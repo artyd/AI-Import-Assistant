@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.log
+.env
+.env.local
+storage/
+
+# Personal Claude Code overrides (project harness in .claude/ IS committed)
+.claude/settings.local.json

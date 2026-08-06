@@ -1,0 +1,15 @@
+node_modules
+dist
+storage
+.env
+.env.local
+*.log
+npm-debug.log*
+
+# Deployment / docs / prototype are not part of the app image build.
+docker-compose.yml
+Caddyfile
+.env.example
+*.md
+*.zip
+.gitignore

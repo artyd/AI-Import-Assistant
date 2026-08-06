@@ -1,0 +1,16 @@
+# Caddy terminates TLS (automatic HTTPS via Let's Encrypt) and reverse-proxies
+# to the backend. API_DOMAIN is provided via the environment (see .env).
+
+{$API_DOMAIN} {
+	encode zstd gzip
+
+	reverse_proxy backend:8080 {
+		# Server-Sent Events: never buffer, keep the connection open. This is
+		# what lets `token` / `tool_call` / `file_status` events reach the
+		# browser incrementally through the proxy.
+		flush_interval -1
+		transport http {
+			response_header_timeout 0
+		}
+	}
+}

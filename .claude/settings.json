@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(npm run build)",
+      "Bash(npm run typecheck)",
+      "Bash(npm run migrate)",
+      "Bash(npm run smoke)",
+      "Bash(npm run dev:*)",
+      "Bash(npm install:*)",
+      "Bash(npm ci:*)",
+      "Bash(npx tsc:*)",
+      "Bash(node scripts/smoke-test.mjs)",
+      "Bash(node --check:*)",
+      "Bash(docker compose:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git add:*)",
+      "Read(./**)",
+      "Grep(./**)",
+      "Glob(./**)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.local)",
+      "Read(./storage/**)"
+    ]
+  }
+}

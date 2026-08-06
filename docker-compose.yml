@@ -1,0 +1,120 @@
+# AI Import Assistant — full stack for our own server.
+# Frontend is hosted separately on Vercel and talks to this stack via Caddy.
+#
+#   cp .env.example .env  (fill in secrets) && docker compose up -d --build
+#
+# Secrets and the production domain come from .env (see .env.example).
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes']
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    restart: unless-stopped
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ['CMD-SHELL', 'bash -c "exec 3<>/dev/tcp/localhost/6333"']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: '8080'
+      HOST: 0.0.0.0
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379
+      QDRANT_URL: http://qdrant:6333
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-4-8}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-voyage-3}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-12h}
+      CORS_ORIGIN: ${CORS_ORIGIN}
+      STORAGE_DIR: /data/storage
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-26214400}
+    volumes:
+      - storage_data:/data/storage
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      qdrant: { condition: service_healthy }
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ['node', 'dist/worker/index.js']
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379
+      QDRANT_URL: http://qdrant:6333
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-voyage-3}
+      JWT_SECRET: ${JWT_SECRET}
+      CORS_ORIGIN: ${CORS_ORIGIN}
+      STORAGE_DIR: /data/storage
+    volumes:
+      - storage_data:/data/storage
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      qdrant: { condition: service_healthy }
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    environment:
+      API_DOMAIN: ${API_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  redis_data:
+  qdrant_data:
+  storage_data:
+  caddy_data:
+  caddy_config:
