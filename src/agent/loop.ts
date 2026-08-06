@@ -1,5 +1,9 @@
-import Anthropic from '@anthropic-ai/sdk';
-import { anthropic, MODEL } from '../anthropic/client.js';
+import {
+  anthropic,
+  MODEL,
+  type ChatMessageParam,
+  type ChatContentBlockParam,
+} from '../anthropic/client.js';
 import type { SseStream } from '../sse/sse.js';
 import type { Citation, ToolCallRecord } from '../services/conversations.js';
 import { toolDefinitions, executeTool, type ToolContext } from './tools.js';
@@ -32,7 +36,7 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
   const { workspaceId, system, history, userMessage, sse } = params;
   const ctx: ToolContext = { workspaceId };
 
-  const messages: Anthropic.MessageParam[] = [
+  const messages: ChatMessageParam[] = [
     ...history.map((m) => ({ role: m.role, content: m.content })),
     { role: 'user' as const, content: userMessage },
   ];
@@ -51,7 +55,7 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
       tools: toolDefinitions,
     });
 
-    stream.on('text', (delta) => {
+    stream.on('text', (delta: string) => {
       text += delta;
       sse.send('token', { text: delta });
     });
@@ -62,7 +66,7 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
 
     if (msg.stop_reason !== 'tool_use') break;
 
-    const toolResults: Anthropic.ToolResultBlockParam[] = [];
+    const toolResults: ChatContentBlockParam[] = [];
     for (const block of msg.content) {
       if (block.type !== 'tool_use') continue;
       sse.send('tool_call', { tool: block.name, input: block.input });

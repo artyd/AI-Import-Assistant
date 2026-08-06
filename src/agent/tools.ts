@@ -1,4 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk';
+import type { ChatTool } from '../anthropic/client.js';
 import { query } from '../db/pool.js';
 import { readStoredFile } from '../services/storage.js';
 import { extractText } from '../services/extract/index.js';
@@ -20,7 +20,7 @@ export interface ToolOutcome {
 }
 
 /** Tool definitions advertised to Claude. The model decides which to call. */
-export const toolDefinitions: Anthropic.Tool[] = [
+export const toolDefinitions: ChatTool[] = [
   {
     name: 'search_documents',
     description:
