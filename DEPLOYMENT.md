@@ -5,6 +5,14 @@ live in one directory) runs on **our own server** via Docker Compose, behind
 **Caddy** (automatic HTTPS). They live on different origins; CORS + SSE are
 configured to work across that boundary.
 
+> ⚠️ **Do not host this backend on Vercel.** Vercel is serverless and cannot run
+> it: it needs a separate always-on indexing worker, a persistent disk for
+> uploaded files, long-lived SSE streams, and Postgres/Qdrant/Redis. If a Vercel
+> project is attached to this repo, `vercel.json` makes the build a green no-op
+> (it validates the TypeScript compile and serves `public/index.html`) — it does
+> **not** serve the API. Deploy the API with `docker compose` below, and point
+> only the **frontend** Vercel project at it via `NEXT_PUBLIC_API_URL`.
+
 ```
 Vercel (Next.js)  ──HTTPS + SSE──▶  Caddy (TLS)  ──▶  Fastify backend ──▶ Anthropic
                                                        │      │
