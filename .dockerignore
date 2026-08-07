@@ -13,3 +13,6 @@ Caddyfile
 *.md
 *.zip
 .gitignore
+
+# The frontend is a separate compose service with its own build context.
+frontend

@@ -1,7 +1,13 @@
 # AI Import Assistant — full stack for our own server.
-# Frontend is hosted separately on Vercel and talks to this stack via Caddy.
 #
 #   cp .env.example .env  (fill in secrets) && docker compose up -d --build
+#
+# TLS + domain routing are handled by the SYSTEM Caddy on the host
+# (/etc/caddy/Caddyfile), NOT by this compose file. Both services are published
+# on 127.0.0.1 only and the host Caddy reverse-proxies the public domain to them:
+#   backend   127.0.0.1:8006  ← /api/* and /health
+#   frontend  127.0.0.1:8007  ← everything else
+# See DEPLOYMENT.md for the exact Caddy block to paste into /etc/caddy/Caddyfile.
 #
 # Secrets and the production domain come from .env (see .env.example).
 
@@ -49,6 +55,9 @@ services:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
+    # Published on localhost only; the host's system Caddy proxies /api/* + /health here.
+    ports:
+      - '127.0.0.1:8006:8080'
     environment:
       NODE_ENV: production
       PORT: '8080'
@@ -96,18 +105,20 @@ services:
       redis: { condition: service_healthy }
       qdrant: { condition: service_healthy }
 
-  caddy:
-    image: caddy:2
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
     restart: unless-stopped
+    # Published on localhost only; the host's system Caddy proxies everything
+    # that is NOT /api/* or /health here. The frontend calls the backend via
+    # relative paths (same public origin), so it needs no backend URL at build time.
     ports:
-      - '80:80'
-      - '443:443'
+      - '127.0.0.1:8007:3000'
     environment:
-      API_DOMAIN: ${API_DOMAIN}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
+      NODE_ENV: production
+      PORT: '3000'
+      HOSTNAME: 0.0.0.0
     depends_on:
       - backend
 
@@ -116,5 +127,3 @@ volumes:
   redis_data:
   qdrant_data:
   storage_data:
-  caddy_data:
-  caddy_config:

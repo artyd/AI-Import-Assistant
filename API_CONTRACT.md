@@ -5,9 +5,10 @@ prototype is a static design mock with no wire calls, so this document — not t
 prototype — is the source of truth for the HTTP/SSE shapes. Data shapes here
 match exactly what the prototype UI renders.
 
-- **Base URL:** the backend origin, injected on Vercel as `NEXT_PUBLIC_API_URL`
-  (e.g. `https://api.ourdomain.com`). The browser calls this backend only; it
-  never calls Anthropic/Voyage directly.
+- **Base URL:** none — the frontend and backend share one origin (the system
+  Caddy routes `/api/*` + `/health` to the backend and everything else to the
+  Next.js app), so the browser uses **relative paths** (`fetch('/api/workspaces')`).
+  It calls this backend only; it never calls Anthropic/Voyage directly.
 - **Auth:** `Authorization: Bearer <jwt>` on every request except
   `POST /api/auth/login`. For the two `EventSource` (SSE-over-GET) endpoints the
   browser cannot set headers, so pass `?access_token=<jwt>` instead (a `token`

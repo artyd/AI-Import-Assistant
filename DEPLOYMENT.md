@@ -1,33 +1,40 @@
-# Deployment — AI Import Assistant backend
+# Deployment — AI Import Assistant (backend + frontend, one origin)
 
-The **frontend** is hosted on **Vercel**. The **backend** (this repo — all files
-live in one directory) runs on **our own server** via Docker Compose, behind
-**Caddy** (automatic HTTPS). They live on different origins; CORS + SSE are
-configured to work across that boundary.
+The **frontend** (Next.js) and the **backend** (this repo's Fastify stack) run on
+**the same server** via Docker Compose and are served from **one public domain**.
+TLS and domain routing are handled by the **system Caddy on the host**
+(`/etc/caddy/Caddyfile`) — this is **not** part of this compose file and is edited
+by hand with `sudo`. Because the app and the API share an origin, the browser uses
+**relative paths** (`/api/...`) — there is no separate backend URL and no CORS
+boundary to cross.
 
-> ⚠️ **Do not host this backend on Vercel.** Vercel is serverless and cannot run
-> it: it needs a separate always-on indexing worker, a persistent disk for
-> uploaded files, long-lived SSE streams, and Postgres/Qdrant/Redis. If a Vercel
-> project is attached to this repo, `vercel.json` makes the build a green no-op
-> (it validates the TypeScript compile and serves `public/index.html`) — it does
-> **not** serve the API. Deploy the API with `docker compose` below, and point
-> only the **frontend** Vercel project at it via `NEXT_PUBLIC_API_URL`.
+> Vercel is **not** used. Everything runs on our own server.
 
 ```
-Vercel (Next.js)  ──HTTPS + SSE──▶  Caddy (TLS)  ──▶  Fastify backend ──▶ Anthropic
-                                                       │      │
-                                                   Postgres  Qdrant
-                                                       ▲      ▲
-                                                       └ worker (BullMQ+Redis)
-                                                       │
-                                                   disk volume (storage_data)
+Browser ──HTTPS + SSE──▶  System Caddy (host, :443, /etc/caddy/Caddyfile)
+                              │
+                              ├─ /api/*  /health ─▶  backend   127.0.0.1:8006  (Fastify, docker)
+                              │                          │      │
+                              │                      Postgres  Qdrant
+                              │                          ▲      ▲
+                              │                          └ worker (BullMQ + Redis)
+                              │                          │
+                              │                      disk volume (storage_data)
+                              │
+                              └─ everything else ─▶  frontend  127.0.0.1:8007  (Next.js, docker)
 ```
+
+The compose stack publishes only on `127.0.0.1` (backend `8006`, frontend `8007`);
+the host Caddy is the only thing bound to `:80`/`:443`. There is **no `caddy`
+service inside this compose file** — ports 80/443 on this server are shared with
+other sites, so TLS is terminated once, centrally, by the system Caddy.
 
 ## Prerequisites
 
-- A Linux server with Docker + Docker Compose v2.
-- A DNS `A`/`AAAA` record for `API_DOMAIN` (e.g. `api.ourdomain.com`) pointing at
-  the server, and ports **80** + **443** open (Caddy needs both for ACME/TLS).
+- A Linux server with Docker + Docker Compose v2 **and** a system Caddy already
+  serving other sites on `:80`/`:443`.
+- A DNS record for the domain (prod: `ai-import-assistant.duckdns.org`) pointing
+  at the server. The system Caddy obtains/renews TLS automatically.
 - An **Anthropic API key** and a **Voyage AI key** (embeddings).
 
 ## First deploy
@@ -35,17 +42,73 @@ Vercel (Next.js)  ──HTTPS + SSE──▶  Caddy (TLS)  ──▶  Fastify ba
 ```bash
 cp .env.example .env
 # Edit .env — set ANTHROPIC_API_KEY, EMBEDDING_API_KEY, JWT_SECRET,
-# API_DOMAIN, CORS_ORIGIN, and the POSTGRES_* values.
+# CORS_ORIGIN (the public domain), and the POSTGRES_* values.
 
 docker compose up -d --build
 ```
 
 On boot the backend and worker each run migrations (idempotent) and ensure the
-Qdrant collection exists. Check health:
+Qdrant collection exists. Then wire up the domain in the system Caddy (next
+section) and check health through it:
 
 ```bash
-curl https://api.ourdomain.com/health      # {"status":"ok"}
+curl https://ai-import-assistant.duckdns.org/health      # {"status":"ok"}
 ```
+
+## System Caddy block (edit by hand, with sudo — NOT part of compose)
+
+Append this block to **`/etc/caddy/Caddyfile`** on the host, then reload Caddy.
+It sends `/api/*` and `/health` to the backend (with SSE-safe buffering disabled)
+and everything else to the Next.js frontend:
+
+```caddyfile
+ai-import-assistant.duckdns.org {
+	encode zstd gzip
+
+	# API + health check → Fastify backend (docker, localhost-only).
+	@backend path /api/* /health
+	handle @backend {
+		reverse_proxy 127.0.0.1:8006 {
+			# Server-Sent Events: never buffer, keep long-lived streams open.
+			# This is what lets `token` / `tool_call` / `file_status` events
+			# reach the browser incrementally through the proxy.
+			flush_interval -1
+			transport http {
+				response_header_timeout 0
+			}
+		}
+	}
+
+	# Everything else → Next.js frontend (docker, localhost-only).
+	handle {
+		reverse_proxy 127.0.0.1:8007
+	}
+}
+```
+
+Apply it:
+
+```bash
+sudo nano /etc/caddy/Caddyfile          # paste the block above
+sudo caddy validate --config /etc/caddy/Caddyfile
+sudo systemctl reload caddy
+```
+
+## Frontend (Next.js, in `frontend/`)
+
+The frontend is a Next.js 15 app (App Router) built as a **standalone** server and
+run in the `frontend` compose service (`node server.js` on port 3000, published on
+`127.0.0.1:8007`). It talks to the backend over **relative paths** (`/api/...`) —
+there is no `NEXT_PUBLIC_API_URL` and no CORS hop, because the host Caddy serves
+both from one origin. `docker compose up -d --build` builds and starts it.
+
+- **Chat** is SSE-over-`POST` → `fetch` + a `ReadableStream` reader (sets the
+  `Authorization` header). **Live file status** is SSE-over-`GET` → the native
+  `EventSource` with `?access_token=<jwt>`.
+- **Local dev without Caddy:** run the backend (`npm run dev` in the repo root),
+  then `cd frontend && DEV_API_PROXY=http://localhost:8080 npm run dev`. The
+  `DEV_API_PROXY` env turns on a dev-only Next rewrite so `/api/*` reaches the
+  backend; in production it is unset and Caddy does the routing.
 
 ## Create the first user (no public signup)
 
@@ -62,10 +125,11 @@ Then `POST /api/auth/login` returns a JWT.
 A dependency-free script exercises the whole flow (health → login → workspace →
 folder skeleton → CSV upload → indexing → chat SSE → conversations → delete),
 including negative checks (401 without a token, `.exe` rejected). Run it against
-a live stack with a seeded user:
+a live stack with a seeded user (through the public domain, or straight at the
+localhost backend port):
 
 ```bash
-BASE_URL=https://api.ourdomain.com \
+BASE_URL=https://ai-import-assistant.duckdns.org \
 EMAIL=user@agroup95.com PASSWORD='s3cret' \
 npm run smoke
 ```
@@ -74,30 +138,11 @@ Locally against `npm run dev` the default `BASE_URL=http://localhost:8080`
 works. `SKIP_CHAT=1` skips the Anthropic-billed chat step; `INDEX_TIMEOUT_MS`
 tunes how long to wait for indexing. Exit code is non-zero if any check fails.
 
-## The one thing the Vercel project needs
-
-Set a single environment variable on the Vercel project — the backend's base URL:
-
-```
-NEXT_PUBLIC_API_URL=https://api.ourdomain.com
-```
-
-The frontend prefixes every request with this. Nothing else about Vercel needs
-to change here. Notes for the frontend team (full detail in `API_CONTRACT.md`):
-
-- Send `Authorization: Bearer <jwt>` on all calls except login.
-- **Chat is SSE over `POST`** → use `fetch` + a `ReadableStream` reader (not the
-  native `EventSource`, which can't POST or set headers).
-- The **live file-status** channel (`GET …/events`) is SSE over `GET` → the
-  native `EventSource` works; authenticate with `?access_token=<jwt>`.
-- CORS auto-allows `CORS_ORIGIN` plus that project's Vercel **preview**
-  deployments (`https://<project>-<hash>.vercel.app`).
-
 ## Operations
 
-- **Logs:** `docker compose logs -f backend worker`
+- **Logs:** `docker compose logs -f backend worker frontend`
 - **Scale indexing throughput:** `docker compose up -d --scale worker=3`
-- **Redeploy after code changes:** `docker compose up -d --build backend worker`
+- **Redeploy after code changes:** `docker compose up -d --build backend worker frontend`
 - **Backups:** persist the named volumes `postgres_data`, `qdrant_data`, and
   `storage_data` (raw files). `redis_data` is a transient job queue.
 - **Rotate secrets:** edit `.env`, then `docker compose up -d`.
@@ -112,7 +157,7 @@ to change here. Notes for the frontend team (full detail in `API_CONTRACT.md`):
 | `QDRANT_URL` | — | `http://localhost:6333` | Qdrant (derived in compose) |
 | `REDIS_URL` | — | `redis://localhost:6379` | BullMQ (derived in compose) |
 | `JWT_SECRET` | ✅ | — | Session signing (≥16 chars) |
-| `CORS_ORIGIN` | ✅ | — | Production Vercel origin(s) |
+| `CORS_ORIGIN` | ✅ | — | Public origin; same-origin now, so mostly a formality |
 | `STORAGE_DIR` | — | `./storage` | On-disk file storage root |
 | `ANTHROPIC_MODEL` | — | `claude-opus-4-8` | Chat model |
 | `EMBEDDING_MODEL` | — | `voyage-3` | Multilingual (Ukrainian) embeddings |

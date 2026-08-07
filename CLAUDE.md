@@ -3,8 +3,12 @@
 Backend for an IDE-style workspace for **Ukrainian import/customs logistics**. A
 single Claude agent **"Штурман"** reconciles shipment documents (invoice vs PO vs
 packing list), tracks document-package completeness, and suggests УКТ ЗЕД codes.
-The frontend is a separate Next.js app hosted on Vercel; **this repo is the
-backend only** and defines the wire contract (`API_CONTRACT.md`).
+The frontend is a Next.js app that lives in **`frontend/`** in this repo; backend
+and frontend are served from **one origin** by the host's system Caddy (backend at
+`127.0.0.1:8006` for `/api/*` + `/health`, frontend at `127.0.0.1:8007` for the
+rest — see `DEPLOYMENT.md`). The wire contract is `API_CONTRACT.md`; the browser
+uses **relative paths** (`/api/...`), so there is no separate backend URL. Vercel
+is not used.
 
 > The `AI Import Assistant prototype.zip` at the root is a **static design mock**
 > (HTML + a React/Babel canvas runtime), NOT a functional app. Use it only for UI
