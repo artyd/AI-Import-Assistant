@@ -4,12 +4,17 @@ import { useTheme } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
 import type { Workspace } from "@/lib/types";
 import { IconLogo, IconMoon, IconSun, IconLogout } from "./icons";
+import { NotificationsBell } from "./NotificationsBell";
 
 const STATUS_LABEL: Record<Workspace["status"], string> = {
   active: "Активна",
   draft: "Чернетка",
   done: "Готово",
+  docs_in_progress: "Документи в роботі",
+  docs_complete: "Документи повні",
+  customs_ready: "Готово до митниці",
 };
+const STATUS_OK = new Set(["done", "customs_ready"]);
 
 export function Header({ workspace }: { workspace?: Workspace | null }) {
   const { theme, toggle } = useTheme();
@@ -74,17 +79,18 @@ export function Header({ workspace }: { workspace?: Workspace | null }) {
             </>
           )}
           <span
-            className={workspace.status === "done" ? "badge ok" : "badge"}
+            className={STATUS_OK.has(workspace.status) ? "badge ok" : "badge"}
             style={{ marginLeft: 4 }}
           >
-            {workspace.status === "done" && <span className="dot done" />}
-            {STATUS_LABEL[workspace.status]}
+            {STATUS_OK.has(workspace.status) && <span className="dot done" />}
+            {STATUS_LABEL[workspace.status] ?? workspace.status}
           </span>
         </div>
       )}
 
       <div style={{ flex: 1 }} />
 
+      {user && <NotificationsBell />}
       {user && (
         <span
           style={{ color: "rgba(250,250,250,.6)", fontSize: 13 }}

@@ -154,8 +154,8 @@ async function main() {
     );
     const one = await api('GET', `/api/workspaces/${workspaceId}`);
     check(
-      'GET /api/workspaces/:id has 10-folder skeleton',
-      one.status === 200 && one.json.folders?.length === 10,
+      'GET /api/workspaces/:id has 8-folder skeleton',
+      one.status === 200 && one.json.folders?.length === 8,
       `folders ${one.json.folders?.length}`,
     );
   }

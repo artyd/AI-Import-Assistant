@@ -42,7 +42,7 @@ other sites, so TLS is terminated once, centrally, by the system Caddy.
 ```bash
 cp .env.example .env
 # Edit .env — set ANTHROPIC_API_KEY, EMBEDDING_API_KEY, JWT_SECRET,
-# CORS_ORIGIN (the public domain), and the POSTGRES_* values.
+# and the POSTGRES_* values. (CORS_ORIGIN is optional — same-origin needs none.)
 
 docker compose up -d --build
 ```
@@ -157,13 +157,16 @@ tunes how long to wait for indexing. Exit code is non-zero if any check fails.
 | `QDRANT_URL` | — | `http://localhost:6333` | Qdrant (derived in compose) |
 | `REDIS_URL` | — | `redis://localhost:6379` | BullMQ (derived in compose) |
 | `JWT_SECRET` | ✅ | — | Session signing (≥16 chars) |
-| `CORS_ORIGIN` | ✅ | — | Public origin; same-origin now, so mostly a formality |
+| `CORS_ORIGIN` | — | `` (empty) | Comma-separated exact origins to allow. Same-origin behind Caddy needs none; set only if the API is served cross-origin |
 | `STORAGE_DIR` | — | `./storage` | On-disk file storage root |
 | `ANTHROPIC_MODEL` | — | `claude-opus-4-8` | Chat model |
 | `EMBEDDING_MODEL` | — | `voyage-3` | Multilingual (Ukrainian) embeddings |
 | `MAX_UPLOAD_BYTES` | — | `26214400` | Per-file upload cap (25 MB) |
 | `CHAT_RATE_MAX` / `CHAT_RATE_WINDOW` | — | `30` / `1 minute` | Per-user chat rate limit |
 | `QDRANT_API_KEY` | — | — | If Qdrant auth is enabled |
+| `EXTRACTION_ENABLED` | — | `true` | Worker structured field extraction (`true`/`false`) |
+| `REMINDERS_ENABLED` | — | `true` | Daily in-app reminder job (`true`/`false`) |
+| `REMINDERS_CRON` | — | `0 6 * * *` | Cron for the reminder scan |
 
 ## Out of scope for v1 (documented v2 additions)
 

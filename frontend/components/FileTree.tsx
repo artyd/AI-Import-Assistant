@@ -11,6 +11,7 @@ import {
   IconPlus,
   IconEdit,
   IconTrash,
+  IconHistory,
 } from "./icons";
 
 interface Props {
@@ -20,6 +21,7 @@ interface Props {
   onUpload: (folderId: string | null, files: FileList) => void;
   onRenameFile: (file: FileItem, name: string) => void;
   onDeleteFile: (file: FileItem) => void;
+  onVersions: (file: FileItem) => void;
 }
 
 export function FileTree({
@@ -29,6 +31,7 @@ export function FileTree({
   onUpload,
   onRenameFile,
   onDeleteFile,
+  onVersions,
 }: Props) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const uploadTarget = useRef<string | null>(null);
@@ -38,6 +41,9 @@ export function FileTree({
   const byFolder = useMemo(() => {
     const map = new Map<string, FileItem[]>();
     for (const f of files) {
+      // Show only the latest version of each document; older versions are
+      // reachable from the per-file version history.
+      if (f.isLatest === false) continue;
       if (q && !f.name.toLowerCase().includes(q)) continue;
       const key = f.folderId ?? "__none__";
       const arr = map.get(key) ?? [];
@@ -124,6 +130,7 @@ export function FileTree({
                   file={file}
                   onRename={onRenameFile}
                   onDelete={onDeleteFile}
+                  onVersions={onVersions}
                 />
               ))}
           </div>
@@ -136,6 +143,7 @@ export function FileTree({
           file={file}
           onRename={onRenameFile}
           onDelete={onDeleteFile}
+          onVersions={onVersions}
         />
       ))}
 
@@ -161,10 +169,12 @@ function FileRow({
   file,
   onRename,
   onDelete,
+  onVersions,
 }: {
   file: FileItem;
   onRename: (f: FileItem, name: string) => void;
   onDelete: (f: FileItem) => void;
+  onVersions: (f: FileItem) => void;
 }) {
   const status = toUiStatus(file.status);
   const title =
@@ -177,7 +187,20 @@ function FileRow({
       <span className="ellipsis" style={{ flex: 1, minWidth: 0 }}>
         {file.name}
       </span>
+      {file.version && file.version > 1 && (
+        <span style={{ fontSize: 10, color: "var(--muted)", fontFamily: "var(--font-mono)" }}>
+          v{file.version}
+        </span>
+      )}
       <span className={`dot ${status}`} title={STATUS_LABEL[status]} />
+      <button
+        className="btn-icon row-action"
+        onClick={() => onVersions(file)}
+        title="Версії"
+        aria-label="Версії"
+      >
+        <IconHistory size={14} />
+      </button>
       <button
         className="btn-icon row-action"
         onClick={() => {

@@ -135,3 +135,16 @@ export const IconDownload = (p: P) => (
     <path d="M4 20h16" />
   </svg>
 );
+export const IconBell = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6" />
+    <path d="M10.5 20a1.5 1.5 0 0 0 3 0" />
+  </svg>
+);
+export const IconHistory = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+    <path d="M3 4v4h4" />
+    <path d="M12 8v4l3 2" />
+  </svg>
+);

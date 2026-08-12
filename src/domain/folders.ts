@@ -1,19 +1,18 @@
 /**
- * The fixed customs document-package folder skeleton, mirroring the prototype's
- * `SKELETON` array. New workspaces are seeded with these folders so the file
- * tree matches the UI's expectations.
+ * The fixed customs document-package folder skeleton. New workspaces are seeded
+ * with these folders so the file tree matches the UI's expectations. The former
+ * 10-folder layout was consolidated to 8 (Contract/Invoice/Packing List merged);
+ * existing workspaces are migrated by `db/migrateFolderSkeleton.ts`.
  */
 export const FOLDER_SKELETON = [
-  '01_Contract',
+  '01_Contract_Invoice_PackingList',
   '02_PO',
-  '03_Invoice',
-  '04_Packing_List',
-  '05_Certificate',
-  '06_Quality_Certificates',
-  '07_Customs',
-  '08_Transport',
-  '09_Photos',
-  '10_Final',
+  '03_Certificate_of_Origin',
+  '04_Quality_Certificates',
+  '05_Customs',
+  '06_Transport',
+  '07_Photos',
+  '08_Final',
 ] as const;
 
 export type FileType = 'pdf' | 'docx' | 'xlsx' | 'csv' | 'image' | 'md';

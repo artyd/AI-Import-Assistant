@@ -6,13 +6,66 @@ export interface User {
   name: string | null;
 }
 
-export type WorkspaceStatus = "active" | "draft" | "done";
+export type WorkspaceStatus =
+  | "active"
+  | "draft"
+  | "done"
+  | "docs_in_progress"
+  | "docs_complete"
+  | "customs_ready";
 
 export interface Workspace {
   id: string;
   number: string | null;
   supplier: string | null;
   status: WorkspaceStatus;
+  created_at: string;
+  // Intake / contract fields — present on GET /:id (optional on the list view).
+  contract_type?: "bilateral" | "trilateral" | null;
+  intake_complete?: boolean;
+  product_category?: string | null;
+  incoterm?: string | null;
+  transport_mode?: string | null;
+  origin_country?: string | null;
+  responsible_user_id?: string | null;
+}
+
+export interface UserLite {
+  id: string;
+  email: string;
+  name: string | null;
+}
+
+export type PartyRole = "our_company" | "supplier" | "intermediary";
+
+export interface Party {
+  id?: string;
+  role: PartyRole;
+  company_name: string;
+  is_internal?: boolean;
+  country?: string | null;
+  contact_info?: Record<string, unknown>;
+}
+
+export interface ChecklistItem {
+  requirement_key: string;
+  status: "missing" | "received" | "verified";
+  source_file_id: string | null;
+}
+
+export interface Discrepancy {
+  field: string;
+  expected: string;
+  actual: string;
+  severity: "error" | "warning" | "info";
+}
+
+export interface NotificationItem {
+  id: string;
+  workspace_id: string | null;
+  type: string;
+  message: string;
+  read: boolean;
   created_at: string;
 }
 
@@ -35,6 +88,18 @@ export interface FileItem {
   errorReason?: string | null;
   sizeBytes?: number;
   createdAt?: string;
+  version?: number;
+  isLatest?: boolean;
+  replacesFileId?: string | null;
+}
+
+export interface FileVersion {
+  id: string;
+  name: string;
+  version: number;
+  replacesFileId: string | null;
+  isLatest: boolean;
+  createdAt: string;
 }
 
 export interface Citation {

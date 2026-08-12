@@ -24,9 +24,9 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(16, 'JWT_SECRET must be at least 16 chars'),
   JWT_EXPIRES_IN: z.string().default('12h'),
 
-  // CORS: the production Vercel origin. Preview deployments are matched by a
-  // scoped regex in server.ts (see corsOriginMatcher).
-  CORS_ORIGIN: z.string().min(1, 'CORS_ORIGIN is required'),
+  // CORS: comma-separated exact origins to allow. The app is same-origin behind
+  // Caddy, so this is usually empty; set it only if the API is served cross-origin.
+  CORS_ORIGIN: z.string().default(''),
 
   // File storage
   STORAGE_DIR: z.string().default('./storage'),
@@ -40,6 +40,17 @@ const envSchema = z.object({
   // Chat rate limit (per user)
   CHAT_RATE_MAX: z.coerce.number().int().positive().default(30),
   CHAT_RATE_WINDOW: z.string().default('1 minute'),
+
+  // Structured document extraction (worker) + daily reminders (worker cron).
+  EXTRACTION_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
+  REMINDERS_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
+  REMINDERS_CRON: z.string().default('0 6 * * *'),
 });
 
 export type AppConfig = z.infer<typeof envSchema>;

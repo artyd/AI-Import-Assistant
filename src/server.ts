@@ -10,28 +10,15 @@ import { fileRoutes } from './routes/files.js';
 import { chatRoutes } from './routes/chat.js';
 import { conversationRoutes } from './routes/conversations.js';
 import { eventRoutes } from './routes/events.js';
+import { checklistRoutes } from './routes/checklist.js';
+import { discrepancyRoutes } from './routes/discrepancies.js';
+import { supplierInstructionRoutes } from './routes/supplierInstruction.js';
+import { userRoutes } from './routes/users.js';
+import { notificationRoutes } from './routes/notifications.js';
+import { partiesRoutes } from './routes/parties.js';
+import { reportRoutes } from './routes/report.js';
+import { exportRoutes } from './routes/export.js';
 import { ensureQdrantCollection } from './services/qdrant.js';
-
-/**
- * Allow the production Vercel origin plus that project's preview deployments
- * (`https://<project>-<hash>-<scope>.vercel.app`), and nothing else. The exact
- * production origin is CORS_ORIGIN; previews are matched by a scoped regex
- * derived from it so we don't leave CORS wide open.
- */
-function buildCorsMatcher(): (origin: string) => boolean {
-  const allowed = new Set(config.CORS_ORIGIN.split(',').map((s) => s.trim()).filter(Boolean));
-  // Derive a preview matcher from the first *.vercel.app production origin.
-  let previewRe: RegExp | null = null;
-  for (const o of allowed) {
-    const m = /^https:\/\/([a-z0-9-]+)\.vercel\.app$/i.exec(o);
-    if (m) {
-      const project = m[1];
-      previewRe = new RegExp(`^https://${project}-[a-z0-9-]+\\.vercel\\.app$`, 'i');
-      break;
-    }
-  }
-  return (origin: string) => allowed.has(origin) || (previewRe?.test(origin) ?? false);
-}
 
 async function buildServer() {
   const app = Fastify({
@@ -39,16 +26,20 @@ async function buildServer() {
     bodyLimit: config.MAX_UPLOAD_BYTES + 1024 * 1024,
   });
 
-  const corsMatches = buildCorsMatcher();
+  // The frontend and API share one origin (system Caddy), so CORS is a
+  // formality: allow no-Origin requests (same-origin / server-to-server) plus any
+  // exact origins listed in CORS_ORIGIN (only needed if the API is ever served
+  // cross-origin). No preview/wildcard matching.
+  const allowedOrigins = new Set(
+    config.CORS_ORIGIN.split(',').map((s) => s.trim()).filter(Boolean),
+  );
   await app.register(cors, {
     origin: (origin, cb) => {
-      // Same-origin / server-to-server requests have no Origin header.
-      if (!origin) return cb(null, true);
-      if (corsMatches(origin)) return cb(null, true);
+      if (!origin || allowedOrigins.has(origin)) return cb(null, true);
       cb(new Error('Not allowed by CORS'), false);
     },
     credentials: true,
-    methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
   });
 
@@ -67,6 +58,14 @@ async function buildServer() {
   await app.register(chatRoutes);
   await app.register(conversationRoutes);
   await app.register(eventRoutes);
+  await app.register(checklistRoutes);
+  await app.register(discrepancyRoutes);
+  await app.register(supplierInstructionRoutes);
+  await app.register(userRoutes);
+  await app.register(notificationRoutes);
+  await app.register(partiesRoutes);
+  await app.register(reportRoutes);
+  await app.register(exportRoutes);
 
   return app;
 }

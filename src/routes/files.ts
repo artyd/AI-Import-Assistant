@@ -26,8 +26,11 @@ async function folderBelongs(workspaceId: string, folderId: string): Promise<boo
 export async function fileRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('preHandler', authenticate);
 
-  // POST /api/workspaces/:id/files?folderId=<uuid>  (multipart upload)
-  app.post<{ Params: { id: string }; Querystring: { folderId?: string } }>(
+  // POST /api/workspaces/:id/files?folderId=<uuid>&replacesFileId=<uuid>  (multipart)
+  app.post<{
+    Params: { id: string };
+    Querystring: { folderId?: string; replacesFileId?: string };
+  }>(
     '/api/workspaces/:id/files',
     async (req, reply) => {
       const ws = await getOwnedWorkspace(req.user!.sub, req.params.id);
@@ -38,12 +41,26 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(400).send({ error: 'invalid_folder' });
       }
 
+      // Optional: this upload replaces an existing file (new version).
+      const replacesFileId = req.query.replacesFileId;
+      let replaced: { id: string; version: number } | null = null;
+      if (replacesFileId) {
+        const { rows } = await query<{ id: string; version: number }>(
+          'SELECT id, version FROM files WHERE id = $1 AND workspace_id = $2',
+          [replacesFileId, ws.id],
+        );
+        if (!rows[0]) return reply.code(400).send({ error: 'invalid_replaces' });
+        replaced = rows[0];
+      }
+
       if (!req.isMultipart()) {
         return reply.code(400).send({ error: 'expected_multipart' });
       }
 
       const created: unknown[] = [];
       const rejected: { name: string; reason: string }[] = [];
+      // A single replacement target applies to the first accepted file only.
+      let replaceConsumed = false;
 
       for await (const part of req.files()) {
         const name = part.filename;
@@ -70,15 +87,33 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
         const diskPath = diskPathFor(ws.id, fileId, name);
         await storeFile(ws.id, fileId, name, buf);
 
+        // Versioning: if this upload replaces an existing file, chain it and
+        // demote the previous version from is_latest.
+        const applyReplace = replaced && !replaceConsumed;
+        const version = applyReplace ? replaced!.version + 1 : 1;
+        const replacesId = applyReplace ? replaced!.id : null;
+
         await query(
-          `INSERT INTO files (id, workspace_id, folder_id, name, type, disk_path, size_bytes, status)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued')`,
-          [fileId, ws.id, folderId ?? null, name, type, diskPath, buf.length],
+          `INSERT INTO files (id, workspace_id, folder_id, name, type, disk_path, size_bytes, status, version, replaces_file_id, is_latest)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued', $8, $9, true)`,
+          [fileId, ws.id, folderId ?? null, name, type, diskPath, buf.length, version, replacesId],
         );
+        if (applyReplace) {
+          await query('UPDATE files SET is_latest = false WHERE id = $1', [replaced!.id]);
+          replaceConsumed = true;
+        }
 
         await enqueueIndexJob(fileId);
         await publishFileStatus(ws.id, { fileId, status: 'queued', name });
-        created.push({ id: fileId, name, type, status: 'queued', folderId: folderId ?? null });
+        created.push({
+          id: fileId,
+          name,
+          type,
+          status: 'queued',
+          folderId: folderId ?? null,
+          version,
+          replacesFileId: replacesId,
+        });
       }
 
       if (created.length === 0 && rejected.length > 0) {
@@ -94,7 +129,8 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
     if (!ws) return reply.code(404).send({ error: 'not_found' });
     const { rows } = await query(
       `SELECT id, folder_id AS "folderId", name, type, status,
-              error_reason AS "errorReason", size_bytes AS "sizeBytes", created_at AS "createdAt"
+              error_reason AS "errorReason", size_bytes AS "sizeBytes", created_at AS "createdAt",
+              version, is_latest AS "isLatest", replaces_file_id AS "replacesFileId"
        FROM files WHERE workspace_id = $1 ORDER BY created_at`,
       [ws.id],
     );
@@ -167,6 +203,32 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       );
       if (!rows[0]) return reply.code(404).send({ error: 'not_found' });
       return reply.send({ file: rows[0] });
+    },
+  );
+
+  // GET /api/workspaces/:id/files/:fileId/history — full version chain.
+  app.get<{ Params: { id: string; fileId: string } }>(
+    '/api/workspaces/:id/files/:fileId/history',
+    async (req, reply) => {
+      const ws = await getOwnedWorkspace(req.user!.sub, req.params.id);
+      if (!ws) return reply.code(404).send({ error: 'not_found' });
+      const { rows } = await query(
+        `WITH RECURSIVE chain AS (
+           SELECT id, name, version, replaces_file_id, is_latest, created_at
+           FROM files WHERE id = $1 AND workspace_id = $2
+           UNION
+           SELECT f.id, f.name, f.version, f.replaces_file_id, f.is_latest, f.created_at
+           FROM files f
+           JOIN chain c ON (f.id = c.replaces_file_id OR f.replaces_file_id = c.id)
+           WHERE f.workspace_id = $2
+         )
+         SELECT id, name, version, replaces_file_id AS "replacesFileId",
+                is_latest AS "isLatest", created_at AS "createdAt"
+         FROM chain ORDER BY version`,
+        [req.params.fileId, ws.id],
+      );
+      if (rows.length === 0) return reply.code(404).send({ error: 'not_found' });
+      return reply.send({ versions: rows });
     },
   );
 }

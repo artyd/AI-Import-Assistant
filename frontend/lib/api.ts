@@ -68,3 +68,24 @@ export async function api<T = unknown>(
   }
   return data as T;
 }
+
+/** Authenticated download of a binary response (e.g. the export zip). */
+export async function downloadBlob(path: string, fallbackName: string): Promise<void> {
+  const token = getToken();
+  const res = await fetch(path, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new ApiError(res.status, `http_${res.status}`);
+  const blob = await res.blob();
+  const cd = res.headers.get("Content-Disposition") || "";
+  const m = /filename="?([^"]+)"?/.exec(cd);
+  const name = m?.[1] || fallbackName;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}

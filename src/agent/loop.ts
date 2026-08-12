@@ -25,10 +25,12 @@ export interface AgentTurnResult {
 const MAX_ITERATIONS = 8;
 
 /**
- * Single-agent, hybrid-retrieval tool-use loop. One Claude conversation with
- * three tools (search_documents / read_file / list_files). The model decides
- * which tool(s) to call and in what order — we do not hardcode a retrieval
- * pipeline. Text is streamed as `token` events; each tool call/result is
+ * Single-agent, hybrid-retrieval tool-use loop. One Claude conversation with the
+ * tools advertised in `toolDefinitions` — retrieval (search_documents / read_file
+ * / list_files) plus the shipment tools (checklist, discrepancies, supplier
+ * instruction, report, context, inbox sorting). The model decides which tool(s)
+ * to call and in what order — we do not hardcode a retrieval pipeline. Text is
+ * streamed as `token` events; each tool call/result is
  * surfaced as `tool_call` / `tool_result` events for the UI's working-status
  * chips and agent-log panel.
  */

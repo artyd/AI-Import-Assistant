@@ -25,6 +25,28 @@ is not used.
   never calls Anthropic/Voyage directly.
 - **Model:** `claude-opus-4-8` with `thinking: { type: 'adaptive' }`.
 
+## Штурман grounding rules (Phase 4 — enforced in `src/agent/systemPrompt.ts`)
+
+The agent must not answer domain questions from its own reasoning when a
+deterministic source exists. These four rules are a hard contract in the system
+prompt (with inline example exchanges); the eval `npm run eval:grounding`
+re-checks them manually.
+
+1. **Context gate.** Before `generate_supplier_instruction`, `get_discrepancies`,
+   an HS-code suggestion, or `generate_report`, the agent calls
+   `get_missing_context` first; if anything is unset it **asks the user and
+   stops** — no defaults/assumptions.
+2. **Tools over free reasoning.** Completeness ⇒ `get_checklist`; invoice/PO/PL
+   discrepancies ⇒ `get_discrepancies` (backed by `document_extractions`); report
+   ⇒ `generate_report`. Retrieval tools locate/quote source text, they do not
+   compute verdicts.
+3. **HS codes advisory only.** Ask product clarifiers first, offer **multiple**
+   candidates with reasoning, and state that a customs specialist must confirm —
+   never one code as fact. (A ТН ВЭД reference DB / official-source checks /
+   duties / risk = **Phase 6**, out of scope for now.)
+4. **No fabrication on empty data.** If a tool returns "no data", say so; never
+   infer from memory or filename.
+
 ## Stack & layout (everything flat in the repo root)
 
 Node 20 + TypeScript (ESM, `NodeNext`) · Fastify 5 · `@anthropic-ai/sdk` ·
@@ -37,9 +59,11 @@ src/
   config.ts            zod-validated env (fails fast)
   db/                  pool, schema.sql, migrate
   auth/                passwords (bcrypt), jwt, authenticate hook, seed script
-  routes/              auth, workspaces, files, chat (SSE), conversations, events (SSE)
-  agent/               loop.ts (tool-use loop), tools.ts (3 tools), systemPrompt.ts
-  services/            storage, extract/ (pdf|docx|xlsx|csv), embeddings/, qdrant, conversations, workspaceAccess
+  routes/              auth, workspaces, files, chat (SSE), conversations, events (SSE),
+                       checklist, discrepancies, supplierInstruction, parties, report, export, users, notifications
+  agent/               loop.ts (tool-use loop), tools.ts (11 tools), systemPrompt.ts
+  services/            storage, extract/ (pdf|docx|xlsx|csv), embeddings/, qdrant, conversations, workspaceAccess,
+                       checklist, discrepancies, status, parties, classify, extraction/, artifacts, supplierInstruction, notifications, report, export
   queue/               BullMQ queue + Redis connection
   events/              fileStatus pub/sub (live indexing status)
   worker/index.ts      indexing worker: extract → chunk → embed → Qdrant → status

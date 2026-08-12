@@ -17,6 +17,8 @@ import { FileTree } from "@/components/FileTree";
 import { WorkspaceSelector } from "@/components/WorkspaceSelector";
 import { Chat } from "@/components/Chat";
 import { AgentLog, type LogEntry } from "@/components/AgentLog";
+import { ShipmentPanel } from "@/components/ShipmentPanel";
+import { VersionsModal } from "@/components/VersionsModal";
 import {
   IconSearch,
   IconFolderPlus,
@@ -40,6 +42,8 @@ export default function WorkspacePage() {
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  const [rightTab, setRightTab] = useState<"shipment" | "log">("shipment");
+  const [versionsFile, setVersionsFile] = useState<FileItem | null>(null);
 
   const rootUploadRef = useRef<HTMLInputElement>(null);
 
@@ -138,11 +142,27 @@ export default function WorkspacePage() {
     setLog((l) => [...l, entry]);
   }, []);
 
+  const onPatch = useCallback((partial: Partial<Workspace>) => {
+    setWorkspace((w) => (w ? { ...w, ...partial } : w));
+  }, []);
+
+  const refreshFiles = useCallback(async () => {
+    const r = await api<{ files: FileItem[] }>(`/api/workspaces/${id}/files`);
+    setFiles(r.files);
+  }, [id]);
+
   const upload = useCallback(
-    async (folderId: string | null, fileList: FileList) => {
+    async (
+      folderId: string | null,
+      fileList: FileList,
+      replacesFileId?: string
+    ) => {
       const form = new FormData();
       for (const f of Array.from(fileList)) form.append("files", f);
-      const qs = folderId ? `?folderId=${encodeURIComponent(folderId)}` : "";
+      const params = new URLSearchParams();
+      if (folderId) params.set("folderId", folderId);
+      if (replacesFileId) params.set("replacesFileId", replacesFileId);
+      const qs = params.toString() ? `?${params.toString()}` : "";
       try {
         const res = await api<{
           files: FileItem[];
@@ -165,6 +185,14 @@ export default function WorkspacePage() {
       }
     },
     [id]
+  );
+
+  const onUploadVersion = useCallback(
+    async (replacesFileId: string, fileList: FileList) => {
+      await upload(versionsFile?.folderId ?? null, fileList, replacesFileId);
+      await refreshFiles(); // pick up the previous version's is_latest = false
+    },
+    [upload, refreshFiles, versionsFile]
   );
 
   const renameFile = useCallback(
@@ -316,6 +344,7 @@ export default function WorkspacePage() {
             onUpload={upload}
             onRenameFile={renameFile}
             onDeleteFile={deleteFile}
+            onVersions={setVersionsFile}
           />
         </aside>
 
@@ -333,19 +362,62 @@ export default function WorkspacePage() {
           )}
         </main>
 
-        {/* RIGHT — agent log */}
+        {/* RIGHT — shipment panel / agent log (tabbed) */}
         <aside
           style={{
-            width: 320,
+            width: 340,
             flex: "none",
             borderLeft: "1px solid var(--border)",
             background: "var(--panel)",
             minHeight: 0,
+            display: "flex",
+            flexDirection: "column",
           }}
         >
-          <AgentLog entries={log} />
+          <div style={{ display: "flex", borderBottom: "1px solid var(--border)", flex: "none" }}>
+            {(
+              [
+                ["shipment", "Постачання"],
+                ["log", "Журнал"],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => setRightTab(key)}
+                style={{
+                  flex: 1,
+                  height: 42,
+                  border: "none",
+                  background: "transparent",
+                  cursor: "pointer",
+                  font: "inherit",
+                  fontWeight: 600,
+                  color: rightTab === key ? "var(--text)" : "var(--muted)",
+                  borderBottom: rightTab === key ? "2px solid var(--accent)" : "2px solid transparent",
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div style={{ flex: 1, minHeight: 0 }}>
+            {rightTab === "shipment" && workspace ? (
+              <ShipmentPanel workspaceId={id} workspace={workspace} onPatch={onPatch} />
+            ) : (
+              <AgentLog entries={log} />
+            )}
+          </div>
         </aside>
       </div>
+
+      {versionsFile && (
+        <VersionsModal
+          workspaceId={id}
+          fileId={versionsFile.id}
+          onClose={() => setVersionsFile(null)}
+          onUploadVersion={onUploadVersion}
+        />
+      )}
     </div>
   );
 }

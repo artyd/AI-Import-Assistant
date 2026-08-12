@@ -14,8 +14,11 @@
     "dev": "tsx watch src/server.ts",
     "dev:worker": "tsx watch src/worker/index.ts",
     "migrate": "node dist/db/migrate.js",
+    "migrate:folders": "tsx src/db/migrateFolderSkeleton.ts",
+    "reminders:once": "tsx src/scripts/reminders-once.ts",
     "seed": "node dist/auth/seed.js",
     "smoke": "node scripts/smoke-test.mjs",
+    "eval:grounding": "node scripts/eval-grounding.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -24,6 +27,8 @@
     "@fastify/multipart": "^9.0.3",
     "@fastify/rate-limit": "^10.2.2",
     "@qdrant/js-client-rest": "^1.15.1",
+    "@types/archiver": "^8.0.0",
+    "archiver": "^8.0.0",
     "bcryptjs": "^3.0.2",
     "bullmq": "^5.34.10",
     "fastify": "^5.2.1",
