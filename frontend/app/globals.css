@@ -31,6 +31,13 @@
   --st-idx: var(--warn);
   --st-queue: #bebec4;
 
+  /* Icon foreground (contrast rule). Neutral icons flip with the theme so they
+     stay dark-on-light / light-on-dark; the two always-dark surfaces (header,
+     accent) use --icon-fg-on-dark. Centralised here — see .ico3d / .btn-icon. */
+  --icon-fg: #141416;         /* dark icon on light surfaces */
+  --icon-fg-muted: #83838a;   /* idle / secondary icon */
+  --icon-fg-on-dark: #fafafa; /* icon on header / accent (always dark bg) */
+
   --font-sans: Inter, system-ui, -apple-system, sans-serif;
   --font-display: "Space Grotesk", var(--font-sans);
   --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
@@ -67,6 +74,10 @@
   --st-done: var(--ok);
   --st-idx: var(--warn);
   --st-queue: #48484d;
+
+  --icon-fg: #f1f1f2;         /* dark theme → light icon */
+  --icon-fg-muted: #83838a;
+  --icon-fg-on-dark: #fafafa;
 }
 
 html,
@@ -151,11 +162,11 @@ a {
   border: none;
   background: transparent;
   border-radius: 6px;
-  color: var(--muted);
+  color: var(--icon-fg-muted);
 }
 .btn-icon:hover {
   background: var(--hover);
-  color: var(--text);
+  color: var(--icon-fg);
 }
 
 /* --- Inputs --- */
@@ -343,5 +354,22 @@ a {
 @keyframes spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+/* --- 3D icon treatment (Font Awesome solid glyphs) ---
+   A stacked drop-shadow gives the flat glyph a raised, extruded look. Shadows
+   sit under the glyph, so light icons on dark surfaces keep full contrast. */
+.ico3d {
+  filter: drop-shadow(0 1px 0.4px rgba(0, 0, 0, 0.28))
+    drop-shadow(0 2px 2.5px rgba(0, 0, 0, 0.16));
+}
+/* The spinner rotates; keep its shadow radially symmetric so it doesn't wobble. */
+.ico3d.spin {
+  filter: drop-shadow(0 0 1.5px rgba(0, 0, 0, 0.3));
+}
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation-duration: 1.6s;
   }
 }
