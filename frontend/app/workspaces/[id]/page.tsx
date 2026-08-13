@@ -156,7 +156,7 @@ export default function WorkspacePage() {
       folderId: string | null,
       fileList: FileList,
       replacesFileId?: string
-    ) => {
+    ): Promise<FileItem[]> => {
       const form = new FormData();
       for (const f of Array.from(fileList)) form.append("files", f);
       const params = new URLSearchParams();
@@ -178,10 +178,12 @@ export default function WorkspacePage() {
               res.rejected.map((r) => `• ${r.name} — ${r.reason}`).join("\n")
           );
         }
+        return res.files;
       } catch (err) {
         if (err instanceof ApiError && err.code === "no_valid_files")
           alert("Жоден файл не підійшов (дозволені: pdf, docx, xlsx, csv, png, jpg).");
         else alert("Не вдалося завантажити файли.");
+        return [];
       }
     },
     [id]
@@ -225,6 +227,65 @@ export default function WorkspacePage() {
       }
     },
     [id, files]
+  );
+
+  // Move a file into a folder — reuses the same PATCH endpoint as rename.
+  const moveFile = useCallback(
+    async (fileId: string, folderId: string) => {
+      const prev = files;
+      setFiles((p) =>
+        p.map((f) => (f.id === fileId ? { ...f, folderId } : f))
+      );
+      try {
+        await api(`/api/workspaces/${id}/files/${fileId}`, {
+          method: "PATCH",
+          body: { folderId },
+        });
+      } catch {
+        setFiles(prev);
+        throw new Error("move_failed");
+      }
+    },
+    [id, files]
+  );
+
+  // Auto-classify one just-uploaded file; on a match, reflect the move locally.
+  const classifyFile = useCallback(
+    async (fileId: string): Promise<string | null> => {
+      const { folderName } = await api<{
+        fileId: string;
+        folderName: string | null;
+      }>(`/api/workspaces/${id}/files/${fileId}/classify`, { method: "POST" });
+      if (folderName) {
+        const target = folders.find((f) => f.name === folderName);
+        if (target)
+          setFiles((p) =>
+            p.map((f) => (f.id === fileId ? { ...f, folderId: target.id } : f))
+          );
+      }
+      return folderName;
+    },
+    [id, folders]
+  );
+
+  // Paperclip flow: upload into the inbox, then classify each created file.
+  const uploadAndClassify = useCallback(
+    async (
+      fileList: FileList
+    ): Promise<{ fileId: string; name: string; folderName: string | null }[]> => {
+      const created = await upload(null, fileList);
+      return Promise.all(
+        created.map(async (f) => {
+          try {
+            const folderName = await classifyFile(f.id);
+            return { fileId: f.id, name: f.name, folderName };
+          } catch {
+            return { fileId: f.id, name: f.name, folderName: null };
+          }
+        })
+      );
+    },
+    [upload, classifyFile]
   );
 
   const createFolder = useCallback(async () => {
@@ -358,6 +419,9 @@ export default function WorkspacePage() {
               initialMessages={initialMessages}
               onConversationStarted={setConversationId}
               onLog={onLog}
+              folders={folders}
+              onUploadAndClassify={uploadAndClassify}
+              onMoveFile={moveFile}
             />
           )}
         </main>
