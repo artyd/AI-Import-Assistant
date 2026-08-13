@@ -14,7 +14,7 @@ import { inferFileType } from '../domain/folders.js';
 import { enqueueIndexJob } from '../queue/index.js';
 import { publishFileStatus } from '../events/fileStatus.js';
 import { deleteFileChunks } from '../services/qdrant.js';
-import { classifyAndFile } from '../services/classify.js';
+import { classifyAndFile, sortInbox } from '../services/classify.js';
 
 async function folderBelongs(workspaceId: string, folderId: string): Promise<boolean> {
   const { rows } = await query('SELECT 1 FROM folders WHERE id = $1 AND workspace_id = $2', [
@@ -176,6 +176,17 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       [ws.id, parsed.data.name],
     );
     return reply.code(201).send({ folder: rows[0] });
+  });
+
+  // POST /api/workspaces/:id/sort-inbox — classify & file every inbox file
+  // (folder_id IS NULL) into its skeleton folder. Uses stored extractions, so a
+  // scan that the worker OCR'd + extracted gets sorted here too. Same service as
+  // the agent's sort_inbox tool; exposed for the file-tree "Розкласти інбокс" button.
+  app.post<{ Params: { id: string } }>('/api/workspaces/:id/sort-inbox', async (req, reply) => {
+    const ws = await getOwnedWorkspace(req.user!.sub, req.params.id);
+    if (!ws) return reply.code(404).send({ error: 'not_found' });
+    const result = await sortInbox(ws.id);
+    return reply.send(result);
   });
 
   // PATCH /api/workspaces/:id/files/:fileId — rename / move a file.
