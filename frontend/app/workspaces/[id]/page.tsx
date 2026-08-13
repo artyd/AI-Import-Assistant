@@ -6,6 +6,7 @@ import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { openEventsChannel } from "@/lib/sse";
 import type {
+  ConversationMeta,
   FileItem,
   FileStatusEvent,
   Folder,
@@ -16,6 +17,7 @@ import { Header } from "@/components/Header";
 import { FileTree } from "@/components/FileTree";
 import { WorkspaceSelector } from "@/components/WorkspaceSelector";
 import { Chat } from "@/components/Chat";
+import { ConversationsBar } from "@/components/ConversationsBar";
 import { AgentLog, type LogEntry } from "@/components/AgentLog";
 import { ShipmentPanel } from "@/components/ShipmentPanel";
 import { VersionsModal } from "@/components/VersionsModal";
@@ -23,6 +25,7 @@ import {
   IconSearch,
   IconFolderPlus,
   IconUpload,
+  IconFolder,
   IconSpinner,
 } from "@/components/icons";
 
@@ -60,9 +63,12 @@ export default function WorkspacePage() {
   const [files, setFiles] = useState<FileItem[]>([]);
   const [initialMessages, setInitialMessages] = useState<Message[]>([]);
   const [conversationId, setConversationId] = useState<string | undefined>();
+  const [conversations, setConversations] = useState<ConversationMeta[]>([]);
+  const [chatSeq, setChatSeq] = useState(0);
   const [log, setLog] = useState<LogEntry[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  const [sorting, setSorting] = useState(false);
   const [notFound, setNotFound] = useState(false);
   const [rightTab, setRightTab] = useState<"shipment" | "log">("shipment");
   const [versionsFile, setVersionsFile] = useState<FileItem | null>(null);
@@ -93,11 +99,12 @@ export default function WorkspacePage() {
         setFiles(filesRes.files);
         setWorkspaces(listRes.workspaces);
 
-        // Restore the most recent conversation, if any.
+        // Load conversation list + restore the most recent one, if any.
         try {
-          const { conversations } = await api<{
-            conversations: { id: string; updated_at: string }[];
-          }>(`/api/workspaces/${id}/conversations`);
+          const { conversations } = await api<{ conversations: ConversationMeta[] }>(
+            `/api/workspaces/${id}/conversations`
+          );
+          if (!cancelled) setConversations(conversations);
           if (!cancelled && conversations.length > 0) {
             const latest = [...conversations].sort((a, b) =>
               b.updated_at.localeCompare(a.updated_at)
@@ -153,6 +160,8 @@ export default function WorkspacePage() {
           ...next[idx]!,
           status: ev.status,
           errorReason: ev.errorReason ?? next[idx]!.errorReason,
+          // Auto-filed by the worker (e.g. an OCR'd scan) — move it live.
+          folderId: ev.folderId !== undefined ? ev.folderId : next[idx]!.folderId,
         };
         return next;
       });
@@ -322,6 +331,73 @@ export default function WorkspacePage() {
     }
   }, [id]);
 
+  // Classify & file every inbox file (folder_id IS NULL), including OCR'd scans.
+  const sortInbox = useCallback(async () => {
+    setSorting(true);
+    try {
+      const res = await api<{
+        moved: { fileId: string; name: string; to: string }[];
+        unclassified: { fileId: string; name: string }[];
+      }>(`/api/workspaces/${id}/sort-inbox`, { method: "POST" });
+      await refreshFiles();
+      const left = res.unclassified.length;
+      alert(
+        `Розкладено: ${res.moved.length}.` +
+          (left
+            ? `\nНе вдалося визначити: ${left} (можливо, ще індексуються — ` +
+              `спробуйте пізніше або перемістіть вручну).`
+            : "")
+      );
+    } catch {
+      alert("Не вдалося розкласти інбокс.");
+    } finally {
+      setSorting(false);
+    }
+  }, [id, refreshFiles]);
+
+  const refreshConversations = useCallback(async () => {
+    try {
+      const { conversations } = await api<{ conversations: ConversationMeta[] }>(
+        `/api/workspaces/${id}/conversations`
+      );
+      setConversations(conversations);
+    } catch {
+      /* ignore */
+    }
+  }, [id]);
+
+  const loadConversation = useCallback(
+    async (convId: string) => {
+      if (convId === conversationId) return;
+      try {
+        const conv = await api<{ conversationId: string; messages: Message[] }>(
+          `/api/workspaces/${id}/conversations/${convId}`
+        );
+        setConversationId(conv.conversationId);
+        setInitialMessages(conv.messages);
+      } catch {
+        alert("Не вдалося завантажити розмову.");
+      }
+    },
+    [id, conversationId]
+  );
+
+  const newChat = useCallback(() => {
+    setConversationId(undefined);
+    setInitialMessages([]);
+    setChatSeq((n) => n + 1); // force a fresh Chat even if already on a new one
+  }, []);
+
+  const onConversationStarted = useCallback(
+    (cid: string) => {
+      setConversationId(cid);
+      void refreshConversations(); // pick up the new conversation + its title
+    },
+    [refreshConversations]
+  );
+
+  const hasInbox = files.some((f) => f.folderId == null && f.isLatest !== false);
+
   if (authLoading || (loading && !workspace)) {
     return (
       <div style={{ height: "100vh", display: "grid", placeItems: "center" }}>
@@ -416,6 +492,16 @@ export default function WorkspacePage() {
             />
           </div>
 
+          <button
+            className="btn"
+            onClick={sortInbox}
+            disabled={sorting || !hasInbox}
+            style={{ width: "100%" }}
+            title="Розкласти файли з інбоксу по папках (враховуючи скани)"
+          >
+            {sorting ? <IconSpinner size={15} /> : <IconFolder size={15} />} Розкласти інбокс
+          </button>
+
           <Legend />
 
           <FileTree
@@ -435,19 +521,37 @@ export default function WorkspacePage() {
         </aside>
 
         {/* CENTER — chat */}
-        <main style={{ flex: 1, minWidth: 0, minHeight: 0 }}>
+        <main
+          style={{
+            flex: 1,
+            minWidth: 0,
+            minHeight: 0,
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
           {workspace && (
-            <Chat
-              key={conversationId ?? "new"}
-              workspaceId={id}
-              conversationId={conversationId}
-              initialMessages={initialMessages}
-              onConversationStarted={setConversationId}
-              onLog={onLog}
-              folders={folders}
-              onUploadAndClassify={uploadAndClassify}
-              onMoveFile={moveFile}
-            />
+            <>
+              <ConversationsBar
+                conversations={conversations}
+                currentId={conversationId}
+                onSelect={loadConversation}
+                onNew={newChat}
+              />
+              <div style={{ flex: 1, minHeight: 0 }}>
+                <Chat
+                  key={`${conversationId ?? "new"}-${chatSeq}`}
+                  workspaceId={id}
+                  conversationId={conversationId}
+                  initialMessages={initialMessages}
+                  onConversationStarted={onConversationStarted}
+                  onLog={onLog}
+                  folders={folders}
+                  onUploadAndClassify={uploadAndClassify}
+                  onMoveFile={moveFile}
+                />
+              </div>
+            </>
           )}
         </main>
 
