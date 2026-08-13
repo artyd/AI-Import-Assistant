@@ -1,4 +1,4 @@
-import { mkdir, writeFile, readFile, unlink } from 'node:fs/promises';
+import { mkdir, writeFile, readFile, unlink, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { config } from '../config.js';
 import type { FileType } from '../domain/folders.js';
@@ -56,6 +56,15 @@ export async function deleteStoredFile(path: string): Promise<void> {
     await unlink(path);
   } catch {
     // Already gone — ignore.
+  }
+}
+
+/** Removes a workspace's entire on-disk file directory (used on workspace delete). */
+export async function deleteWorkspaceStorage(workspaceId: string): Promise<void> {
+  try {
+    await rm(workspaceDir(workspaceId), { recursive: true, force: true });
+  } catch {
+    // Nothing stored yet / already gone — ignore.
   }
 }
 

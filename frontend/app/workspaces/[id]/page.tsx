@@ -21,11 +21,13 @@ import { ConversationsBar } from "@/components/ConversationsBar";
 import { AgentLog, type LogEntry } from "@/components/AgentLog";
 import { ShipmentPanel } from "@/components/ShipmentPanel";
 import { VersionsModal } from "@/components/VersionsModal";
+import { FilePreviewModal } from "@/components/FilePreviewModal";
 import {
   IconSearch,
   IconFolderPlus,
   IconUpload,
   IconFolder,
+  IconRefresh,
   IconSpinner,
 } from "@/components/icons";
 
@@ -72,6 +74,7 @@ export default function WorkspacePage() {
   const [notFound, setNotFound] = useState(false);
   const [rightTab, setRightTab] = useState<"shipment" | "log">("shipment");
   const [versionsFile, setVersionsFile] = useState<FileItem | null>(null);
+  const [previewFile, setPreviewFile] = useState<FileItem | null>(null);
 
   const rootUploadRef = useRef<HTMLInputElement>(null);
 
@@ -398,6 +401,34 @@ export default function WorkspacePage() {
 
   const hasInbox = files.some((f) => f.folderId == null && f.isLatest !== false);
 
+  // Requeue indexing for a file whose previous run errored.
+  const reindexFile = useCallback(
+    async (file: FileItem) => {
+      setFiles((p) =>
+        p.map((f) =>
+          f.id === file.id ? { ...f, status: "queued", errorReason: null } : f
+        )
+      );
+      try {
+        await api(`/api/workspaces/${id}/files/${file.id}/reindex`, {
+          method: "POST",
+        });
+      } catch {
+        alert("Не вдалося запустити переіндексацію.");
+        await refreshFiles();
+      }
+    },
+    [id, refreshFiles]
+  );
+
+  const erroredFiles = files.filter(
+    (f) => f.status === "error" && f.isLatest !== false
+  );
+  const retryErrored = useCallback(async () => {
+    const targets = files.filter((f) => f.status === "error");
+    await mapLimit(targets, 4, (f) => reindexFile(f));
+  }, [files, reindexFile]);
+
   if (authLoading || (loading && !workspace)) {
     return (
       <div style={{ height: "100vh", display: "grid", placeItems: "center" }}>
@@ -502,6 +533,17 @@ export default function WorkspacePage() {
             {sorting ? <IconSpinner size={15} /> : <IconFolder size={15} />} Розкласти інбокс
           </button>
 
+          {erroredFiles.length > 0 && (
+            <button
+              className="btn"
+              onClick={retryErrored}
+              style={{ width: "100%", color: "var(--err)", borderColor: "var(--err)" }}
+              title="Повторити індексацію файлів зі статусом «Помилка»"
+            >
+              <IconRefresh size={15} /> Повторити невдалі ({erroredFiles.length})
+            </button>
+          )}
+
           <Legend />
 
           <FileTree
@@ -517,6 +559,8 @@ export default function WorkspacePage() {
                 alert("Не вдалося перемістити файл.");
               });
             }}
+            onReindex={reindexFile}
+            onPreview={setPreviewFile}
           />
         </aside>
 
@@ -609,6 +653,14 @@ export default function WorkspacePage() {
           fileId={versionsFile.id}
           onClose={() => setVersionsFile(null)}
           onUploadVersion={onUploadVersion}
+        />
+      )}
+
+      {previewFile && (
+        <FilePreviewModal
+          workspaceId={id}
+          file={previewFile}
+          onClose={() => setPreviewFile(null)}
         />
       )}
     </div>

@@ -57,6 +57,14 @@ export async function deleteFileChunks(fileId: string): Promise<void> {
   });
 }
 
+/** Removes every chunk vector in a workspace (used on workspace delete). */
+export async function deleteWorkspaceChunks(workspaceId: string): Promise<void> {
+  await qdrant.delete(COLLECTION, {
+    wait: true,
+    filter: { must: [{ key: 'workspace_id', match: { value: workspaceId } }] },
+  });
+}
+
 export interface SearchHit {
   file: string;
   fileId: string;

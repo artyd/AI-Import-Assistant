@@ -335,16 +335,17 @@ a {
 .tree-row:hover {
   background: var(--hover);
 }
+/* Row actions are hidden AND take no layout space until the row is hovered, so
+   the file/folder name gets the full row width to show as much as possible. */
 .row-action {
-  opacity: 0;
-  transition: opacity 0.1s;
+  display: none;
 }
 .tree-row:hover .row-action {
-  opacity: 1;
+  display: inline-flex;
 }
 @media (hover: none) {
   .row-action {
-    opacity: 1;
+    display: inline-flex;
   }
 }
 

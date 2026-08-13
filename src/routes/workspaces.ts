@@ -5,6 +5,8 @@ import { authenticate } from '../auth/hook.js';
 import { getOwnedWorkspace, WORKSPACE_STATUSES } from '../services/workspaceAccess.js';
 import { FOLDER_SKELETON } from '../domain/folders.js';
 import { refreshWorkspaceState } from '../services/status.js';
+import { deleteWorkspaceChunks } from '../services/qdrant.js';
+import { deleteWorkspaceStorage } from '../services/storage.js';
 
 const createSchema = z.object({
   number: z.string().min(1).optional(),
@@ -91,6 +93,23 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       },
       folders,
     });
+  });
+
+  // DELETE /api/workspaces/:id — remove a shipment and everything it owns.
+  // The DB cascade (folders, files, conversations/messages, extractions,
+  // checklist, parties, notifications, artifacts) handles relational rows; we
+  // additionally purge the workspace's Qdrant vectors and on-disk files.
+  app.delete<{ Params: { id: string } }>('/api/workspaces/:id', async (req, reply) => {
+    const ws = await getOwnedWorkspace(req.user!.sub, req.params.id);
+    if (!ws) return reply.code(404).send({ error: 'not_found' });
+    try {
+      await deleteWorkspaceChunks(ws.id);
+    } catch {
+      // Vector store already clean / unreachable — don't block the delete.
+    }
+    await deleteWorkspaceStorage(ws.id);
+    await query('DELETE FROM workspaces WHERE id = $1', [ws.id]);
+    return reply.send({ ok: true });
   });
 
   // PATCH /api/workspaces/:id — update intake / contract fields. Flipping

@@ -7,6 +7,7 @@ import { getOwnedWorkspace } from '../services/workspaceAccess.js';
 import {
   isAllowedUpload,
   storeFile,
+  readStoredFile,
   deleteStoredFile,
   diskPathFor,
 } from '../services/storage.js';
@@ -15,6 +16,31 @@ import { enqueueIndexJob } from '../queue/index.js';
 import { publishFileStatus } from '../events/fileStatus.js';
 import { deleteFileChunks } from '../services/qdrant.js';
 import { classifyAndFile, sortInbox } from '../services/classify.js';
+
+/** MIME type for inline preview / download, derived from the stored file type. */
+function contentType(type: string, name: string): string {
+  switch (type) {
+    case 'pdf':
+      return 'application/pdf';
+    case 'csv':
+      return 'text/csv; charset=utf-8';
+    case 'md':
+      return 'text/markdown; charset=utf-8';
+    case 'docx':
+      return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    case 'xlsx':
+      return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    case 'image': {
+      const n = name.toLowerCase();
+      if (n.endsWith('.png')) return 'image/png';
+      if (n.endsWith('.gif')) return 'image/gif';
+      if (n.endsWith('.webp')) return 'image/webp';
+      return 'image/jpeg';
+    }
+    default:
+      return 'application/octet-stream';
+  }
+}
 
 async function folderBelongs(workspaceId: string, folderId: string): Promise<boolean> {
   const { rows } = await query('SELECT 1 FROM folders WHERE id = $1 AND workspace_id = $2', [
@@ -215,6 +241,58 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       );
       if (!rows[0]) return reply.code(404).send({ error: 'not_found' });
       return reply.send({ file: rows[0] });
+    },
+  );
+
+  // GET /api/workspaces/:id/files/:fileId/content — stream the stored bytes
+  // (inline) for in-app preview / download. Auth via the normal Bearer header;
+  // the browser fetches it with JS and shows it from a blob URL.
+  app.get<{ Params: { id: string; fileId: string } }>(
+    '/api/workspaces/:id/files/:fileId/content',
+    async (req, reply) => {
+      const ws = await getOwnedWorkspace(req.user!.sub, req.params.id);
+      if (!ws) return reply.code(404).send({ error: 'not_found' });
+      const { rows } = await query<{ name: string; type: string; disk_path: string }>(
+        'SELECT name, type, disk_path FROM files WHERE id = $1 AND workspace_id = $2',
+        [req.params.fileId, ws.id],
+      );
+      const file = rows[0];
+      if (!file) return reply.code(404).send({ error: 'not_found' });
+      let buf: Buffer;
+      try {
+        buf = await readStoredFile(file.disk_path);
+      } catch {
+        return reply.code(404).send({ error: 'not_found' });
+      }
+      reply.header('Content-Type', contentType(file.type, file.name));
+      reply.header('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(file.name)}`);
+      return reply.send(buf);
+    },
+  );
+
+  // POST /api/workspaces/:id/files/:fileId/reindex — requeue indexing for a file
+  // whose previous run errored (or to re-run it). Resets status to 'queued' and
+  // enqueues a fresh index job; the worker re-extracts/OCRs → embeds → 'ready'.
+  app.post<{ Params: { id: string; fileId: string } }>(
+    '/api/workspaces/:id/files/:fileId/reindex',
+    async (req, reply) => {
+      const ws = await getOwnedWorkspace(req.user!.sub, req.params.id);
+      if (!ws) return reply.code(404).send({ error: 'not_found' });
+
+      const { rows } = await query<{ id: string; name: string }>(
+        'SELECT id, name FROM files WHERE id = $1 AND workspace_id = $2',
+        [req.params.fileId, ws.id],
+      );
+      const file = rows[0];
+      if (!file) return reply.code(404).send({ error: 'not_found' });
+
+      await query('UPDATE files SET status = $2, error_reason = NULL WHERE id = $1', [
+        file.id,
+        'queued',
+      ]);
+      await enqueueIndexJob(file.id);
+      await publishFileStatus(ws.id, { fileId: file.id, status: 'queued', name: file.name });
+      return reply.send({ ok: true });
     },
   );
 
