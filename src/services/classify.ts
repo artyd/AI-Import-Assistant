@@ -42,24 +42,82 @@ interface FileRow {
   disk_path: string;
 }
 
+// Filename keyword heuristic (EN/UA/RU). Ordered most-distinctive first so the
+// cross-folder types (transport/customs/origin/quality/PO) win over the generic
+// 01-bucket types (invoice/packing/contract all map to the same folder anyway).
+// This is deterministic and free, classifies scans that have no text layer, and
+// avoids an LLM call for the many clearly-named customs documents.
+const FILENAME_RULES: { type: string; patterns: string[] }[] = [
+  { type: 'transport', patterns: ['cmr', 'awb', 'hawb', 'mawb', 'airway', 'air way', 'waybill', 'bill of lading', 'b/l', 'consignee', 'коносамент'] },
+  { type: 'customs_declaration', patterns: ['customs', 'declaration', 'декларац', 'митн', 'таможен'] },
+  { type: 'certificate_of_origin', patterns: ['certificate of origin', 'coo', 'походженн', 'происхожден', 'form a', 'eur.1', 'eur1'] },
+  { type: 'quality_certificate', patterns: ['coa', 'certificate of analysis', 'analysis', 'аналіз', 'анализ', 'msds', 'sds', 'quality', 'якост', 'качеств'] },
+  { type: 'purchase_order', patterns: ['purchase order', 'order', 'po', 'замовленн', 'заказ'] },
+  { type: 'invoice', patterns: ['invoice', 'inv', 'рахуно', 'счет', 'счёт', 'facture', 'факт'] },
+  { type: 'packing_list', patterns: ['packing', 'plist', 'pack list', 'специфікац', 'пакувальн', 'упаковочн', 'pl'] },
+  { type: 'contract', patterns: ['contract', 'контракт', 'договір', 'договор', 'agreement', 'угода'] },
+];
+
+// Short/ambiguous Latin tokens must match as whole words so they don't fire
+// inside a longer word (e.g. 'po' in 'report', 'pl' in 'sample'). Everything
+// else (Cyrillic stems, full English words) matches as a substring so inflected
+// forms are caught (рахуно→рахунок, декларац→декларація, походженн→походження).
+const BOUNDARY_TOKENS = new Set([
+  'po', 'pl', 'inv', 'coo', 'coa', 'sds', 'msds', 'awb', 'cmr', 'hawb', 'mawb',
+  'order', 'eur1', 'eur 1', 'b l', 'form a', 'air way',
+]);
+
+/** Normalize to lowercase with every non-alphanumeric run collapsed to a single
+ *  space, padded so whole-word checks work (handles ._-/()[] and Cyrillic). */
+function normalizeName(s: string): string {
+  return ` ${s.toLowerCase().replace(/[^0-9a-zа-яёіїєґ]+/gi, ' ').trim()} `;
+}
+
+function classifyByFilename(name: string): string | null {
+  const n = normalizeName(name);
+  for (const rule of FILENAME_RULES) {
+    for (const p of rule.patterns) {
+      const core = normalizeName(p).trim();
+      const hit = BOUNDARY_TOKENS.has(core) ? n.includes(` ${core} `) : n.includes(core);
+      if (hit) return rule.type;
+    }
+  }
+  return null;
+}
+
 async function resolveDocType(file: FileRow): Promise<string | null> {
-  // Prefer an existing extraction (deterministic, no LLM cost).
+  // 1. Prefer an existing structured extraction (deterministic, no LLM cost).
+  //    Treat 'other' as inconclusive and keep going.
   const { rows } = await query<{ doc_type: string | null }>(
     `SELECT extracted_fields->>'doc_type' AS doc_type
      FROM document_extractions WHERE file_id = $1 ORDER BY extracted_at DESC LIMIT 1`,
     [file.id],
   );
-  if (rows[0]?.doc_type) return rows[0].doc_type;
+  const stored = rows[0]?.doc_type;
+  if (stored && stored !== 'other') return stored;
 
-  // Images have no text layer → photos.
+  // 2. Images have no text layer → photos.
   if (file.type === 'image') return 'photos';
 
-  // Fallback: classify from text via the constrained extractor.
-  const buf = await readStoredFile(file.disk_path);
-  const pages = await extractText(buf, file.type);
-  if (pages.length === 0) return null;
-  const fields = await extractDocumentFields(pages.map((p) => p.text).join('\n\n'));
-  return fields?.doc_type ?? null;
+  // 3. Filename heuristic — cheap, language-aware, works on scans.
+  const byName = classifyByFilename(file.name);
+  if (byName) return byName;
+
+  // 4. Fall back to the text-based classifier, but skip the LLM entirely when
+  //    there's no meaningful text (e.g. a scanned PDF with no text layer) —
+  //    that both avoids a wasted/erroring call and keeps large batches fast.
+  let text = '';
+  try {
+    const buf = await readStoredFile(file.disk_path);
+    const pages = await extractText(buf, file.type);
+    text = pages.map((p) => p.text).join('\n\n').trim();
+  } catch {
+    return null;
+  }
+  if (text.length < 20) return null;
+  const fields = await extractDocumentFields(text);
+  const docType = fields?.doc_type;
+  return docType && docType !== 'other' ? docType : null;
 }
 
 /** Classifies one file and moves it into the matching folder (move-only). */

@@ -12,6 +12,7 @@ import {
   IconEdit,
   IconTrash,
   IconHistory,
+  IconCheck,
 } from "./icons";
 
 interface Props {
@@ -22,6 +23,7 @@ interface Props {
   onRenameFile: (file: FileItem, name: string) => void;
   onDeleteFile: (file: FileItem) => void;
   onVersions: (file: FileItem) => void;
+  onMoveFile: (file: FileItem, folderId: string) => void;
 }
 
 export function FileTree({
@@ -32,6 +34,7 @@ export function FileTree({
   onRenameFile,
   onDeleteFile,
   onVersions,
+  onMoveFile,
 }: Props) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const uploadTarget = useRef<string | null>(null);
@@ -128,9 +131,11 @@ export function FileTree({
                 <FileRow
                   key={file.id}
                   file={file}
+                  folders={folders}
                   onRename={onRenameFile}
                   onDelete={onDeleteFile}
                   onVersions={onVersions}
+                  onMove={onMoveFile}
                 />
               ))}
           </div>
@@ -141,9 +146,11 @@ export function FileTree({
         <FileRow
           key={file.id}
           file={file}
+          folders={folders}
           onRename={onRenameFile}
           onDelete={onDeleteFile}
           onVersions={onVersions}
+          onMove={onMoveFile}
         />
       ))}
 
@@ -167,15 +174,20 @@ const rowStyle: React.CSSProperties = {
 
 function FileRow({
   file,
+  folders,
   onRename,
   onDelete,
   onVersions,
+  onMove,
 }: {
   file: FileItem;
+  folders: Folder[];
   onRename: (f: FileItem, name: string) => void;
   onDelete: (f: FileItem) => void;
   onVersions: (f: FileItem) => void;
+  onMove: (f: FileItem, folderId: string) => void;
 }) {
+  const [moveOpen, setMoveOpen] = useState(false);
   const status = toUiStatus(file.status);
   const title =
     file.status === "error" && file.errorReason
@@ -193,6 +205,84 @@ function FileRow({
         </span>
       )}
       <span className={`dot ${status}`} title={STATUS_LABEL[status]} />
+      <div style={{ position: "relative", display: "flex" }}>
+        <button
+          className="btn-icon row-action"
+          onClick={() => setMoveOpen((v) => !v)}
+          title="Перемістити в папку"
+          aria-label="Перемістити в папку"
+          style={moveOpen ? { opacity: 1 } : undefined}
+        >
+          <IconFolder size={14} />
+        </button>
+        {moveOpen && (
+          <>
+            <div
+              onClick={() => setMoveOpen(false)}
+              style={{ position: "fixed", inset: 0, zIndex: 40 }}
+            />
+            <div
+              style={{
+                position: "absolute",
+                top: "100%",
+                right: 0,
+                zIndex: 41,
+                marginTop: 4,
+                minWidth: 210,
+                maxHeight: 260,
+                overflowY: "auto",
+                background: "var(--menu)",
+                border: "1px solid var(--border)",
+                borderRadius: "var(--radius-sm)",
+                boxShadow: "var(--shadow)",
+                padding: 4,
+              }}
+            >
+              {folders.map((folder) => {
+                const current = file.folderId === folder.id;
+                return (
+                  <button
+                    key={folder.id}
+                    disabled={current}
+                    onClick={() => {
+                      setMoveOpen(false);
+                      if (!current) onMove(file, folder.id);
+                    }}
+                    className="ellipsis"
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      width: "100%",
+                      textAlign: "left",
+                      border: "none",
+                      background: "transparent",
+                      color: current ? "var(--muted)" : "var(--text)",
+                      font: "inherit",
+                      fontSize: 13,
+                      padding: "7px 8px",
+                      borderRadius: 6,
+                      cursor: current ? "default" : "pointer",
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!current) e.currentTarget.style.background = "var(--hover)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = "transparent";
+                    }}
+                  >
+                    <IconFolder size={14} />
+                    <span className="ellipsis" style={{ flex: 1, minWidth: 0 }}>
+                      {folder.name}
+                    </span>
+                    {current && <IconCheck size={13} />}
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </div>
       <button
         className="btn-icon row-action"
         onClick={() => onVersions(file)}
