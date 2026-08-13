@@ -12,6 +12,9 @@ export interface FileStatusEvent {
   status: 'queued' | 'indexing' | 'ready' | 'error' | 'deleted';
   name?: string;
   errorReason?: string | null;
+  // Present when the worker auto-filed an inbox file (e.g. a scan classified via
+  // OCR) so the file tree can move it live without a refetch.
+  folderId?: string | null;
 }
 
 function channel(workspaceId: string): string {

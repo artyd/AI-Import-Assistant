@@ -11,6 +11,7 @@ import { extractText } from '../services/extract/index.js';
 import { ocrDocument } from '../services/ocr/claudeOcr.js';
 import { chunkPages } from '../services/extract/chunk.js';
 import { extractDocumentFields } from '../services/extraction/extractFields.js';
+import { classifyAndFile } from '../services/classify.js';
 import { getWorkspaceById } from '../services/workspaceAccess.js';
 import { refreshWorkspaceState } from '../services/status.js';
 import { scanAndNotify } from '../services/reminders.js';
@@ -124,6 +125,32 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
         }
         const ws = await getWorkspaceById(file.workspace_id);
         if (ws) await refreshWorkspaceState(ws);
+
+        // Auto-file if the document is still sitting in the inbox — this is how a
+        // scan gets sorted: its doc_type only became known after OCR + extraction
+        // above. Guarded on folder_id IS NULL so we never override a placement the
+        // user (or the upload-time classify) already made.
+        const { rows: cur } = await query<{ folder_id: string | null }>(
+          'SELECT folder_id FROM files WHERE id = $1',
+          [file.id],
+        );
+        if (cur[0] && cur[0].folder_id === null) {
+          const res = await classifyAndFile(file.workspace_id, file.id);
+          if (res?.to) {
+            const { rows: moved } = await query<{ folder_id: string | null }>(
+              'SELECT folder_id FROM files WHERE id = $1',
+              [file.id],
+            );
+            await publishFileStatus(file.workspace_id, {
+              fileId: file.id,
+              status: 'ready',
+              name: file.name,
+              folderId: moved[0]?.folder_id ?? null,
+            });
+            // eslint-disable-next-line no-console
+            console.log(`Auto-filed ${file.id} (${file.name}) → ${res.to}.`);
+          }
+        }
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error(`Extraction failed for file ${file.id}:`, (err as Error).message);

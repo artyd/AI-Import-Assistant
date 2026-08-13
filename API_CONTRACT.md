@@ -146,6 +146,9 @@ Response `200`: `{ "ok": true }`
 ### Extensions (to support the tree UI)
 - `POST /api/workspaces/:id/folders` — `{ "name": string }` → `201 { "folder": { "id","name","position" } }`
 - `PATCH /api/workspaces/:id/files/:fileId` — `{ "name"?: string, "folderId"?: string|null }` → `200 { "file": {…} }`
+- `POST /api/workspaces/:id/sort-inbox` (auth, no body) — classify & file every inbox
+  file (`folder_id IS NULL`) into its skeleton folder (move-only; uses stored
+  extractions, so OCR'd scans sort too). → `200 { "moved": [ { "fileId","name","to" } ], "unclassified": [ { "fileId","name" } ] }`
 
 ### `POST /api/workspaces/:id/files/:fileId/classify`  (auth, no body)
 Auto-sorts a single file into its skeleton folder (move-only; same classifier as the
@@ -215,7 +218,9 @@ transitions so the file-tree dots update without polling.
 
 | event | data |
 |-------|------|
-| `file_status` | `{ "fileId": string, "status": "queued"|"indexing"|"ready"|"error"|"deleted", "name"?: string, "errorReason"?: string|null }` |
+| `file_status` | `{ "fileId": string, "status": "queued"|"indexing"|"ready"|"error"|"deleted", "name"?: string, "errorReason"?: string|null, "folderId"?: string|null }` |
+
+`folderId` is present when the worker auto-filed an inbox file (e.g. a scan classified via OCR); the tree moves the file into that folder live.
 
 Consumable with the native `EventSource` (GET). Emits `: ping` keep-alives.
 

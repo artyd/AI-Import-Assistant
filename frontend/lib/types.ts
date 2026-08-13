@@ -157,6 +157,8 @@ export interface FileStatusEvent {
   status: FileStatus | "deleted";
   name?: string;
   errorReason?: string | null;
+  // Present when the worker auto-filed an inbox file (e.g. an OCR'd scan).
+  folderId?: string | null;
 }
 
 export function toUiStatus(s: FileStatus): UiFileStatus {
