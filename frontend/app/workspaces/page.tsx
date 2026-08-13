@@ -11,6 +11,7 @@ import {
   IconFolderPlus,
   IconSpinner,
   IconAgent,
+  IconTrash,
 } from "@/components/icons";
 
 export default function WorkspacesPage() {
@@ -30,6 +31,26 @@ export default function WorkspacesPage() {
     );
     setItems(workspaces);
   }, []);
+
+  const del = useCallback(
+    async (w: Workspace) => {
+      const ok = window.confirm(
+        `Видалити поставку №${w.number ?? "—"}?\n\n` +
+          "Буде видалено всі файли, папки та чати цієї поставки. " +
+          "Дію не можна скасувати."
+      );
+      if (!ok) return;
+      const prev = items;
+      setItems((list) => (list ? list.filter((x) => x.id !== w.id) : list));
+      try {
+        await api(`/api/workspaces/${w.id}`, { method: "DELETE" });
+      } catch {
+        setItems(prev);
+        alert("Не вдалося видалити поставку.");
+      }
+    },
+    [items]
+  );
 
   useEffect(() => {
     if (user) load().catch(() => setItems([]));
@@ -93,36 +114,58 @@ export default function WorkspacesPage() {
             </div>
           ) : (
             items.map((w) => (
-              <button
+              <div
                 key={w.id}
-                onClick={() => router.push(`/workspaces/${w.id}`)}
-                className="btn"
+                className="tree-row"
                 style={{
-                  justifyContent: "flex-start",
-                  height: "auto",
-                  padding: "10px 12px",
-                  textAlign: "left",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4,
+                  padding: 4,
+                  borderRadius: 8,
+                  border: "1px solid var(--border)",
                   background: "var(--surface)",
                 }}
               >
-                <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-                  <span style={{ fontWeight: 600 }}>
-                    №{w.number ?? "—"}
-                  </span>
+                <button
+                  onClick={() => router.push(`/workspaces/${w.id}`)}
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 2,
+                    textAlign: "left",
+                    border: "none",
+                    background: "transparent",
+                    color: "var(--text)",
+                    font: "inherit",
+                    padding: "6px 8px",
+                    cursor: "pointer",
+                  }}
+                >
+                  <span style={{ fontWeight: 600 }}>№{w.number ?? "—"}</span>
                   <span
+                    className="ellipsis"
                     style={{
                       fontSize: 12,
                       color: "var(--muted)",
                       fontWeight: 400,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
                     }}
                   >
                     {w.supplier || "Без постачальника"}
                   </span>
-                </div>
-              </button>
+                </button>
+                <button
+                  className="btn-icon row-action"
+                  onClick={() => del(w)}
+                  title="Видалити поставку"
+                  aria-label="Видалити поставку"
+                  style={{ flex: "none", color: "var(--err)" }}
+                >
+                  <IconTrash size={15} />
+                </button>
+              </div>
             ))
           )}
         </aside>

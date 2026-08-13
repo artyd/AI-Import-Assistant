@@ -70,6 +70,12 @@ Response `201`: `{ "workspace": { "id","number","supplier","status","created_at"
 ### `GET /api/workspaces`  (auth)
 Response `200`: `{ "workspaces": [ { "id","number","supplier","status","created_at" } ] }`
 
+### `DELETE /api/workspaces/:id`  (auth)
+Deletes the shipment and everything it owns — folders, files, conversations +
+messages, extractions, checklist, parties, notifications, artifacts (DB cascade),
+plus its Qdrant vectors and on-disk files. Irreversible.
+Response `200`: `{ "ok": true }`. `404 not_found` if not owned/found.
+
 ### `GET /api/workspaces/:id`  (auth)
 Response `200`:
 ```json
