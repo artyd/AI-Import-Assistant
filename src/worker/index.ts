@@ -8,6 +8,7 @@ import { INDEX_QUEUE, type IndexJobData } from '../queue/index.js';
 import { REMINDERS_QUEUE, scheduleReminders, type ReminderJobData } from '../queue/reminders.js';
 import { readStoredFile } from '../services/storage.js';
 import { extractText } from '../services/extract/index.js';
+import { ocrDocument } from '../services/ocr/claudeOcr.js';
 import { chunkPages } from '../services/extract/chunk.js';
 import { extractDocumentFields } from '../services/extraction/extractFields.js';
 import { getWorkspaceById } from '../services/workspaceAccess.js';
@@ -61,7 +62,25 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
 
   try {
     const buf = await readStoredFile(file.disk_path);
-    const pages = await extractText(buf, file.type);
+    let pages = await extractText(buf, file.type);
+
+    // OCR fallback: a scanned PDF (no text layer) or an image yields no text
+    // from extractText. Transcribe it with Claude vision so it still gets
+    // indexed + field-extracted. Best-effort — a failure leaves pages empty and
+    // the file simply indexes as before (status still becomes 'ready').
+    if (pages.length === 0 && (file.type === 'pdf' || file.type === 'image')) {
+      try {
+        pages = await ocrDocument(buf, file.type, file.name);
+        if (pages.length > 0) {
+          // eslint-disable-next-line no-console
+          console.log(`OCR recovered text for file ${file.id} (${file.name}).`);
+        }
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error(`OCR failed for file ${file.id}:`, (err as Error).message);
+      }
+    }
+
     const chunks = chunkPages(pages);
 
     // Replace any prior vectors for this file (safe on re-index).
@@ -84,8 +103,8 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
       await upsertChunks(vectors, payloads);
     }
 
-    // Files without a text layer (e.g. images) are still "ready" — there is
-    // simply nothing to index (OCR is a documented v2 addition).
+    // Files with no recoverable text (e.g. a blank or un-OCR-able image) are
+    // still "ready" — there is simply nothing to index for them.
     await setStatus(file.id, file.workspace_id, 'ready');
 
     // Structured extraction (best-effort): populate document_extractions so the
@@ -157,7 +176,7 @@ async function main(): Promise<void> {
 
   // eslint-disable-next-line no-console
   console.log(
-    `Indexing worker started (env=${config.NODE_ENV}, extraction=${config.EXTRACTION_ENABLED}, reminders=${config.REMINDERS_ENABLED}).`,
+    `Indexing worker started (env=${config.NODE_ENV}, extraction=${config.EXTRACTION_ENABLED}, ocr=${config.OCR_ENABLED}, reminders=${config.REMINDERS_ENABLED}).`,
   );
 
   const shutdown = async (): Promise<void> => {
