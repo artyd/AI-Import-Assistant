@@ -156,6 +156,11 @@ Response `200`: `{ "ok": true }`
   file (`folder_id IS NULL`) into its skeleton folder (move-only; uses stored
   extractions, so OCR'd scans sort too). → `200 { "moved": [ { "fileId","name","to" } ], "unclassified": [ { "fileId","name" } ] }`
 
+### `GET /api/workspaces/:id/files/:fileId/content`  (auth)
+Streams the stored file bytes inline (`Content-Type` by file type, `Content-Disposition: inline`)
+for in-app preview / download. The browser fetches it with the Bearer header and renders it
+from a blob URL (PDF in an `<iframe>`, images in `<img>`). `404 not_found` if not owned/found.
+
 ### `POST /api/workspaces/:id/files/:fileId/reindex`  (auth, no body)
 Requeue indexing for a file (e.g. one whose previous run errored): resets status
 to `queued`, clears `error_reason`, enqueues a fresh index job, emits `file_status`.

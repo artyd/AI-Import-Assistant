@@ -21,6 +21,7 @@ import { ConversationsBar } from "@/components/ConversationsBar";
 import { AgentLog, type LogEntry } from "@/components/AgentLog";
 import { ShipmentPanel } from "@/components/ShipmentPanel";
 import { VersionsModal } from "@/components/VersionsModal";
+import { FilePreviewModal } from "@/components/FilePreviewModal";
 import {
   IconSearch,
   IconFolderPlus,
@@ -73,6 +74,7 @@ export default function WorkspacePage() {
   const [notFound, setNotFound] = useState(false);
   const [rightTab, setRightTab] = useState<"shipment" | "log">("shipment");
   const [versionsFile, setVersionsFile] = useState<FileItem | null>(null);
+  const [previewFile, setPreviewFile] = useState<FileItem | null>(null);
 
   const rootUploadRef = useRef<HTMLInputElement>(null);
 
@@ -558,6 +560,7 @@ export default function WorkspacePage() {
               });
             }}
             onReindex={reindexFile}
+            onPreview={setPreviewFile}
           />
         </aside>
 
@@ -650,6 +653,14 @@ export default function WorkspacePage() {
           fileId={versionsFile.id}
           onClose={() => setVersionsFile(null)}
           onUploadVersion={onUploadVersion}
+        />
+      )}
+
+      {previewFile && (
+        <FilePreviewModal
+          workspaceId={id}
+          file={previewFile}
+          onClose={() => setPreviewFile(null)}
         />
       )}
     </div>

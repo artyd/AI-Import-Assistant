@@ -26,6 +26,7 @@ interface Props {
   onVersions: (file: FileItem) => void;
   onMoveFile: (file: FileItem, folderId: string) => void;
   onReindex: (file: FileItem) => void;
+  onPreview: (file: FileItem) => void;
 }
 
 export function FileTree({
@@ -38,6 +39,7 @@ export function FileTree({
   onVersions,
   onMoveFile,
   onReindex,
+  onPreview,
 }: Props) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const uploadTarget = useRef<string | null>(null);
@@ -140,6 +142,7 @@ export function FileTree({
                   onVersions={onVersions}
                   onMove={onMoveFile}
                   onReindex={onReindex}
+                  onPreview={onPreview}
                 />
               ))}
           </div>
@@ -156,6 +159,7 @@ export function FileTree({
           onVersions={onVersions}
           onMove={onMoveFile}
           onReindex={onReindex}
+          onPreview={onPreview}
         />
       ))}
 
@@ -185,6 +189,7 @@ function FileRow({
   onVersions,
   onMove,
   onReindex,
+  onPreview,
 }: {
   file: FileItem;
   folders: Folder[];
@@ -193,19 +198,39 @@ function FileRow({
   onVersions: (f: FileItem) => void;
   onMove: (f: FileItem, folderId: string) => void;
   onReindex: (f: FileItem) => void;
+  onPreview: (f: FileItem) => void;
 }) {
   const [moveOpen, setMoveOpen] = useState(false);
   const status = toUiStatus(file.status);
   const title =
     file.status === "error" && file.errorReason
       ? `Помилка: ${file.errorReason}`
-      : file.name;
+      : `${file.name} — натисніть для перегляду`;
   return (
     <div className="tree-row" style={{ ...rowStyle, paddingLeft: 30 }} title={title}>
-      <IconFile size={15} />
-      <span className="ellipsis" style={{ flex: 1, minWidth: 0 }}>
-        {file.name}
-      </span>
+      <button
+        onClick={() => onPreview(file)}
+        title={file.name}
+        style={{
+          flex: 1,
+          minWidth: 0,
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          textAlign: "left",
+          border: "none",
+          background: "transparent",
+          color: "var(--text)",
+          font: "inherit",
+          padding: 0,
+          cursor: "pointer",
+        }}
+      >
+        <IconFile size={15} style={{ flex: "none" }} />
+        <span className="ellipsis" style={{ flex: 1, minWidth: 0 }}>
+          {file.name}
+        </span>
+      </button>
       {file.version && file.version > 1 && (
         <span style={{ fontSize: 10, color: "var(--muted)", fontFamily: "var(--font-mono)" }}>
           v{file.version}
