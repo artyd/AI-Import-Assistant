@@ -26,6 +26,28 @@ import {
   IconSpinner,
 } from "@/components/icons";
 
+// Run an async mapper over items with bounded concurrency, preserving order.
+// Keeps the post-upload classify calls from firing as one big burst (which can
+// trip provider rate limits and surface as spurious "couldn't classify").
+async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const idx = next++;
+      results[idx] = await fn(items[idx]!);
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, worker)
+  );
+  return results;
+}
+
 export default function WorkspacePage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
@@ -274,16 +296,14 @@ export default function WorkspacePage() {
       fileList: FileList
     ): Promise<{ fileId: string; name: string; folderName: string | null }[]> => {
       const created = await upload(null, fileList);
-      return Promise.all(
-        created.map(async (f) => {
-          try {
-            const folderName = await classifyFile(f.id);
-            return { fileId: f.id, name: f.name, folderName };
-          } catch {
-            return { fileId: f.id, name: f.name, folderName: null };
-          }
-        })
-      );
+      return mapLimit(created, 4, async (f) => {
+        try {
+          const folderName = await classifyFile(f.id);
+          return { fileId: f.id, name: f.name, folderName };
+        } catch {
+          return { fileId: f.id, name: f.name, folderName: null };
+        }
+      });
     },
     [upload, classifyFile]
   );
@@ -406,6 +426,11 @@ export default function WorkspacePage() {
             onRenameFile={renameFile}
             onDeleteFile={deleteFile}
             onVersions={setVersionsFile}
+            onMoveFile={(file, folderId) => {
+              void moveFile(file.id, folderId).catch(() => {
+                alert("Не вдалося перемістити файл.");
+              });
+            }}
           />
         </aside>
 
