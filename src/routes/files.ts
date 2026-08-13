@@ -218,6 +218,32 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
+  // POST /api/workspaces/:id/files/:fileId/reindex — requeue indexing for a file
+  // whose previous run errored (or to re-run it). Resets status to 'queued' and
+  // enqueues a fresh index job; the worker re-extracts/OCRs → embeds → 'ready'.
+  app.post<{ Params: { id: string; fileId: string } }>(
+    '/api/workspaces/:id/files/:fileId/reindex',
+    async (req, reply) => {
+      const ws = await getOwnedWorkspace(req.user!.sub, req.params.id);
+      if (!ws) return reply.code(404).send({ error: 'not_found' });
+
+      const { rows } = await query<{ id: string; name: string }>(
+        'SELECT id, name FROM files WHERE id = $1 AND workspace_id = $2',
+        [req.params.fileId, ws.id],
+      );
+      const file = rows[0];
+      if (!file) return reply.code(404).send({ error: 'not_found' });
+
+      await query('UPDATE files SET status = $2, error_reason = NULL WHERE id = $1', [
+        file.id,
+        'queued',
+      ]);
+      await enqueueIndexJob(file.id);
+      await publishFileStatus(ws.id, { fileId: file.id, status: 'queued', name: file.name });
+      return reply.send({ ok: true });
+    },
+  );
+
   // POST /api/workspaces/:id/files/:fileId/classify — auto-sort a single file into
   // its skeleton folder (move-only). Reuses the same classifier as the agent's
   // classify_and_file tool. Called by the chat right after a paperclip upload.

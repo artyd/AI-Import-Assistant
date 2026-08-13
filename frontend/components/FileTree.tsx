@@ -13,6 +13,7 @@ import {
   IconTrash,
   IconHistory,
   IconCheck,
+  IconRefresh,
 } from "./icons";
 
 interface Props {
@@ -24,6 +25,7 @@ interface Props {
   onDeleteFile: (file: FileItem) => void;
   onVersions: (file: FileItem) => void;
   onMoveFile: (file: FileItem, folderId: string) => void;
+  onReindex: (file: FileItem) => void;
 }
 
 export function FileTree({
@@ -35,6 +37,7 @@ export function FileTree({
   onDeleteFile,
   onVersions,
   onMoveFile,
+  onReindex,
 }: Props) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const uploadTarget = useRef<string | null>(null);
@@ -136,6 +139,7 @@ export function FileTree({
                   onDelete={onDeleteFile}
                   onVersions={onVersions}
                   onMove={onMoveFile}
+                  onReindex={onReindex}
                 />
               ))}
           </div>
@@ -151,6 +155,7 @@ export function FileTree({
           onDelete={onDeleteFile}
           onVersions={onVersions}
           onMove={onMoveFile}
+          onReindex={onReindex}
         />
       ))}
 
@@ -179,6 +184,7 @@ function FileRow({
   onDelete,
   onVersions,
   onMove,
+  onReindex,
 }: {
   file: FileItem;
   folders: Folder[];
@@ -186,6 +192,7 @@ function FileRow({
   onDelete: (f: FileItem) => void;
   onVersions: (f: FileItem) => void;
   onMove: (f: FileItem, folderId: string) => void;
+  onReindex: (f: FileItem) => void;
 }) {
   const [moveOpen, setMoveOpen] = useState(false);
   const status = toUiStatus(file.status);
@@ -205,6 +212,17 @@ function FileRow({
         </span>
       )}
       <span className={`dot ${status}`} title={STATUS_LABEL[status]} />
+      {file.status === "error" && (
+        <button
+          className="btn-icon"
+          onClick={() => onReindex(file)}
+          title={`Переіндексувати${file.errorReason ? ` (помилка: ${file.errorReason})` : ""}`}
+          aria-label="Переіндексувати"
+          style={{ color: "var(--err)" }}
+        >
+          <IconRefresh size={14} />
+        </button>
+      )}
       <div style={{ position: "relative", display: "flex" }}>
         <button
           className="btn-icon row-action"

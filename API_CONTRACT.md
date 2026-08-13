@@ -150,6 +150,11 @@ Response `200`: `{ "ok": true }`
   file (`folder_id IS NULL`) into its skeleton folder (move-only; uses stored
   extractions, so OCR'd scans sort too). → `200 { "moved": [ { "fileId","name","to" } ], "unclassified": [ { "fileId","name" } ] }`
 
+### `POST /api/workspaces/:id/files/:fileId/reindex`  (auth, no body)
+Requeue indexing for a file (e.g. one whose previous run errored): resets status
+to `queued`, clears `error_reason`, enqueues a fresh index job, emits `file_status`.
+Response `200`: `{ "ok": true }`. `404 not_found` if the workspace/file isn't found.
+
 ### `POST /api/workspaces/:id/files/:fileId/classify`  (auth, no body)
 Auto-sorts a single file into its skeleton folder (move-only; same classifier as the
 agent's `classify_and_file` tool). Used by the chat right after a paperclip upload.
