@@ -41,6 +41,16 @@ const envSchema = z.object({
   CHAT_RATE_MAX: z.coerce.number().int().positive().default(30),
   CHAT_RATE_WINDOW: z.string().default('1 minute'),
 
+  // OCR fallback (worker): when a PDF has no text layer or the file is an image,
+  // transcribe it with Claude vision so scans become searchable + extractable.
+  OCR_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
+  // Model used for OCR transcription. Defaults to the chat model; a cheaper
+  // vision-capable model (e.g. claude-haiku-4-5) can be set to cut cost.
+  OCR_MODEL: z.string().default('claude-opus-4-8'),
+
   // Structured document extraction (worker) + daily reminders (worker cron).
   EXTRACTION_ENABLED: z
     .enum(['true', 'false'])

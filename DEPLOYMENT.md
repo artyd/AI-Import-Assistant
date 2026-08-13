@@ -164,14 +164,17 @@ tunes how long to wait for indexing. Exit code is non-zero if any check fails.
 | `MAX_UPLOAD_BYTES` | — | `26214400` | Per-file upload cap (25 MB) |
 | `CHAT_RATE_MAX` / `CHAT_RATE_WINDOW` | — | `30` / `1 minute` | Per-user chat rate limit |
 | `QDRANT_API_KEY` | — | — | If Qdrant auth is enabled |
+| `OCR_ENABLED` | — | `true` | Worker OCR fallback for scanned PDFs / images via Claude vision (`true`/`false`) |
+| `OCR_MODEL` | — | `claude-opus-4-8` | Vision model for OCR; set `claude-haiku-4-5` to cut cost |
 | `EXTRACTION_ENABLED` | — | `true` | Worker structured field extraction (`true`/`false`) |
 | `REMINDERS_ENABLED` | — | `true` | Daily in-app reminder job (`true`/`false`) |
 | `REMINDERS_CRON` | — | `0 6 * * *` | Cron for the reminder scan |
 
 ## Out of scope for v1 (documented v2 additions)
 
-- **OCR** for scanned images — image files are stored and marked `ready` but not
-  indexed (no text layer).
+- ~~**OCR** for scanned images~~ — **now supported** (`OCR_ENABLED`): scanned PDFs
+  and images are transcribed with Claude vision in the worker, then indexed and
+  field-extracted like any other document.
 - **Native structured agent blocks** — reconciliation diff-tables / completeness
   checklists currently arrive as Markdown inside the answer; a typed
   `checks[]`/`diff{}` schema can replace that later without changing the transport.
