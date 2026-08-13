@@ -147,6 +147,15 @@ Response `200`: `{ "ok": true }`
 - `POST /api/workspaces/:id/folders` — `{ "name": string }` → `201 { "folder": { "id","name","position" } }`
 - `PATCH /api/workspaces/:id/files/:fileId` — `{ "name"?: string, "folderId"?: string|null }` → `200 { "file": {…} }`
 
+### `POST /api/workspaces/:id/files/:fileId/classify`  (auth, no body)
+Auto-sorts a single file into its skeleton folder (move-only; same classifier as the
+agent's `classify_and_file` tool). Used by the chat right after a paperclip upload.
+Response `200`: `{ "fileId": string, "folderName": string | null }` — `folderName` is
+the destination folder name when filed, or `null` when the file was left in the inbox
+(`folder_id IS NULL`; unknown/`other` type) so the client can ask the user to pick.
+Move confirmation reuses `PATCH /api/workspaces/:id/files/:fileId` with `{ "folderId" }`.
+`404 not_found` if the workspace or file isn't owned/found.
+
 ---
 
 ## Chat (SSE)

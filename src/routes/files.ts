@@ -14,6 +14,7 @@ import { inferFileType } from '../domain/folders.js';
 import { enqueueIndexJob } from '../queue/index.js';
 import { publishFileStatus } from '../events/fileStatus.js';
 import { deleteFileChunks } from '../services/qdrant.js';
+import { classifyAndFile } from '../services/classify.js';
 
 async function folderBelongs(workspaceId: string, folderId: string): Promise<boolean> {
   const { rows } = await query('SELECT 1 FROM folders WHERE id = $1 AND workspace_id = $2', [
@@ -203,6 +204,27 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       );
       if (!rows[0]) return reply.code(404).send({ error: 'not_found' });
       return reply.send({ file: rows[0] });
+    },
+  );
+
+  // POST /api/workspaces/:id/files/:fileId/classify — auto-sort a single file into
+  // its skeleton folder (move-only). Reuses the same classifier as the agent's
+  // classify_and_file tool. Called by the chat right after a paperclip upload.
+  // Note: immediately after upload the indexing worker's structured extraction may
+  // not exist yet, so classifyAndFile → resolveDocType runs its own forced-tool LLM
+  // call; the worker's later extraction is idempotent, so this is a harmless duplicate.
+  app.post<{ Params: { id: string; fileId: string } }>(
+    '/api/workspaces/:id/files/:fileId/classify',
+    async (req, reply) => {
+      const ws = await getOwnedWorkspace(req.user!.sub, req.params.id);
+      if (!ws) return reply.code(404).send({ error: 'not_found' });
+
+      const res = await classifyAndFile(ws.id, req.params.fileId);
+      if (!res) return reply.code(404).send({ error: 'not_found' });
+
+      // res.to === null → left in inbox (unmapped / 'other' / folder missing) → the
+      // chat asks the user to pick. Otherwise the file was moved into res.to.
+      return reply.send({ fileId: res.fileId, folderName: res.to });
     },
   );
 
