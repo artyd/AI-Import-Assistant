@@ -31,6 +31,15 @@ export interface PartyRow {
 
 const INTERNAL_COMPANIES = ['AGroup95', 'PrimeForce'];
 
+// Party role is free text (parties_role_check was dropped) and the UI's role
+// presets are Ukrainian-only (ShipmentPanel.tsx::ROLE_PRESETS). Match a small set
+// of supplier-meaning labels rather than one hardcoded English string.
+export const SUPPLIER_ROLE_MATCHES = ['supplier', 'постачальник', 'поставщик'];
+
+export function isSupplierRole(role: string): boolean {
+  return SUPPLIER_ROLE_MATCHES.includes(role.trim().toLowerCase());
+}
+
 /** Replaces the workspace's parties atomically with the supplied set. */
 export async function upsertParties(
   workspaceId: string,
@@ -112,8 +121,9 @@ export async function getMissingContext(ws: WorkspaceRow): Promise<string[]> {
   if (!ws.origin_country) missing.push('origin_country');
 
   const { rows } = await query<{ n: number }>(
-    `SELECT count(*)::int AS n FROM parties WHERE workspace_id = $1 AND role = 'supplier'`,
-    [ws.id],
+    `SELECT count(*)::int AS n FROM parties
+     WHERE workspace_id = $1 AND lower(trim(role)) = ANY($2::text[])`,
+    [ws.id, SUPPLIER_ROLE_MATCHES],
   );
   if ((rows[0]?.n ?? 0) === 0) missing.push('parties');
 

@@ -2,6 +2,7 @@ import { anthropic, MODEL } from '../anthropic/client.js';
 import { query } from '../db/pool.js';
 import type { WorkspaceRow } from './workspaceAccess.js';
 import { saveArtifact } from './artifacts.js';
+import { isSupplierRole } from './parties.js';
 
 /**
  * Generates a supplier instruction letter (Markdown) from the workspace intake
@@ -30,7 +31,7 @@ function requiredMissing(ws: WorkspaceRow, parties: PartyRow[]): string[] {
   if (!ws.origin_country) missing.push('origin_country');
   if (!ws.incoterm) missing.push('incoterm');
   if (!ws.transport_mode) missing.push('transport_mode');
-  if (!parties.some((p) => p.role === 'supplier')) missing.push('supplier_party');
+  if (!parties.some((p) => isSupplierRole(p.role))) missing.push('supplier_party');
   return missing;
 }
 
@@ -45,7 +46,7 @@ export async function buildSupplierInstruction(
   const missing = requiredMissing(ws, parties);
   if (missing.length > 0) return { missing };
 
-  const supplier = parties.find((p) => p.role === 'supplier');
+  const supplier = parties.find((p) => isSupplierRole(p.role));
   const prompt = [
     'Склади інструкцію для постачальника (лист) українською у форматі Markdown.',
     'Контекст постачання:',
