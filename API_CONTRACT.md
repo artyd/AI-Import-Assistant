@@ -151,8 +151,12 @@ Request: `{}`. Response `200`: `{ "suggestions": [ { "role","company_name","coun
   `400 invalid_replaces` if the id isn't in this workspace.
 - Allow-list: `pdf, docx, xlsx, csv, png, jpg/jpeg`. Anything else (incl.
   executables) is rejected. Per-file size limit `MAX_UPLOAD_BYTES` (default 25 MB).
-- On accept: stores to disk, writes a `queued` row, enqueues a background index
-  job, and emits a `file_status` event (see the events channel).
+- **Content dedup:** an exact-content match (SHA-256 of the bytes, scoped to the
+  workspace's `is_latest` files, and within the same upload batch) is skipped and
+  reported in `rejected` with `reason: "duplicate_of:<existing name>"`. Skipped when
+  `replacesFileId` is set (an explicit version-replace is never deduped).
+- On accept: stores to disk, writes a `queued` row (with `content_hash`), enqueues a
+  background index job, and emits a `file_status` event (see the events channel).
 Response `201`: `{ "files": [ { "id","name","type","status":"queued","folderId","version","replacesFileId" } ], "rejected": [ { "name","reason" } ] }`
 Response `415` when nothing valid was uploaded: `{ "error":"no_valid_files", "rejected":[…] }`
 

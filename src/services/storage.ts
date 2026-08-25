@@ -1,4 +1,5 @@
 import { mkdir, writeFile, readFile, unlink, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { config } from '../config.js';
 import type { FileType } from '../domain/folders.js';
@@ -49,6 +50,11 @@ export async function storeFile(
 
 export async function readStoredFile(path: string): Promise<Buffer> {
   return readFile(path);
+}
+
+/** SHA-256 of a file's bytes, used for exact-content dedup. */
+export function contentHashOf(data: Buffer): string {
+  return createHash('sha256').update(data).digest('hex');
 }
 
 export async function deleteStoredFile(path: string): Promise<void> {

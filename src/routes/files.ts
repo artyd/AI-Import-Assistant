@@ -10,6 +10,7 @@ import {
   readStoredFile,
   deleteStoredFile,
   diskPathFor,
+  contentHashOf,
 } from '../services/storage.js';
 import { inferFileType } from '../domain/folders.js';
 import { enqueueIndexJob } from '../queue/index.js';
@@ -88,6 +89,8 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       const rejected: { name: string; reason: string }[] = [];
       // A single replacement target applies to the first accepted file only.
       let replaceConsumed = false;
+      // Exact-content dedup within this upload batch (hash -> first name seen).
+      const seenHashes = new Map<string, string>();
 
       for await (const part of req.files()) {
         const name = part.filename;
@@ -109,6 +112,26 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
           continue;
         }
 
+        // Exact-content dedup — only for fresh uploads, never for an explicit
+        // version-replace (which is a deliberate user action).
+        const hash = contentHashOf(buf);
+        if (!replacesFileId) {
+          const inBatch = seenHashes.get(hash);
+          if (inBatch) {
+            rejected.push({ name, reason: `duplicate_of:${inBatch}` });
+            continue;
+          }
+          const { rows: dup } = await query<{ name: string }>(
+            `SELECT name FROM files
+             WHERE workspace_id = $1 AND content_hash = $2 AND is_latest = true LIMIT 1`,
+            [ws.id, hash],
+          );
+          if (dup[0]) {
+            rejected.push({ name, reason: `duplicate_of:${dup[0].name}` });
+            continue;
+          }
+        }
+
         const fileId = uuidv4();
         const type = inferFileType(name);
         const diskPath = diskPathFor(ws.id, fileId, name);
@@ -121,10 +144,11 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
         const replacesId = applyReplace ? replaced!.id : null;
 
         await query(
-          `INSERT INTO files (id, workspace_id, folder_id, name, type, disk_path, size_bytes, status, version, replaces_file_id, is_latest)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued', $8, $9, true)`,
-          [fileId, ws.id, folderId ?? null, name, type, diskPath, buf.length, version, replacesId],
+          `INSERT INTO files (id, workspace_id, folder_id, name, type, disk_path, size_bytes, status, version, replaces_file_id, is_latest, content_hash)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued', $8, $9, true, $10)`,
+          [fileId, ws.id, folderId ?? null, name, type, diskPath, buf.length, version, replacesId, hash],
         );
+        seenHashes.set(hash, name);
         if (applyReplace) {
           await query('UPDATE files SET is_latest = false WHERE id = $1', [replaced!.id]);
           replaceConsumed = true;
