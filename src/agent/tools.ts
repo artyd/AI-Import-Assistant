@@ -1,8 +1,10 @@
 import { z } from 'zod';
 import type { ChatTool } from '../anthropic/client.js';
 import { query } from '../db/pool.js';
-import { readStoredFile } from '../services/storage.js';
+import { readStoredFile, contentHashOf } from '../services/storage.js';
 import { extractText } from '../services/extract/index.js';
+import { enqueueIndexJob } from '../queue/index.js';
+import { publishFileStatus } from '../events/fileStatus.js';
 import { searchWorkspace } from '../services/qdrant.js';
 import { getWorkspaceById } from '../services/workspaceAccess.js';
 import { buildSupplierInstruction } from '../services/supplierInstruction.js';
@@ -149,6 +151,16 @@ export const toolDefinitions: ChatTool[] = [
     input_schema: { type: 'object', properties: {} },
   },
   {
+    name: 'normalize_shipment_files',
+    description:
+      'Перевіряє файли поточного постачання на точні дублікати за вмістом (не за іменем) та ' +
+      'донараховує відсутні хеші для файлів, завантажених до цієї функції. Ніколи не видаляє ' +
+      'файли — лише повідомляє про знайдені дублікати. Також повторно запускає індексацію всіх ' +
+      'файлів зі статусом «Помилка». Використовуй за проханням «нормалізуй файли», «перевір ' +
+      'дублікати», «повтори невдалі файли» тощо.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
     name: 'generate_report',
     description:
       'Генерує та зберігає HTML-звіт по постачанню (огляд, комплектність, розбіжності, ' +
@@ -203,6 +215,8 @@ export async function executeTool(
       return runClassifyAndFile(input, ctx);
     case 'sort_inbox':
       return runSortInbox(ctx);
+    case 'normalize_shipment_files':
+      return runNormalizeShipmentFiles(ctx);
     case 'generate_report':
       return runGenerateReport(ctx);
     case 'compare_document_versions':
@@ -430,6 +444,61 @@ async function runSortInbox(ctx: ToolContext): Promise<ToolOutcome> {
   return {
     result: lines.join('\n'),
     summary: `Розкладено: ${moved.length}, не визначено: ${unclassified.length}`,
+    citations: [],
+  };
+}
+
+async function runNormalizeShipmentFiles(ctx: ToolContext): Promise<ToolOutcome> {
+  // 1. Backfill content_hash for files that predate this feature.
+  const { rows: unhashed } = await query<{ id: string; disk_path: string }>(
+    `SELECT id, disk_path FROM files
+     WHERE workspace_id = $1 AND is_latest = true AND content_hash IS NULL`,
+    [ctx.workspaceId],
+  );
+  let backfilled = 0;
+  for (const f of unhashed) {
+    try {
+      const buf = await readStoredFile(f.disk_path);
+      await query('UPDATE files SET content_hash = $2 WHERE id = $1', [f.id, contentHashOf(buf)]);
+      backfilled++;
+    } catch {
+      // Stored bytes missing/unreadable — skip; not fatal for the rest of the sweep.
+    }
+  }
+
+  // 2. Report (never delete) duplicate groups among is_latest files.
+  const { rows: dupGroups } = await query<{ content_hash: string; names: string[]; ids: string[] }>(
+    `SELECT content_hash, array_agg(name ORDER BY created_at) AS names, array_agg(id ORDER BY created_at) AS ids
+     FROM files
+     WHERE workspace_id = $1 AND is_latest = true AND content_hash IS NOT NULL
+     GROUP BY content_hash HAVING COUNT(*) > 1`,
+    [ctx.workspaceId],
+  );
+
+  // 3. Bulk-retry currently-errored files (same primitive as POST …/reindex).
+  const { rows: errored } = await query<{ id: string; name: string }>(
+    `SELECT id, name FROM files WHERE workspace_id = $1 AND status = 'error'`,
+    [ctx.workspaceId],
+  );
+  for (const f of errored) {
+    await query(`UPDATE files SET status = 'queued', error_reason = NULL WHERE id = $1`, [f.id]);
+    await enqueueIndexJob(f.id);
+    await publishFileStatus(ctx.workspaceId, { fileId: f.id, status: 'queued', name: f.name });
+  }
+
+  const lines: string[] = [];
+  lines.push(`Донараховано хешів: ${backfilled}.`);
+  if (dupGroups.length === 0) {
+    lines.push('Дублікатів за вмістом не знайдено.');
+  } else {
+    lines.push(`Знайдено груп дублікатів: ${dupGroups.length} (файли НЕ видалено, це лише звіт):`);
+    for (const g of dupGroups) lines.push(`- ${g.names.map((n) => `«${n}»`).join(' = ')}`);
+  }
+  lines.push(`Поставлено на повторну індексацію (були в статусі «Помилка»): ${errored.length}.`);
+
+  return {
+    result: lines.join('\n'),
+    summary: `Нормалізація: хешів +${backfilled}, дублікатів ${dupGroups.length}, повторно проіндексовано ${errored.length}`,
     citations: [],
   };
 }

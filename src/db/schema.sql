@@ -84,6 +84,11 @@ ALTER TABLE files ADD COLUMN IF NOT EXISTS replaces_file_id UUID REFERENCES file
 ALTER TABLE files ADD COLUMN IF NOT EXISTS is_latest BOOLEAN NOT NULL DEFAULT TRUE;
 -- files.folder_id is already nullable (NULL = inbox) — no change needed.
 
+-- Content-hash dedup (file-normalization phase 1). Nullable until backfilled.
+ALTER TABLE files ADD COLUMN IF NOT EXISTS content_hash TEXT;
+CREATE INDEX IF NOT EXISTS idx_files_workspace_hash ON files(workspace_id, content_hash)
+  WHERE is_latest = true;
+
 -- Workspace intake / contract structure.
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS contract_type TEXT
   CHECK (contract_type IN ('bilateral', 'trilateral'));
