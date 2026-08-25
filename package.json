@@ -15,6 +15,7 @@
     "dev:worker": "tsx watch src/worker/index.ts",
     "migrate": "node dist/db/migrate.js",
     "migrate:folders": "tsx src/db/migrateFolderSkeleton.ts",
+    "migrate:cert-merge": "tsx src/db/migrateCertMerge.ts",
     "reminders:once": "tsx src/scripts/reminders-once.ts",
     "seed": "node dist/auth/seed.js",
     "smoke": "node scripts/smoke-test.mjs",

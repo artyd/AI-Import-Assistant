@@ -20,10 +20,11 @@ const DOC_TYPE_TO_FOLDER: Record<string, string> = {
   invoice: '01_Contract_Invoice_PackingList',
   packing_list: '01_Contract_Invoice_PackingList',
   purchase_order: '02_PO',
-  certificate_of_origin: '03_Certificate_of_Origin',
-  quality_certificate: '04_Quality_Certificates',
-  customs_declaration: '05_Customs',
-  transport: '06_Transport',
+  // Both certificate doc_types route into the merged certificates folder.
+  certificate_of_origin: '03_Certificates',
+  quality_certificate: '03_Certificates',
+  customs_declaration: '04_Customs',
+  transport: '05_Transport',
 };
 
 export interface ClassifyResult {
@@ -136,7 +137,7 @@ export async function classifyAndFile(
 
   const docType = await resolveDocType(file);
   const targetName =
-    docType === 'photos' ? '07_Photos' : docType ? DOC_TYPE_TO_FOLDER[docType] : undefined;
+    docType === 'photos' ? '06_Photos' : docType ? DOC_TYPE_TO_FOLDER[docType] : undefined;
   if (!targetName) {
     return { fileId: file.id, name: file.name, from: file.folder_name, to: null };
   }

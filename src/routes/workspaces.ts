@@ -89,6 +89,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         incoterm: ws.incoterm,
         transport_mode: ws.transport_mode,
         origin_country: ws.origin_country,
+        destination_country: ws.destination_country,
         responsible_user_id: ws.responsible_user_id,
       },
       folders,
@@ -112,6 +113,74 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: true });
   });
 
+  // POST /api/workspaces/:id/duplicate — clone a shipment's context (intake
+  // scalars + a fresh folder skeleton + parties), WITHOUT copying files,
+  // conversations, extractions, checklist items, artifacts, or Qdrant vectors.
+  app.post<{ Params: { id: string } }>(
+    '/api/workspaces/:id/duplicate',
+    async (req, reply) => {
+      const src = await getOwnedWorkspace(req.user!.sub, req.params.id);
+      if (!src) return reply.code(404).send({ error: 'not_found' });
+
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const number = `${src.number ?? defaultNumber()}-копія`;
+        const { rows } = await client.query(
+          `INSERT INTO workspaces
+             (owner_id, number, supplier, status, contract_type, intake_complete,
+              product_category, incoterm, transport_mode, origin_country, destination_country)
+           VALUES ($1, $2, $3, 'draft', $4, $5, $6, $7, $8, $9, $10)
+           RETURNING id`,
+          [
+            req.user!.sub,
+            number,
+            src.supplier,
+            src.contract_type,
+            src.intake_complete,
+            src.product_category,
+            src.incoterm,
+            src.transport_mode,
+            src.origin_country,
+            src.destination_country,
+          ],
+        );
+        const newId = rows[0].id as string;
+
+        // Fresh folder skeleton.
+        for (let i = 0; i < FOLDER_SKELETON.length; i++) {
+          await client.query(
+            'INSERT INTO folders (workspace_id, name, position) VALUES ($1, $2, $3)',
+            [newId, FOLDER_SKELETON[i], i],
+          );
+        }
+
+        // Copy parties (contract context, not documents). Drop to blank copy by
+        // removing this INSERT…SELECT if a truly empty duplicate is preferred.
+        await client.query(
+          `INSERT INTO parties (workspace_id, role, company_name, is_internal, country, contact_info)
+           SELECT $1, role, company_name, is_internal, country, contact_info
+           FROM parties WHERE workspace_id = $2`,
+          [newId, src.id],
+        );
+
+        await client.query('COMMIT');
+
+        // If the copy is intake-complete, compute its checklist + derived status
+        // to match the create/patch convention.
+        const created = (await getOwnedWorkspace(req.user!.sub, newId))!;
+        if (created.intake_complete) await refreshWorkspaceState(created);
+        const workspace = (await getOwnedWorkspace(req.user!.sub, newId))!;
+        return reply.code(201).send({ workspace });
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
+    },
+  );
+
   // PATCH /api/workspaces/:id — update intake / contract fields. Flipping
   // intake_complete to true (re)computes the checklist and derived status.
   const patchSchema = z.object({
@@ -122,6 +191,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
     incoterm: z.string().nullable().optional(),
     transport_mode: z.string().nullable().optional(),
     origin_country: z.string().nullable().optional(),
+    destination_country: z.string().nullable().optional(),
     responsible_user_id: z.string().uuid().nullable().optional(),
     intake_complete: z.boolean().optional(),
   });
@@ -190,6 +260,9 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
     incoterm: z.string().nullable().optional(),
     transport_mode: z.string().nullable().optional(),
     origin_country: z.string().nullable().optional(),
+    // destination_country is settable here but intentionally NOT part of the
+    // intake_complete required-five derivation below (see decision in the audit).
+    destination_country: z.string().nullable().optional(),
   });
   app.patch<{ Params: { id: string } }>('/api/workspaces/:id/intake', async (req, reply) => {
     const ws = await getOwnedWorkspace(req.user!.sub, req.params.id);

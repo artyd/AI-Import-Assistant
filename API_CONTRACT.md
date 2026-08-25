@@ -82,7 +82,8 @@ Response `200`:
 {
   "workspace": { "id","number","supplier","status","created_at",
                  "contract_type","intake_complete","product_category",
-                 "incoterm","transport_mode","origin_country","responsible_user_id" },
+                 "incoterm","transport_mode","origin_country","destination_country",
+                 "responsible_user_id" },
   "folders": [ { "id","name","position" } ]
 }
 ```
@@ -90,7 +91,8 @@ Response `200`:
 ### `PATCH /api/workspaces/:id`  (auth)
 Request (all optional): `{ "number"?, "supplier"?, "contract_type"?:"bilateral"|"trilateral"|null,
 "product_category"?:string|null, "incoterm"?:string|null, "transport_mode"?:string|null,
-"origin_country"?:string|null, "responsible_user_id"?:uuid|null, "intake_complete"?:boolean }`.
+"origin_country"?:string|null, "destination_country"?:string|null,
+"responsible_user_id"?:uuid|null, "intake_complete"?:boolean }`.
 Sets intake/contract fields. When `intake_complete` is true, the checklist is
 (re)computed and the derived status refreshed. `400 invalid_user` if
 `responsible_user_id` doesn't exist.
@@ -102,10 +104,18 @@ Request: `{ "status": "active"|"draft"|"done"|"docs_in_progress"|"docs_complete"
 
 ### `PATCH /api/workspaces/:id/intake`  (auth)
 Request (all optional): `{ "contract_type"?:"bilateral"|"trilateral"|null, "product_category"?,
-"incoterm"?, "transport_mode"?, "origin_country"? }`. Sets shipment context and
-**auto-computes** `intake_complete` (true once all five are present; recomputes the
-checklist + status on completion).
+"incoterm"?, "transport_mode"?, "origin_country"?, "destination_country"? }`. Sets shipment
+context and **auto-computes** `intake_complete` (true once the five core fields —
+contract_type/product_category/incoterm/transport_mode/origin_country — are present;
+`destination_country` is settable but does not gate completeness). Recomputes the
+checklist + status on completion.
 Response `200`: `{ "workspace": {…}, "checklist"?: [ {…} ] }`.
+
+### `POST /api/workspaces/:id/duplicate`  (auth)
+Clones a shipment's context (intake scalars + a fresh folder skeleton + parties);
+does **not** copy files, conversations, extractions, checklist items, or artifacts.
+The copy's `number` is `"<src>-копія"` and `status` is `draft`.
+Request: `{}`. Response `201`: `{ "workspace": {…} }`.
 
 ---
 
@@ -115,10 +125,19 @@ Response `200`: `{ "workspace": {…}, "checklist"?: [ {…} ] }`.
 Response `200`: `{ "parties": [ { "id","role","company_name","is_internal","country","contact_info" } ] }`.
 
 ### `POST /api/workspaces/:id/parties`  (auth)
-Request: `{ "parties": [ { "role":"our_company"|"supplier"|"intermediary", "company_name",
-"is_internal"?, "country"?, "contact_info"? } ] }` — **bulk replace**. Validation only
-**warns** (never hard-fails) on unusual role combinations for the contract type.
+Request: `{ "parties": [ { "role":string, "company_name",
+"is_internal"?, "country"?, "contact_info"? } ] }` — **bulk replace**. `role` is now a
+free-text label (canonical values `our_company`/`supplier`/`intermediary` still drive
+validation/context). `contact_info` may carry `{ "source":"auto"|"manual", "source_files"?:string[] }`
+to mark auto-extracted vs manually-entered parties. Validation only **warns** (never
+hard-fails) on unusual role combinations for the contract type.
 Response `200`: `{ "parties": [ {…} ], "warnings": [ string ] }`.
+
+### `POST /api/workspaces/:id/parties/suggest`  (auth)
+LLM-derived party suggestions aggregated from stored document extractions (no new
+LLM call — reuses `document_extractions`). **Read-only**: does not write parties.
+Request: `{}`. Response `200`: `{ "suggestions": [ { "role","company_name","country",
+"source_files":string[], "confidence":number } ], "suggested_contract_type": "bilateral"|"trilateral"|null }`.
 
 ---
 

@@ -7,7 +7,10 @@ import type { WorkspaceRow } from './workspaceAccess.js';
  * so real-world edge cases don't block intake.
  */
 
-export type PartyRole = 'our_company' | 'supplier' | 'intermediary';
+// Role is a free-text label (relaxed from a fixed enum). Canonical values
+// ('our_company' | 'supplier' | 'intermediary') are still used by validateParties
+// and getMissingContext, but any label is accepted and persisted.
+export type PartyRole = string;
 
 export interface PartyInput {
   role: PartyRole;

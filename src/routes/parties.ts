@@ -3,9 +3,10 @@ import { z } from 'zod';
 import { authenticate } from '../auth/hook.js';
 import { getOwnedWorkspace } from '../services/workspaceAccess.js';
 import { upsertParties, validateParties, listParties } from '../services/parties.js';
+import { suggestParties, suggestContractType } from '../services/partyExtraction.js';
 
 const partySchema = z.object({
-  role: z.enum(['our_company', 'supplier', 'intermediary']),
+  role: z.string().min(1),
   company_name: z.string().min(1),
   is_internal: z.boolean().optional(),
   country: z.string().nullable().optional(),
@@ -35,4 +36,17 @@ export async function partiesRoutes(app: FastifyInstance): Promise<void> {
     const parties = await upsertParties(ws.id, parsed.data.parties);
     return reply.send({ parties, warnings });
   });
+
+  // POST /api/workspaces/:id/parties/suggest — LLM-derived party suggestions
+  // aggregated from stored document extractions. Read-only: does NOT write parties.
+  app.post<{ Params: { id: string } }>(
+    '/api/workspaces/:id/parties/suggest',
+    async (req, reply) => {
+      const ws = await getOwnedWorkspace(req.user!.sub, req.params.id);
+      if (!ws) return reply.code(404).send({ error: 'not_found' });
+      const suggestions = await suggestParties(ws.id);
+      const suggested_contract_type = suggestContractType(suggestions);
+      return reply.send({ suggestions, suggested_contract_type });
+    },
+  );
 }
