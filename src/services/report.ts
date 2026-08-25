@@ -49,6 +49,26 @@ async function gatherFigures(workspaceId: string): Promise<Figures> {
   };
 }
 
+interface DocIncoterm {
+  name: string;
+  doc_type: string | null;
+  incoterm: string | null;
+}
+
+async function gatherDocIncoterms(workspaceId: string): Promise<DocIncoterm[]> {
+  const { rows } = await query<DocIncoterm>(
+    `SELECT f.name AS name,
+            de.extracted_fields->>'doc_type' AS doc_type,
+            de.extracted_fields->>'incoterm' AS incoterm
+     FROM document_extractions de JOIN files f ON f.id = de.file_id
+     WHERE de.workspace_id = $1 AND f.is_latest = true
+       AND de.extracted_fields->>'incoterm' IS NOT NULL
+     ORDER BY f.name`,
+    [workspaceId],
+  );
+  return rows;
+}
+
 function deriveConclusions(
   status: string,
   checklist: ChecklistItem[],
@@ -82,14 +102,26 @@ function render(
   figures: Figures,
   status: string,
   conclusions: string[],
+  docIncoterms: DocIncoterm[],
 ): string {
   const done = checklist.filter((i) => i.status !== 'missing').length;
   const pct = checklist.length ? Math.round((done / checklist.length) * 100) : 0;
 
   const partiesRows = parties
+    .map((p) => {
+      const auto =
+        (p.contact_info as { source?: string } | null)?.source === 'auto'
+          ? ' <span class="tag">авто</span>'
+          : '';
+      const internal = p.is_internal ? ' <span class="tag">internal</span>' : '';
+      return `<tr><td>${esc(p.role)}</td><td>${esc(p.company_name)}${internal}${auto}</td><td>${esc(p.country ?? '—')}</td></tr>`;
+    })
+    .join('');
+
+  const docIncotermRows = docIncoterms
     .map(
-      (p) =>
-        `<tr><td>${esc(p.role)}</td><td>${esc(p.company_name)}${p.is_internal ? ' <span class="tag">internal</span>' : ''}</td><td>${esc(p.country ?? '—')}</td></tr>`,
+      (d) =>
+        `<tr><td>${esc(d.name)}</td><td>${esc(d.doc_type ?? '—')}</td><td>${esc(d.incoterm ?? '—')}</td></tr>`,
     )
     .join('');
 
@@ -159,8 +191,16 @@ ul.concl{margin:8px 0;padding-left:18px} ul.concl li{margin:4px 0}
   <table>
     <tr><th>Категорія товару</th><td>${esc(ws.product_category ?? '—')}</td><th>Incoterms</th><td>${esc(ws.incoterm ?? '—')}</td></tr>
     <tr><th>Транспорт</th><td>${esc(ws.transport_mode ?? '—')}</td><th>Країна походження</th><td>${esc(ws.origin_country ?? '—')}</td></tr>
+    <tr><th>Країна призначення</th><td>${esc(ws.destination_country ?? '—')}</td><th>Тип контракту</th><td>${esc(ws.contract_type ?? '—')}</td></tr>
     <tr><th>Створено</th><td>${esc(ws.created_at)}</td><th>Статус</th><td>${esc(status)}</td></tr>
   </table>
+  ${
+    docIncoterms.length
+      ? `<h2>Incoterms за документами</h2>
+  <table><thead><tr><th>Документ</th><th>Тип</th><th>Incoterms</th></tr></thead>
+  <tbody>${docIncotermRows}</tbody></table>`
+      : ''
+  }
 
   <h2>Сторони</h2>
   <table><thead><tr><th>Роль</th><th>Компанія</th><th>Країна</th></tr></thead>
@@ -192,15 +232,16 @@ ul.concl{margin:8px 0;padding-left:18px} ul.concl li{margin:4px 0}
 export async function buildAndSaveReport(
   ws: WorkspaceRow,
 ): Promise<{ id: string; html: string }> {
-  const [parties, checklist, discrepancies, figures] = await Promise.all([
+  const [parties, checklist, discrepancies, figures, docIncoterms] = await Promise.all([
     listParties(ws.id),
     computeChecklist(ws),
     computeDiscrepancies(ws.id),
     gatherFigures(ws.id),
+    gatherDocIncoterms(ws.id),
   ]);
   const status = deriveWorkspaceStatus(ws, checklist, discrepancies);
   const conclusions = deriveConclusions(status, checklist, discrepancies);
-  const html = render(ws, parties, checklist, discrepancies, figures, status, conclusions);
+  const html = render(ws, parties, checklist, discrepancies, figures, status, conclusions, docIncoterms);
   const { id } = await saveArtifact(ws.id, 'shipment_report_html', html, 'html', 'agent');
   return { id, html };
 }

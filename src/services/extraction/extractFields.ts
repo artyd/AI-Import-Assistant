@@ -31,6 +31,13 @@ const DOC_TYPES: readonly DocType[] = [
   'other',
 ];
 
+export interface ExtractedParty {
+  name: string;
+  role: string | null;
+  country: string | null;
+  address: string | null;
+}
+
 export interface ExtractedFields {
   doc_type: DocType;
   po_number: string | null;
@@ -44,6 +51,7 @@ export interface ExtractedFields {
   buyer: string | null;
   seller: string | null;
   incoterm: string | null;
+  parties: ExtractedParty[];
 }
 
 const MAX_INPUT_CHARS = 30_000;
@@ -70,6 +78,22 @@ const EXTRACTION_TOOL: ChatTool = {
       buyer: { type: 'string', description: 'Покупець.' },
       seller: { type: 'string', description: 'Продавець/постачальник.' },
       incoterm: { type: 'string', description: 'Умови поставки (Incoterms).' },
+      parties: {
+        type: 'array',
+        description:
+          'Усі окремі компанії/сторони, названі в документі, з їхньою роллю ' +
+          '(продавець/покупець/посередник/вантажоодержувач/агент тощо) та країною/адресою, якщо вказані.',
+        items: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', description: 'Назва компанії/сторони.' },
+            role: { type: 'string', description: 'Роль у договорі, як зазначено в документі.' },
+            country: { type: 'string', description: 'Країна сторони.' },
+            address: { type: 'string', description: 'Адреса сторони, якщо вказана.' },
+          },
+          required: ['name'],
+        },
+      },
     },
     required: ['doc_type'],
   },
@@ -105,7 +129,26 @@ function normalize(input: Record<string, unknown>): ExtractedFields {
     buyer: toStr(input.buyer),
     seller: toStr(input.seller),
     incoterm: toStr(input.incoterm),
+    parties: normalizeParties(input.parties),
   };
+}
+
+function normalizeParties(v: unknown): ExtractedParty[] {
+  if (!Array.isArray(v)) return [];
+  const out: ExtractedParty[] = [];
+  for (const item of v) {
+    if (!item || typeof item !== 'object') continue;
+    const rec = item as Record<string, unknown>;
+    const name = toStr(rec.name);
+    if (!name) continue; // drop entries with no identifiable name
+    out.push({
+      name,
+      role: toStr(rec.role),
+      country: toStr(rec.country),
+      address: toStr(rec.address),
+    });
+  }
+  return out;
 }
 
 /**

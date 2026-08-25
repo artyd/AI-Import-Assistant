@@ -284,10 +284,11 @@ const saveContextSchema = z.object({
   incoterm: z.string().optional(),
   transport_mode: z.string().optional(),
   origin_country: z.string().optional(),
+  destination_country: z.string().optional(),
   parties: z
     .array(
       z.object({
-        role: z.enum(['our_company', 'supplier', 'intermediary']),
+        role: z.string().min(1),
         company_name: z.string().min(1),
         is_internal: z.boolean().optional(),
         country: z.string().nullable().optional(),
@@ -310,6 +311,7 @@ async function runSaveContext(input: unknown, ctx: ToolContext): Promise<ToolOut
     'incoterm',
     'transport_mode',
     'origin_country',
+    'destination_country',
   ] as const;
   const sets: string[] = [];
   const vals: unknown[] = [ws.id];

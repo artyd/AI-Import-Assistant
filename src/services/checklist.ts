@@ -26,10 +26,10 @@ export interface ChecklistItem {
 const FOLDER_CATEGORIES: Record<string, string[]> = {
   '01_Contract_Invoice_PackingList': ['contract', 'invoice', 'packing_list'],
   '02_PO': ['purchase_order'],
-  '03_Certificate_of_Origin': ['certificate_of_origin'],
-  '04_Quality_Certificates': ['quality_certificate'],
-  '05_Customs': ['customs_declaration'],
-  '06_Transport': ['transport'],
+  // Merged certificate folder covers both certificate categories.
+  '03_Certificates': ['certificate_of_origin', 'quality_certificate'],
+  '04_Customs': ['customs_declaration'],
+  '05_Transport': ['transport'],
 };
 
 interface LatestFileRow {
@@ -43,8 +43,9 @@ async function requiredKeys(ws: WorkspaceRow): Promise<string[]> {
     `SELECT required_document_types FROM checklist_templates
      WHERE (product_category IS NULL OR product_category = $1)
        AND (incoterm IS NULL OR incoterm = $2)
-       AND (transport_mode IS NULL OR transport_mode = $3)`,
-    [ws.product_category, ws.incoterm, ws.transport_mode],
+       AND (transport_mode IS NULL OR transport_mode = $3)
+       AND (contract_type IS NULL OR contract_type = $4)`,
+    [ws.product_category, ws.incoterm, ws.transport_mode, ws.contract_type],
   );
   return [...new Set(rows.flatMap((r) => r.required_document_types))];
 }

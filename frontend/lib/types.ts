@@ -27,6 +27,7 @@ export interface Workspace {
   incoterm?: string | null;
   transport_mode?: string | null;
   origin_country?: string | null;
+  destination_country?: string | null;
   responsible_user_id?: string | null;
 }
 
@@ -36,7 +37,15 @@ export interface UserLite {
   name: string | null;
 }
 
-export type PartyRole = "our_company" | "supplier" | "intermediary";
+// Free-text role label (relaxed from a fixed enum). Common presets are offered
+// in the UI, but any label is accepted.
+export type PartyRole = string;
+
+export interface PartyContactInfo {
+  source?: "auto" | "manual";
+  source_files?: string[];
+  [key: string]: unknown;
+}
 
 export interface Party {
   id?: string;
@@ -44,7 +53,15 @@ export interface Party {
   company_name: string;
   is_internal?: boolean;
   country?: string | null;
-  contact_info?: Record<string, unknown>;
+  contact_info?: PartyContactInfo;
+}
+
+export interface PartySuggestion {
+  role: string;
+  company_name: string;
+  country: string | null;
+  source_files: string[];
+  confidence: number;
 }
 
 export interface ChecklistItem {

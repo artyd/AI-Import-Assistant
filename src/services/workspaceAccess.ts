@@ -32,6 +32,7 @@ export interface WorkspaceRow {
   incoterm: string | null;
   transport_mode: string | null;
   origin_country: string | null;
+  destination_country: string | null;
   responsible_user_id: string | null;
 }
 

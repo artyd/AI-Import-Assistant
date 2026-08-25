@@ -101,7 +101,7 @@ ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS responsible_user_id UUID
 CREATE TABLE IF NOT EXISTS parties (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-  role         TEXT NOT NULL CHECK (role IN ('our_company', 'supplier', 'intermediary')),
+  role         TEXT NOT NULL, -- free-text role label (relaxed from a fixed CHECK; see phase-3 ALTER below)
   company_name TEXT NOT NULL DEFAULT '',
   is_internal  BOOLEAN NOT NULL DEFAULT FALSE,
   country      TEXT,
@@ -186,3 +186,28 @@ SELECT NULL, NULL, NULL, ARRAY[
   'quality_certificate', 'customs_declaration', 'transport'
 ]
 WHERE NOT EXISTS (SELECT 1 FROM checklist_templates);
+
+-- ── Sidebar-enhancement phase 1: destination country + free-text party roles ──
+
+-- Country of destination (mirrors origin_country). Nullable; not part of the
+-- intake_complete required-five derivation (see routes/workspaces.ts).
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS destination_country TEXT;
+
+-- Relax the parties.role fixed CHECK to free-text so role labels are flexible
+-- (seller/buyer/consignee/agent/…). Idempotent for existing production DBs.
+ALTER TABLE parties DROP CONSTRAINT IF EXISTS parties_role_check;
+
+-- ── Sidebar-enhancement phase 4: contract-structure checklist dimension ───────
+
+-- Checklist templates can now vary by contract_type (2-party vs 3-party). NULL =
+-- wildcard, so the baseline row still applies to every shipment; the trilateral
+-- row is additive on top of it.
+ALTER TABLE checklist_templates ADD COLUMN IF NOT EXISTS contract_type TEXT;
+
+-- Trilateral (3-party) shipments require the intermediary-structure document(s).
+-- NOTE(phase4): 'intermediary_agreement' is a PLACEHOLDER doc_type — confirm the
+-- real required-document list with the domain owner before relying on it.
+INSERT INTO checklist_templates (product_category, incoterm, transport_mode, contract_type,
+                                 required_document_types)
+SELECT NULL, NULL, NULL, 'trilateral', ARRAY['intermediary_agreement']
+WHERE NOT EXISTS (SELECT 1 FROM checklist_templates WHERE contract_type = 'trilateral');
