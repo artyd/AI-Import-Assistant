@@ -202,10 +202,16 @@ function FileRow({
 }) {
   const [moveOpen, setMoveOpen] = useState(false);
   const status = toUiStatus(file.status);
+  const suggestedFolder =
+    file.folderId == null && file.suggestedFolderId
+      ? folders.find((f) => f.id === file.suggestedFolderId) ?? null
+      : null;
   const title =
     file.status === "error" && file.errorReason
       ? `Помилка: ${file.errorReason}`
-      : `${file.name} — натисніть для перегляду`;
+      : file.folderReason
+        ? `Чому тут: ${file.folderReason}${file.folderConfidence ? ` (впевненість: ${CONFIDENCE_LABEL[file.folderConfidence]})` : ""}`
+        : `${file.name} — натисніть для перегляду`;
   return (
     <div className="tree-row" style={{ ...rowStyle, paddingLeft: 30 }} title={title}>
       <button
@@ -231,6 +237,25 @@ function FileRow({
           {file.name}
         </span>
       </button>
+      {suggestedFolder && (
+        <button
+          onClick={() => onMove(file, suggestedFolder.id)}
+          title={`Схоже на ${suggestedFolder.name}${file.folderReason ? ` — ${file.folderReason}` : ""}. Натисніть, щоб підтвердити.`}
+          style={{
+            fontSize: 10,
+            fontWeight: 600,
+            color: "var(--warn)",
+            background: "var(--hover)",
+            border: "1px solid var(--warn)",
+            borderRadius: 999,
+            padding: "1px 7px",
+            whiteSpace: "nowrap",
+            cursor: "pointer",
+          }}
+        >
+          ? {suggestedFolder.name}
+        </button>
+      )}
       {file.version && file.version > 1 && (
         <span style={{ fontSize: 10, color: "var(--muted)", fontFamily: "var(--font-mono)" }}>
           v{file.version}
@@ -364,4 +389,10 @@ const STATUS_LABEL: Record<string, string> = {
   indexing: "Індексується",
   queued: "У черзі",
   error: "Помилка",
+};
+
+const CONFIDENCE_LABEL: Record<string, string> = {
+  high: "висока",
+  medium: "середня",
+  low: "низька",
 };

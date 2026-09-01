@@ -24,7 +24,9 @@ export interface Workspace {
   contract_type?: "bilateral" | "trilateral" | null;
   intake_complete?: boolean;
   product_category?: string | null;
-  incoterm?: string | null;
+  incoterm?: string | null; // legacy; mirrors incoterm_in
+  incoterm_in?: string | null; // buy-side (supplier → us)
+  incoterm_out?: string | null; // sell-side (us → buyer)
   transport_mode?: string | null;
   origin_country?: string | null;
   destination_country?: string | null;
@@ -37,9 +39,9 @@ export interface UserLite {
   name: string | null;
 }
 
-// Free-text role label (relaxed from a fixed enum). Common presets are offered
-// in the UI, but any label is accepted.
-export type PartyRole = string;
+// Three fixed party slots: sender (Від кого) / intermediary (Через кого) /
+// recipient (Кому). The backend normalizes any legacy label into one of these.
+export type PartyRole = "sender" | "intermediary" | "recipient";
 
 export interface PartyContactInfo {
   source?: "auto" | "manual";
@@ -77,6 +79,15 @@ export interface Discrepancy {
   severity: "error" | "warning" | "info";
 }
 
+export interface Risk {
+  code: string;
+  category: "expiry" | "missing_docs" | "discrepancy" | "deadline";
+  severity: "error" | "warning" | "info";
+  title: string;
+  detail: string;
+  source_file_id: string | null;
+}
+
 export interface NotificationItem {
   id: string;
   workspace_id: string | null;
@@ -108,6 +119,11 @@ export interface FileItem {
   version?: number;
   isLatest?: boolean;
   replacesFileId?: string | null;
+  // Classification transparency: why the file was filed + how confident, and
+  // (for low-confidence inbox items) a suggested folder to confirm manually.
+  folderReason?: string | null;
+  folderConfidence?: "high" | "medium" | "low" | null;
+  suggestedFolderId?: string | null;
 }
 
 export interface FileVersion {

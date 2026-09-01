@@ -1,4 +1,11 @@
-import { anthropic, MODEL, type ChatTool } from '../../anthropic/client.js';
+import {
+  anthropic,
+  MODEL,
+  type ChatTool,
+  type ChatContentBlockParam,
+} from '../../anthropic/client.js';
+import { config } from '../../config.js';
+import type { FileType } from '../../domain/folders.js';
 
 /**
  * Structured field extraction for a single document. Runs a non-streaming Claude
@@ -6,6 +13,13 @@ import { anthropic, MODEL, type ChatTool } from '../../anthropic/client.js';
  * (never free text). The result is stored in `document_extractions.extracted_fields`
  * and is the deterministic source for checklist + discrepancy computation — those
  * never re-read raw document text at answer time.
+ *
+ * Two entry points: `extractDocumentFieldsFromDocument` feeds the ORIGINAL file
+ * (PDF/image) to Claude vision so figures and tables are read from the document
+ * image itself — not from heuristically-reconstructed pdf-parse text, which
+ * mangles multi-column customs tables and detaches numbers from their labels
+ * (the main hallucination source). `extractDocumentFields` is the text path,
+ * used for docx/xlsx/csv/md and as a fallback.
  */
 
 export type DocType =
@@ -51,10 +65,21 @@ export interface ExtractedFields {
   buyer: string | null;
   seller: string | null;
   incoterm: string | null;
+  // Dates (ISO yyyy-mm-dd where possible) — power the proactive risk engine
+  // (expiry / deadline checks). Null when the document does not state them.
+  document_date: string | null;
+  expiry_date: string | null;
+  shipment_date: string | null;
+  delivery_deadline: string | null;
   parties: ExtractedParty[];
 }
 
-const MAX_INPUT_CHARS = 30_000;
+// Text-path input clip. Generous so multi-page invoices don't lose tail-page
+// fields (totals often sit on the last page). The vision path sends the whole
+// document image instead and is not clipped here.
+const MAX_INPUT_CHARS = 120_000;
+// Anthropic PDF request limit (same bound as the OCR path).
+const PDF_MAX_BYTES = 32 * 1024 * 1024;
 
 const EXTRACTION_TOOL: ChatTool = {
   name: 'record_extraction',
@@ -78,6 +103,19 @@ const EXTRACTION_TOOL: ChatTool = {
       buyer: { type: 'string', description: 'Покупець.' },
       seller: { type: 'string', description: 'Продавець/постачальник.' },
       incoterm: { type: 'string', description: 'Умови поставки (Incoterms).' },
+      document_date: { type: 'string', description: 'Дата документа (формат YYYY-MM-DD).' },
+      expiry_date: {
+        type: 'string',
+        description: 'Дата закінчення дії (сертифіката/ліцензії), формат YYYY-MM-DD.',
+      },
+      shipment_date: {
+        type: 'string',
+        description: 'Дата відвантаження/відправлення, формат YYYY-MM-DD.',
+      },
+      delivery_deadline: {
+        type: 'string',
+        description: 'Крайній термін поставки/доставки, формат YYYY-MM-DD.',
+      },
       parties: {
         type: 'array',
         description:
@@ -129,6 +167,10 @@ function normalize(input: Record<string, unknown>): ExtractedFields {
     buyer: toStr(input.buyer),
     seller: toStr(input.seller),
     incoterm: toStr(input.incoterm),
+    document_date: toStr(input.document_date),
+    expiry_date: toStr(input.expiry_date),
+    shipment_date: toStr(input.shipment_date),
+    delivery_deadline: toStr(input.delivery_deadline),
     parties: normalizeParties(input.parties),
   };
 }
@@ -151,29 +193,67 @@ function normalizeParties(v: unknown): ExtractedParty[] {
   return out;
 }
 
-/**
- * Extracts structured fields from a document's plain text. Returns null if the
- * model did not produce a tool call (caller treats that as "no extraction").
- */
-export async function extractDocumentFields(text: string): Promise<ExtractedFields | null> {
-  const clipped = text.slice(0, MAX_INPUT_CHARS);
+const INSTRUCTION =
+  'Витягни структуровані поля з цього документа постачання та виклич ' +
+  'record_extraction. Читай цифри, суми, ваги та таблиці ДОСЛІВНО з документа. ' +
+  'Не вигадуй значень: якщо поля немає в документі — пропусти його.';
+
+function imageMediaType(name: string): 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp' {
+  const n = name.toLowerCase();
+  if (n.endsWith('.png')) return 'image/png';
+  if (n.endsWith('.gif')) return 'image/gif';
+  if (n.endsWith('.webp')) return 'image/webp';
+  return 'image/jpeg';
+}
+
+/** Runs the forced-tool extraction over the given content blocks. */
+async function runExtraction(content: ChatContentBlockParam[]): Promise<ExtractedFields | null> {
   const msg = await anthropic.messages.create({
     model: MODEL,
-    max_tokens: 1024,
+    max_tokens: 2048,
     tools: [EXTRACTION_TOOL],
     tool_choice: { type: 'tool', name: 'record_extraction' },
-    messages: [
-      {
-        role: 'user',
-        content:
-          'Витягни структуровані поля з наступного документа постачання та виклич ' +
-          'record_extraction. Не вигадуй значень: якщо поля немає в тексті — пропусти його.\n\n' +
-          clipped,
-      },
-    ],
+    messages: [{ role: 'user', content }],
   });
-
   const block = msg.content.find((b) => b.type === 'tool_use');
   if (!block || block.type !== 'tool_use') return null;
   return normalize(block.input as Record<string, unknown>);
+}
+
+/**
+ * Extracts structured fields from a document's plain text. Returns null if the
+ * model did not produce a tool call (caller treats that as "no extraction").
+ * Used for docx/xlsx/csv/md and as a fallback for the vision path.
+ */
+export async function extractDocumentFields(text: string): Promise<ExtractedFields | null> {
+  const clipped = text.slice(0, MAX_INPUT_CHARS);
+  return runExtraction([{ type: 'text', text: `${INSTRUCTION}\n\n${clipped}` }]);
+}
+
+/**
+ * Vision extraction: feeds the ORIGINAL PDF/image to Claude so figures/tables are
+ * read from the document image directly. Returns null for unsupported types or an
+ * over-large PDF (caller then falls back to the text path). Key stays server-side.
+ */
+export async function extractDocumentFieldsFromDocument(
+  buf: Buffer,
+  type: FileType,
+  name: string,
+): Promise<ExtractedFields | null> {
+  let media: ChatContentBlockParam;
+  if (type === 'pdf') {
+    if (buf.length > PDF_MAX_BYTES) return null;
+    media = {
+      type: 'document',
+      source: { type: 'base64', media_type: 'application/pdf', data: buf.toString('base64') },
+    };
+  } else if (type === 'image') {
+    media = {
+      type: 'image',
+      source: { type: 'base64', media_type: imageMediaType(name), data: buf.toString('base64') },
+    };
+  } else {
+    return null;
+  }
+  return runExtraction([media, { type: 'text', text: INSTRUCTION }]);
 }

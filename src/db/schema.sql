@@ -89,6 +89,15 @@ ALTER TABLE files ADD COLUMN IF NOT EXISTS content_hash TEXT;
 CREATE INDEX IF NOT EXISTS idx_files_workspace_hash ON files(workspace_id, content_hash)
   WHERE is_latest = true;
 
+-- Classification transparency (analysis-improvement phase 4): why a file was
+-- filed, how confident, and — for low-confidence guesses left in the inbox —
+-- which folder is suggested for manual confirmation.
+ALTER TABLE files ADD COLUMN IF NOT EXISTS folder_reason TEXT;
+ALTER TABLE files ADD COLUMN IF NOT EXISTS folder_confidence TEXT
+  CHECK (folder_confidence IN ('high', 'medium', 'low'));
+ALTER TABLE files ADD COLUMN IF NOT EXISTS suggested_folder_id UUID
+  REFERENCES folders(id) ON DELETE SET NULL;
+
 -- Workspace intake / contract structure.
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS contract_type TEXT
   CHECK (contract_type IN ('bilateral', 'trilateral'));
@@ -216,3 +225,36 @@ INSERT INTO checklist_templates (product_category, incoterm, transport_mode, con
                                  required_document_types)
 SELECT NULL, NULL, NULL, 'trilateral', ARRAY['intermediary_agreement']
 WHERE NOT EXISTS (SELECT 1 FROM checklist_templates WHERE contract_type = 'trilateral');
+
+-- ── Analysis-improvement phase 2: dual Incoterms + fixed party slots ──────────
+
+-- Incoming (buy-side, supplier→us) and outgoing (sell-side, us→buyer) Incoterms.
+-- The legacy single `incoterm` column is kept in sync with incoterm_in for
+-- back-compat (checklist matching / supplier instruction historically read it).
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS incoterm_in TEXT;
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS incoterm_out TEXT;
+UPDATE workspaces SET incoterm_in = incoterm
+  WHERE incoterm_in IS NULL AND incoterm IS NOT NULL;
+
+-- Preserve the "this is us" signal before collapsing roles: the old model
+-- identified our company by the role string, the new one carries it via
+-- is_internal. Run BEFORE the role re-bucket below so it can still match.
+UPDATE parties SET is_internal = true
+  WHERE is_internal = false
+    AND lower(trim(role)) = ANY(ARRAY['our_company','наша компанія','наша компания']);
+
+-- Collapse free-text party roles into the three fixed slots the UI now exposes:
+--   sender (Від кого) / intermediary (Через кого) / recipient (Кому).
+-- Idempotent; roles already canonical are unaffected. 'our_company' → recipient
+-- (importer) is the common bilateral case; users can re-slot in the UI.
+UPDATE parties SET role = 'sender'
+  WHERE lower(trim(role)) = ANY(ARRAY['постачальник','поставщик','продавець','продавец',
+    'supplier','seller','shipper','від кого','вид кого','вантажовідправник',
+    'грузоотправитель','експортер','exporter']);
+UPDATE parties SET role = 'intermediary'
+  WHERE lower(trim(role)) = ANY(ARRAY['посередник','посредник','агент','agent','trader',
+    'брокер','через кого']);
+UPDATE parties SET role = 'recipient'
+  WHERE lower(trim(role)) = ANY(ARRAY['покупець','покупатель','buyer','вантажоодержувач',
+    'грузополучатель','consignee','отримувач','получатель','кому','імпортер','importer',
+    'our_company','наша компанія','наша компания']);

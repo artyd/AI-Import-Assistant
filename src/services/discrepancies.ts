@@ -123,5 +123,17 @@ export async function computeDiscrepancies(workspaceId: string): Promise<Discrep
     });
   }
 
+  // Incoterms should agree between the invoice and the purchase order.
+  const incInv = invoice?.incoterm as string | null | undefined;
+  const incPo = po?.incoterm as string | null | undefined;
+  if (incInv && incPo && incInv.trim().toUpperCase() !== incPo.trim().toUpperCase()) {
+    out.push({
+      field: 'incoterm',
+      expected: `purchase_order: ${incPo}`,
+      actual: `invoice: ${incInv}`,
+      severity: 'warning',
+    });
+  }
+
   return out;
 }

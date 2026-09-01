@@ -10,12 +10,17 @@ import { readStoredFile } from '../services/storage.js';
 import { extractText } from '../services/extract/index.js';
 import { ocrDocument } from '../services/ocr/claudeOcr.js';
 import { chunkPages } from '../services/extract/chunk.js';
-import { extractDocumentFields } from '../services/extraction/extractFields.js';
+import {
+  extractDocumentFields,
+  extractDocumentFieldsFromDocument,
+} from '../services/extraction/extractFields.js';
 import { classifyAndFile } from '../services/classify.js';
 import { getWorkspaceById } from '../services/workspaceAccess.js';
 import { refreshWorkspaceState } from '../services/status.js';
+import { computeRisks } from '../services/risks.js';
+import { insertNotification } from '../services/notifications.js';
 import { scanAndNotify } from '../services/reminders.js';
-import { getEmbeddingProvider } from '../services/embeddings/index.js';
+import { embedForIndex } from '../services/embeddings/index.js';
 import {
   ensureQdrantCollection,
   deleteFileChunks,
@@ -88,10 +93,7 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
     await deleteFileChunks(file.id);
 
     if (chunks.length > 0) {
-      const vectors = await getEmbeddingProvider().embed(
-        chunks.map((c) => c.text),
-        'document',
-      );
+      const { vectors, provider } = await embedForIndex(chunks.map((c) => c.text));
       const payloads: ChunkPayload[] = chunks.map((c) => ({
         workspace_id: file.workspace_id,
         file_id: file.id,
@@ -100,8 +102,9 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
         chunk_index: c.index,
         page: c.page,
         text: c.text,
+        provider: provider.id,
       }));
-      await upsertChunks(vectors, payloads);
+      await upsertChunks(vectors, payloads, provider.collectionName);
     }
 
     // Files with no recoverable text (e.g. a blank or un-OCR-able image) are
@@ -115,7 +118,14 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
       try {
         const fullText = pages.map((p) => p.text).join('\n\n');
         await query('DELETE FROM document_extractions WHERE file_id = $1', [file.id]);
-        const fields = await extractDocumentFields(fullText);
+        // Vision first for PDFs/images (reads figures/tables from the document
+        // image itself); fall back to the text path if vision is unavailable or
+        // the type is text-based.
+        let fields =
+          file.type === 'pdf' || file.type === 'image'
+            ? await extractDocumentFieldsFromDocument(buf, file.type, file.name)
+            : null;
+        if (!fields) fields = await extractDocumentFields(fullText);
         if (fields) {
           await query(
             `INSERT INTO document_extractions (file_id, workspace_id, extracted_fields, model_version)
@@ -124,7 +134,28 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
           );
         }
         const ws = await getWorkspaceById(file.workspace_id);
-        if (ws) await refreshWorkspaceState(ws);
+        if (ws) {
+          await refreshWorkspaceState(ws);
+          // Proactive risk scan: notify the responsible user about NEW critical
+          // (error-level) risks. De-duped per (user, workspace, type) per day.
+          if (ws.responsible_user_id) {
+            try {
+              const risks = await computeRisks(ws);
+              const critical = risks.filter((r) => r.severity === 'error');
+              if (critical.length > 0) {
+                await insertNotification(
+                  ws.responsible_user_id,
+                  ws.id,
+                  'risk_alert',
+                  `Постачання №${ws.number}: критичні ризики (${critical.length}) — ${critical[0]!.title}.`,
+                );
+              }
+            } catch (err) {
+              // eslint-disable-next-line no-console
+              console.error(`Risk scan failed for workspace ${ws.id}:`, (err as Error).message);
+            }
+          }
+        }
 
         // Auto-file if the document is still sitting in the inbox — this is how a
         // scan gets sorted: its doc_type only became known after OCR + extraction

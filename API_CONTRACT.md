@@ -82,7 +82,8 @@ Response `200`:
 {
   "workspace": { "id","number","supplier","status","created_at",
                  "contract_type","intake_complete","product_category",
-                 "incoterm","transport_mode","origin_country","destination_country",
+                 "incoterm","incoterm_in","incoterm_out",
+                 "transport_mode","origin_country","destination_country",
                  "responsible_user_id" },
   "folders": [ { "id","name","position" } ]
 }
@@ -90,9 +91,12 @@ Response `200`:
 
 ### `PATCH /api/workspaces/:id`  (auth)
 Request (all optional): `{ "number"?, "supplier"?, "contract_type"?:"bilateral"|"trilateral"|null,
-"product_category"?:string|null, "incoterm"?:string|null, "transport_mode"?:string|null,
+"product_category"?:string|null, "incoterm"?:string|null,
+"incoterm_in"?:string|null, "incoterm_out"?:string|null, "transport_mode"?:string|null,
 "origin_country"?:string|null, "destination_country"?:string|null,
-"responsible_user_id"?:uuid|null, "intake_complete"?:boolean }`.
+"responsible_user_id"?:uuid|null, "intake_complete"?:boolean }`. `incoterm_in` is the
+incoming (buy-side) Incoterm and `incoterm_out` the outgoing (sell-side) one; the legacy
+`incoterm` is kept in sync with `incoterm_in`.
 Sets intake/contract fields. When `intake_complete` is true, the checklist is
 (re)computed and the derived status refreshed. `400 invalid_user` if
 `responsible_user_id` doesn't exist.
@@ -104,11 +108,11 @@ Request: `{ "status": "active"|"draft"|"done"|"docs_in_progress"|"docs_complete"
 
 ### `PATCH /api/workspaces/:id/intake`  (auth)
 Request (all optional): `{ "contract_type"?:"bilateral"|"trilateral"|null, "product_category"?,
-"incoterm"?, "transport_mode"?, "origin_country"?, "destination_country"? }`. Sets shipment
-context and **auto-computes** `intake_complete` (true once the five core fields —
-contract_type/product_category/incoterm/transport_mode/origin_country — are present;
-`destination_country` is settable but does not gate completeness). Recomputes the
-checklist + status on completion.
+"incoterm"?, "incoterm_in"?, "incoterm_out"?, "transport_mode"?, "origin_country"?,
+"destination_country"? }`. Sets shipment context and **auto-computes** `intake_complete`
+(true once the five core fields — contract_type/product_category/**incoterm_in**/transport_mode/
+origin_country — are present; `incoterm_out` and `destination_country` are settable but do
+not gate completeness). Recomputes the checklist + status on completion.
 Response `200`: `{ "workspace": {…}, "checklist"?: [ {…} ] }`.
 
 ### `POST /api/workspaces/:id/duplicate`  (auth)
@@ -126,18 +130,22 @@ Response `200`: `{ "parties": [ { "id","role","company_name","is_internal","coun
 
 ### `POST /api/workspaces/:id/parties`  (auth)
 Request: `{ "parties": [ { "role":string, "company_name",
-"is_internal"?, "country"?, "contact_info"? } ] }` — **bulk replace**. `role` is now a
-free-text label (canonical values `our_company`/`supplier`/`intermediary` still drive
-validation/context). `contact_info` may carry `{ "source":"auto"|"manual", "source_files"?:string[] }`
-to mark auto-extracted vs manually-entered parties. Validation only **warns** (never
-hard-fails) on unusual role combinations for the contract type.
+"is_internal"?, "country"?, "contact_info"? } ] }` — **bulk replace**. `role` is normalized
+to one of three fixed slots: `sender` (Від кого / постачальник), `intermediary`
+(Через кого / посередник, optional), `recipient` (Кому / одержувач). Legacy/free-text
+labels are mapped into these slots on write. `contact_info` may carry
+`{ "source":"auto"|"manual", "source_files"?:string[] }` to mark auto-extracted vs
+manually-entered parties. Validation only **warns** (never hard-fails) on unusual slot
+combinations for the contract type.
 Response `200`: `{ "parties": [ {…} ], "warnings": [ string ] }`.
 
 ### `POST /api/workspaces/:id/parties/suggest`  (auth)
-LLM-derived party suggestions aggregated from stored document extractions (no new
-LLM call — reuses `document_extractions`). **Read-only**: does not write parties.
-Request: `{}`. Response `200`: `{ "suggestions": [ { "role","company_name","country",
-"source_files":string[], "confidence":number } ], "suggested_contract_type": "bilateral"|"trilateral"|null }`.
+Party + Incoterm suggestions aggregated from stored document extractions (no new
+LLM call — reuses `document_extractions`). **Read-only**: does not write anything.
+Request: `{}`. Response `200`: `{ "suggestions": [ { "role":"sender"|"intermediary"|"recipient",
+"company_name","country","source_files":string[], "confidence":number } ],
+"suggested_contract_type": "bilateral"|"trilateral"|null,
+"suggested_incoterm_in": string|null, "suggested_incoterm_out": string|null }`.
 
 ---
 
@@ -165,8 +173,11 @@ Full version chain for a document (walks `replaces_file_id` both ways).
 Response `200`: `{ "versions": [ { "id","name","version","replacesFileId","isLatest","createdAt" } ] }` (ordered by `version`).
 
 ### `GET /api/workspaces/:id/files`  (auth)
-Response `200`: `{ "files": [ { "id","folderId","name","type","status","errorReason","sizeBytes","createdAt","version","isLatest","replacesFileId" } ] }`
+Response `200`: `{ "files": [ { "id","folderId","name","type","status","errorReason","sizeBytes","createdAt","version","isLatest","replacesFileId","folderReason","folderConfidence","suggestedFolderId" } ] }`
 (the UI shows only `isLatest` files; superseded versions are reachable via the history endpoint).
+`folderReason` (human-readable "why this folder") + `folderConfidence` (`high`|`medium`|`low`)
+explain the auto-classification; `suggestedFolderId` is set for a low-confidence guess left
+in the inbox for manual confirmation.
 
 ### `DELETE /api/workspaces/:id/files/:fileId`  (auth)
 Deletes the disk file, its vector chunks, and the row; emits `file_status: deleted`.
@@ -177,7 +188,9 @@ Response `200`: `{ "ok": true }`
 - `PATCH /api/workspaces/:id/files/:fileId` — `{ "name"?: string, "folderId"?: string|null }` → `200 { "file": {…} }`
 - `POST /api/workspaces/:id/sort-inbox` (auth, no body) — classify & file every inbox
   file (`folder_id IS NULL`) into its skeleton folder (move-only; uses stored
-  extractions, so OCR'd scans sort too). → `200 { "moved": [ { "fileId","name","to" } ], "unclassified": [ { "fileId","name" } ] }`
+  extractions, so OCR'd scans sort too). High/medium-confidence files are moved;
+  low-confidence guesses stay in the inbox with a `suggested` folder.
+  → `200 { "moved": [ { "fileId","name","to","reason" } ], "unclassified": [ { "fileId","name","suggested":string|null,"reason":string|null } ] }`
 
 ### `GET /api/workspaces/:id/files/:fileId/content`  (auth)
 Streams the stored file bytes inline (`Content-Type` by file type, `Content-Disposition: inline`)
@@ -209,9 +222,9 @@ Omitting `conversationId` starts a new conversation.
 Response: `Content-Type: text/event-stream`. The single agent ("Штурман") runs a
 tool-use loop over the tools it chooses at runtime — retrieval (`search_documents`,
 `read_file`, `list_files`) plus shipment tools (`get_checklist`,
-`get_discrepancies`, `generate_supplier_instruction`, `generate_report`,
+`get_discrepancies`, `get_risks`, `generate_supplier_instruction`, `generate_report`,
 `get_missing_context`, `save_workspace_context`, `classify_and_file`,
-`sort_inbox`, `compare_document_versions`) — and streams:
+`sort_inbox`, `normalize_shipment_files`, `compare_document_versions`) — and streams:
 
 | event | data | UI usage |
 |-------|------|----------|
@@ -274,9 +287,20 @@ at read time. Structured extraction runs in the indexing worker once a file is
 
 ### `POST /api/workspaces/:id/supplier-instruction`  (auth)
 Generates + persists a supplier instruction letter (Markdown).
+Request (optional): `{ "sections"?: ("documents"|"invoice_packing"|"marking"|"certificates"|"timelines")[] }`
+— a subset of letter sections (the constructor UI toggles these). Omit for all sections.
 Response `200`: `{ "instruction": string(markdown), "artifactId": uuid }`.
-Response `400`: `{ "error":"missing_context", "missing": ["product_category", "incoterm", …] }`
-when required intake fields / a supplier party are absent (fails loudly, never fabricates).
+Response `400`: `{ "error":"missing_context", "missing": ["product_category", "incoterm_in", …] }`
+when required intake fields / a sender party are absent (fails loudly, never fabricates).
+
+### `GET /api/workspaces/:id/risks`  (auth)
+Proactive current + upcoming problems, computed deterministically from extractions,
+the persisted checklist, and intake (never LLM-generated). Categories: `expiry`
+(expired/expiring certificates), `missing_docs`, `discrepancy`, `deadline`.
+Response `200`: `{ "risks": [ { "code", "category", "severity":"error"|"warning"|"info",
+"title", "detail", "source_file_id":uuid|null } ] }` (most-severe first). The indexing
+worker also raises an in-app `risk_alert` notification to the responsible user on new
+error-level risks.
 
 ### `GET /api/workspaces/:id/checklist`  (auth)
 Recomputes + returns the completeness checklist and derived status.

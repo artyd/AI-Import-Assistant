@@ -1,4 +1,5 @@
 import { query } from '../db/pool.js';
+import { canonicalRole, type PartyRole } from './parties.js';
 
 /**
  * Aggregates party candidates from a workspace's already-stored document
@@ -59,17 +60,20 @@ export async function suggestParties(workspaceId: string): Promise<PartySuggesti
     }
   };
 
+  // Bucket every extracted role into one of the three fixed slots; unknown
+  // labels default to 'recipient' (Кому) as the least-surprising fallback.
+  const slot = (role: string | null): PartyRole => canonicalRole(role) ?? 'recipient';
   for (const r of rows) {
     const f = r.fields ?? {};
     const src = r.file_name;
     // Structured parties (enriched extraction).
     const parties = Array.isArray(f.parties) ? (f.parties as Record<string, unknown>[]) : [];
     for (const p of parties) {
-      add(str(p.name), str(p.role) ?? 'intermediary', str(p.country), src);
+      add(str(p.name), slot(str(p.role)), str(p.country), src);
     }
-    // Legacy scalar fields (best-effort role mapping — heuristic, user-editable).
-    add(str(f.seller), 'supplier', str(f.country_of_origin), src);
-    add(str(f.buyer), 'our_company', null, src);
+    // Legacy scalar fields.
+    add(str(f.seller), 'sender', str(f.country_of_origin), src);
+    add(str(f.buyer), 'recipient', null, src);
   }
 
   return [...byKey.values()]

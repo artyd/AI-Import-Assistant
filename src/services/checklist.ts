@@ -45,7 +45,8 @@ async function requiredKeys(ws: WorkspaceRow): Promise<string[]> {
        AND (incoterm IS NULL OR incoterm = $2)
        AND (transport_mode IS NULL OR transport_mode = $3)
        AND (contract_type IS NULL OR contract_type = $4)`,
-    [ws.product_category, ws.incoterm, ws.transport_mode, ws.contract_type],
+    // Import customs is driven by the incoming (buy-side) Incoterm.
+    [ws.product_category, ws.incoterm_in ?? ws.incoterm, ws.transport_mode, ws.contract_type],
   );
   return [...new Set(rows.flatMap((r) => r.required_document_types))];
 }
