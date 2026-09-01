@@ -29,7 +29,9 @@ export interface WorkspaceRow {
   contract_type: 'bilateral' | 'trilateral' | null;
   intake_complete: boolean;
   product_category: string | null;
-  incoterm: string | null;
+  incoterm: string | null; // legacy; kept in sync with incoterm_in
+  incoterm_in: string | null; // buy-side (supplier → us)
+  incoterm_out: string | null; // sell-side (us → buyer)
   transport_mode: string | null;
   origin_country: string | null;
   destination_country: string | null;

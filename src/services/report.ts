@@ -189,9 +189,10 @@ ul.concl{margin:8px 0;padding-left:18px} ul.concl li{margin:4px 0}
 
   <h2>Огляд</h2>
   <table>
-    <tr><th>Категорія товару</th><td>${esc(ws.product_category ?? '—')}</td><th>Incoterms</th><td>${esc(ws.incoterm ?? '—')}</td></tr>
-    <tr><th>Транспорт</th><td>${esc(ws.transport_mode ?? '—')}</td><th>Країна походження</th><td>${esc(ws.origin_country ?? '—')}</td></tr>
-    <tr><th>Країна призначення</th><td>${esc(ws.destination_country ?? '—')}</td><th>Тип контракту</th><td>${esc(ws.contract_type ?? '—')}</td></tr>
+    <tr><th>Incoterms (вхідний)</th><td>${esc(ws.incoterm_in ?? ws.incoterm ?? '—')}</td><th>Incoterms (вихідний)</th><td>${esc(ws.incoterm_out ?? '—')}</td></tr>
+    <tr><th>Категорія товару</th><td>${esc(ws.product_category ?? '—')}</td><th>Транспорт</th><td>${esc(ws.transport_mode ?? '—')}</td></tr>
+    <tr><th>Країна походження</th><td>${esc(ws.origin_country ?? '—')}</td><th>Країна призначення</th><td>${esc(ws.destination_country ?? '—')}</td></tr>
+    <tr><th>Тип контракту</th><td>${esc(ws.contract_type ?? '—')}</td><th></th><td></td></tr>
     <tr><th>Створено</th><td>${esc(ws.created_at)}</td><th>Статус</th><td>${esc(status)}</td></tr>
   </table>
   ${

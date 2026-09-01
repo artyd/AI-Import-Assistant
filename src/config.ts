@@ -34,8 +34,15 @@ const envSchema = z.object({
 
   // Model / embeddings
   ANTHROPIC_MODEL: z.string().default('claude-opus-4-8'),
-  EMBEDDING_PROVIDER: z.enum(['voyage']).default('voyage'),
+  EMBEDDING_PROVIDER: z.enum(['voyage', 'openai']).default('voyage'),
   EMBEDDING_MODEL: z.string().default('voyage-3'),
+
+  // Optional FALLBACK embedding provider, used only when the primary is
+  // unavailable during indexing (search fans out across both collections).
+  // Leave EMBEDDING_FALLBACK_PROVIDER = 'none' (default) to disable.
+  EMBEDDING_FALLBACK_PROVIDER: z.enum(['voyage', 'openai', 'none']).default('none'),
+  EMBEDDING_FALLBACK_MODEL: z.string().default('text-embedding-3-large'),
+  EMBEDDING_FALLBACK_API_KEY: z.string().optional(),
 
   // Chat rate limit (per user)
   CHAT_RATE_MAX: z.coerce.number().int().positive().default(30),

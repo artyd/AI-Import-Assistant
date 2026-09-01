@@ -7,7 +7,9 @@ import type {
   ChecklistItem,
   Discrepancy,
   Party,
+  PartyRole,
   PartySuggestion,
+  Risk,
   UserLite,
   Workspace,
   WorkspaceStatus,
@@ -20,16 +22,14 @@ import {
   type Country,
 } from "@/lib/shipmentOptions";
 import { Combobox } from "./ui/Combobox";
+import { InstructionModal } from "./InstructionModal";
 import { IconDownload, IconSpinner } from "./icons";
 
-const ROLE_PRESETS = [
-  "наша компанія",
-  "постачальник",
-  "посередник",
-  "продавець",
-  "покупець",
-  "вантажоодержувач",
-  "агент",
+// Three fixed party slots. "Через кого" (intermediary) is optional.
+const PARTY_SLOTS: { role: PartyRole; label: string; hint: string; optional?: boolean }[] = [
+  { role: "sender", label: "Від кого", hint: "Постачальник / відправник" },
+  { role: "intermediary", label: "Через кого", hint: "Посередник / агент", optional: true },
+  { role: "recipient", label: "Кому", hint: "Одержувач / покупець" },
 ];
 
 const countryOptions = COUNTRIES.map((c: Country) => ({ value: c.uk, label: c.uk }));
@@ -43,6 +43,12 @@ const STATUS_OPTIONS: { value: WorkspaceStatus; label: string }[] = [
   { value: "customs_ready", label: "Готово до митниці" },
   { value: "done", label: "Готово" },
 ];
+
+const RISK_CLS: Record<Risk["severity"], string> = {
+  error: "var(--err)",
+  warning: "var(--warn)",
+  info: "var(--muted)",
+};
 
 const CHECK_LABEL: Record<ChecklistItem["status"], string> = {
   verified: "підтверджено",
@@ -73,6 +79,8 @@ export function ShipmentPanel({
   const router = useRouter();
   const [users, setUsers] = useState<UserLite[]>([]);
   const [parties, setParties] = useState<Party[]>([]);
+  const [risks, setRisks] = useState<Risk[] | null>(null);
+  const [instructionOpen, setInstructionOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [result, setResult] = useState<Result | null>(null);
   const [suggestedContractType, setSuggestedContractType] = useState<
@@ -83,7 +91,8 @@ export function ShipmentPanel({
   const [form, setForm] = useState({
     contract_type: workspace.contract_type ?? "",
     product_category: workspace.product_category ?? "",
-    incoterm: workspace.incoterm ?? "",
+    incoterm_in: workspace.incoterm_in ?? workspace.incoterm ?? "",
+    incoterm_out: workspace.incoterm_out ?? "",
     transport_mode: workspace.transport_mode ?? "",
     origin_country: workspace.origin_country ?? "",
     destination_country: workspace.destination_country ?? "",
@@ -93,7 +102,8 @@ export function ShipmentPanel({
     setForm({
       contract_type: workspace.contract_type ?? "",
       product_category: workspace.product_category ?? "",
-      incoterm: workspace.incoterm ?? "",
+      incoterm_in: workspace.incoterm_in ?? workspace.incoterm ?? "",
+      incoterm_out: workspace.incoterm_out ?? "",
       transport_mode: workspace.transport_mode ?? "",
       origin_country: workspace.origin_country ?? "",
       destination_country: workspace.destination_country ?? "",
@@ -105,9 +115,20 @@ export function ShipmentPanel({
       .then((r) => setUsers(r.users))
       .catch(() => setUsers([]));
     api<{ parties: Party[] }>(`/api/workspaces/${workspaceId}/parties`)
-      .then((r) => setParties(r.parties))
+      // Normalise any legacy role labels into the three fixed slots on load.
+      .then((r) => setParties(r.parties.map((p) => ({ ...p, role: canonRole(p.role) }))))
       .catch(() => setParties([]));
+    // Proactively surface current/upcoming problems on open.
+    api<{ risks: Risk[] }>(`/api/workspaces/${workspaceId}/risks`)
+      .then((r) => setRisks(r.risks))
+      .catch(() => setRisks(null));
   }, [workspaceId]);
+
+  const reloadRisks = () =>
+    run("risks", async () => {
+      const r = await api<{ risks: Risk[] }>(`/api/workspaces/${workspaceId}/risks`);
+      setRisks(r.risks);
+    });
 
   const run = useCallback(
     async (key: string, fn: () => Promise<void>) => {
@@ -129,7 +150,8 @@ export function ShipmentPanel({
       const body: Record<string, string | null> = {};
       body.contract_type = form.contract_type || null;
       body.product_category = form.product_category || null;
-      body.incoterm = form.incoterm || null;
+      body.incoterm_in = form.incoterm_in || null;
+      body.incoterm_out = form.incoterm_out || null;
       body.transport_mode = form.transport_mode || null;
       body.origin_country = form.origin_country || null;
       body.destination_country = form.destination_country || null;
@@ -140,13 +162,13 @@ export function ShipmentPanel({
       onPatch(res.workspace);
     });
 
-  // Incoterm change: keep transport valid for the selected term (sea-only terms
-  // restrict transport to sea/inland waterway).
-  const setIncoterm = (incoterm: string) =>
+  // Incoming Incoterm drives transport validity (sea-only terms restrict
+  // transport to sea/inland waterway).
+  const setIncotermIn = (incoterm_in: string) =>
     setForm((f) => {
-      const allowed = transportOptionsFor(incoterm).map((m) => m.value);
+      const allowed = transportOptionsFor(incoterm_in).map((m) => m.value);
       const transport_mode = allowed.includes(f.transport_mode) ? f.transport_mode : "";
-      return { ...f, incoterm, transport_mode };
+      return { ...f, incoterm_in, transport_mode };
     });
 
   const setStatus = (status: WorkspaceStatus) =>
@@ -182,31 +204,54 @@ export function ShipmentPanel({
       });
     });
 
-  // Autofill parties from document extractions (suggestions, user-editable).
+  // Autofill parties + Incoterms from document extractions (suggestions,
+  // user-editable). Places at most one company into each of the three slots.
   const autofillParties = () =>
     run("suggest", async () => {
       const res = await api<{
         suggestions: PartySuggestion[];
         suggested_contract_type: "bilateral" | "trilateral" | null;
+        suggested_incoterm_in: string | null;
+        suggested_incoterm_out: string | null;
       }>(`/api/workspaces/${workspaceId}/parties/suggest`, { method: "POST", body: {} });
       setSuggestedContractType(res.suggested_contract_type);
+
       setParties((cur) => {
-        const seen = new Set(cur.map((p) => norm(p.company_name)));
-        const additions: Party[] = res.suggestions
-          .filter((s) => s.company_name.trim() && !seen.has(norm(s.company_name)))
-          .map((s) => ({
-            role: s.role,
-            company_name: s.company_name,
-            country: s.country,
-            contact_info: { source: "auto" as const, source_files: s.source_files },
-          }));
-        return [...cur, ...additions];
+        const next = [...cur];
+        for (const role of ["sender", "intermediary", "recipient"] as PartyRole[]) {
+          if (next.some((p) => p.role === role && p.company_name.trim())) continue;
+          const pick = res.suggestions.find((s) => canonRole(s.role) === role && s.company_name.trim());
+          if (!pick) continue;
+          const idx = next.findIndex((p) => p.role === role);
+          const party: Party = {
+            role,
+            company_name: pick.company_name,
+            country: pick.country,
+            contact_info: { source: "auto", source_files: pick.source_files },
+          };
+          if (idx >= 0) next[idx] = party;
+          else next.push(party);
+        }
+        return next;
       });
+
+      // Apply Incoterm suggestions into the intake form (user can still edit).
+      if (res.suggested_incoterm_in || res.suggested_incoterm_out) {
+        setForm((f) => ({
+          ...f,
+          incoterm_in: res.suggested_incoterm_in ?? f.incoterm_in,
+          incoterm_out: res.suggested_incoterm_out ?? f.incoterm_out,
+        }));
+      }
+
       setResult({
         kind: "text",
-        title: "Автозаповнення сторін",
+        title: "Автозаповнення з документів",
         body: res.suggestions.length
-          ? `Знайдено сторін: ${res.suggestions.length}. Перевірте та збережіть.`
+          ? `Знайдено сторін: ${res.suggestions.length}.` +
+            (res.suggested_incoterm_in ? ` Incoterms (вх.): ${res.suggested_incoterm_in}.` : "") +
+            (res.suggested_incoterm_out ? ` Incoterms (вих.): ${res.suggested_incoterm_out}.` : "") +
+            " Перевірте та збережіть."
           : "Сторін у документах не виявлено.",
       });
     });
@@ -248,27 +293,6 @@ export function ShipmentPanel({
       setResult({ kind: "discrepancies", items: r.discrepancies });
     });
 
-  const genInstruction = () =>
-    run("instruction", async () => {
-      try {
-        const r = await api<{ instruction: string }>(
-          `/api/workspaces/${workspaceId}/supplier-instruction`,
-          { method: "POST", body: {} }
-        );
-        setResult({ kind: "text", title: "Інструкція постачальнику", body: r.instruction });
-      } catch (err) {
-        if (err instanceof ApiError && err.code === "missing_context") {
-          const missing = (err as ApiError & { message?: string }).message;
-          setResult({
-            kind: "error",
-            body: "Бракує даних постачання — заповніть параметри вище перед генерацією." + (missing ? ` (${missing})` : ""),
-          });
-          return;
-        }
-        throw err;
-      }
-    });
-
   const genReport = () =>
     run("report", async () => {
       const r = await api<{ html: string }>(`/api/workspaces/${workspaceId}/report`, {
@@ -285,24 +309,28 @@ export function ShipmentPanel({
       await downloadBlob(`/api/workspaces/${workspaceId}/export`, `${workspace.number ?? "export"}.zip`);
     });
 
-  const addParty = () =>
-    setParties((p) => [
-      ...p,
-      { role: "постачальник", company_name: "", country: "", contact_info: { source: "manual" } },
-    ]);
-  const updateParty = (i: number, patch: Partial<Party>) =>
-    setParties((p) =>
-      p.map((x, idx) => {
-        if (idx !== i) return x;
+  const slotParty = (role: PartyRole): Party | undefined =>
+    parties.find((p) => p.role === role);
+
+  const setSlotParty = (role: PartyRole, patch: Partial<Party>) =>
+    setParties((cur) => {
+      const idx = cur.findIndex((p) => p.role === role);
+      if (idx < 0) {
+        return [...cur, { role, company_name: "", country: "", contact_info: { source: "manual" }, ...patch }];
+      }
+      return cur.map((x, i) => {
+        if (i !== idx) return x;
         // Editing an auto-filled party marks it manual so provenance stays truthful.
         const contact_info =
           x.contact_info?.source === "auto"
             ? { ...x.contact_info, source: "manual" as const }
             : x.contact_info;
         return { ...x, ...patch, contact_info };
-      })
-    );
-  const removeParty = (i: number) => setParties((p) => p.filter((_, idx) => idx !== i));
+      });
+    });
+
+  const clearSlotParty = (role: PartyRole) =>
+    setParties((cur) => cur.filter((p) => p.role !== role));
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
@@ -355,8 +383,8 @@ export function ShipmentPanel({
 
           <Field label="Категорія товару" value={form.product_category} onChange={(v) => setForm((f) => ({ ...f, product_category: v }))} />
 
-          <label style={lbl}>Incoterms</label>
-          <select className="input" value={form.incoterm} onChange={(e) => setIncoterm(e.target.value)}>
+          <label style={lbl}>Incoterms — вхідний (закупівля: постачальник → ми)</label>
+          <select className="input" value={form.incoterm_in} onChange={(e) => setIncotermIn(e.target.value)}>
             <option value="">—</option>
             {INCOTERMS_2020.map((o) => (
               <option key={o.value} value={o.value}>
@@ -365,6 +393,23 @@ export function ShipmentPanel({
             ))}
           </select>
 
+          <label style={lbl}>Incoterms — вихідний (продаж: ми → покупець)</label>
+          <select
+            className="input"
+            value={form.incoterm_out}
+            onChange={(e) => setForm((f) => ({ ...f, incoterm_out: e.target.value }))}
+          >
+            <option value="">—</option>
+            {INCOTERMS_2020.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+          <div style={{ fontSize: 12, color: "var(--muted)" }}>
+            «Автозаповнення з документів» нижче визначає обидва Incoterms за файлами.
+          </div>
+
           <label style={lbl}>Транспорт</label>
           <select
             className="input"
@@ -372,13 +417,13 @@ export function ShipmentPanel({
             onChange={(e) => setForm((f) => ({ ...f, transport_mode: e.target.value }))}
           >
             <option value="">—</option>
-            {transportOptionsFor(form.incoterm).map((o) => (
+            {transportOptionsFor(form.incoterm_in).map((o) => (
               <option key={o.value} value={o.value}>
                 {o.label}
               </option>
             ))}
           </select>
-          {form.incoterm && transportOptionsFor(form.incoterm).length < 8 && (
+          {form.incoterm_in && transportOptionsFor(form.incoterm_in).length < 8 && (
             <div style={{ fontSize: 12, color: "var(--muted)" }}>
               Цей Incoterm обмежує транспорт до морського / внутрішніх водних шляхів.
             </div>
@@ -427,67 +472,92 @@ export function ShipmentPanel({
           </div>
         </Section>
 
-        {/* Parties */}
+        {/* Parties — three fixed slots: Від кого / Через кого / Кому */}
         <Section title="Сторони">
-          {form.contract_type === "trilateral" && (
-            <div style={{ fontSize: 12, color: "var(--muted)" }}>
-              Тристоронній контракт — додайте сторону-посередника/агента.
-            </div>
-          )}
-          <datalist id="party-role-presets">
-            {ROLE_PRESETS.map((r) => (
-              <option key={r} value={r} />
-            ))}
-          </datalist>
-          {parties.map((p, i) => (
-            <div key={i} style={{ display: "flex", flexDirection: "column", gap: 6, border: "1px solid var(--border)", borderRadius: 8, padding: 8 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          {PARTY_SLOTS.map((slot) => {
+            const p = slotParty(slot.role);
+            const filled = Boolean(p && p.company_name.trim());
+            // The optional intermediary slot only renders once it exists or is trilateral.
+            if (slot.optional && !p && form.contract_type !== "trilateral") {
+              return (
+                <button
+                  key={slot.role}
+                  className="btn"
+                  onClick={() => setSlotParty(slot.role, {})}
+                  style={{ height: 30 }}
+                >
+                  + Додати «{slot.label}» (посередник)
+                </button>
+              );
+            }
+            return (
+              <div key={slot.role} style={{ display: "flex", flexDirection: "column", gap: 6, border: "1px solid var(--border)", borderRadius: 8, padding: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontWeight: 600, fontSize: 13, flex: 1 }}>
+                    {slot.label}
+                    <span style={{ color: "var(--muted)", fontWeight: 400 }}> — {slot.hint}</span>
+                  </span>
+                  {p?.contact_info?.source === "auto" && (
+                    <span style={{ fontSize: 11, fontWeight: 600, color: "var(--warn)", background: "var(--hover)", padding: "2px 7px", borderRadius: 999, whiteSpace: "nowrap" }}>
+                      авто
+                    </span>
+                  )}
+                </div>
                 <input
                   className="input"
-                  list="party-role-presets"
-                  placeholder="Роль (напр. постачальник)"
-                  value={p.role}
-                  onChange={(e) => updateParty(i, { role: e.target.value })}
-                  style={{ flex: 1 }}
+                  placeholder="Назва компанії"
+                  value={p?.company_name ?? ""}
+                  onChange={(e) => setSlotParty(slot.role, { company_name: e.target.value })}
                 />
-                {p.contact_info?.source === "auto" && (
-                  <span
-                    style={{
-                      fontSize: 11,
-                      fontWeight: 600,
-                      color: "var(--warn)",
-                      background: "var(--hover)",
-                      padding: "2px 7px",
-                      borderRadius: 999,
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    авто
-                  </span>
+                <Combobox
+                  value={p?.country ?? ""}
+                  onChange={(v) => setSlotParty(slot.role, { country: v })}
+                  options={countryOptions}
+                  onSearch={countrySearch}
+                  placeholder="Країна"
+                />
+                <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--muted)" }}>
+                  <input type="checkbox" checked={!!p?.is_internal} onChange={(e) => setSlotParty(slot.role, { is_internal: e.target.checked })} />
+                  Наша компанія (AGroup95 / PrimeForce)
+                </label>
+                {slot.optional && (
+                  <button className="btn" onClick={() => clearSlotParty(slot.role)} style={{ height: 30 }}>
+                    Прибрати посередника
+                  </button>
+                )}
+                {!slot.optional && filled && (
+                  <button className="btn" onClick={() => clearSlotParty(slot.role)} style={{ height: 30 }}>
+                    Очистити
+                  </button>
                 )}
               </div>
-              <input className="input" placeholder="Назва компанії" value={p.company_name} onChange={(e) => updateParty(i, { company_name: e.target.value })} />
-              <Combobox
-                value={p.country ?? ""}
-                onChange={(v) => updateParty(i, { country: v })}
-                options={countryOptions}
-                onSearch={countrySearch}
-                placeholder="Країна"
-              />
-              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--muted)" }}>
-                <input type="checkbox" checked={!!p.is_internal} onChange={(e) => updateParty(i, { is_internal: e.target.checked })} />
-                Внутрішня (AGroup95 / PrimeForce)
-              </label>
-              <button className="btn" onClick={() => removeParty(i)} style={{ height: 30 }}>Прибрати</button>
-            </div>
-          ))}
+            );
+          })}
           <button className="btn" onClick={autofillParties} disabled={busy === "suggest"}>
-            {busy === "suggest" ? <IconSpinner size={15} /> : null} Автозаповнення сторін
+            {busy === "suggest" ? <IconSpinner size={15} /> : null} Автозаповнення з документів
           </button>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button className="btn" onClick={addParty} style={{ flex: 1 }}>+ Сторона</button>
-            <button className="btn btn-primary" onClick={saveParties} disabled={busy === "parties"} style={{ flex: 1 }}>Зберегти</button>
-          </div>
+          <button className="btn btn-primary" onClick={saveParties} disabled={busy === "parties"}>
+            Зберегти сторони
+          </button>
+        </Section>
+
+        {/* Risks — proactive current + upcoming problems */}
+        <Section title="Ризики">
+          {risks === null ? (
+            <div style={{ fontSize: 12, color: "var(--muted)" }}>Аналіз ризиків…</div>
+          ) : risks.length === 0 ? (
+            <div style={{ fontSize: 13, color: "var(--ok)" }}>Ризиків не виявлено.</div>
+          ) : (
+            risks.map((r, i) => (
+              <div key={i} style={{ display: "flex", flexDirection: "column", gap: 2, borderLeft: `3px solid ${RISK_CLS[r.severity]}`, paddingLeft: 8 }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: RISK_CLS[r.severity] }}>{r.title}</span>
+                <span style={{ fontSize: 12, color: "var(--muted)" }}>{r.detail}</span>
+              </div>
+            ))
+          )}
+          <button className="btn" onClick={reloadRisks} disabled={busy === "risks"} style={{ height: 30 }}>
+            {busy === "risks" ? <IconSpinner size={15} /> : null} Оновити ризики
+          </button>
         </Section>
 
         {/* Actions */}
@@ -495,7 +565,7 @@ export function ShipmentPanel({
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             <button className="btn" onClick={loadChecklist} disabled={busy === "checklist"}>Комплектність</button>
             <button className="btn" onClick={loadDiscrepancies} disabled={busy === "discrepancies"}>Розбіжності</button>
-            <button className="btn" onClick={genInstruction} disabled={busy === "instruction"}>Інструкція</button>
+            <button className="btn" onClick={() => setInstructionOpen(true)}>Інструкція</button>
             <button className="btn" onClick={exportZip} disabled={busy === "export"}>Архів (.zip)</button>
           </div>
           <button className="btn btn-primary" onClick={genReport} disabled={busy === "report"}>
@@ -520,6 +590,9 @@ export function ShipmentPanel({
 
         {result && <ResultView result={result} />}
       </div>
+      {instructionOpen && (
+        <InstructionModal workspaceId={workspaceId} onClose={() => setInstructionOpen(false)} />
+      )}
     </div>
   );
 }
@@ -572,8 +645,19 @@ function ResultView({ result }: { result: Result }) {
 
 const lbl: CSSProperties = { fontSize: 12, color: "var(--muted)" };
 
-function norm(name: string): string {
-  return name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+// Bucket any legacy/free-text role label into one of the three fixed slots
+// (mirrors the backend canonicalRole). Unrecognised → recipient as a safe default.
+const ROLE_SYNONYMS: Record<PartyRole, string[]> = {
+  sender: ["sender", "від кого", "постачальник", "поставщик", "продавець", "продавец", "supplier", "seller", "shipper", "вантажовідправник", "експортер", "exporter"],
+  intermediary: ["intermediary", "через кого", "посередник", "посредник", "агент", "agent", "trader", "брокер"],
+  recipient: ["recipient", "кому", "покупець", "покупатель", "buyer", "вантажоодержувач", "consignee", "отримувач", "імпортер", "importer", "our_company", "наша компанія"],
+};
+function canonRole(role: string): PartyRole {
+  const r = role.trim().toLowerCase();
+  for (const slot of ["sender", "intermediary", "recipient"] as PartyRole[]) {
+    if (slot === r || ROLE_SYNONYMS[slot].includes(r)) return slot;
+  }
+  return "recipient";
 }
 
 function Field({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {

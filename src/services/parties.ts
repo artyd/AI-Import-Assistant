@@ -2,18 +2,21 @@ import { pool, query } from '../db/pool.js';
 import type { WorkspaceRow } from './workspaceAccess.js';
 
 /**
- * Workspace parties (our company / supplier / intermediary). Roles are a flexible
- * set — validation only *warns* about unusual combinations, it never hard-fails,
- * so real-world edge cases don't block intake.
+ * Workspace parties. The deal is modelled as three fixed slots:
+ *   sender       — Від кого   (постачальник / продавець / shipper)
+ *   intermediary — Через кого (посередник / агент)   — optional
+ *   recipient    — Кому       (покупець / вантажоодержувач / importer)
+ * Our own company is any slot flagged is_internal (usually intermediary or
+ * recipient). Validation only *warns*, it never hard-fails, so real-world edge
+ * cases don't block intake.
  */
 
-// Role is a free-text label (relaxed from a fixed enum). Canonical values
-// ('our_company' | 'supplier' | 'intermediary') are still used by validateParties
-// and getMissingContext, but any label is accepted and persisted.
-export type PartyRole = string;
+export type PartyRole = 'sender' | 'intermediary' | 'recipient';
+export const PARTY_ROLES: readonly PartyRole[] = ['sender', 'intermediary', 'recipient'] as const;
 
 export interface PartyInput {
-  role: PartyRole;
+  // Accepts any label (canonicalRole normalizes to a fixed slot on write).
+  role: string;
   company_name: string;
   is_internal?: boolean;
   country?: string | null;
@@ -31,13 +34,32 @@ export interface PartyRow {
 
 const INTERNAL_COMPANIES = ['AGroup95', 'PrimeForce'];
 
-// Party role is free text (parties_role_check was dropped) and the UI's role
-// presets are Ukrainian-only (ShipmentPanel.tsx::ROLE_PRESETS). Match a small set
-// of supplier-meaning labels rather than one hardcoded English string.
-export const SUPPLIER_ROLE_MATCHES = ['supplier', 'постачальник', 'поставщик'];
+// Free-text/legacy role labels (UA/RU/EN) → the three fixed slots. Used to bucket
+// extracted or historical roles when reading; upserts write canonical values.
+const ROLE_SYNONYMS: Record<PartyRole, string[]> = {
+  sender: [
+    'sender', 'від кого', 'вид кого', 'постачальник', 'поставщик', 'продавець', 'продавец',
+    'supplier', 'seller', 'shipper', 'вантажовідправник', 'грузоотправитель', 'експортер', 'exporter',
+  ],
+  intermediary: [
+    'intermediary', 'через кого', 'посередник', 'посредник', 'агент', 'agent', 'trader', 'брокер',
+  ],
+  recipient: [
+    'recipient', 'кому', 'покупець', 'покупатель', 'buyer', 'вантажоодержувач', 'грузополучатель',
+    'consignee', 'отримувач', 'получатель', 'імпортер', 'importer', 'our_company',
+    'наша компанія', 'наша компания',
+  ],
+};
 
-export function isSupplierRole(role: string): boolean {
-  return SUPPLIER_ROLE_MATCHES.includes(role.trim().toLowerCase());
+/** Maps any role label to one of the three fixed slots (null if unrecognised). */
+export function canonicalRole(role: string | null | undefined): PartyRole | null {
+  if (!role) return null;
+  const r = role.trim().toLowerCase();
+  if ((PARTY_ROLES as readonly string[]).includes(r)) return r as PartyRole;
+  for (const slot of PARTY_ROLES) {
+    if (ROLE_SYNONYMS[slot].includes(r)) return slot;
+  }
+  return null;
 }
 
 /** Replaces the workspace's parties atomically with the supplied set. */
@@ -51,13 +73,14 @@ export async function upsertParties(
     await client.query('DELETE FROM parties WHERE workspace_id = $1', [workspaceId]);
     const out: PartyRow[] = [];
     for (const p of parties) {
+      const role = canonicalRole(p.role) ?? p.role;
       const { rows } = await client.query<PartyRow>(
         `INSERT INTO parties (workspace_id, role, company_name, is_internal, country, contact_info)
          VALUES ($1, $2, $3, $4, $5, $6::jsonb)
          RETURNING id, role, company_name, is_internal, country, contact_info`,
         [
           workspaceId,
-          p.role,
+          role,
           p.company_name,
           p.is_internal ?? false,
           p.country ?? null,
@@ -76,22 +99,25 @@ export async function upsertParties(
   }
 }
 
-/** Non-fatal validation of a parties set against the contract type. */
+/** Non-fatal validation of a parties set against the three fixed slots. */
 export function validateParties(
   contractType: 'bilateral' | 'trilateral' | null,
   parties: PartyInput[],
 ): string[] {
   const warnings: string[] = [];
-  const count = (role: PartyRole): number => parties.filter((p) => p.role === role).length;
+  const count = (role: PartyRole): number =>
+    parties.filter((p) => canonicalRole(p.role) === role).length;
 
-  if (contractType === 'bilateral') {
-    if (count('our_company') !== 1) warnings.push('bilateral: очікується рівно 1 our_company');
-    if (count('supplier') !== 1) warnings.push('bilateral: очікується рівно 1 supplier');
-    if (count('intermediary') > 0) warnings.push('bilateral: intermediary зайвий');
-  } else if (contractType === 'trilateral') {
-    if (count('our_company') !== 1) warnings.push('trilateral: очікується рівно 1 our_company');
-    if (count('intermediary') !== 1) warnings.push('trilateral: очікується рівно 1 intermediary');
-    if (count('supplier') !== 1) warnings.push('trilateral: очікується рівно 1 supplier');
+  if (count('sender') === 0) warnings.push('не вказано сторону «Від кого» (постачальник)');
+  if (count('recipient') === 0) warnings.push('не вказано сторону «Кому» (одержувач)');
+  if (count('sender') > 1) warnings.push('очікується не більше однієї сторони «Від кого»');
+  if (count('intermediary') > 1) warnings.push('очікується не більше однієї сторони «Через кого»');
+  if (count('recipient') > 1) warnings.push('очікується не більше однієї сторони «Кому»');
+  if (contractType === 'trilateral' && count('intermediary') === 0) {
+    warnings.push('тристоронній контракт — додайте сторону «Через кого» (посередник)');
+  }
+  if (contractType === 'bilateral' && count('intermediary') > 0) {
+    warnings.push('двосторонній контракт — сторона «Через кого» зайва');
   }
 
   for (const p of parties) {
@@ -116,16 +142,23 @@ export async function getMissingContext(ws: WorkspaceRow): Promise<string[]> {
   const missing: string[] = [];
   if (!ws.contract_type) missing.push('contract_type');
   if (!ws.product_category) missing.push('product_category');
-  if (!ws.incoterm) missing.push('incoterm');
+  if (!(ws.incoterm_in ?? ws.incoterm)) missing.push('incoterm_in');
   if (!ws.transport_mode) missing.push('transport_mode');
   if (!ws.origin_country) missing.push('origin_country');
 
+  // Need at least a "sender" (Від кого) party. Match canonical + legacy labels.
+  const senderLabels = ['sender', ...ROLE_SYNONYMS.sender];
   const { rows } = await query<{ n: number }>(
     `SELECT count(*)::int AS n FROM parties
      WHERE workspace_id = $1 AND lower(trim(role)) = ANY($2::text[])`,
-    [ws.id, SUPPLIER_ROLE_MATCHES],
+    [ws.id, senderLabels],
   );
   if ((rows[0]?.n ?? 0) === 0) missing.push('parties');
 
   return missing;
+}
+
+/** True if the role denotes the sender/supplier slot. */
+export function isSenderRole(role: string): boolean {
+  return canonicalRole(role) === 'sender';
 }

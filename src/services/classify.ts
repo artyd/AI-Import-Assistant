@@ -27,11 +27,22 @@ const DOC_TYPE_TO_FOLDER: Record<string, string> = {
   transport: '05_Transport',
 };
 
+export type Confidence = 'high' | 'medium' | 'low';
+
 export interface ClassifyResult {
   fileId: string;
   name: string;
   from: string | null;
-  to: string | null; // null = left in inbox (unclassified)
+  to: string | null; // null = left in inbox (unclassified or low-confidence suggestion)
+  reason: string | null; // human-readable "why this folder"
+  confidence: Confidence | null;
+  suggested: string | null; // suggested folder when left in inbox for manual confirm
+}
+
+interface DocTypeResolution {
+  docType: string | null;
+  method: 'extraction' | 'image' | 'filename' | 'llm' | null;
+  confidence: Confidence | null;
 }
 
 interface FileRow {
@@ -86,39 +97,60 @@ function classifyByFilename(name: string): string | null {
   return null;
 }
 
-async function resolveDocType(file: FileRow): Promise<string | null> {
+async function resolveDocType(file: FileRow): Promise<DocTypeResolution> {
   // 1. Prefer an existing structured extraction (deterministic, no LLM cost).
-  //    Treat 'other' as inconclusive and keep going.
+  //    Treat 'other' as inconclusive and keep going. Highest confidence.
   const { rows } = await query<{ doc_type: string | null }>(
     `SELECT extracted_fields->>'doc_type' AS doc_type
      FROM document_extractions WHERE file_id = $1 ORDER BY extracted_at DESC LIMIT 1`,
     [file.id],
   );
   const stored = rows[0]?.doc_type;
-  if (stored && stored !== 'other') return stored;
+  if (stored && stored !== 'other') {
+    return { docType: stored, method: 'extraction', confidence: 'high' };
+  }
 
   // 2. Images have no text layer → photos.
-  if (file.type === 'image') return 'photos';
+  if (file.type === 'image') return { docType: 'photos', method: 'image', confidence: 'high' };
 
-  // 3. Filename heuristic — cheap, language-aware, works on scans.
+  // 3. Filename heuristic — cheap, language-aware, works on scans. Medium.
   const byName = classifyByFilename(file.name);
-  if (byName) return byName;
+  if (byName) return { docType: byName, method: 'filename', confidence: 'medium' };
 
   // 4. Fall back to the text-based classifier, but skip the LLM entirely when
   //    there's no meaningful text (e.g. a scanned PDF with no text layer) —
   //    that both avoids a wasted/erroring call and keeps large batches fast.
+  //    LLM-on-content is the fuzziest signal → LOW confidence (kept in inbox for
+  //    manual confirmation rather than auto-moved).
   let text = '';
   try {
     const buf = await readStoredFile(file.disk_path);
     const pages = await extractText(buf, file.type);
     text = pages.map((p) => p.text).join('\n\n').trim();
   } catch {
-    return null;
+    return { docType: null, method: null, confidence: null };
   }
-  if (text.length < 20) return null;
+  if (text.length < 20) return { docType: null, method: null, confidence: null };
   const fields = await extractDocumentFields(text);
   const docType = fields?.doc_type;
-  return docType && docType !== 'other' ? docType : null;
+  return docType && docType !== 'other'
+    ? { docType, method: 'llm', confidence: 'low' }
+    : { docType: null, method: null, confidence: null };
+}
+
+function reasonText(method: DocTypeResolution['method'], docType: string, folder: string): string {
+  switch (method) {
+    case 'extraction':
+      return `структурне витягнення визначило тип «${docType}» → ${folder}`;
+    case 'image':
+      return `файл є зображенням → ${folder}`;
+    case 'filename':
+      return `назва файлу вказує на «${docType}» → ${folder}`;
+    case 'llm':
+      return `ІІ визначив за вмістом тип «${docType}» → ${folder}`;
+    default:
+      return `тип «${docType}» → ${folder}`;
+  }
 }
 
 /** Classifies one file and moves it into the matching folder (move-only). */
@@ -135,12 +167,20 @@ export async function classifyAndFile(
   const file = rows[0];
   if (!file) return null;
 
-  const docType = await resolveDocType(file);
+  const empty: ClassifyResult = {
+    fileId: file.id,
+    name: file.name,
+    from: file.folder_name,
+    to: null,
+    reason: null,
+    confidence: null,
+    suggested: null,
+  };
+
+  const { docType, method, confidence } = await resolveDocType(file);
   const targetName =
     docType === 'photos' ? '06_Photos' : docType ? DOC_TYPE_TO_FOLDER[docType] : undefined;
-  if (!targetName) {
-    return { fileId: file.id, name: file.name, from: file.folder_name, to: null };
-  }
+  if (!targetName || !docType) return empty;
 
   const { rows: folders } = await query<{ id: string }>(
     'SELECT id FROM folders WHERE workspace_id = $1 AND name = $2 LIMIT 1',
@@ -149,22 +189,54 @@ export async function classifyAndFile(
   const target = folders[0];
   if (!target) {
     // Skeleton folder missing (custom layout) — leave in inbox rather than guess.
-    return { fileId: file.id, name: file.name, from: file.folder_name, to: null };
+    return empty;
   }
 
-  // Move only. Never deletes or overwrites.
-  await query('UPDATE files SET folder_id = $1 WHERE id = $2 AND workspace_id = $3', [
-    target.id,
-    file.id,
-    workspaceId,
-  ]);
+  const reason = reasonText(method, docType, targetName);
 
-  return { fileId: file.id, name: file.name, from: file.folder_name, to: targetName };
+  // Low confidence → do NOT auto-move. Keep in the inbox with a suggested folder
+  // and the reason, so the user confirms it manually.
+  if (confidence === 'low') {
+    await query(
+      `UPDATE files SET suggested_folder_id = $1, folder_reason = $2, folder_confidence = 'low'
+       WHERE id = $3 AND workspace_id = $4`,
+      [target.id, reason, file.id, workspaceId],
+    );
+    return {
+      fileId: file.id,
+      name: file.name,
+      from: file.folder_name,
+      to: null,
+      reason,
+      confidence: 'low',
+      suggested: targetName,
+    };
+  }
+
+  // High/medium → move. Never deletes or overwrites. Record why + how confident.
+  await query(
+    `UPDATE files SET folder_id = $1, suggested_folder_id = NULL,
+            folder_reason = $2, folder_confidence = $3
+     WHERE id = $4 AND workspace_id = $5`,
+    [target.id, reason, confidence, file.id, workspaceId],
+  );
+
+  return {
+    fileId: file.id,
+    name: file.name,
+    from: file.folder_name,
+    to: targetName,
+    reason,
+    confidence,
+    suggested: null,
+  };
 }
 
 export interface SortInboxResult {
-  moved: { fileId: string; name: string; to: string }[];
-  unclassified: { fileId: string; name: string }[];
+  moved: { fileId: string; name: string; to: string; reason: string | null }[];
+  // Left in inbox: either a low-confidence suggestion (suggested set) or truly
+  // unclassified (suggested null).
+  unclassified: { fileId: string; name: string; suggested: string | null; reason: string | null }[];
 }
 
 /** Classifies and files every inbox (folder_id IS NULL) file. */
@@ -179,8 +251,8 @@ export async function sortInbox(workspaceId: string): Promise<SortInboxResult> {
   for (const { id } of rows) {
     const res = await classifyAndFile(workspaceId, id);
     if (!res) continue;
-    if (res.to) moved.push({ fileId: res.fileId, name: res.name, to: res.to });
-    else unclassified.push({ fileId: res.fileId, name: res.name });
+    if (res.to) moved.push({ fileId: res.fileId, name: res.name, to: res.to, reason: res.reason });
+    else unclassified.push({ fileId: res.fileId, name: res.name, suggested: res.suggested, reason: res.reason });
   }
   return { moved, unclassified };
 }

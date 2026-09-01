@@ -181,7 +181,9 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
     const { rows } = await query(
       `SELECT id, folder_id AS "folderId", name, type, status,
               error_reason AS "errorReason", size_bytes AS "sizeBytes", created_at AS "createdAt",
-              version, is_latest AS "isLatest", replaces_file_id AS "replacesFileId"
+              version, is_latest AS "isLatest", replaces_file_id AS "replacesFileId",
+              folder_reason AS "folderReason", folder_confidence AS "folderConfidence",
+              suggested_folder_id AS "suggestedFolderId"
        FROM files WHERE workspace_id = $1 ORDER BY created_at`,
       [ws.id],
     );

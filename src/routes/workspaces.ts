@@ -87,6 +87,8 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         intake_complete: ws.intake_complete,
         product_category: ws.product_category,
         incoterm: ws.incoterm,
+        incoterm_in: ws.incoterm_in,
+        incoterm_out: ws.incoterm_out,
         transport_mode: ws.transport_mode,
         origin_country: ws.origin_country,
         destination_country: ws.destination_country,
@@ -129,8 +131,9 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         const { rows } = await client.query(
           `INSERT INTO workspaces
              (owner_id, number, supplier, status, contract_type, intake_complete,
-              product_category, incoterm, transport_mode, origin_country, destination_country)
-           VALUES ($1, $2, $3, 'draft', $4, $5, $6, $7, $8, $9, $10)
+              product_category, incoterm, incoterm_in, incoterm_out, transport_mode,
+              origin_country, destination_country)
+           VALUES ($1, $2, $3, 'draft', $4, $5, $6, $7, $8, $9, $10, $11, $12)
            RETURNING id`,
           [
             req.user!.sub,
@@ -140,6 +143,8 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
             src.intake_complete,
             src.product_category,
             src.incoterm,
+            src.incoterm_in,
+            src.incoterm_out,
             src.transport_mode,
             src.origin_country,
             src.destination_country,
@@ -189,6 +194,8 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
     contract_type: z.enum(['bilateral', 'trilateral']).nullable().optional(),
     product_category: z.string().nullable().optional(),
     incoterm: z.string().nullable().optional(),
+    incoterm_in: z.string().nullable().optional(),
+    incoterm_out: z.string().nullable().optional(),
     transport_mode: z.string().nullable().optional(),
     origin_country: z.string().nullable().optional(),
     destination_country: z.string().nullable().optional(),
@@ -220,6 +227,10 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
     }
     if (sets.length > 0) {
       await query(`UPDATE workspaces SET ${sets.join(', ')} WHERE id = $1`, vals);
+    }
+    // Keep the legacy `incoterm` column in sync with the incoming Incoterm.
+    if (parsed.data.incoterm_in !== undefined) {
+      await query('UPDATE workspaces SET incoterm = incoterm_in WHERE id = $1', [ws.id]);
     }
 
     const updated = (await getOwnedWorkspace(req.user!.sub, req.params.id))!;
@@ -258,6 +269,8 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
     contract_type: z.enum(['bilateral', 'trilateral']).nullable().optional(),
     product_category: z.string().nullable().optional(),
     incoterm: z.string().nullable().optional(),
+    incoterm_in: z.string().nullable().optional(),
+    incoterm_out: z.string().nullable().optional(),
     transport_mode: z.string().nullable().optional(),
     origin_country: z.string().nullable().optional(),
     // destination_country is settable here but intentionally NOT part of the
@@ -282,13 +295,16 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
     if (sets.length > 0) {
       await query(`UPDATE workspaces SET ${sets.join(', ')} WHERE id = $1`, vals);
     }
+    if (parsed.data.incoterm_in !== undefined) {
+      await query('UPDATE workspaces SET incoterm = incoterm_in WHERE id = $1', [ws.id]);
+    }
 
-    // Recompute intake_complete from the required five fields.
+    // Recompute intake_complete from the required five fields (incoming Incoterm).
     const merged = (await getOwnedWorkspace(req.user!.sub, req.params.id))!;
     const complete = Boolean(
       merged.contract_type &&
         merged.product_category &&
-        merged.incoterm &&
+        (merged.incoterm_in ?? merged.incoterm) &&
         merged.transport_mode &&
         merged.origin_country,
     );

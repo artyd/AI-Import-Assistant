@@ -12,6 +12,7 @@ import { conversationRoutes } from './routes/conversations.js';
 import { eventRoutes } from './routes/events.js';
 import { checklistRoutes } from './routes/checklist.js';
 import { discrepancyRoutes } from './routes/discrepancies.js';
+import { riskRoutes } from './routes/risks.js';
 import { supplierInstructionRoutes } from './routes/supplierInstruction.js';
 import { userRoutes } from './routes/users.js';
 import { notificationRoutes } from './routes/notifications.js';
@@ -60,6 +61,7 @@ async function buildServer() {
   await app.register(eventRoutes);
   await app.register(checklistRoutes);
   await app.register(discrepancyRoutes);
+  await app.register(riskRoutes);
   await app.register(supplierInstructionRoutes);
   await app.register(userRoutes);
   await app.register(notificationRoutes);

@@ -3,12 +3,14 @@ import type { ChatTool } from '../anthropic/client.js';
 import { query } from '../db/pool.js';
 import { readStoredFile, contentHashOf } from '../services/storage.js';
 import { extractText } from '../services/extract/index.js';
+import { ocrDocument } from '../services/ocr/claudeOcr.js';
 import { enqueueIndexJob } from '../queue/index.js';
 import { publishFileStatus } from '../events/fileStatus.js';
 import { searchWorkspace } from '../services/qdrant.js';
 import { getWorkspaceById } from '../services/workspaceAccess.js';
 import { buildSupplierInstruction } from '../services/supplierInstruction.js';
 import { computeDiscrepancies } from '../services/discrepancies.js';
+import { computeRisks } from '../services/risks.js';
 import { refreshWorkspaceState } from '../services/status.js';
 import { getMissingContext, upsertParties, type PartyInput } from '../services/parties.js';
 import { classifyAndFile, sortInbox } from '../services/classify.js';
@@ -87,6 +89,15 @@ export const toolDefinitions: ChatTool[] = [
     input_schema: { type: 'object', properties: {} },
   },
   {
+    name: 'get_risks',
+    description:
+      'Повертає перелік поточних і майбутніх ризиків постачання (прострочені/близькі до ' +
+      'завершення сертифікати, брак документів, розбіжності цифр, наближення терміну ' +
+      'поставки). Викликай проактивно, коли користувач питає «які проблеми?», «що не так?», ' +
+      '«на що звернути увагу?» — не оцінюй ризики самостійно з тексту.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
     name: 'generate_supplier_instruction',
     description:
       'Генерує інструкцію (лист) для постачальника на основі параметрів постачання та ' +
@@ -112,16 +123,21 @@ export const toolDefinitions: ChatTool[] = [
       properties: {
         contract_type: { type: 'string', enum: ['bilateral', 'trilateral'] },
         product_category: { type: 'string' },
-        incoterm: { type: 'string' },
+        incoterm_in: { type: 'string', description: 'Вхідний Incoterms (закупівля: постачальник→ми).' },
+        incoterm_out: { type: 'string', description: 'Вихідний Incoterms (продаж: ми→покупець).' },
         transport_mode: { type: 'string' },
         origin_country: { type: 'string' },
         parties: {
           type: 'array',
-          description: 'Опційно: перелік сторін для перезапису.',
+          description: 'Опційно: перелік сторін для перезапису (3 фіксовані ролі).',
           items: {
             type: 'object',
             properties: {
-              role: { type: 'string', enum: ['our_company', 'supplier', 'intermediary'] },
+              role: {
+                type: 'string',
+                enum: ['sender', 'intermediary', 'recipient'],
+                description: 'sender=Від кого, intermediary=Через кого, recipient=Кому.',
+              },
               company_name: { type: 'string' },
               is_internal: { type: 'boolean' },
               country: { type: 'string' },
@@ -205,6 +221,8 @@ export async function executeTool(
       return runChecklist(ctx);
     case 'get_discrepancies':
       return runDiscrepancies(ctx);
+    case 'get_risks':
+      return runRisks(ctx);
     case 'generate_supplier_instruction':
       return runSupplierInstruction(ctx);
     case 'get_missing_context':
@@ -264,6 +282,23 @@ async function runDiscrepancies(ctx: ToolContext): Promise<ToolOutcome> {
   return { result, summary: `Розбіжності: ${findings.length}`, citations: [] };
 }
 
+async function runRisks(ctx: ToolContext): Promise<ToolOutcome> {
+  const ws = await getWorkspaceById(ctx.workspaceId);
+  if (!ws) return { result: 'Постачання не знайдено.', summary: 'Ризики: помилка', citations: [] };
+  const risks = await computeRisks(ws);
+  if (risks.length === 0) {
+    return {
+      result: 'Наразі ризиків не виявлено (за наявними даними).',
+      summary: 'Ризики: 0',
+      citations: [],
+    };
+  }
+  const result = risks
+    .map((r) => `- [${r.severity}] ${r.title}: ${r.detail}`)
+    .join('\n');
+  return { result, summary: `Ризики: ${risks.length}`, citations: [] };
+}
+
 async function runSupplierInstruction(ctx: ToolContext): Promise<ToolOutcome> {
   const ws = await getWorkspaceById(ctx.workspaceId);
   if (!ws) return { result: 'Постачання не знайдено.', summary: 'Інструкція: помилка', citations: [] };
@@ -296,6 +331,8 @@ const saveContextSchema = z.object({
   contract_type: z.enum(['bilateral', 'trilateral']).optional(),
   product_category: z.string().optional(),
   incoterm: z.string().optional(),
+  incoterm_in: z.string().optional(),
+  incoterm_out: z.string().optional(),
   transport_mode: z.string().optional(),
   origin_country: z.string().optional(),
   destination_country: z.string().optional(),
@@ -323,6 +360,8 @@ async function runSaveContext(input: unknown, ctx: ToolContext): Promise<ToolOut
     'contract_type',
     'product_category',
     'incoterm',
+    'incoterm_in',
+    'incoterm_out',
     'transport_mode',
     'origin_country',
     'destination_country',
@@ -338,6 +377,9 @@ async function runSaveContext(input: unknown, ctx: ToolContext): Promise<ToolOut
   if (sets.length > 0) {
     await query(`UPDATE workspaces SET ${sets.join(', ')} WHERE id = $1`, vals);
   }
+  if (parsed.data.incoterm_in !== undefined) {
+    await query('UPDATE workspaces SET incoterm = incoterm_in WHERE id = $1', [ws.id]);
+  }
   if (parsed.data.parties) {
     await upsertParties(ws.id, parsed.data.parties as PartyInput[]);
   }
@@ -347,7 +389,7 @@ async function runSaveContext(input: unknown, ctx: ToolContext): Promise<ToolOut
   const complete = Boolean(
     merged.contract_type &&
       merged.product_category &&
-      merged.incoterm &&
+      (merged.incoterm_in ?? merged.incoterm) &&
       merged.transport_mode &&
       merged.origin_country,
   );
@@ -373,14 +415,18 @@ async function runClassifyAndFile(input: unknown, ctx: ToolContext): Promise<Too
   const res = await classifyAndFile(ctx.workspaceId, fileId);
   if (!res) return { result: 'Файл не знайдено.', summary: 'Класифікація: не знайдено', citations: [] };
   if (!res.to) {
+    // Low-confidence guess left in inbox with a suggestion, or truly unclassified.
+    const suggestion = res.suggested
+      ? ` Схоже на теку ${res.suggested} (${res.reason}) — підтвердіть вручну.`
+      : '';
     return {
-      result: `Не вдалося визначити теку для «${res.name}» — залишено в інбоксі.`,
-      summary: 'Класифікація: не визначено',
+      result: `Не вдалося впевнено визначити теку для «${res.name}» — залишено в інбоксі.${suggestion}`,
+      summary: 'Класифікація: потрібне підтвердження',
       citations: [],
     };
   }
   return {
-    result: `Файл «${res.name}» переміщено до теки ${res.to}.`,
+    result: `Файл «${res.name}» переміщено до теки ${res.to}. Причина: ${res.reason}.`,
     summary: `Переміщено: ${res.name} → ${res.to}`,
     citations: [],
   };
@@ -437,9 +483,13 @@ async function runSortInbox(ctx: ToolContext): Promise<ToolOutcome> {
   if (moved.length === 0 && unclassified.length === 0) {
     return { result: 'Інбокс порожній — нема чого сортувати.', summary: 'Сортування: 0', citations: [] };
   }
-  const lines = moved.map((m) => `- «${m.name}» → ${m.to}`);
-  if (unclassified.length) {
-    lines.push(`Не визначено (залишено в інбоксі): ${unclassified.map((u) => `«${u.name}»`).join(', ')}`);
+  const lines = moved.map((m) => `- «${m.name}» → ${m.to}${m.reason ? ` (${m.reason})` : ''}`);
+  for (const u of unclassified) {
+    lines.push(
+      u.suggested
+        ? `- «${u.name}» — залишено в інбоксі, схоже на ${u.suggested} (${u.reason}) — підтвердіть вручну`
+        : `- «${u.name}» — не визначено, залишено в інбоксі`,
+    );
   }
   return {
     result: lines.join('\n'),
@@ -535,9 +585,16 @@ async function runReadFile(input: unknown, ctx: ToolContext): Promise<ToolOutcom
 
   const buf = await readStoredFile(file.disk_path);
   let pages = await extractText(buf, file.type);
+  // Consistency with indexing: when the file has no text layer (scanned PDF /
+  // image), fall back to Claude vision OCR — the same path the worker used to
+  // index it — so read_file returns the same content that search can find,
+  // instead of a misleading "no text layer".
+  if (pages.length === 0 && (file.type === 'pdf' || file.type === 'image')) {
+    pages = await ocrDocument(buf, file.type, file.name).catch(() => []);
+  }
   if (pages.length === 0) {
     return {
-      result: `Файл "${file.name}" не містить текстового шару (можливо, скан-зображення).`,
+      result: `Файл "${file.name}" не містить тексту, який вдалося розпізнати.`,
       summary: `Читання: ${file.name} (без тексту)`,
       citations: [{ file: file.name, page: null }],
     };
@@ -603,6 +660,7 @@ async function findFile(workspaceId: string, path: string): Promise<FileRow | nu
     `SELECT f.id, f.name, f.type, f.disk_path, f.status, fo.name AS folder_name
      FROM files f LEFT JOIN folders fo ON fo.id = f.folder_id
      WHERE f.workspace_id = $1 AND lower(f.name) = lower($2)
+     ORDER BY f.is_latest DESC, f.version DESC, f.created_at DESC
      LIMIT 1`,
     [workspaceId, name],
   );

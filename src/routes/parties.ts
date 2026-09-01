@@ -4,6 +4,7 @@ import { authenticate } from '../auth/hook.js';
 import { getOwnedWorkspace } from '../services/workspaceAccess.js';
 import { upsertParties, validateParties, listParties } from '../services/parties.js';
 import { suggestParties, suggestContractType } from '../services/partyExtraction.js';
+import { suggestIncoterms } from '../services/incoterms.js';
 
 const partySchema = z.object({
   role: z.string().min(1),
@@ -46,7 +47,13 @@ export async function partiesRoutes(app: FastifyInstance): Promise<void> {
       if (!ws) return reply.code(404).send({ error: 'not_found' });
       const suggestions = await suggestParties(ws.id);
       const suggested_contract_type = suggestContractType(suggestions);
-      return reply.send({ suggestions, suggested_contract_type });
+      const incoterms = await suggestIncoterms(ws.id);
+      return reply.send({
+        suggestions,
+        suggested_contract_type,
+        suggested_incoterm_in: incoterms.incoterm_in,
+        suggested_incoterm_out: incoterms.incoterm_out,
+      });
     },
   );
 }
