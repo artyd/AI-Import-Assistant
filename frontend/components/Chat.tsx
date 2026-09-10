@@ -16,6 +16,38 @@ import {
 } from "./icons";
 
 const UPLOAD_ACCEPT = ".pdf,.docx,.xlsx,.csv,.png,.jpg,.jpeg";
+const ACCEPT_EXT = UPLOAD_ACCEPT.split(",").map((s) => s.trim().toLowerCase());
+
+let pasteSeq = 0;
+
+// A pasted screenshot arrives as an image blob that may lack a usable filename;
+// give it a real extension so the server's extension allow-list accepts it.
+function normalizeDropped(file: File): File {
+  const lower = file.name.toLowerCase();
+  if (ACCEPT_EXT.some((ext) => lower.endsWith(ext))) return file;
+  if (file.type.startsWith("image/")) {
+    const ext = file.type === "image/png" ? "png" : /jpe?g/.test(file.type) ? "jpg" : null;
+    if (ext) return new File([file], `screenshot-${++pasteSeq}.${ext}`, { type: file.type });
+  }
+  return file;
+}
+
+function isAccepted(file: File): boolean {
+  const lower = file.name.toLowerCase();
+  return ACCEPT_EXT.some((ext) => lower.endsWith(ext));
+}
+
+// Build a real FileList (via DataTransfer) from dropped/pasted files, keeping
+// only supported types. Returns null when nothing usable remains, so the whole
+// existing upload pipeline (which expects a FileList) can be reused unchanged.
+function toAcceptedFileList(files: File[]): FileList | null {
+  const dt = new DataTransfer();
+  for (const raw of files) {
+    const f = normalizeDropped(raw);
+    if (isAccepted(f)) dt.items.add(f);
+  }
+  return dt.files.length ? dt.files : null;
+}
 
 export interface UploadClassifyOutcome {
   fileId: string;
@@ -90,10 +122,14 @@ export function Chat({
   );
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const convRef = useRef<string | undefined>(conversationId);
   const scrollRef = useRef<HTMLDivElement>(null);
   const streamTextRef = useRef("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Drag events fire on every child; count enters/leaves so the overlay only
+  // clears when the cursor truly leaves the chat container.
+  const dragDepth = useRef(0);
 
   useEffect(() => {
     setItems(initialMessages.map((m) => ({ kind: "message" as const, ...m })));
@@ -146,6 +182,55 @@ export function Chat({
       });
     },
     [onUploadAndClassify, patchCard]
+  );
+
+  const hasFiles = (dt: DataTransfer | null) =>
+    !!dt && Array.from(dt.types).includes("Files");
+
+  const onDragEnter = useCallback((e: React.DragEvent) => {
+    if (!hasFiles(e.dataTransfer)) return;
+    e.preventDefault();
+    dragDepth.current += 1;
+    setDragging(true);
+  }, []);
+
+  const onDragOver = useCallback((e: React.DragEvent) => {
+    if (!hasFiles(e.dataTransfer)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  }, []);
+
+  const onDragLeave = useCallback((e: React.DragEvent) => {
+    if (!hasFiles(e.dataTransfer)) return;
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setDragging(false);
+  }, []);
+
+  const onDrop = useCallback(
+    (e: React.DragEvent) => {
+      if (!hasFiles(e.dataTransfer)) return;
+      e.preventDefault();
+      dragDepth.current = 0;
+      setDragging(false);
+      if (streaming) return;
+      const list = toAcceptedFileList(Array.from(e.dataTransfer.files));
+      if (list) void handleFiles(list);
+    },
+    [handleFiles, streaming]
+  );
+
+  // Paste (Ctrl+V) of files or a screenshot into the composer. Only swallow the
+  // paste when it actually carries files, so pasting plain text still works.
+  const onPaste = useCallback(
+    (e: React.ClipboardEvent) => {
+      const files = Array.from(e.clipboardData.files);
+      if (!files.length) return;
+      const list = toAcceptedFileList(files);
+      if (!list) return;
+      e.preventDefault();
+      if (!streaming) void handleFiles(list);
+    },
+    [handleFiles, streaming]
   );
 
   const pickFolder = useCallback(
@@ -242,7 +327,12 @@ export function Chat({
 
   return (
     <div
+      onDragEnter={onDragEnter}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
       style={{
+        position: "relative",
         display: "flex",
         flexDirection: "column",
         height: "100%",
@@ -250,6 +340,38 @@ export function Chat({
         background: "var(--chat)",
       }}
     >
+      {dragging && (
+        <div
+          style={{
+            position: "absolute",
+            inset: 12,
+            zIndex: 20,
+            borderRadius: 16,
+            border: "2px dashed var(--accent)",
+            background: "color-mix(in srgb, var(--accent) 8%, var(--chat))",
+            display: "grid",
+            placeItems: "center",
+            pointerEvents: "none",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 10,
+              color: "var(--accent)",
+              fontWeight: 600,
+            }}
+          >
+            <IconAttach size={28} />
+            <span>Відпустіть, щоб долучити файли</span>
+            <span style={{ color: "var(--muted)", fontWeight: 400, fontSize: 13 }}>
+              PDF, DOCX, XLSX, CSV, зображення
+            </span>
+          </div>
+        </div>
+      )}
       <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "24px 0" }}>
         <div style={{ maxWidth: 720, margin: "0 auto", padding: "0 24px" }}>
           <DateSeparator />
@@ -311,13 +433,14 @@ export function Chat({
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
+              onPaste={onPaste}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
                   send();
                 }
               }}
-              placeholder="Спитайте Штурмана"
+              placeholder="Спитайте Штурмана або перетягніть / вставте файли"
               rows={1}
               style={{
                 flex: 1,
