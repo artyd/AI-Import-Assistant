@@ -37,16 +37,11 @@ function isAccepted(file: File): boolean {
   return ACCEPT_EXT.some((ext) => lower.endsWith(ext));
 }
 
-// Build a real FileList (via DataTransfer) from dropped/pasted files, keeping
-// only supported types. Returns null when nothing usable remains, so the whole
-// existing upload pipeline (which expects a FileList) can be reused unchanged.
-function toAcceptedFileList(files: File[]): FileList | null {
-  const dt = new DataTransfer();
-  for (const raw of files) {
-    const f = normalizeDropped(raw);
-    if (isAccepted(f)) dt.items.add(f);
-  }
-  return dt.files.length ? dt.files : null;
+// Normalize + filter dropped/pasted files down to the supported types. Returns a
+// plain File[] (no DataTransfer round-trip — that can silently drop filenames,
+// which the server's extension allow-list then rejects).
+function acceptFiles(files: File[]): File[] {
+  return files.map(normalizeDropped).filter(isAccepted);
 }
 
 export interface UploadClassifyOutcome {
@@ -62,7 +57,7 @@ interface Props {
   onConversationStarted: (id: string) => void;
   onLog: (entry: LogEntry) => void;
   folders: Folder[];
-  onUploadAndClassify: (files: FileList) => Promise<UploadClassifyOutcome[]>;
+  onUploadAndClassify: (files: File[]) => Promise<UploadClassifyOutcome[]>;
   onMoveFile: (fileId: string, folderId: string) => Promise<void>;
 }
 
@@ -123,6 +118,7 @@ export function Chat({
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const convRef = useRef<string | undefined>(conversationId);
   const scrollRef = useRef<HTMLDivElement>(null);
   const streamTextRef = useRef("");
@@ -151,19 +147,19 @@ export function Chat({
   );
 
   const handleFiles = useCallback(
-    async (fileList: FileList) => {
+    async (files: File[]) => {
+      if (!files.length) return;
       // One card per selected file, in order, starting at "uploading".
-      const names = Array.from(fileList).map((f) => f.name);
-      const cards: ClassifyCard[] = names.map((name) => ({
+      const cards: ClassifyCard[] = files.map((f) => ({
         kind: "classify",
         id: `card-${cardSeq++}`,
         fileId: null,
-        name,
+        name: f.name,
         state: "uploading",
       }));
       setItems((list) => [...list, ...cards]);
 
-      const outcomes = await onUploadAndClassify(fileList);
+      const outcomes = await onUploadAndClassify(files);
 
       // Match outcomes back to cards positionally (upload preserves order). Any
       // file the server rejected has no outcome → mark that card as an error.
@@ -206,31 +202,59 @@ export function Chat({
     if (dragDepth.current === 0) setDragging(false);
   }, []);
 
+  const ingest = useCallback(
+    (raw: File[]) => {
+      if (streaming) return;
+      const files = acceptFiles(raw);
+      if (files.length) {
+        setNotice(null);
+        void handleFiles(files);
+      } else if (raw.length) {
+        // Files arrived but none were a supported type — say so instead of
+        // silently doing nothing.
+        setNotice(
+          "Ці файли не підтримуються. Дозволені: PDF, DOCX, XLSX, CSV, PNG, JPG."
+        );
+      }
+    },
+    [handleFiles, streaming]
+  );
+
   const onDrop = useCallback(
     (e: React.DragEvent) => {
       if (!hasFiles(e.dataTransfer)) return;
       e.preventDefault();
       dragDepth.current = 0;
       setDragging(false);
-      if (streaming) return;
-      const list = toAcceptedFileList(Array.from(e.dataTransfer.files));
-      if (list) void handleFiles(list);
+      ingest(Array.from(e.dataTransfer.files));
     },
-    [handleFiles, streaming]
+    [ingest]
   );
 
-  // Paste (Ctrl+V) of files or a screenshot into the composer. Only swallow the
-  // paste when it actually carries files, so pasting plain text still works.
+  // Paste (Ctrl+V) of files or a screenshot into the composer. Chrome exposes
+  // pasted files both as `files` and as `items[].getAsFile()`; read both and
+  // dedupe. Only swallow the paste when it actually carries files, so pasting
+  // plain text still works.
   const onPaste = useCallback(
     (e: React.ClipboardEvent) => {
-      const files = Array.from(e.clipboardData.files);
+      const fromItems = Array.from(e.clipboardData.items)
+        .filter((it) => it.kind === "file")
+        .map((it) => it.getAsFile())
+        .filter((f): f is File => f != null);
+      const collected = [...Array.from(e.clipboardData.files), ...fromItems];
+      // Dedupe (a file can appear in both lists).
+      const seen = new Set<string>();
+      const files = collected.filter((f) => {
+        const key = `${f.name}:${f.size}:${f.lastModified}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
       if (!files.length) return;
-      const list = toAcceptedFileList(files);
-      if (!list) return;
       e.preventDefault();
-      if (!streaming) void handleFiles(list);
+      ingest(files);
     },
-    [handleFiles, streaming]
+    [ingest]
   );
 
   const pickFolder = useCallback(
@@ -399,6 +423,23 @@ export function Chat({
 
       <div style={{ flex: "none", padding: "0 24px 18px" }}>
         <div style={{ maxWidth: 720, margin: "0 auto" }}>
+          {notice && (
+            <div
+              role="alert"
+              onClick={() => setNotice(null)}
+              style={{
+                marginBottom: 8,
+                padding: "8px 12px",
+                borderRadius: 10,
+                background: "color-mix(in srgb, var(--err) 12%, var(--surface))",
+                color: "var(--err)",
+                fontSize: 13,
+                cursor: "pointer",
+              }}
+            >
+              {notice}
+            </div>
+          )}
           <div
             className="panel"
             style={{
@@ -417,7 +458,7 @@ export function Chat({
               accept={UPLOAD_ACCEPT}
               onChange={(e) => {
                 if (e.target.files && e.target.files.length)
-                  void handleFiles(e.target.files);
+                  ingest(Array.from(e.target.files));
                 e.target.value = "";
               }}
             />

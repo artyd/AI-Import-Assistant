@@ -188,11 +188,15 @@ export default function WorkspacePage() {
   const upload = useCallback(
     async (
       folderId: string | null,
-      fileList: FileList,
+      fileList: FileList | File[],
       replacesFileId?: string
     ): Promise<FileItem[]> => {
       const form = new FormData();
-      for (const f of Array.from(fileList)) form.append("files", f);
+      // Always pass the filename explicitly: files built in code (drag-drop /
+      // paste) can otherwise reach the server with an empty name, which the
+      // extension allow-list then rejects as "no_valid_files".
+      for (const f of Array.from(fileList))
+        form.append("files", f, f.name || "file");
       const params = new URLSearchParams();
       if (folderId) params.set("folderId", folderId);
       if (replacesFileId) params.set("replacesFileId", replacesFileId);
@@ -305,7 +309,7 @@ export default function WorkspacePage() {
   // Paperclip flow: upload into the inbox, then classify each created file.
   const uploadAndClassify = useCallback(
     async (
-      fileList: FileList
+      fileList: FileList | File[]
     ): Promise<{ fileId: string; name: string; folderName: string | null }[]> => {
       const created = await upload(null, fileList);
       return mapLimit(created, 4, async (f) => {
