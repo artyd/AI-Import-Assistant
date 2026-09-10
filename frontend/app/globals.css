@@ -45,6 +45,27 @@
   --radius: 12px;
   --radius-sm: 8px;
   --header-h: 58px;
+
+  /* ── Material Design language (ref: CosmicMind/Material) ──────────────────
+     Elevation: discrete dp levels, a soft ambient + a tighter key shadow, the
+     way Material stacks surfaces. Motion: Material standard easing + a short/
+     medium/long duration scale. State layers: translucent currentColor overlays
+     for hover/press instead of hard background swaps. */
+  --elev-1: 0 1px 2px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.10);
+  --elev-2: 0 2px 4px rgba(0, 0, 0, 0.07), 0 2px 8px rgba(0, 0, 0, 0.10);
+  --elev-3: 0 4px 8px rgba(0, 0, 0, 0.09), 0 3px 12px rgba(0, 0, 0, 0.11);
+  --elev-4: 0 6px 14px rgba(0, 0, 0, 0.11), 0 4px 18px rgba(0, 0, 0, 0.12);
+  --elev-5: 0 12px 28px rgba(0, 0, 0, 0.16), 0 6px 24px rgba(0, 0, 0, 0.14);
+
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-decelerate: cubic-bezier(0, 0, 0, 1);
+  --ease-accelerate: cubic-bezier(0.3, 0, 1, 1);
+  --dur-short: 120ms;
+  --dur-medium: 210ms;
+  --dur-long: 320ms;
+
+  --state-hover: 0.08;
+  --state-press: 0.14;
 }
 
 [data-theme="dark"] {
@@ -78,6 +99,13 @@
   --icon-fg: #f1f1f2;         /* dark theme → light icon */
   --icon-fg-muted: #83838a;
   --icon-fg-on-dark: #fafafa;
+
+  /* Deeper elevation on dark surfaces (Material: shadows read stronger on dark). */
+  --elev-1: 0 1px 2px rgba(0, 0, 0, 0.40), 0 1px 3px rgba(0, 0, 0, 0.50);
+  --elev-2: 0 2px 5px rgba(0, 0, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.50);
+  --elev-3: 0 4px 10px rgba(0, 0, 0, 0.50), 0 3px 14px rgba(0, 0, 0, 0.55);
+  --elev-4: 0 6px 16px rgba(0, 0, 0, 0.55), 0 4px 20px rgba(0, 0, 0, 0.55);
+  --elev-5: 0 12px 30px rgba(0, 0, 0, 0.62), 0 6px 26px rgba(0, 0, 0, 0.60);
 }
 
 html,
@@ -121,8 +149,10 @@ a {
   background: transparent;
 }
 
-/* --- Buttons --- */
+/* --- Buttons (Material: state layers + elevation + standard motion) --- */
 .btn {
+  position: relative;
+  overflow: hidden;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -136,26 +166,54 @@ a {
   font: inherit;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.12s, border-color 0.12s, opacity 0.12s;
+  transition: background var(--dur-short) var(--ease-standard),
+    border-color var(--dur-short) var(--ease-standard),
+    box-shadow var(--dur-medium) var(--ease-standard),
+    transform var(--dur-short) var(--ease-standard), opacity var(--dur-short);
   white-space: nowrap;
 }
-.btn:hover {
-  background: var(--hover);
+/* Translucent state layer — Material's hover/press feedback, tinted by the
+   button's own text colour so it reads on both light and dark buttons. */
+.btn::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: currentColor;
+  opacity: 0;
+  transition: opacity var(--dur-short) var(--ease-standard);
+  pointer-events: none;
+}
+.btn:hover::after {
+  opacity: var(--state-hover);
+}
+.btn:active::after {
+  opacity: var(--state-press);
+}
+.btn:active {
+  transform: scale(0.98);
 }
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
+.btn:disabled::after {
+  opacity: 0;
+}
 .btn-primary {
   background: var(--accent);
   color: var(--accentTx);
   border-color: var(--accent);
+  box-shadow: var(--elev-1);
 }
 .btn-primary:hover {
-  background: var(--accent);
-  opacity: 0.88;
+  box-shadow: var(--elev-2);
+}
+.btn-primary:active {
+  box-shadow: var(--elev-1);
 }
 .btn-icon {
+  position: relative;
+  overflow: hidden;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -164,12 +222,17 @@ a {
   padding: 0;
   border: none;
   background: transparent;
-  border-radius: 6px;
+  border-radius: 8px;
   color: var(--icon-fg-muted);
+  transition: color var(--dur-short) var(--ease-standard),
+    background var(--dur-short) var(--ease-standard);
 }
 .btn-icon:hover {
   background: var(--hover);
   color: var(--icon-fg);
+}
+.btn-icon:active {
+  background: color-mix(in srgb, currentColor 14%, transparent);
 }
 
 /* --- Inputs --- */
@@ -186,9 +249,16 @@ a {
 .input::placeholder {
   color: var(--muted);
 }
+.input {
+  transition: border-color var(--dur-short) var(--ease-standard),
+    box-shadow var(--dur-short) var(--ease-standard);
+}
+/* Material focus: the field's outline adopts the accent + a soft focus ring,
+   instead of only darkening the border. */
 .input:focus {
   outline: none;
-  border-color: var(--border2);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 /* --- Status dots --- */
@@ -375,5 +445,104 @@ a {
 @media (prefers-reduced-motion: reduce) {
   .spin {
     animation-duration: 1.6s;
+  }
+}
+
+/* ── Material components & elevation utilities (ref: CosmicMind/Material) ──── */
+
+/* Elevation utility classes — apply a Material dp level to any surface. */
+.elev-1 { box-shadow: var(--elev-1); }
+.elev-2 { box-shadow: var(--elev-2); }
+.elev-3 { box-shadow: var(--elev-3); }
+.elev-4 { box-shadow: var(--elev-4); }
+.elev-5 { box-shadow: var(--elev-5); }
+
+/* Material card: elevated, rounded surface that lifts on hover. */
+.card-m {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--elev-1);
+  transition: box-shadow var(--dur-medium) var(--ease-standard),
+    transform var(--dur-medium) var(--ease-standard);
+}
+.card-m:hover {
+  box-shadow: var(--elev-3);
+}
+
+/* Floating Action Button — Material's primary circular action. */
+.fab {
+  position: relative;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 56px;
+  width: 56px;
+  border: none;
+  border-radius: 16px;
+  background: var(--accent);
+  color: var(--accentTx);
+  cursor: pointer;
+  box-shadow: var(--elev-3);
+  transition: box-shadow var(--dur-medium) var(--ease-standard),
+    transform var(--dur-short) var(--ease-standard);
+}
+.fab:hover {
+  box-shadow: var(--elev-4);
+}
+.fab:active {
+  transform: scale(0.96);
+}
+.fab::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: currentColor;
+  opacity: 0;
+  transition: opacity var(--dur-short) var(--ease-standard);
+}
+.fab:hover::after { opacity: var(--state-hover); }
+.fab:active::after { opacity: var(--state-press); }
+
+/* Snackbar — Material's transient message surface. */
+.snackbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 0 16px;
+  border-radius: var(--radius-sm);
+  background: var(--header);
+  color: var(--icon-fg-on-dark);
+  box-shadow: var(--elev-3);
+  font-size: 13px;
+  animation: snackbar-in var(--dur-long) var(--ease-decelerate);
+}
+@keyframes snackbar-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Modal surfaces enter with a Material decelerate curve. */
+@media (prefers-reduced-motion: no-preference) {
+  .m-enter {
+    animation: m-enter var(--dur-medium) var(--ease-decelerate);
+  }
+  @keyframes m-enter {
+    from {
+      opacity: 0;
+      transform: translateY(8px) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
   }
 }

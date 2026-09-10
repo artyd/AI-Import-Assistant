@@ -15,6 +15,7 @@ import type { WorkspaceRow } from './workspaceAccess.js';
 import { readStoredFile } from './storage.js';
 import { computeChecklist } from './checklist.js';
 import { computeDiscrepancies } from './discrepancies.js';
+import { DOC_TYPE_TO_FOLDER } from './classify.js';
 import { buildAndSaveReport } from './report.js';
 import { saveArtifact, getLatestArtifacts, type ArtifactType } from './artifacts.js';
 
@@ -98,9 +99,17 @@ export async function streamWorkspaceZip(ws: WorkspaceRow, reply: FastifyReply):
     is_latest: boolean;
     version: number;
     folder_name: string | null;
+    suggested_folder_name: string | null;
+    doc_type: string | null;
   }>(
-    `SELECT f.name, f.disk_path, f.is_latest, f.version, fo.name AS folder_name
-     FROM files f LEFT JOIN folders fo ON fo.id = f.folder_id
+    `SELECT f.name, f.disk_path, f.is_latest, f.version,
+            fo.name AS folder_name,
+            sfo.name AS suggested_folder_name,
+            de.extracted_fields->>'doc_type' AS doc_type
+     FROM files f
+     LEFT JOIN folders fo  ON fo.id  = f.folder_id
+     LEFT JOIN folders sfo ON sfo.id = f.suggested_folder_id
+     LEFT JOIN document_extractions de ON de.file_id = f.id
      WHERE f.workspace_id = $1
      ORDER BY fo.position NULLS LAST, f.created_at`,
     [ws.id],
@@ -113,10 +122,20 @@ export async function streamWorkspaceZip(ws: WorkspaceRow, reply: FastifyReply):
     } catch {
       continue; // Skip files missing on disk rather than aborting the whole zip.
     }
+    // Folder structure is assembled AT EXPORT TIME (plan Q16): a file the user
+    // moved keeps that folder; otherwise we derive the folder from the confirmed
+    // extraction type, then the suggested folder, else _Inbox. Nothing is moved
+    // in the DB — this placement is only inside the zip.
+    const derived = f.doc_type
+      ? f.doc_type === 'photos'
+        ? '06_Photos'
+        : DOC_TYPE_TO_FOLDER[f.doc_type] ?? null
+      : null;
+    const targetFolder = f.folder_name ?? derived ?? f.suggested_folder_name;
     const entry = !f.is_latest
       ? `_OldVersions/v${f.version}_${f.name}`
-      : f.folder_name
-        ? `${f.folder_name}/${f.name}`
+      : targetFolder
+        ? `${targetFolder}/${f.name}`
         : `_Inbox/${f.name}`;
     archive.append(buf, { name: uniqueName(entry) });
   }

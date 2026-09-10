@@ -7,3 +7,9 @@ storage/
 
 # Personal Claude Code overrides (project harness in .claude/ IS committed)
 .claude/settings.local.json
+
+# Installed third-party skills (personal tooling, not product code — run with
+# full agent permissions; keep out of the product repo). Added 2026-09-10.
+.agents/
+.claude/skills/
+skills-lock.json

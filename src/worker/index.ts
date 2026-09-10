@@ -114,24 +114,47 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
     // Structured extraction (best-effort): populate document_extractions so the
     // checklist/discrepancy checks are deterministic. A failure here must NOT
     // fail indexing — the file stays "ready".
-    if (config.EXTRACTION_ENABLED && pages.length > 0) {
+    if (config.EXTRACTION_ENABLED) {
       try {
         const fullText = pages.map((p) => p.text).join('\n\n');
         await query('DELETE FROM document_extractions WHERE file_id = $1', [file.id]);
         // Vision first for PDFs/images (reads figures/tables from the document
         // image itself); fall back to the text path if vision is unavailable or
-        // the type is text-based.
+        // the type is text-based. For a scan with no recovered text, vision can
+        // still read the image directly — so we attempt it even when pages == 0.
         let fields =
           file.type === 'pdf' || file.type === 'image'
             ? await extractDocumentFieldsFromDocument(buf, file.type, file.name)
             : null;
-        if (!fields) fields = await extractDocumentFields(fullText);
+        if (!fields && pages.length > 0) fields = await extractDocumentFields(fullText);
+
         if (fields) {
           await query(
             `INSERT INTO document_extractions (file_id, workspace_id, extracted_fields, model_version)
              VALUES ($1, $2, $3::jsonb, $4)`,
             [file.id, file.workspace_id, JSON.stringify(fields), MODEL],
           );
+          await query('UPDATE files SET extraction_status = $2 WHERE id = $1', [file.id, 'ok']);
+        } else if (pages.length === 0) {
+          // Honest unreadable status (plan Q29): the document could not be read.
+          // Insert a flagged placeholder extraction so the verification screen
+          // surfaces it and asks the human to enter key fields — never a silent skip.
+          const placeholder = {
+            doc_type: 'other',
+            also_contains: [],
+            unreadable: true,
+            extraction_note:
+              'Документ не вдалося прочитати (скан без текстового шару / OCR не дав результату). ' +
+              'Введіть ключові поля вручну.',
+          };
+          await query(
+            `INSERT INTO document_extractions (file_id, workspace_id, extracted_fields, model_version)
+             VALUES ($1, $2, $3::jsonb, $4)`,
+            [file.id, file.workspace_id, JSON.stringify(placeholder), MODEL],
+          );
+          await query('UPDATE files SET extraction_status = $2 WHERE id = $1', [file.id, 'unreadable']);
+        } else {
+          await query('UPDATE files SET extraction_status = $2 WHERE id = $1', [file.id, 'no_fields']);
         }
         const ws = await getWorkspaceById(file.workspace_id);
         if (ws) {
@@ -157,29 +180,19 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
           }
         }
 
-        // Auto-file if the document is still sitting in the inbox — this is how a
-        // scan gets sorted: its doc_type only became known after OCR + extraction
-        // above. Guarded on folder_id IS NULL so we never override a placement the
-        // user (or the upload-time classify) already made.
+        // Detect the document TYPE and record it as a suggestion — never a
+        // silent move (plan Q14/Q16). The single-list UI shows the label; folders
+        // are assembled only at export time. Guarded on folder_id IS NULL so we
+        // never touch a file the user already placed by hand.
         const { rows: cur } = await query<{ folder_id: string | null }>(
           'SELECT folder_id FROM files WHERE id = $1',
           [file.id],
         );
         if (cur[0] && cur[0].folder_id === null) {
-          const res = await classifyAndFile(file.workspace_id, file.id);
-          if (res?.to) {
-            const { rows: moved } = await query<{ folder_id: string | null }>(
-              'SELECT folder_id FROM files WHERE id = $1',
-              [file.id],
-            );
-            await publishFileStatus(file.workspace_id, {
-              fileId: file.id,
-              status: 'ready',
-              name: file.name,
-              folderId: moved[0]?.folder_id ?? null,
-            });
+          const res = await classifyAndFile(file.workspace_id, file.id, { move: false });
+          if (res?.suggested) {
             // eslint-disable-next-line no-console
-            console.log(`Auto-filed ${file.id} (${file.name}) → ${res.to}.`);
+            console.log(`Suggested type for ${file.id} (${file.name}) → ${res.suggested}.`);
           }
         }
       } catch (err) {
