@@ -83,6 +83,7 @@ export function InstructionModal({
       style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", display: "grid", placeItems: "center", zIndex: 100, padding: 20 }}
     >
       <div
+        className="m-enter"
         onClick={(e) => e.stopPropagation()}
         style={{ width: 620, maxWidth: "100%", maxHeight: "88vh", overflowY: "auto", background: "var(--surface)", color: "var(--text)", border: "1px solid var(--border)", borderRadius: "var(--radius)", boxShadow: "var(--shadow)", padding: 18, display: "flex", flexDirection: "column", gap: 12 }}
       >

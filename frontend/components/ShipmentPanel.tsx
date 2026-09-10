@@ -23,6 +23,7 @@ import {
 } from "@/lib/shipmentOptions";
 import { Combobox } from "./ui/Combobox";
 import { InstructionModal } from "./InstructionModal";
+import { VerificationModal } from "./VerificationModal";
 import { IconDownload, IconSpinner } from "./icons";
 
 // Three fixed party slots. "Через кого" (intermediary) is optional.
@@ -81,6 +82,7 @@ export function ShipmentPanel({
   const [parties, setParties] = useState<Party[]>([]);
   const [risks, setRisks] = useState<Risk[] | null>(null);
   const [instructionOpen, setInstructionOpen] = useState(false);
+  const [verifyOpen, setVerifyOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [result, setResult] = useState<Result | null>(null);
   const [suggestedContractType, setSuggestedContractType] = useState<
@@ -562,6 +564,9 @@ export function ShipmentPanel({
 
         {/* Actions */}
         <Section title="Дії">
+          <button className="btn btn-primary" onClick={() => setVerifyOpen(true)}>
+            Перевірити поля документів
+          </button>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             <button className="btn" onClick={loadChecklist} disabled={busy === "checklist"}>Комплектність</button>
             <button className="btn" onClick={loadDiscrepancies} disabled={busy === "discrepancies"}>Розбіжності</button>
@@ -593,6 +598,13 @@ export function ShipmentPanel({
       {instructionOpen && (
         <InstructionModal workspaceId={workspaceId} onClose={() => setInstructionOpen(false)} />
       )}
+      {verifyOpen && (
+        <VerificationModal
+          workspaceId={workspaceId}
+          onClose={() => setVerifyOpen(false)}
+          onSaved={reloadRisks}
+        />
+      )}
     </div>
   );
 }
@@ -621,15 +633,31 @@ function ResultView({ result }: { result: Result }) {
           {result.items.length === 0 ? (
             <Muted>Розбіжностей не виявлено.</Muted>
           ) : (
-            result.items.map((d, i) => (
-              <div key={i} style={{ fontSize: 13 }}>
-                <span style={{ color: d.severity === "error" ? "var(--err)" : d.severity === "warning" ? "var(--warn)" : "var(--muted)", fontWeight: 600 }}>
-                  {d.field}
-                </span>
-                <div style={{ color: "var(--muted)", fontSize: 12 }}>{d.expected} → {d.actual}</div>
-              </div>
-            ))
+            result.items.map((d, i) => {
+              const confirmed = d.kind !== "suspected";
+              const color =
+                d.severity === "error" ? "var(--err)" : d.severity === "warning" ? "var(--warn)" : "var(--muted)";
+              return (
+                <div key={i} style={{ fontSize: 13, borderLeft: `3px solid ${color}`, paddingLeft: 8 }}>
+                  <span style={{ fontWeight: 600, color }}>
+                    {confirmed ? "🔴" : "🟡"} {d.field}
+                  </span>
+                  <div style={{ color: "var(--muted)", fontSize: 12 }}>{d.expected} → {d.actual}</div>
+                  {d.citations && d.citations.length > 0 && (
+                    <div style={{ color: "var(--muted)", fontSize: 11, marginTop: 2 }}>
+                      {d.citations.map((c, j) => (
+                        <div key={j}>
+                          ↳ {c.doc_type}
+                          {c.file_name ? ` · «${c.file_name}»` : ""}: {c.value}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })
           )}
+          <Muted>🔴 — підтверджена розбіжність (з джерелами) · 🟡 — потребує перевірки</Muted>
         </>
       )}
       {result.kind === "text" && (

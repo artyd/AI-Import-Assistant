@@ -72,11 +72,35 @@ export interface ChecklistItem {
   source_file_id: string | null;
 }
 
+export type FlagKind = "confirmed" | "suspected";
+
+export interface DiscrepancyCitation {
+  file_id: string | null;
+  file_name: string | null;
+  doc_type: string;
+  value: string;
+}
+
 export interface Discrepancy {
   field: string;
   expected: string;
   actual: string;
   severity: "error" | "warning" | "info";
+  // Ranked confidence (plan Q15): "confirmed" = 🔴 deterministic mismatch backed
+  // by two source citations; "suspected" = 🟡 uncertain / not fully checked.
+  kind?: FlagKind;
+  citations?: DiscrepancyCitation[];
+}
+
+// Human-in-the-loop verification (plan Q9/Q17): one file's extracted fields plus
+// which verdict-driving fields still need the declarant's confirmation.
+export interface FileExtraction {
+  file_id: string;
+  file_name: string;
+  extraction_status: "ok" | "unreadable" | "no_fields" | null;
+  fields: Record<string, unknown>;
+  needs_review: string[];
+  verified: boolean;
 }
 
 export interface Risk {
@@ -124,6 +148,9 @@ export interface FileItem {
   folderReason?: string | null;
   folderConfidence?: "high" | "medium" | "low" | null;
   suggestedFolderId?: string | null;
+  // Extraction outcome (plan Q29): 'unreadable' means the human must enter key
+  // fields on the verification screen.
+  extractionStatus?: "ok" | "unreadable" | "no_fields" | null;
 }
 
 export interface FileVersion {
