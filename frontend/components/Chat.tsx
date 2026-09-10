@@ -20,14 +20,31 @@ const ACCEPT_EXT = UPLOAD_ACCEPT.split(",").map((s) => s.trim().toLowerCase());
 
 let pasteSeq = 0;
 
-// A pasted screenshot arrives as an image blob that may lack a usable filename;
-// give it a real extension so the server's extension allow-list accepts it.
+// MIME → extension for every supported type. Drag/paste sources (and pasted
+// screenshots) often hand us a file whose NAME has no extension — the server's
+// allow-list is extension-based, so we must derive one from the MIME type or the
+// upload is rejected as "no_valid_files".
+const MIME_EXT: Record<string, string> = {
+  "application/pdf": "pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+  "text/csv": "csv",
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/jpg": "jpg",
+};
+
+// If the file's name already ends in a supported extension, keep it as-is.
+// Otherwise, if its MIME type is one we support, rebuild the file with a proper
+// extension (preserving any original base name so the user still recognises it).
 function normalizeDropped(file: File): File {
   const lower = file.name.toLowerCase();
   if (ACCEPT_EXT.some((ext) => lower.endsWith(ext))) return file;
-  if (file.type.startsWith("image/")) {
-    const ext = file.type === "image/png" ? "png" : /jpe?g/.test(file.type) ? "jpg" : null;
-    if (ext) return new File([file], `screenshot-${++pasteSeq}.${ext}`, { type: file.type });
+  const ext = MIME_EXT[file.type.toLowerCase()];
+  if (ext) {
+    const rawBase = file.name.trim().replace(/[/\\]+/g, "_");
+    const base = rawBase || `файл-${++pasteSeq}`;
+    return new File([file], `${base}.${ext}`, { type: file.type });
   }
   return file;
 }
