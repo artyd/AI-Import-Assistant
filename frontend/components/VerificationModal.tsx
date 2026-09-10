@@ -27,6 +27,8 @@ const KEY_FIELDS: { key: string; label: string; kind: FieldKind }[] = [
   { key: "hs_code", label: "УКТ ЗЕД", kind: "text" },
   { key: "country_of_origin", label: "Країна походження", kind: "text" },
   { key: "incoterm", label: "Incoterms", kind: "text" },
+  { key: "manufacturer", label: "Виробник", kind: "text" },
+  { key: "registration_number", label: "Реєстраційний номер", kind: "text" },
 ];
 
 function asString(v: unknown): string {
