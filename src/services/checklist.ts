@@ -36,6 +36,7 @@ interface LatestFileRow {
   file_id: string;
   folder_name: string | null;
   doc_type: string | null;
+  also_contains: string[] | null;
 }
 
 async function requiredKeys(ws: WorkspaceRow): Promise<string[]> {
@@ -58,6 +59,10 @@ function resolveItems(required: string[], files: LatestFileRow[]): ChecklistItem
   const received = new Map<string, string>();
   for (const f of files) {
     if (f.doc_type && !verified.has(f.doc_type)) verified.set(f.doc_type, f.file_id);
+    // A 2-in-1 file (e.g. invoice+packing list) verifies every type it contains.
+    if (Array.isArray(f.also_contains)) {
+      for (const t of f.also_contains) if (t && !verified.has(t)) verified.set(t, f.file_id);
+    }
     const cats = f.folder_name ? FOLDER_CATEGORIES[f.folder_name] ?? [] : [];
     for (const c of cats) if (!received.has(c)) received.set(c, f.file_id);
   }
@@ -79,7 +84,8 @@ export async function computeChecklist(ws: WorkspaceRow): Promise<ChecklistItem[
 
   const { rows: files } = await query<LatestFileRow>(
     `SELECT f.id AS file_id, fo.name AS folder_name,
-            de.extracted_fields->>'doc_type' AS doc_type
+            de.extracted_fields->>'doc_type' AS doc_type,
+            de.extracted_fields->'also_contains' AS also_contains
      FROM files f
      LEFT JOIN folders fo ON fo.id = f.folder_id
      LEFT JOIN document_extractions de ON de.file_id = f.id

@@ -1,0 +1,43 @@
+{
+  "_comment": "GOLDEN-SET TEMPLATE. Copy this file to '<shipment>.json' (drop the leading underscore so the runner picks it up) and fill it in for one real past shipment. See eval/README.md. Every '_comment*' key is documentation and is ignored by the runner.",
+
+  "shipment_id": "my-shipment-slug",
+  "title": "Short human label for this shipment",
+  "notes": "Free text: what makes this shipment interesting (2-in-1 file? scan? multi-item? tri-party?).",
+
+  "_comment_documents": "One entry per document in the shipment. In DRY-RUN the runner reads 'fixture'; in --real it reads 'source'. 'expected' holds ONLY the fields you hand-verified — leave out anything you didn't check.",
+  "documents": [
+    {
+      "id": "invoice",
+      "file_name": "invoice.pdf",
+      "_comment_source": "Used in --real mode. Either a path to the real file (relative to the repo root or absolute) OR pasted plain text.",
+      "source": { "file": "eval/samples/my-shipment/invoice.pdf" },
+      "_comment_source_text": "Alternatively: \"source\": { \"text\": \"...pasted document text...\" }",
+      "_comment_fixture": "Used in DRY-RUN mode: a recorded extraction JSON (a full ExtractedFields object), path relative to eval/fixtures/. Record one with --real once you trust the extraction, or write it by hand.",
+      "fixture": "my-shipment/invoice.json",
+      "_comment_expected": "The correct values. doc_type + numbers exact; currency case-insensitive; hs_code compared on digits only; weights/values/counts within EVAL_NUM_TOLERANCE (default 1%). also_contains is a set.",
+      "expected": {
+        "doc_type": "invoice",
+        "also_contains": [],
+        "invoice_number": "INV-123",
+        "po_number": "PO-456",
+        "total_value": 10000,
+        "currency": "USD",
+        "incoterm": "FOB",
+        "seller": "Seller Ltd",
+        "buyer": "Buyer LLC",
+        "country_of_origin": "China",
+        "hs_code": null,
+        "net_weight_kg": 100,
+        "gross_weight_kg": 120,
+        "packages_count": 5,
+        "document_date": "2026-01-15"
+      }
+    }
+  ],
+
+  "_comment_expected_discrepancies": "The discrepancies reconcile() SHOULD report for this shipment (ground truth). 'field' is required and must be a discrepancy field name (po_number, net_weight_kg, gross_weight_kg, total_weight_kg, packages_count, currency, total_value, hs_code, country_of_origin, incoterm, seller, buyer, line_items). 'kind' (confirmed=red / suspected=yellow) and 'severity' are optional — if omitted, matching is by field only. An empty array means a clean shipment.",
+  "expected_discrepancies": [
+    { "field": "hs_code", "kind": "suspected", "note": "no HS code on the invoice — yellow verify flag" }
+  ]
+}

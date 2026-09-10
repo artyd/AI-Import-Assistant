@@ -1,0 +1,48 @@
+{
+  "doc_type": "invoice",
+  "also_contains": ["packing_list"],
+  "po_number": null,
+  "invoice_number": "EXP/26-27/N/0091",
+  "contract_number": null,
+  "total_value": 8750,
+  "currency": "USD",
+  "hs_code": null,
+  "country_of_origin": "India",
+  "buyer": "TEKHINFORM PLUS",
+  "seller": "Prime Force UK",
+  "incoterm": "CPT",
+  "document_date": "2026-02-11",
+  "expiry_date": null,
+  "shipment_date": null,
+  "delivery_deadline": null,
+  "parties": [
+    { "name": "Prime Force UK", "role": "seller", "country": "United Kingdom", "address": null },
+    { "name": "TEKHINFORM PLUS", "role": "buyer", "country": "Ukraine", "address": null }
+  ],
+  "total_weight_kg": null,
+  "net_weight_kg": 25,
+  "gross_weight_kg": 32,
+  "packages_count": 3,
+  "line_items": [
+    {
+      "description": "S-Methoprene Technical",
+      "quantity": 25,
+      "unit": "kg",
+      "unit_price": 350,
+      "amount": 8750,
+      "hs_code": null,
+      "batch_no": null
+    }
+  ],
+  "field_confidence": {
+    "invoice_number": "high",
+    "total_value": "high",
+    "currency": "high",
+    "net_weight_kg": "high",
+    "gross_weight_kg": "high",
+    "packages_count": "high",
+    "country_of_origin": "high",
+    "incoterm": "high"
+  },
+  "extraction_note": null
+}

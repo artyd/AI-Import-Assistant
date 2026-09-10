@@ -15,7 +15,7 @@ import type { FileType } from '../domain/folders.js';
  * (`extractDocumentFields` — same classifier used at index time).
  */
 
-const DOC_TYPE_TO_FOLDER: Record<string, string> = {
+export const DOC_TYPE_TO_FOLDER: Record<string, string> = {
   contract: '01_Contract_Invoice_PackingList',
   invoice: '01_Contract_Invoice_PackingList',
   packing_list: '01_Contract_Invoice_PackingList',
@@ -153,11 +153,19 @@ function reasonText(method: DocTypeResolution['method'], docType: string, folder
   }
 }
 
-/** Classifies one file and moves it into the matching folder (move-only). */
+/**
+ * Classifies one file. With `move: true` (default) it moves the file into the
+ * matching skeleton folder (move-only, high/medium confidence). With
+ * `move: false` it NEVER moves — it only records the detected type as a
+ * suggestion (`suggested_folder_id` + reason + confidence), leaving placement to
+ * the human or to export-time assembly (plan Q14/Q16: no silent auto-move).
+ */
 export async function classifyAndFile(
   workspaceId: string,
   fileId: string,
+  opts: { move?: boolean } = {},
 ): Promise<ClassifyResult | null> {
+  const move = opts.move !== false;
   const { rows } = await query<FileRow>(
     `SELECT f.id, f.name, f.type, f.folder_id, f.disk_path, fo.name AS folder_name
      FROM files f LEFT JOIN folders fo ON fo.id = f.folder_id
@@ -193,6 +201,26 @@ export async function classifyAndFile(
   }
 
   const reason = reasonText(method, docType, targetName);
+
+  // Suggestion-only mode (plan Q14/Q16): record the detected type as a suggested
+  // folder + reason, never move. The single-list UI shows the label; the actual
+  // folder structure is assembled at export time.
+  if (!move) {
+    await query(
+      `UPDATE files SET suggested_folder_id = $1, folder_reason = $2, folder_confidence = $3
+       WHERE id = $4 AND workspace_id = $5`,
+      [target.id, reason, confidence, file.id, workspaceId],
+    );
+    return {
+      fileId: file.id,
+      name: file.name,
+      from: file.folder_name,
+      to: null,
+      reason,
+      confidence,
+      suggested: targetName,
+    };
+  }
 
   // Low confidence → do NOT auto-move. Keep in the inbox with a suggested folder
   // and the reason, so the user confirms it manually.

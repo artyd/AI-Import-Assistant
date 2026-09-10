@@ -1,0 +1,33 @@
+{
+  "shipment_id": "metopren",
+  "title": "Метопрен — single-SKU import, invoice+packing 2-in-1",
+  "notes": "Reference shipment. Single line item (S-Methoprene, 25kg net / 32kg gross, 3 boxes). Invoice EXP/26-27/N/0091, USD 8750 CPT. Seller Prime Force (UK), buyer TEKHINFORM PLUS, origin India. The invoice and packing list are ONE file (2-in-1), so also_contains must include 'packing_list'. Clean commercially; the only deterministic finding is the yellow 'HS code absent from invoice' (the УКТ ЗЕД lives only in the customs declaration, per plan §2).",
+
+  "documents": [
+    {
+      "id": "invoice-packing",
+      "file_name": "metopren-invoice-packing.pdf",
+      "source": { "file": "eval/samples/metopren/invoice-packing.pdf" },
+      "fixture": "metopren/invoice-packing.json",
+      "expected": {
+        "doc_type": "invoice",
+        "also_contains": ["packing_list"],
+        "invoice_number": "EXP/26-27/N/0091",
+        "total_value": 8750,
+        "currency": "USD",
+        "incoterm": "CPT",
+        "seller": "Prime Force UK",
+        "buyer": "TEKHINFORM PLUS",
+        "country_of_origin": "India",
+        "hs_code": null,
+        "net_weight_kg": 25,
+        "gross_weight_kg": 32,
+        "packages_count": 3
+      }
+    }
+  ],
+
+  "expected_discrepancies": [
+    { "field": "hs_code", "kind": "suspected", "severity": "warning", "note": "HS code is absent from the invoice (it is stated only in the customs declaration). Deterministic yellow verify-flag — not a real error." }
+  ]
+}

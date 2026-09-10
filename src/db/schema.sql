@@ -98,6 +98,16 @@ ALTER TABLE files ADD COLUMN IF NOT EXISTS folder_confidence TEXT
 ALTER TABLE files ADD COLUMN IF NOT EXISTS suggested_folder_id UUID
   REFERENCES folders(id) ON DELETE SET NULL;
 
+-- Extraction outcome, separate from the (contract-frozen) indexing `status`.
+-- 'ok'         — fields extracted normally.
+-- 'unreadable' — a scan/image whose text could not be read (no text layer + OCR
+--                failed + vision produced nothing) — the human must enter key
+--                fields on the verification screen (plan Q29). NEVER silently dropped.
+-- 'no_fields'  — text was available but no structured fields came back.
+-- NULL         — extraction not run / not applicable.
+ALTER TABLE files ADD COLUMN IF NOT EXISTS extraction_status TEXT
+  CHECK (extraction_status IN ('ok', 'unreadable', 'no_fields'));
+
 -- Workspace intake / contract structure.
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS contract_type TEXT
   CHECK (contract_type IN ('bilateral', 'trilateral'));

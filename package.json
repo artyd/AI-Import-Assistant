@@ -20,7 +20,9 @@
     "seed": "node dist/auth/seed.js",
     "smoke": "node scripts/smoke-test.mjs",
     "eval:grounding": "node scripts/eval-grounding.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "eval:golden": "tsx eval/run.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:eval": "tsc -p eval/tsconfig.json --noEmit"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",

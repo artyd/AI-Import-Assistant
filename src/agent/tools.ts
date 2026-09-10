@@ -277,9 +277,32 @@ async function runDiscrepancies(ctx: ToolContext): Promise<ToolOutcome> {
     };
   }
   const result = findings
-    .map((f) => `- [${f.severity}] ${f.field}: очікується ${f.expected}; факт ${f.actual}`)
+    .map((f) => {
+      const mark = f.kind === 'confirmed' ? '🔴' : '🟡';
+      const srcs = f.citations
+        .map((c) => (c.file_name ? `${c.doc_type}: «${c.file_name}» = ${c.value}` : `${c.doc_type} = ${c.value}`))
+        .join('; ');
+      const src = srcs ? ` (джерела: ${srcs})` : '';
+      return `- ${mark} [${f.severity}] ${f.field}: очікується ${f.expected}; факт ${f.actual}${src}`;
+    })
     .join('\n');
-  return { result, summary: `Розбіжності: ${findings.length}`, citations: [] };
+  // Surface the source documents as citation chips (dedup by file name).
+  const seen = new Set<string>();
+  const citations: Citation[] = [];
+  for (const f of findings) {
+    for (const c of f.citations) {
+      if (c.file_name && !seen.has(c.file_name)) {
+        seen.add(c.file_name);
+        citations.push({ file: c.file_name, page: null });
+      }
+    }
+  }
+  const confirmed = findings.filter((f) => f.kind === 'confirmed').length;
+  return {
+    result,
+    summary: `Розбіжності: ${findings.length} (🔴 ${confirmed})`,
+    citations,
+  };
 }
 
 async function runRisks(ctx: ToolContext): Promise<ToolOutcome> {
