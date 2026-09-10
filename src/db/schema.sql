@@ -236,6 +236,26 @@ INSERT INTO checklist_templates (product_category, incoterm, transport_mode, con
 SELECT NULL, NULL, NULL, 'trilateral', ARRAY['intermediary_agreement']
 WHERE NOT EXISTS (SELECT 1 FROM checklist_templates WHERE contract_type = 'trilateral');
 
+-- ── Phase 6: local mirror of the State Register of Medicinal Products ─────────
+-- Reference table (NOT workspace-scoped): a local copy of the Ukrainian drug
+-- register (drlz.com.ua / МОЗ open data), ingested by scripts/ingest-drug-registry.
+-- Lets the registry cross-check run deterministically OFFLINE (no live browsing,
+-- per the grounding rules). Advisory only — a regulatory specialist confirms.
+CREATE TABLE IF NOT EXISTS drug_registry (
+  reg_number           TEXT PRIMARY KEY,       -- e.g. UA/19603/01/01
+  product_name         TEXT,
+  active_substance     TEXT,
+  dosage_form          TEXT,
+  manufacturer         TEXT,
+  manufacturer_country TEXT,
+  mah_owner            TEXT,                    -- власник реєстраційного посвідчення
+  valid_from           DATE,
+  valid_to             DATE,                    -- NULL when valid_unlimited (необмежений)
+  valid_unlimited      BOOLEAN NOT NULL DEFAULT FALSE,
+  raw                  JSONB NOT NULL DEFAULT '{}'::jsonb,
+  updated_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- ── Analysis-improvement phase 2: dual Incoterms + fixed party slots ──────────
 
 -- Incoming (buy-side, supplier→us) and outgoing (sell-side, us→buyer) Incoterms.

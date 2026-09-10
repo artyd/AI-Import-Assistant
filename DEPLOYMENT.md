@@ -120,6 +120,27 @@ docker compose exec backend node dist/auth/seed.js user@agroup95.com 's3cret' '�
 
 Then `POST /api/auth/login` returns a JWT.
 
+## Drug-registry mirror (Phase 6 — offline registration cross-check)
+
+The registry check (validity / manufacturer / marketing-authorization holder vs
+documents) runs against a LOCAL copy of the State Register of Medicinal Products
+(data.gov.ua, CC-BY, quarterly). Populate / refresh it:
+
+```bash
+# Quick seed of one validated record (demo/test — no download):
+docker compose exec backend node scripts/ingest-drug-registry.mjs --seed
+
+# Full ingest — download the current snapshot and load ~16.5k registrations:
+docker compose exec backend node scripts/ingest-drug-registry.mjs
+# …or from a local file / custom URL:
+docker compose exec backend node scripts/ingest-drug-registry.mjs /path/reestr.csv
+docker compose exec backend node scripts/ingest-drug-registry.mjs --url <csv-url>
+```
+
+The CSV is `;`-delimited, Windows-1251 — the script transcodes it. Re-running is
+idempotent (upsert by registration number). Schedule quarterly to stay current.
+Optional env `REGISTRY_CSV_URL` overrides the default download URL.
+
 ## Smoke test
 
 A dependency-free script exercises the whole flow (health → login → workspace →
