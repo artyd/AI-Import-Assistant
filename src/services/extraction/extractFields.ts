@@ -75,6 +75,8 @@ export const CONFIDENCE_FIELDS = [
   'hs_code',
   'country_of_origin',
   'incoterm',
+  'manufacturer',
+  'registration_number',
 ] as const;
 export type ConfidenceField = (typeof CONFIDENCE_FIELDS)[number];
 
@@ -115,6 +117,11 @@ export interface ExtractedFields {
   buyer: string | null;
   seller: string | null;
   incoterm: string | null;
+  // Manufacturer of the goods + any regulatory registration number (e.g. a
+  // Ukrainian drug registration UA/xxxxx/xx/xx). Power cross-document consistency
+  // and (Phase 6) the drug-registry cross-check.
+  manufacturer: string | null;
+  registration_number: string | null;
   // Dates (ISO yyyy-mm-dd where possible) — power the proactive risk engine
   // (expiry / deadline checks). Null when the document does not state them.
   document_date: string | null;
@@ -173,6 +180,16 @@ const EXTRACTION_TOOL: ChatTool = {
       country_of_origin: { type: 'string', description: 'Країна походження.' },
       buyer: { type: 'string', description: 'Покупець.' },
       seller: { type: 'string', description: 'Продавець/постачальник.' },
+      manufacturer: {
+        type: 'string',
+        description: 'Виробник товару (назва компанії), якщо вказано. Для ліків — виробник субстанції/препарату.',
+      },
+      registration_number: {
+        type: 'string',
+        description:
+          'Реєстраційний номер, якщо є (напр. українське реєстраційне посвідчення ' +
+          'ліків формату UA/19603/01/01, номер сертифіката тощо).',
+      },
       incoterm: { type: 'string', description: 'Умови поставки (Incoterms).' },
       document_date: { type: 'string', description: 'Дата документа (формат YYYY-MM-DD).' },
       expiry_date: {
@@ -333,6 +350,8 @@ function normalize(input: Record<string, unknown>): ExtractedFields {
     buyer: toStr(input.buyer),
     seller: toStr(input.seller),
     incoterm: toStr(input.incoterm),
+    manufacturer: toStr(input.manufacturer),
+    registration_number: toStr(input.registration_number),
     document_date: toStr(input.document_date),
     expiry_date: toStr(input.expiry_date),
     shipment_date: toStr(input.shipment_date),
@@ -370,7 +389,9 @@ const INSTRUCTION =
   'Витягни структуровані поля з цього документа постачання та виклич ' +
   'record_extraction. Читай цифри, суми, ваги та таблиці ДОСЛІВНО з документа. ' +
   'Якщо це інвойс або пакувальний лист із таблицею товарів — заповни line_items ' +
-  'по рядках. Не вигадуй значень: якщо поля немає в документі — пропусти його. ' +
+  'по рядках. Витягуй виробника (manufacturer) та реєстраційний номер ' +
+  '(registration_number, напр. UA/19603/01/01) ДОСЛІВНО, якщо вони є. ' +
+  'Не вигадуй значень: якщо поля немає в документі — пропусти його. ' +
   'Для кожного заповненого ключового поля познач field_confidence; якщо документ ' +
   'погано читається — додай extraction_note.';
 

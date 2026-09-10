@@ -1,6 +1,7 @@
 import { query } from '../db/pool.js';
 import type { WorkspaceRow } from './workspaceAccess.js';
 import { computeDiscrepancies } from './discrepancies.js';
+import { computeRegistryChecks } from './drugRegistry.js';
 
 /**
  * Proactive risk engine. Unlike discrepancies (which only compares invoice/PO/PL
@@ -12,7 +13,12 @@ import { computeDiscrepancies } from './discrepancies.js';
  */
 
 export type RiskSeverity = 'error' | 'warning' | 'info';
-export type RiskCategory = 'expiry' | 'missing_docs' | 'discrepancy' | 'deadline';
+export type RiskCategory =
+  | 'expiry'
+  | 'missing_docs'
+  | 'discrepancy'
+  | 'deadline'
+  | 'registry';
 
 export interface Risk {
   code: string;
@@ -143,6 +149,27 @@ export async function computeRisks(ws: WorkspaceRow): Promise<Risk[]> {
       detail: `${d.expected} → ${d.actual}`,
       source_file_id: null,
     });
+  }
+
+  // 3b. Drug-registry cross-check (Phase 6): validity, manufacturer vs registry,
+  //     MAH present in documents. Advisory — a specialist confirms. Runs offline
+  //     against the local register mirror; a shipment with no reg numbers yields
+  //     nothing. Never fails the whole risk scan.
+  try {
+    const registry = await computeRegistryChecks(ws.id);
+    for (const r of registry) {
+      risks.push({
+        code: r.code,
+        category: 'registry',
+        severity: r.severity,
+        title: r.title,
+        detail: r.detail,
+        source_file_id: null,
+      });
+    }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(`Registry check failed for workspace ${ws.id}:`, (err as Error).message);
   }
 
   // 4. Delivery-deadline pressure (only meaningful while docs are incomplete).

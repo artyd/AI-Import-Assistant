@@ -10,6 +10,7 @@ import { searchWorkspace } from '../services/qdrant.js';
 import { getWorkspaceById } from '../services/workspaceAccess.js';
 import { buildSupplierInstruction } from '../services/supplierInstruction.js';
 import { computeDiscrepancies } from '../services/discrepancies.js';
+import { computeRegistryChecks } from '../services/drugRegistry.js';
 import { computeRisks } from '../services/risks.js';
 import { refreshWorkspaceState } from '../services/status.js';
 import { getMissingContext, upsertParties, type PartyInput } from '../services/parties.js';
@@ -95,6 +96,16 @@ export const toolDefinitions: ChatTool[] = [
       'завершення сертифікати, брак документів, розбіжності цифр, наближення терміну ' +
       'поставки). Викликай проактивно, коли користувач питає «які проблеми?», «що не так?», ' +
       '«на що звернути увагу?» — не оцінюй ризики самостійно з тексту.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'check_drug_registration',
+    description:
+      'Довідкова перевірка реєстраційних номерів ліків (напр. UA/19603/01/01) з документів ' +
+      'за ЛОКАЛЬНОЮ копією Держреєстру ліків України: чинність реєстрації, збіг виробника та ' +
+      'наявність власника реєстраційного посвідчення в документах. Викликай, коли в постачанні ' +
+      'є лікарський засіб / субстанція з реєстраційним номером. Це ДОВІДКОВО — остаточне ' +
+      'підтвердження робить регуляторний/митний фахівець; не роби юридичних висновків сам.',
     input_schema: { type: 'object', properties: {} },
   },
   {
@@ -223,6 +234,8 @@ export async function executeTool(
       return runDiscrepancies(ctx);
     case 'get_risks':
       return runRisks(ctx);
+    case 'check_drug_registration':
+      return runRegistryCheck(ctx);
     case 'generate_supplier_instruction':
       return runSupplierInstruction(ctx);
     case 'get_missing_context':
@@ -302,6 +315,27 @@ async function runDiscrepancies(ctx: ToolContext): Promise<ToolOutcome> {
     result,
     summary: `Розбіжності: ${findings.length} (🔴 ${confirmed})`,
     citations,
+  };
+}
+
+async function runRegistryCheck(ctx: ToolContext): Promise<ToolOutcome> {
+  const findings = await computeRegistryChecks(ctx.workspaceId);
+  if (findings.length === 0) {
+    return {
+      result:
+        'Реєстраційних номерів у документах не знайдено, або зауважень за локальною базою ' +
+        'Держреєстру ліків немає. Це довідкова перевірка — остаточне підтвердження за регуляторним фахівцем.',
+      summary: 'Реєстр: 0 зауважень',
+      citations: [],
+    };
+  }
+  const result = findings
+    .map((f) => `- [${f.severity}] ${f.title}: ${f.detail}`)
+    .join('\n');
+  return {
+    result: `Перевірка за Держреєстром ліків (довідково, підтверджує фахівець):\n${result}`,
+    summary: `Реєстр: ${findings.length} зауважень`,
+    citations: [],
   };
 }
 

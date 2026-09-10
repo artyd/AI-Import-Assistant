@@ -262,6 +262,12 @@ export function reconcile(docs: ReconcileDoc[]): Discrepancy[] {
   crossCheckParty(invoice, contract ?? po, 'seller', out);
   crossCheckParty(invoice, contract ?? po, 'buyer', out);
 
+  // ── Manufacturer & registration number must be consistent across EVERY
+  //    document that states them (labels, COA, invoice…). Catches e.g. labels
+  //    naming "Sujata Nutri-Pharma" while a COA names "Sujata Chemicals". ──────
+  checkManufacturerConsistency(docs, out);
+  checkRegistrationConsistency(docs, out);
+
   // ── Line items: reconcile per-row for small shipments; honest degradation for
   //    many-item invoices (plan Q12/Q26). ─────────────────────────────────────
   reconcileLineItems(invoice, packing, out);
@@ -340,6 +346,62 @@ function crossCheckParty(
     severity: 'warning',
     kind: 'suspected',
     citations: [cite(a, na), cite(b, nb)],
+  });
+}
+
+function toRef(d: ReconcileDoc): DocRef {
+  return { file_id: d.file_id, file_name: d.file_name, doc_type: d.doc_type ?? 'other', fields: d.fields };
+}
+
+/** Every document that states `field`, paired with its value. */
+function docsWithField(docs: ReconcileDoc[], field: string): { ref: DocRef; val: string }[] {
+  const out: { ref: DocRef; val: string }[] = [];
+  for (const d of docs) {
+    const ref = toRef(d);
+    const val = strOf(ref, field);
+    if (val) out.push({ ref, val });
+  }
+  return out;
+}
+
+/** Manufacturer name must agree across all documents (fuzzy → YELLOW). */
+function checkManufacturerConsistency(docs: ReconcileDoc[], out: Discrepancy[]): void {
+  const entries = docsWithField(docs, 'manufacturer');
+  if (entries.length < 2) return;
+  let mismatch = false;
+  for (const a of entries) {
+    for (const b of entries) {
+      if (a === b) continue;
+      const ka = normalizeName(a.val);
+      const kb = normalizeName(b.val);
+      if (ka && kb && !ka.includes(kb) && !kb.includes(ka)) mismatch = true;
+    }
+  }
+  if (!mismatch) return;
+  out.push({
+    field: 'manufacturer',
+    expected: 'єдиний виробник у всіх документах',
+    actual: 'назви виробника різняться між документами — уточніть у постачальника',
+    severity: 'warning',
+    kind: 'suspected',
+    citations: entries.map((e) => cite(e.ref, e.val)),
+  });
+}
+
+/** Registration number must be identical everywhere it appears (normalized). */
+function checkRegistrationConsistency(docs: ReconcileDoc[], out: Discrepancy[]): void {
+  const entries = docsWithField(docs, 'registration_number');
+  if (entries.length < 2) return;
+  const norm = (s: string): string => s.toUpperCase().replace(/\s+/g, '');
+  const distinct = new Set(entries.map((e) => norm(e.val)));
+  if (distinct.size <= 1) return;
+  out.push({
+    field: 'registration_number',
+    expected: entries[0]!.val,
+    actual: entries.map((e) => `${e.ref.doc_type}: ${e.val}`).join(' | '),
+    severity: 'warning',
+    kind: 'suspected',
+    citations: entries.map((e) => cite(e.ref, e.val)),
   });
 }
 

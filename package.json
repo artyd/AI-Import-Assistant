@@ -19,6 +19,7 @@
     "reminders:once": "tsx src/scripts/reminders-once.ts",
     "seed": "node dist/auth/seed.js",
     "smoke": "node scripts/smoke-test.mjs",
+    "ingest:registry": "node scripts/ingest-drug-registry.mjs",
     "eval:grounding": "node scripts/eval-grounding.mjs",
     "eval:golden": "tsx eval/run.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
