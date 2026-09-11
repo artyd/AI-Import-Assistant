@@ -165,6 +165,14 @@
   0%, 100% { opacity: 0.25; }
   50% { opacity: 1; }
 }
+@keyframes overlayIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes modalIn {
+  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
 @media (prefers-reduced-motion: reduce) {
   [data-anim] { animation: none !important; }
 }
@@ -320,6 +328,11 @@ a {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+/* --- Sidebar / palette rows: subtle hover state layer --- */
+.nav-row:hover {
+  background: var(--hover) !important;
 }
 
 /* --- Chat composer (mock: accent border on focus-within) --- */

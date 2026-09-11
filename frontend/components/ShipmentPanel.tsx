@@ -25,6 +25,7 @@ import { Combobox } from "./ui/Combobox";
 import { InstructionModal } from "./InstructionModal";
 import { VerificationModal } from "./VerificationModal";
 import { IconDownload, IconSpinner } from "./icons";
+import { LnCheck, LnExport } from "./LineIcons";
 
 // Three fixed party slots. "Через кого" (intermediary) is optional.
 const PARTY_SLOTS: { role: PartyRole; label: string; hint: string; optional?: boolean }[] = [
@@ -85,6 +86,8 @@ export function ShipmentPanel({
   const [verifyOpen, setVerifyOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [result, setResult] = useState<Result | null>(null);
+  // Auto-loaded completeness (mock's "Комплектність" progress header).
+  const [checklist, setChecklist] = useState<ChecklistItem[] | null>(null);
   const [suggestedContractType, setSuggestedContractType] = useState<
     "bilateral" | "trilateral" | null
   >(null);
@@ -124,6 +127,10 @@ export function ShipmentPanel({
     api<{ risks: Risk[] }>(`/api/workspaces/${workspaceId}/risks`)
       .then((r) => setRisks(r.risks))
       .catch(() => setRisks(null));
+    // Completeness for the progress header (non-blocking).
+    api<{ items: ChecklistItem[]; status: string }>(`/api/workspaces/${workspaceId}/checklist`)
+      .then((r) => setChecklist(r.items))
+      .catch(() => setChecklist(null));
   }, [workspaceId]);
 
   const reloadRisks = () =>
@@ -337,6 +344,15 @@ export function ShipmentPanel({
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
       <div style={{ overflowY: "auto", padding: "14px 16px", display: "flex", flexDirection: "column", gap: 18 }}>
+        {/* Completeness — mock's progress header */}
+        {checklist && checklist.length > 0 && (
+          <CompletenessHeader
+            items={checklist}
+            onExport={exportZip}
+            exporting={busy === "export"}
+          />
+        )}
+
         {/* Status */}
         <Section title="Статус">
           <select
@@ -686,6 +702,98 @@ function canonRole(role: string): PartyRole {
     if (slot === r || ROLE_SYNONYMS[slot].includes(r)) return slot;
   }
   return "recipient";
+}
+
+// Friendly labels for common checklist requirement keys (fallback: the raw key).
+const REQ_LABEL: Record<string, string> = {
+  contract: "Контракт",
+  invoice: "Інвойс",
+  proforma: "Проформа-інвойс",
+  packing_list: "Пакувальний лист",
+  cmr: "CMR / транспортна",
+  certificate_of_origin: "Сертифікат походження",
+  quality_certificate: "Сертифікат якості",
+  customs_declaration: "Митна декларація",
+  payment: "Платіжні документи",
+  specification: "Специфікація",
+};
+function reqLabel(key: string): string {
+  return REQ_LABEL[key] ?? key.replace(/_/g, " ");
+}
+
+function CompletenessHeader({
+  items,
+  onExport,
+  exporting,
+}: {
+  items: ChecklistItem[];
+  onExport: () => void;
+  exporting: boolean;
+}) {
+  const done = items.filter((i) => i.status !== "missing").length;
+  const total = items.length;
+  const pct = total ? Math.round((done / total) * 100) : 0;
+  const color = pct >= 100 ? "var(--ok)" : pct >= 50 ? "var(--warn)" : "var(--err)";
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        <span style={{ fontWeight: 600, fontSize: 13, color: "var(--text)" }}>Комплектність пакета</span>
+        <span style={{ fontSize: 12, fontWeight: 600, color, fontVariantNumeric: "tabular-nums" }}>
+          {done}/{total}
+        </span>
+      </div>
+      <div style={{ height: 7, borderRadius: 4, background: "var(--hover)", overflow: "hidden", marginBottom: 16 }}>
+        <div style={{ height: "100%", width: `${pct}%`, background: color, borderRadius: 4, transition: "width .3s" }} />
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+        {items.map((ci) => {
+          const ok = ci.status !== "missing";
+          return (
+            <div key={ci.requirement_key} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
+              {ok ? (
+                <span
+                  style={{
+                    flex: "none",
+                    width: 18,
+                    height: 18,
+                    borderRadius: "50%",
+                    background: "var(--okBg)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "var(--ok)",
+                  }}
+                >
+                  <LnCheck size={11} strokeWidth={3.2} />
+                </span>
+              ) : (
+                <span
+                  style={{
+                    flex: "none",
+                    width: 18,
+                    height: 18,
+                    borderRadius: "50%",
+                    border: "1.5px dashed var(--border2)",
+                  }}
+                />
+              )}
+              <span style={{ flex: 1, minWidth: 0, color: ok ? "var(--text)" : "var(--muted)", textTransform: "capitalize" }}>
+                {reqLabel(ci.requirement_key)}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      <button
+        onClick={onExport}
+        disabled={exporting}
+        className="btn btn-primary"
+        style={{ width: "100%", marginTop: 18, height: 40 }}
+      >
+        {exporting ? <IconSpinner size={15} /> : <LnExport size={15} />} Експорт пакета
+      </button>
+    </div>
+  );
 }
 
 function Field({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {

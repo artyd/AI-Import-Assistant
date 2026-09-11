@@ -16,7 +16,13 @@ const DOT: Record<LogEntry["kind"], string> = {
   warn: "var(--warn)",
 };
 
-export function AgentLog({ entries }: { entries: LogEntry[] }) {
+export function AgentLog({
+  entries,
+  embedded = false,
+}: {
+  entries: LogEntry[];
+  embedded?: boolean;
+}) {
   return (
     <div
       style={{
@@ -26,20 +32,22 @@ export function AgentLog({ entries }: { entries: LogEntry[] }) {
         minHeight: 0,
       }}
     >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          padding: "14px 16px",
-          borderBottom: "1px solid var(--border)",
-          fontWeight: 600,
-          flex: "none",
-        }}
-      >
-        <IconClock size={17} />
-        Журнал агента
-      </div>
+      {!embedded && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "14px 16px",
+            borderBottom: "1px solid var(--border)",
+            fontWeight: 600,
+            flex: "none",
+          }}
+        >
+          <IconClock size={17} />
+          Журнал агента
+        </div>
+      )}
 
       <div style={{ overflowY: "auto", padding: "12px 16px", flex: 1 }}>
         {entries.length === 0 ? (
