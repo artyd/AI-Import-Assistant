@@ -13,6 +13,7 @@ import {
   IconFile,
   IconFolder,
   IconCheck,
+  IconSearch,
 } from "./icons";
 
 const UPLOAD_ACCEPT = ".pdf,.docx,.xlsx,.csv,.png,.jpg,.jpeg";
@@ -288,8 +289,8 @@ export function Chat({
     [onMoveFile, patchCard]
   );
 
-  const send = useCallback(async () => {
-    const text = input.trim();
+  const runMessage = useCallback(async (raw: string) => {
+    const text = raw.trim();
     if (!text || streaming) return;
     setInput("");
     setStreaming(true);
@@ -364,7 +365,9 @@ export function Chat({
     } finally {
       setStreaming(false);
     }
-  }, [input, streaming, workspaceId, onConversationStarted, onLog]);
+  }, [streaming, workspaceId, onConversationStarted, onLog]);
+
+  const send = useCallback(() => runMessage(input), [runMessage, input]);
 
   return (
     <div
@@ -414,145 +417,291 @@ export function Chat({
           </div>
         </div>
       )}
-      <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "24px 0" }}>
-        <div style={{ maxWidth: 760, margin: "0 auto", padding: "0 28px" }}>
-          {items.length === 0 ? <Greeting /> : <DateSeparator />}
-          {items.map((it) =>
-            it.kind === "classify" ? (
-              <ClassifyBubble
-                key={it.id}
-                card={it}
-                folders={folders}
-                onPick={pickFolder}
-              />
-            ) : it.role === "user" ? (
-              <UserBubble key={it.id} text={it.content} />
-            ) : (
-              <AssistantBubble
-                key={it.id}
-                text={it.content}
-                citations={it.citations}
-                pending={streaming && it.content === ""}
-              />
-            )
-          )}
-        </div>
-      </div>
+      {/* Shared hidden file input (rendered once; whichever branch is mounted
+          owns the ref). */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        hidden
+        accept={UPLOAD_ACCEPT}
+        onChange={(e) => {
+          if (e.target.files && e.target.files.length) ingest(Array.from(e.target.files));
+          e.target.value = "";
+        }}
+      />
 
-      <div style={{ flex: "none", padding: "8px 28px 20px" }}>
-        <div style={{ maxWidth: 760, margin: "0 auto" }}>
-          {notice && (
-            <div
-              role="alert"
-              onClick={() => setNotice(null)}
-              style={{
-                marginBottom: 8,
-                padding: "8px 12px",
-                borderRadius: 10,
-                background: "var(--errBg)",
-                color: "var(--err)",
-                fontSize: 13,
-                cursor: "pointer",
-              }}
-            >
-              {notice}
+      {items.length === 0 ? (
+        /* ── Onboarding / new chat — centered, like the AI-chat empty state ── */
+        <div
+          style={{
+            flex: 1,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "32px 24px",
+            minHeight: 0,
+            overflowY: "auto",
+          }}
+        >
+          <div
+            data-anim
+            style={{ width: "100%", maxWidth: 680, animation: "fadeUp .5s ease both" }}
+          >
+            <div style={{ display: "flex", justifyContent: "center", margin: "0 0 22px" }}>
+              <span
+                style={{
+                  flex: "none",
+                  width: 60,
+                  height: 60,
+                  borderRadius: 17,
+                  background: "var(--accent)",
+                  color: "var(--accentTx)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontWeight: 800,
+                  fontSize: 31,
+                  boxShadow: "0 10px 30px var(--accentSoft)",
+                }}
+              >
+                Ш
+              </span>
             </div>
-          )}
-          <div
-            className="composer"
-            style={{
-              display: "flex",
-              alignItems: "flex-end",
-              gap: 10,
-              padding: "8px 8px 8px 15px",
-              background: "var(--surface)",
-              border: "1px solid var(--border2)",
-              borderRadius: 16,
-              boxShadow: "var(--shadow)",
-            }}
-          >
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              hidden
-              accept={UPLOAD_ACCEPT}
-              onChange={(e) => {
-                if (e.target.files && e.target.files.length)
-                  ingest(Array.from(e.target.files));
-                e.target.value = "";
-              }}
-            />
-            <button
-              title="Долучити файл"
-              aria-label="Долучити файл"
-              data-testid="chat-attach"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={streaming}
+            <h1
               style={{
-                flex: "none",
-                width: 40,
-                height: 40,
-                alignSelf: "center",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                borderRadius: 10,
-                border: "none",
-                background: "transparent",
-                color: "var(--muted)",
-                cursor: streaming ? "default" : "pointer",
-              }}
-            >
-              <IconAttach size={21} />
-            </button>
-            <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onPaste={onPaste}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  send();
-                }
-              }}
-              placeholder="Спитайте Штурмана або перетягніть / вставте файли"
-              data-testid="chat-input"
-              rows={1}
-              style={{
-                flex: 1,
-                resize: "none",
-                border: "none",
-                outline: "none",
-                background: "transparent",
+                margin: "0 0 8px",
+                fontWeight: 700,
+                fontSize: 32,
+                lineHeight: 1.15,
+                textAlign: "center",
                 color: "var(--text)",
-                font: "inherit",
-                maxHeight: 160,
-                padding: "8px 4px",
               }}
-            />
-            <button
-              className="btn btn-primary"
-              onClick={send}
-              disabled={streaming || !input.trim()}
-              style={{ height: 40, width: 40, padding: 0, borderRadius: 11 }}
-              aria-label="Надіслати"
             >
-              {streaming ? <IconSpinner size={16} /> : <IconSend size={16} />}
-            </button>
-          </div>
-          <div
-            style={{
-              textAlign: "center",
-              color: "var(--muted)",
-              fontSize: 12,
-              marginTop: 8,
-            }}
-          >
-            Штурман читає документи інструментами та посилається на джерело. Enter — надіслати.
+              Чим допомогти по постачанню?
+            </h1>
+            <p
+              style={{
+                margin: "0 0 30px",
+                fontSize: 15.5,
+                lineHeight: 1.55,
+                color: "var(--muted)",
+                textAlign: "center",
+              }}
+            >
+              Штурман проіндексує документи, звірить чернетки, простежить
+              комплектність пакета й підкаже код УКТ&nbsp;ЗЕД.
+            </p>
+            {notice && <Notice text={notice} onClear={() => setNotice(null)} />}
+            <Composer
+              input={input}
+              setInput={setInput}
+              onPaste={onPaste}
+              onSend={send}
+              onAttach={() => fileInputRef.current?.click()}
+              streaming={streaming}
+            />
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                justifyContent: "center",
+                gap: 9,
+                marginTop: 18,
+              }}
+            >
+              {STARTERS.map((s) => (
+                <button
+                  key={s.text}
+                  onClick={() => runMessage(s.text)}
+                  disabled={streaming}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 8,
+                    height: 38,
+                    padding: "0 15px",
+                    background: "var(--surface)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 20,
+                    color: "var(--text)",
+                    fontSize: 13,
+                    cursor: streaming ? "default" : "pointer",
+                  }}
+                >
+                  <span style={{ color: "var(--accent)", display: "flex" }}>{s.icon}</span>
+                  {s.text}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
-      </div>
+      ) : (
+        /* ── Conversation thread ── */
+        <>
+          <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "24px 0" }}>
+            <div style={{ maxWidth: 760, margin: "0 auto", padding: "0 28px" }}>
+              <DateSeparator />
+              {items.map((it) =>
+                it.kind === "classify" ? (
+                  <ClassifyBubble key={it.id} card={it} folders={folders} onPick={pickFolder} />
+                ) : it.role === "user" ? (
+                  <UserBubble key={it.id} text={it.content} />
+                ) : (
+                  <AssistantBubble
+                    key={it.id}
+                    text={it.content}
+                    citations={it.citations}
+                    pending={streaming && it.content === ""}
+                  />
+                )
+              )}
+            </div>
+          </div>
+
+          <div style={{ flex: "none", padding: "8px 28px 20px" }}>
+            <div style={{ maxWidth: 760, margin: "0 auto" }}>
+              {notice && <Notice text={notice} onClear={() => setNotice(null)} />}
+              <Composer
+                input={input}
+                setInput={setInput}
+                onPaste={onPaste}
+                onSend={send}
+                onAttach={() => fileInputRef.current?.click()}
+                streaming={streaming}
+              />
+              <div
+                style={{
+                  textAlign: "center",
+                  color: "var(--muted)",
+                  fontSize: 12,
+                  marginTop: 8,
+                }}
+              >
+                Штурман читає документи інструментами та посилається на джерело. Enter — надіслати.
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+const STARTERS: { text: string; icon: React.ReactNode }[] = [
+  { text: "Звірити інвойс із контрактом", icon: <IconFile size={15} /> },
+  { text: "Перевірити комплектність пакета", icon: <IconCheck size={15} /> },
+  { text: "Підказати код УКТ ЗЕД", icon: <IconSearch size={15} /> },
+  { text: "Яких документів ще бракує?", icon: <IconFolder size={15} /> },
+];
+
+function Notice({ text, onClear }: { text: string; onClear: () => void }) {
+  return (
+    <div
+      role="alert"
+      onClick={onClear}
+      style={{
+        marginBottom: 8,
+        padding: "8px 12px",
+        borderRadius: 10,
+        background: "var(--errBg)",
+        color: "var(--err)",
+        fontSize: 13,
+        cursor: "pointer",
+      }}
+    >
+      {text}
+    </div>
+  );
+}
+
+function Composer({
+  input,
+  setInput,
+  onPaste,
+  onSend,
+  onAttach,
+  streaming,
+}: {
+  input: string;
+  setInput: (v: string) => void;
+  onPaste: (e: React.ClipboardEvent) => void;
+  onSend: () => void;
+  onAttach: () => void;
+  streaming: boolean;
+}) {
+  return (
+    <div
+      className="composer"
+      style={{
+        display: "flex",
+        alignItems: "flex-end",
+        gap: 10,
+        padding: "8px 8px 8px 15px",
+        background: "var(--surface)",
+        border: "1px solid var(--border2)",
+        borderRadius: 16,
+        boxShadow: "var(--shadow)",
+      }}
+    >
+      <button
+        title="Долучити файл"
+        aria-label="Долучити файл"
+        data-testid="chat-attach"
+        onClick={onAttach}
+        disabled={streaming}
+        style={{
+          flex: "none",
+          width: 40,
+          height: 40,
+          alignSelf: "center",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          borderRadius: 10,
+          border: "none",
+          background: "transparent",
+          color: "var(--muted)",
+          cursor: streaming ? "default" : "pointer",
+        }}
+      >
+        <IconAttach size={21} />
+      </button>
+      <textarea
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        onPaste={onPaste}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            onSend();
+          }
+        }}
+        placeholder="Спитайте Штурмана або перетягніть / вставте файли"
+        data-testid="chat-input"
+        rows={1}
+        style={{
+          flex: 1,
+          resize: "none",
+          border: "none",
+          outline: "none",
+          background: "transparent",
+          color: "var(--text)",
+          font: "inherit",
+          maxHeight: 160,
+          padding: "8px 4px",
+        }}
+      />
+      <button
+        className="btn btn-primary"
+        onClick={onSend}
+        disabled={streaming || !input.trim()}
+        style={{ height: 40, width: 40, padding: 0, borderRadius: 11 }}
+        aria-label="Надіслати"
+      >
+        {streaming ? <IconSpinner size={16} /> : <IconSend size={16} />}
+      </button>
     </div>
   );
 }
@@ -599,64 +748,6 @@ function AgentAvatar() {
     >
       Ш
     </span>
-  );
-}
-
-function Greeting() {
-  return (
-    <div
-      data-anim
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        textAlign: "center",
-        padding: "36px 8px 30px",
-        animation: "fadeUp .5s ease both",
-      }}
-    >
-      <span
-        style={{
-          flex: "none",
-          width: 60,
-          height: 60,
-          borderRadius: 17,
-          background: "var(--accent)",
-          color: "var(--accentTx)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontWeight: 800,
-          fontSize: 31,
-          boxShadow: "0 10px 30px var(--accentSoft)",
-        }}
-      >
-        Ш
-      </span>
-      <h1
-        style={{
-          margin: "22px 0 8px",
-          fontWeight: 700,
-          fontSize: 28,
-          lineHeight: 1.15,
-          color: "var(--text)",
-        }}
-      >
-        Чим допомогти по постачанню?
-      </h1>
-      <p
-        style={{
-          margin: 0,
-          maxWidth: 520,
-          fontSize: 15,
-          lineHeight: 1.55,
-          color: "var(--muted)",
-        }}
-      >
-        Штурман проіндексує документи, звірить чернетки, простежить комплектність
-        пакета й підкаже код УКТ&nbsp;ЗЕД.
-      </p>
-    </div>
   );
 }
 
