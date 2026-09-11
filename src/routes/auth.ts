@@ -4,10 +4,15 @@ import { query } from '../db/pool.js';
 import { verifyPassword } from '../auth/passwords.js';
 import { signToken } from '../auth/jwt.js';
 import { authenticate } from '../auth/hook.js';
+import { config } from '../config.js';
 
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
+});
+
+const codeSchema = z.object({
+  code: z.string().min(1),
 });
 
 interface UserRow {
@@ -35,6 +40,40 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     if (!user || !(await verifyPassword(password, user.password_hash))) {
       return reply.code(401).send({ error: 'invalid_credentials' });
     }
+
+    const token = signToken({ sub: user.id, email: user.email });
+    return reply.send({
+      token,
+      user: { id: user.id, email: user.email, name: user.name },
+    });
+  });
+
+  // POST /api/auth/login-code — shared access-code login (the UI's PIN keypad).
+  // Unauthenticated, like /login. A correct ACCESS_CODE issues a JWT for the
+  // configured ACCESS_CODE_EMAIL, or the oldest user if unset.
+  app.post('/api/auth/login-code', async (req, reply) => {
+    if (!config.ACCESS_CODE) {
+      return reply.code(404).send({ error: 'code_login_disabled' });
+    }
+    const parsed = codeSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'invalid_request', issues: parsed.error.issues });
+    }
+    if (parsed.data.code !== config.ACCESS_CODE) {
+      return reply.code(401).send({ error: 'invalid_code' });
+    }
+
+    const target = config.ACCESS_CODE_EMAIL?.trim().toLowerCase();
+    const { rows } = target
+      ? await query<{ id: string; email: string; name: string }>(
+          'SELECT id, email, name FROM users WHERE email = $1',
+          [target],
+        )
+      : await query<{ id: string; email: string; name: string }>(
+          'SELECT id, email, name FROM users ORDER BY created_at ASC LIMIT 1',
+        );
+    const user = rows[0];
+    if (!user) return reply.code(401).send({ error: 'no_user' });
 
     const token = signToken({ sub: user.id, email: user.email });
     return reply.send({
