@@ -615,31 +615,62 @@ export default function WorkspacePage() {
             flexDirection: "column",
           }}
         >
-          <div style={{ display: "flex", borderBottom: "1px solid var(--border)", flex: "none" }}>
+          <div
+            style={{
+              flex: "none",
+              display: "flex",
+              alignItems: "center",
+              height: "var(--header-h)",
+              padding: "0 18px",
+              borderBottom: "1px solid var(--border)",
+              fontWeight: 600,
+              fontSize: 14,
+              color: "var(--text)",
+            }}
+          >
+            Робоча панель
+          </div>
+          <div
+            style={{
+              flex: "none",
+              display: "flex",
+              gap: 2,
+              margin: "10px 12px 0",
+              padding: 3,
+              background: "var(--hover)",
+              borderRadius: 11,
+            }}
+          >
             {(
               [
                 ["shipment", "Постачання"],
                 ["log", "Журнал"],
               ] as const
-            ).map(([key, label]) => (
-              <button
-                key={key}
-                onClick={() => setRightTab(key)}
-                style={{
-                  flex: 1,
-                  height: 42,
-                  border: "none",
-                  background: "transparent",
-                  cursor: "pointer",
-                  font: "inherit",
-                  fontWeight: 600,
-                  color: rightTab === key ? "var(--text)" : "var(--muted)",
-                  borderBottom: rightTab === key ? "2px solid var(--accent)" : "2px solid transparent",
-                }}
-              >
-                {label}
-              </button>
-            ))}
+            ).map(([key, label]) => {
+              const on = rightTab === key;
+              return (
+                <button
+                  key={key}
+                  onClick={() => setRightTab(key)}
+                  style={{
+                    flex: 1,
+                    height: 34,
+                    border: "none",
+                    borderRadius: 9,
+                    cursor: "pointer",
+                    font: "inherit",
+                    fontWeight: 600,
+                    fontSize: 13,
+                    color: on ? "var(--text)" : "var(--muted)",
+                    background: on ? "var(--surface)" : "transparent",
+                    boxShadow: on ? "var(--elev-1)" : "none",
+                    transition: "background .15s, color .15s",
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })}
           </div>
           <div style={{ flex: 1, minHeight: 0 }}>
             {rightTab === "shipment" && workspace ? (

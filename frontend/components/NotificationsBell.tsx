@@ -46,7 +46,7 @@ export function NotificationsBell() {
         onClick={() => setOpen((o) => !o)}
         aria-label="Сповіщення"
         title="Сповіщення"
-        style={{ color: "rgba(250,250,250,.85)", position: "relative" }}
+        style={{ position: "relative" }}
       >
         <IconBell size={18} />
         {unread > 0 && (

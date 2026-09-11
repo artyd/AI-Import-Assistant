@@ -6,7 +6,6 @@ import { streamChat } from "@/lib/sse";
 import { Markdown } from "./Markdown";
 import type { LogEntry } from "./AgentLog";
 import {
-  IconAgent,
   IconSend,
   IconAttach,
   IconSpinner,
@@ -414,8 +413,8 @@ export function Chat({
         </div>
       )}
       <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "24px 0" }}>
-        <div style={{ maxWidth: 720, margin: "0 auto", padding: "0 24px" }}>
-          <DateSeparator />
+        <div style={{ maxWidth: 760, margin: "0 auto", padding: "0 28px" }}>
+          {items.length === 0 ? <Greeting /> : <DateSeparator />}
           {items.map((it) =>
             it.kind === "classify" ? (
               <ClassifyBubble
@@ -438,8 +437,8 @@ export function Chat({
         </div>
       </div>
 
-      <div style={{ flex: "none", padding: "0 24px 18px" }}>
-        <div style={{ maxWidth: 720, margin: "0 auto" }}>
+      <div style={{ flex: "none", padding: "8px 28px 20px" }}>
+        <div style={{ maxWidth: 760, margin: "0 auto" }}>
           {notice && (
             <div
               role="alert"
@@ -448,7 +447,7 @@ export function Chat({
                 marginBottom: 8,
                 padding: "8px 12px",
                 borderRadius: 10,
-                background: "color-mix(in srgb, var(--err) 12%, var(--surface))",
+                background: "var(--errBg)",
                 color: "var(--err)",
                 fontSize: 13,
                 cursor: "pointer",
@@ -458,13 +457,16 @@ export function Chat({
             </div>
           )}
           <div
-            className="panel"
+            className="composer"
             style={{
               display: "flex",
               alignItems: "flex-end",
-              gap: 8,
-              padding: 8,
+              gap: 10,
+              padding: "8px 8px 8px 15px",
               background: "var(--surface)",
+              border: "1px solid var(--border2)",
+              borderRadius: 16,
+              boxShadow: "var(--shadow)",
             }}
           >
             <input
@@ -516,7 +518,7 @@ export function Chat({
               className="btn btn-primary"
               onClick={send}
               disabled={streaming || !input.trim()}
-              style={{ height: 36, width: 36, padding: 0, borderRadius: 999 }}
+              style={{ height: 40, width: 40, padding: 0, borderRadius: 11 }}
               aria-label="Надіслати"
             >
               {streaming ? <IconSpinner size={16} /> : <IconSend size={16} />}
@@ -560,19 +562,100 @@ function DateSeparator() {
   );
 }
 
+function AgentAvatar() {
+  return (
+    <span
+      style={{
+        flex: "none",
+        width: 32,
+        height: 32,
+        borderRadius: 9,
+        background: "var(--accent)",
+        color: "var(--accentTx)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontWeight: 700,
+        fontSize: 13,
+        marginTop: 2,
+      }}
+    >
+      Ш
+    </span>
+  );
+}
+
+function Greeting() {
+  return (
+    <div
+      data-anim
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        textAlign: "center",
+        padding: "36px 8px 30px",
+        animation: "fadeUp .5s ease both",
+      }}
+    >
+      <span
+        style={{
+          flex: "none",
+          width: 60,
+          height: 60,
+          borderRadius: 17,
+          background: "var(--accent)",
+          color: "var(--accentTx)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontWeight: 800,
+          fontSize: 31,
+          boxShadow: "0 10px 30px var(--accentSoft)",
+        }}
+      >
+        Ш
+      </span>
+      <h1
+        style={{
+          margin: "22px 0 8px",
+          fontWeight: 700,
+          fontSize: 28,
+          lineHeight: 1.15,
+          color: "var(--text)",
+        }}
+      >
+        Чим допомогти по постачанню?
+      </h1>
+      <p
+        style={{
+          margin: 0,
+          maxWidth: 520,
+          fontSize: 15,
+          lineHeight: 1.55,
+          color: "var(--muted)",
+        }}
+      >
+        Штурман проіндексує документи, звірить чернетки, простежить комплектність
+        пакета й підкаже код УКТ&nbsp;ЗЕД.
+      </p>
+    </div>
+  );
+}
+
 function UserBubble({ text }: { text: string }) {
   return (
-    <div style={{ display: "flex", justifyContent: "flex-end", margin: "14px 0" }}>
+    <div style={{ display: "flex", justifyContent: "flex-end", margin: "14px 0 26px" }}>
       <div
         style={{
           background: "var(--bubble)",
           color: "var(--bubbleTx)",
-          padding: "12px 16px",
-          borderRadius: 16,
-          borderBottomRightRadius: 6,
+          padding: "12px 17px",
+          borderRadius: "20px 20px 6px 20px",
           maxWidth: "78%",
           whiteSpace: "pre-wrap",
           fontSize: 15,
+          lineHeight: 1.55,
         }}
       >
         {text}
@@ -688,32 +771,12 @@ function AssistantBubble({
   pending?: boolean;
 }) {
   return (
-    <div style={{ margin: "18px 0" }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          marginBottom: 8,
-        }}
-      >
-        <span
-          style={{
-            width: 26,
-            height: 26,
-            borderRadius: 8,
-            background: "var(--accent)",
-            color: "var(--accentTx)",
-            display: "grid",
-            placeItems: "center",
-          }}
-        >
-          <IconAgent size={16} />
-        </span>
-        <span style={{ fontWeight: 600 }}>Штурман</span>
-        <span style={{ color: "var(--muted)", fontSize: 12 }}>агент</span>
-      </div>
-      <div style={{ paddingLeft: 34 }}>
+    <div style={{ display: "flex", gap: 14, margin: "18px 0 28px" }} data-anim>
+      <AgentAvatar />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8 }}>
+          Штурман
+        </div>
         {pending ? (
           <span style={{ color: "var(--muted)" }}>
             <IconSpinner size={16} /> Обмірковує…

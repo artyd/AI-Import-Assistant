@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { ApiError } from "@/lib/api";
 import { useTheme } from "@/lib/theme";
-import { IconLogo, IconMoon, IconSun, IconSpinner } from "@/components/icons";
+import { IconMoon, IconSun, IconSpinner } from "@/components/icons";
 
 export default function LoginPage() {
   const { user, loading, login } = useAuth();
@@ -42,27 +42,37 @@ export default function LoginPage() {
       <div
         style={{
           height: "var(--header-h)",
-          background: "var(--header)",
-          color: "#fafafa",
+          background: "var(--chat)",
+          color: "var(--text)",
           display: "flex",
           alignItems: "center",
           padding: "0 16px",
           gap: 10,
+          borderBottom: "1px solid var(--border)",
         }}
       >
-        <IconLogo size={22} />
         <span
-          style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 16 }}
+          style={{
+            flex: "none",
+            width: 30,
+            height: 30,
+            borderRadius: 9,
+            background: "var(--accent)",
+            color: "var(--accentTx)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontWeight: 800,
+            fontSize: 16,
+          }}
         >
-          AI Import Assistant
+          Ш
+        </span>
+        <span style={{ fontWeight: 700, fontSize: 17, letterSpacing: 1.5 }}>
+          ШТУРМАН
         </span>
         <div style={{ flex: 1 }} />
-        <button
-          className="btn-icon"
-          onClick={toggle}
-          aria-label="Тема"
-          style={{ color: "rgba(250,250,250,.85)" }}
-        >
+        <button className="btn-icon" onClick={toggle} aria-label="Тема">
           {theme === "dark" ? <IconSun size={18} /> : <IconMoon size={18} />}
         </button>
       </div>

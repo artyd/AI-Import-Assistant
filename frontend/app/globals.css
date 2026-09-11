@@ -1,50 +1,57 @@
-/* Design tokens ported verbatim from the DesignCanvas mock (AI Import Assistant.dc.html). */
+/* Design tokens ported from the DesignCanvas mock (ШТУРМАН.dc.html) — Hanken
+   Grotesk, blue accent, light/dark themes + an optional calmer "soft" tone. */
 * {
   box-sizing: border-box;
 }
 
 :root {
-  --bg: #f4f4f5;
+  --bg: #ffffff;
   --header: #111113;
-  --panel: #fafafa;
+  --panel: #f7f7f8;
   --surface: #ffffff;
   --chat: #ffffff;
-  --text: #141416;
+  --text: #0d0d0f;
   --hi: #fafafa;
-  --muted: #83838a;
-  --border: rgba(20, 20, 22, 0.12);
-  --border2: rgba(20, 20, 22, 0.22);
-  --hover: rgba(20, 20, 22, 0.055);
-  --card: #f6f6f7;
-  --bubble: #141416;
-  --bubbleTx: #fafafa;
-  --hl: rgba(20, 20, 22, 0.08);
+  --muted: #8b8b94;
+  --faint: #b4b4bc;
+  --border: rgba(13, 13, 15, 0.09);
+  --border2: rgba(13, 13, 15, 0.14);
+  --hover: rgba(13, 13, 15, 0.045);
+  --active: rgba(47, 111, 235, 0.1);
+  --card: #f7f7f8;
+  --bubble: #2f6feb;
+  --bubbleTx: #ffffff;
+  --hl: rgba(13, 13, 15, 0.08);
   --menu: #ffffff;
-  --shadow: 0 12px 36px rgba(0, 0, 0, 0.16);
-  --accent: #141416;
-  --accentTx: #fafafa;
-  --ok: #1e9e6a;
-  --warn: #e8890c;
-  --err: #e5484d;
-  --info: #3b7de0;
+  --shadow: 0 10px 34px rgba(13, 13, 20, 0.12);
+  --accent: #2f6feb;
+  --accentTx: #ffffff;
+  --accentSoft: rgba(47, 111, 235, 0.12);
+  --ok: #12936a;
+  --warn: #d98213;
+  --err: #dc4a4f;
+  --info: #2f6feb;
+  --okBg: rgba(18, 147, 106, 0.12);
+  --warnBg: rgba(217, 130, 19, 0.14);
+  --errBg: rgba(220, 74, 79, 0.12);
   --st-done: var(--ok);
   --st-idx: var(--warn);
-  --st-queue: #bebec4;
+  --st-queue: #c7c7cf;
 
   /* Icon foreground (contrast rule). Neutral icons flip with the theme so they
      stay dark-on-light / light-on-dark; the two always-dark surfaces (header,
      accent) use --icon-fg-on-dark. Centralised here — see .ico3d / .btn-icon. */
-  --icon-fg: #141416;         /* dark icon on light surfaces */
-  --icon-fg-muted: #83838a;   /* idle / secondary icon */
-  --icon-fg-on-dark: #fafafa; /* icon on header / accent (always dark bg) */
+  --icon-fg: #0d0d0f;         /* dark icon on light surfaces */
+  --icon-fg-muted: #8b8b94;   /* idle / secondary icon */
+  --icon-fg-on-dark: #fafafa; /* icon on accent / always-dark surfaces */
 
-  --font-sans: Inter, system-ui, -apple-system, sans-serif;
-  --font-display: "Space Grotesk", var(--font-sans);
-  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --font-sans: "Hanken Grotesk", system-ui, -apple-system, sans-serif;
+  --font-display: "Hanken Grotesk", var(--font-sans);
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
 
-  --radius: 12px;
-  --radius-sm: 8px;
-  --header-h: 58px;
+  --radius: 14px;
+  --radius-sm: 10px;
+  --header-h: 56px;
 
   /* ── Material Design language (ref: CosmicMind/Material) ──────────────────
      Elevation: discrete dp levels, a soft ambient + a tighter key shadow, the
@@ -68,36 +75,54 @@
   --state-press: 0.14;
 }
 
+/* Calmer "soft" tone — slightly cool, tinted panels. Opt in with
+   `data-tone="soft"` on a container (composes with light/dark). */
+[data-tone="soft"] {
+  --bg: #f7f8fa;
+  --panel: #edf0f4;
+  --chat: #f7f8fa;
+  --surface: #ffffff;
+  --card: #ffffff;
+  --hover: rgba(23, 31, 48, 0.05);
+  --border: rgba(23, 31, 48, 0.09);
+}
+
 [data-theme="dark"] {
-  --bg: #0d0d0f;
+  --bg: #212124;
   --header: #000000;
-  --panel: #141416;
-  --surface: #1b1b1e;
-  --chat: #0f0f11;
-  --text: #f1f1f2;
-  --hi: #f1f1f2;
-  --muted: #83838a;
-  --border: rgba(241, 241, 242, 0.14);
-  --border2: rgba(241, 241, 242, 0.26);
-  --hover: rgba(241, 241, 242, 0.08);
-  --card: #1b1b1e;
-  --bubble: #2b2b30;
-  --bubbleTx: #f1f1f2;
-  --hl: rgba(241, 241, 242, 0.11);
-  --menu: #1b1b1e;
-  --shadow: 0 14px 40px rgba(0, 0, 0, 0.6);
-  --accent: #f1f1f2;
+  --panel: #181819;
+  --surface: #2a2a2e;
+  --chat: #212124;
+  --text: #ececee;
+  --hi: #ececee;
+  --muted: #9a9aa2;
+  --faint: #6e6e76;
+  --border: rgba(236, 236, 238, 0.11);
+  --border2: rgba(236, 236, 238, 0.2);
+  --hover: rgba(236, 236, 238, 0.06);
+  --active: rgba(93, 150, 255, 0.16);
+  --card: #2a2a2e;
+  --bubble: #3a78f0;
+  --bubbleTx: #ffffff;
+  --hl: rgba(236, 236, 238, 0.11);
+  --menu: #2a2a2e;
+  --shadow: 0 14px 40px rgba(0, 0, 0, 0.55);
+  --accent: #5d96ff;
   --accentTx: #0d0d0f;
-  --ok: #37c48b;
-  --warn: #f5a623;
-  --err: #f26169;
-  --info: #5b9bf0;
+  --accentSoft: rgba(93, 150, 255, 0.16);
+  --ok: #33b98a;
+  --warn: #e7a54b;
+  --err: #ee6a70;
+  --info: #5d96ff;
+  --okBg: rgba(51, 185, 138, 0.16);
+  --warnBg: rgba(231, 165, 75, 0.16);
+  --errBg: rgba(238, 106, 112, 0.16);
   --st-done: var(--ok);
   --st-idx: var(--warn);
-  --st-queue: #48484d;
+  --st-queue: #4a4a50;
 
-  --icon-fg: #f1f1f2;         /* dark theme → light icon */
-  --icon-fg-muted: #83838a;
+  --icon-fg: #ececee;         /* dark theme → light icon */
+  --icon-fg-muted: #9a9aa2;
   --icon-fg-on-dark: #fafafa;
 
   /* Deeper elevation on dark surfaces (Material: shadows read stronger on dark). */
@@ -106,6 +131,42 @@
   --elev-3: 0 4px 10px rgba(0, 0, 0, 0.50), 0 3px 14px rgba(0, 0, 0, 0.55);
   --elev-4: 0 6px 16px rgba(0, 0, 0, 0.55), 0 4px 20px rgba(0, 0, 0, 0.55);
   --elev-5: 0 12px 30px rgba(0, 0, 0, 0.62), 0 6px 26px rgba(0, 0, 0, 0.60);
+}
+
+[data-theme="dark"][data-tone="soft"] {
+  --bg: #1d2026;
+  --panel: #15171b;
+  --chat: #1d2026;
+}
+
+/* Motion vocabulary from the mock — used by the chat "working" indicator,
+   file-status rings and entrance animations. */
+@keyframes idxPulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.5); opacity: 0.35; }
+}
+@keyframes idxRing {
+  0% { transform: scale(0.6); opacity: 0.5; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes stepIn {
+  from { opacity: 0; transform: translateX(-6px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes popIn {
+  from { opacity: 0; transform: translateY(-6px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes blink {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-anim] { animation: none !important; }
 }
 
 html,
@@ -261,6 +322,14 @@ a {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
+/* --- Chat composer (mock: accent border on focus-within) --- */
+.composer {
+  transition: border-color var(--dur-short, 120ms) ease;
+}
+.composer:focus-within {
+  border-color: var(--accent);
+}
+
 /* --- Status dots --- */
 .dot {
   width: 8px;
@@ -274,6 +343,19 @@ a {
 }
 .dot.indexing {
   background: var(--st-idx);
+  position: relative;
+}
+/* Mock's live-indexing cue: a soft expanding ring around the dot. */
+.dot.indexing::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--st-idx);
+  animation: idxRing 1.3s ease-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .dot.indexing::after { animation: none; }
 }
 .dot.queued {
   background: var(--st-queue);
