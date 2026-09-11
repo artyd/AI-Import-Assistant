@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import type { FileItem, Folder } from "@/lib/types";
 import { toUiStatus } from "@/lib/types";
+import { folderLabel } from "@/lib/folderLabels";
 import { FileTree } from "./FileTree";
 import {
   LnFile,
@@ -61,7 +62,10 @@ export function FilesTab(props: Props) {
     .filter((f) => f.isLatest !== false && (!q || f.name.toLowerCase().includes(q)))
     .map((f) => ({
       ...f,
-      folderName: folders.find((fo) => fo.id === f.folderId)?.name ?? "Корінь постачання",
+      folderName: (() => {
+        const fo = folders.find((x) => x.id === f.folderId);
+        return fo ? folderLabel(fo.name) : "Корінь постачання";
+      })(),
     }));
 
   const viewBtn = (active: boolean): React.CSSProperties => ({

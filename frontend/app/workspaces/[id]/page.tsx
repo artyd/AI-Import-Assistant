@@ -317,6 +317,20 @@ export default function WorkspacePage() {
     [id, folders]
   );
 
+  // Upload + auto-distribute: when 2+ files land in the root (inbox), classify
+  // each into its skeleton folder automatically (single files are left in the
+  // root for the user to place). Folder-targeted uploads are never reclassified.
+  const uploadSmart = useCallback(
+    async (folderId: string | null, fileList: FileList | File[]): Promise<FileItem[]> => {
+      const created = await upload(folderId, fileList);
+      if (folderId == null && created.length >= 2) {
+        await mapLimit(created, 4, (f) => classifyFile(f.id).catch(() => null));
+      }
+      return created;
+    },
+    [upload, classifyFile]
+  );
+
   const uploadAndClassify = useCallback(
     async (
       fileList: FileList | File[]
@@ -562,7 +576,7 @@ export default function WorkspacePage() {
         hidden
         accept=".pdf,.docx,.xlsx,.csv,.png,.jpg,.jpeg"
         onChange={(e) => {
-          if (e.target.files && e.target.files.length) upload(null, e.target.files);
+          if (e.target.files && e.target.files.length) uploadSmart(null, e.target.files);
           e.target.value = "";
         }}
       />
@@ -622,7 +636,7 @@ export default function WorkspacePage() {
               workspaceNumber={workspace.number}
               folders={folders}
               files={files}
-              onUpload={upload}
+              onUpload={uploadSmart}
               onCreateFolder={createFolder}
               onRenameFile={renameFile}
               onDeleteFile={deleteFile}

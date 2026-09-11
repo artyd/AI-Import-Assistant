@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Workspace, WorkspaceStatus } from "@/lib/types";
-import { NotificationsBell } from "./NotificationsBell";
 import {
   LnCheck,
   LnLock,
@@ -293,8 +292,6 @@ export function TopBar({
         <LnPanelRight size={17} />
         Панель
       </button>
-
-      <NotificationsBell />
 
       <button style={iconBtn} onClick={onToggleTheme} title="Тема оформлення" aria-label="Тема оформлення">
         {theme === "dark" ? <LnSun size={17} /> : <LnMoon size={16} />}

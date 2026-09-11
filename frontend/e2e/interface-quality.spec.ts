@@ -1,12 +1,18 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 
 /**
  * Interface quality — verifies the Material Design language is actually applied
- * and the layout is sound. All run standalone against the login page.
+ * and the layout is sound. Run standalone against the login page. The primary
+ * button + text inputs live on the admin email form, so those tests switch to it.
  */
+async function gotoEmailForm(page: Page) {
+  await page.goto("/login");
+  await page.getByRole("button", { name: /Вхід адміністратора/ }).click();
+}
+
 test.describe("Interface quality (Material)", () => {
   test("primary button carries Material elevation (box-shadow)", async ({ page }) => {
-    await page.goto("/login");
+    await gotoEmailForm(page);
     const btn = page.getByRole("button", { name: "Увійти" });
     const shadow = await btn.evaluate((el) => getComputedStyle(el).boxShadow);
     expect(shadow).not.toBe("none");
@@ -14,7 +20,7 @@ test.describe("Interface quality (Material)", () => {
   });
 
   test("buttons have a state-layer overlay (::after)", async ({ page }) => {
-    await page.goto("/login");
+    await gotoEmailForm(page);
     const hasLayer = await page
       .getByRole("button", { name: "Увійти" })
       .evaluate((el) => {
@@ -25,7 +31,7 @@ test.describe("Interface quality (Material)", () => {
   });
 
   test("input shows an accent focus ring on focus", async ({ page }) => {
-    await page.goto("/login");
+    await gotoEmailForm(page);
     const email = page.locator('input[type="email"]');
     const before = await email.evaluate((el) => getComputedStyle(el).boxShadow);
     await email.focus();
@@ -38,7 +44,7 @@ test.describe("Interface quality (Material)", () => {
     await page.goto("/login");
     const root = page.locator("html");
     const initial = await root.getAttribute("data-theme");
-    await page.getByRole("button", { name: "Тема" }).click();
+    await page.getByRole("button", { name: "Тема оформлення" }).click();
     await expect
       .poll(async () => root.getAttribute("data-theme"))
       .not.toBe(initial);
@@ -62,6 +68,6 @@ test.describe("Interface quality (Material)", () => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/login");
     // Page still renders and is interactive under reduced motion.
-    await expect(page.getByRole("button", { name: "Увійти" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "1", exact: true })).toBeVisible();
   });
 });

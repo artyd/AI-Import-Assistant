@@ -18,8 +18,9 @@ test.describe("Accessibility & hygiene", () => {
   test("interactive controls have accessible names", async ({ page }) => {
     await page.goto("/login");
     // Icon-only theme button must expose an aria-label.
-    await expect(page.getByRole("button", { name: "Тема" })).toBeVisible();
-    // Submit button has a visible text name.
+    await expect(page.getByRole("button", { name: "Тема оформлення" })).toBeVisible();
+    // Switch to the admin email form — its submit button has a visible text name.
+    await page.getByRole("button", { name: /Вхід адміністратора/ }).click();
     await expect(page.getByRole("button", { name: "Увійти" })).toBeVisible();
   });
 

@@ -3,6 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import type { FileItem, Folder } from "@/lib/types";
 import { toUiStatus } from "@/lib/types";
+import { folderLabel } from "@/lib/folderLabels";
 import {
   IconChevronDown,
   IconChevronRight,
@@ -106,7 +107,7 @@ export function FileTree({
               </button>
               <IconFolder size={16} />
               <span style={{ fontWeight: 600, flex: 1, minWidth: 0 }} className="ellipsis">
-                {folder.name}
+                {folderLabel(folder.name)}
               </span>
               {items.length > 0 && (
                 <span
@@ -253,7 +254,7 @@ function FileRow({
             cursor: "pointer",
           }}
         >
-          ? {suggestedFolder.name}
+          ? {folderLabel(suggestedFolder.name)}
         </button>
       )}
       {file.version && file.version > 1 && (
@@ -341,7 +342,7 @@ function FileRow({
                   >
                     <IconFolder size={14} />
                     <span className="ellipsis" style={{ flex: 1, minWidth: 0 }}>
-                      {folder.name}
+                      {folderLabel(folder.name)}
                     </span>
                     {current && <IconCheck size={13} />}
                   </button>

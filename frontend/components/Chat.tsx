@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Citation, Folder, Message } from "@/lib/types";
 import { streamChat } from "@/lib/sse";
+import { folderLabel } from "@/lib/folderLabels";
 import { Markdown } from "./Markdown";
 import type { LogEntry } from "./AgentLog";
 import {
@@ -371,6 +372,7 @@ export function Chat({
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
+      data-testid="chat-root"
       style={{
         position: "relative",
         display: "flex",
@@ -482,13 +484,27 @@ export function Chat({
               }}
             />
             <button
-              className="btn-icon"
               title="Долучити файл"
               aria-label="Долучити файл"
+              data-testid="chat-attach"
               onClick={() => fileInputRef.current?.click()}
               disabled={streaming}
+              style={{
+                flex: "none",
+                width: 40,
+                height: 40,
+                alignSelf: "center",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                borderRadius: 10,
+                border: "none",
+                background: "transparent",
+                color: "var(--muted)",
+                cursor: streaming ? "default" : "pointer",
+              }}
             >
-              <IconAttach size={18} />
+              <IconAttach size={21} />
             </button>
             <textarea
               value={input}
@@ -501,6 +517,7 @@ export function Chat({
                 }
               }}
               placeholder="Спитайте Штурмана або перетягніть / вставте файли"
+              data-testid="chat-input"
               rows={1}
               style={{
                 flex: 1,
@@ -688,7 +705,7 @@ function ClassifyBubble({
       : card.state === "error"
       ? "Не вдалося завантажити."
       : card.state === "filed"
-      ? `Віднесено до «${card.folderName}».`
+      ? `Віднесено до «${folderLabel(card.folderName ?? "")}».`
       : "Не вдалося визначити папку — оберіть вручну:";
 
   return (
@@ -752,7 +769,7 @@ function ClassifyBubble({
               style={{ height: 30, padding: "0 12px", fontSize: 13 }}
               onClick={() => onPick(card, folder)}
             >
-              <IconFolder size={14} /> {folder.name}
+              <IconFolder size={14} /> {folderLabel(folder.name)}
             </button>
           ))}
         </div>
