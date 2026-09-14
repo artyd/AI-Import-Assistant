@@ -8,6 +8,7 @@ import { useTheme } from "@/lib/theme";
 import { openEventsChannel } from "@/lib/sse";
 import type {
   ChecklistItem,
+  Collection,
   ConversationMeta,
   FileItem,
   FileStatusEvent,
@@ -15,8 +16,9 @@ import type {
   Message,
   Workspace,
 } from "@/lib/types";
-import { Chat } from "@/components/Chat";
+import { Chat, type EntitySelector } from "@/components/Chat";
 import { useAppStore } from "@/lib/store";
+import { resolveChatEndpoints } from "@/lib/chatContext";
 import { AgentLog, type LogEntry } from "@/components/AgentLog";
 import { ShipmentPanel } from "@/components/ShipmentPanel";
 import { VersionsModal } from "@/components/VersionsModal";
@@ -110,10 +112,24 @@ export default function WorkspacePage() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [sound, setSound] = useState(false);
 
-  // App-wide store: which chat kind + top-level view are active (prototype port).
+  // App-wide store: which chat kind + top-level view + collections are active.
   const chatKind = useAppStore((s) => s.chatKind);
   const setChatKind = useAppStore((s) => s.setChatKind);
   const view = useAppStore((s) => s.view);
+  const setView = useAppStore((s) => s.setView);
+  const collections = useAppStore((s) => s.collections);
+  const setCollections = useAppStore((s) => s.setCollections);
+  const activeCollectionId = useAppStore((s) => s.activeCollectionId);
+  const setActiveCollectionId = useAppStore((s) => s.setActiveCollectionId);
+  const addCollection = useAppStore((s) => s.addCollection);
+  const removeCollection = useAppStore((s) => s.removeCollection);
+
+  // Chat endpoints for the active (kind, entity). null = consolidated without a
+  // selected collection (the UI then prompts to create/select one).
+  const endpoints = useMemo(
+    () => resolveChatEndpoints(chatKind, id, activeCollectionId),
+    [chatKind, id, activeCollectionId]
+  );
 
   const [versionsFile, setVersionsFile] = useState<FileItem | null>(null);
   const [previewFile, setPreviewFile] = useState<FileItem | null>(null);
@@ -139,37 +155,19 @@ export default function WorkspacePage() {
     setLoading(true);
     (async () => {
       try {
-        const [wsRes, filesRes, listRes] = await Promise.all([
+        const [wsRes, filesRes, listRes, colRes] = await Promise.all([
           api<{ workspace: Workspace; folders: Folder[] }>(`/api/workspaces/${id}`),
           api<{ files: FileItem[] }>(`/api/workspaces/${id}/files`),
           api<{ workspaces: Workspace[] }>(`/api/workspaces`),
+          api<{ collections: Collection[] }>(`/api/collections`),
         ]);
         if (cancelled) return;
         setWorkspace(wsRes.workspace);
         setFolders(wsRes.folders);
         setFiles(filesRes.files);
         setWorkspaces(listRes.workspaces);
-
-        try {
-          const { conversations } = await api<{ conversations: ConversationMeta[] }>(
-            `/api/workspaces/${id}/conversations`
-          );
-          if (!cancelled) setConversations(conversations);
-          if (!cancelled && conversations.length > 0) {
-            const latest = [...conversations].sort((a, b) =>
-              b.updated_at.localeCompare(a.updated_at)
-            )[0]!;
-            const conv = await api<{ conversationId: string; messages: Message[] }>(
-              `/api/workspaces/${id}/conversations/${latest.id}`
-            );
-            if (!cancelled) {
-              setConversationId(conv.conversationId);
-              setInitialMessages(conv.messages);
-            }
-          }
-        } catch {
-          /* no conversations yet — fine */
-        }
+        setCollections(colRes.collections);
+        // Conversations load in the separate (kind/entity)-driven effect below.
       } catch (err) {
         if (cancelled) return;
         if (err instanceof ApiError && err.status === 404) setNotFound(true);
@@ -181,6 +179,54 @@ export default function WorkspacePage() {
       cancelled = true;
     };
   }, [id, user]);
+
+  // Load conversations for the active (kind, entity). Re-runs whenever the user
+  // switches chat kind or the selected collection — each kind/entity keeps its
+  // own history (prototype `normalChats` / per-shipment / per-collection chats).
+  useEffect(() => {
+    if (!user) return;
+    if (!endpoints) {
+      // consolidated without a selected collection — nothing to load.
+      setConversations([]);
+      setConversationId(undefined);
+      setInitialMessages([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const { conversations } = await api<{ conversations: ConversationMeta[] }>(
+          endpoints.convListPath
+        );
+        if (cancelled) return;
+        setConversations(conversations);
+        if (conversations.length > 0) {
+          const latest = [...conversations].sort((a, b) =>
+            b.updated_at.localeCompare(a.updated_at)
+          )[0]!;
+          const conv = await api<{ conversationId: string; messages: Message[] }>(
+            endpoints.convMsgPath(latest.id)
+          );
+          if (!cancelled) {
+            setConversationId(conv.conversationId);
+            setInitialMessages(conv.messages);
+          }
+        } else if (!cancelled) {
+          setConversationId(undefined);
+          setInitialMessages([]);
+        }
+      } catch {
+        if (!cancelled) {
+          setConversations([]);
+          setConversationId(undefined);
+          setInitialMessages([]);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, endpoints]);
 
   // Completeness for the top-bar step dots + right-panel badge.
   const refreshChecklist = useCallback(() => {
@@ -396,22 +442,23 @@ export default function WorkspacePage() {
   }, [id, refreshFiles]);
 
   const refreshConversations = useCallback(async () => {
+    if (!endpoints) return;
     try {
       const { conversations } = await api<{ conversations: ConversationMeta[] }>(
-        `/api/workspaces/${id}/conversations`
+        endpoints.convListPath
       );
       setConversations(conversations);
     } catch {
       /* ignore */
     }
-  }, [id]);
+  }, [endpoints]);
 
   const loadConversation = useCallback(
     async (convId: string) => {
-      if (convId === conversationId) return;
+      if (!endpoints || convId === conversationId) return;
       try {
         const conv = await api<{ conversationId: string; messages: Message[] }>(
-          `/api/workspaces/${id}/conversations/${convId}`
+          endpoints.convMsgPath(convId)
         );
         setConversationId(conv.conversationId);
         setInitialMessages(conv.messages);
@@ -419,7 +466,7 @@ export default function WorkspacePage() {
         alert("Не вдалося завантажити розмову.");
       }
     },
-    [id, conversationId]
+    [endpoints, conversationId]
   );
 
   const newChat = useCallback(() => {
@@ -453,6 +500,36 @@ export default function WorkspacePage() {
 
   // Shell actions.
   const selectShipment = useCallback((wid: string) => router.push(`/workspaces/${wid}`), [router]);
+
+  // Collections (Збірник). Kept in the app store; created/selected/deleted here.
+  const selectCollection = useCallback(
+    (cid: string) => setActiveCollectionId(cid),
+    [setActiveCollectionId]
+  );
+  const newCollection = useCallback(async () => {
+    try {
+      const { collection } = await api<{ collection: Collection }>(`/api/collections`, {
+        body: { status: "active" },
+      });
+      addCollection(collection); // prepends + sets it active
+      setChatKind("consolidated");
+    } catch {
+      alert("Не вдалося створити збірник.");
+    }
+  }, [addCollection, setChatKind]);
+  const deleteActiveCollection = useCallback(async () => {
+    if (!activeCollectionId) return;
+    const ok = window.confirm(
+      "Видалити збірник?\n\nБуде видалено всі файли, теки та чати. Дію не можна скасувати."
+    );
+    if (!ok) return;
+    try {
+      await api(`/api/collections/${activeCollectionId}`, { method: "DELETE" });
+      removeCollection(activeCollectionId);
+    } catch {
+      alert("Не вдалося видалити збірник.");
+    }
+  }, [activeCollectionId, removeCollection]);
 
   const newShipment = useCallback(async () => {
     const number = window.prompt("Номер постачання (необов'язково)") ?? "";
@@ -587,6 +664,31 @@ export default function WorkspacePage() {
 
   if (!workspace) return null;
 
+  // Composer entity selector: shipments for supply, collections for consolidated,
+  // hidden (null) for the global normal chat.
+  const composerSelector: EntitySelector | null =
+    chatKind === "supply"
+      ? {
+          label: "Постачання",
+          value: workspace.id,
+          options: workspaces.map((w) => ({
+            id: w.id,
+            label: `№${w.number ?? "—"}${w.supplier ? ` · ${w.supplier}` : ""}`,
+          })),
+          onChange: selectShipment,
+        }
+      : chatKind === "consolidated"
+        ? {
+            label: "Збірник",
+            value: activeCollectionId ?? "",
+            options: collections.map((c) => ({
+              id: c.id,
+              label: `${c.number ?? "Збірник"}${c.supplier ? ` · ${c.supplier}` : ""}`,
+            })),
+            onChange: selectCollection,
+          }
+        : null;
+
   return (
     <div style={{ height: "100vh", display: "flex", overflow: "hidden", background: "var(--chat)" }}>
       <input
@@ -604,15 +706,23 @@ export default function WorkspacePage() {
       <SidebarNav
         workspaces={workspaces}
         current={workspace}
+        collections={collections}
+        activeCollectionId={activeCollectionId}
+        chatKind={chatKind}
+        onChangeKind={setChatKind}
+        view={view}
+        onSetView={setView}
         conversations={conversations}
         currentConversationId={conversationId}
         collapsed={sidebarCollapsed}
         onToggleCollapsed={() => setSidebarCollapsed((v) => !v)}
         onNewChat={newChat}
-        onNewShipment={newShipment}
         onOpenSearch={() => setPaletteOpen(true)}
         onSelectShipment={selectShipment}
         onDeleteShipment={deleteShipment}
+        onSelectCollection={selectCollection}
+        onNewCollection={newCollection}
+        onDeleteActiveCollection={deleteActiveCollection}
         onSelectConversation={loadConversation}
       />
 
@@ -641,43 +751,45 @@ export default function WorkspacePage() {
               title="Карта постачань"
               note="Інтерактивна карта маршрутів і суден — у розробці (Фаза D)."
             />
-          ) : chatKind === "supply" ? (
+          ) : !endpoints ? (
+            <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+              <div style={{ maxWidth: 440, textAlign: "center" }}>
+                <h2 style={{ margin: "0 0 8px", fontSize: 18, color: "var(--text)" }}>Збірний вантаж</h2>
+                <p style={{ margin: "0 0 16px", fontSize: 14, lineHeight: 1.5, color: "var(--muted)" }}>
+                  Оберіть збірник у полі вводу або створіть новий, щоб почати роботу та аналіз збірної партії.
+                </p>
+                <button className="btn btn-primary" onClick={newCollection}>
+                  Створити збірник
+                </button>
+              </div>
+            </div>
+          ) : (
             <Chat
-              key={`${conversationId ?? "new"}-${chatSeq}`}
-              postPath={`/api/workspaces/${id}/chat`}
+              key={`${chatKind}-${activeCollectionId ?? "ws"}-${conversationId ?? "new"}-${chatSeq}`}
+              postPath={endpoints.postPath}
               chatKind={chatKind}
               onChangeKind={setChatKind}
-              selector={{
-                label: "Постачання",
-                value: workspace.id,
-                options: workspaces.map((w) => ({
-                  id: w.id,
-                  label: `№${w.number ?? "—"}${w.supplier ? ` · ${w.supplier}` : ""}`,
-                })),
-                onChange: selectShipment,
-              }}
+              selector={composerSelector}
               conversationId={conversationId}
               initialMessages={initialMessages}
               onConversationStarted={onConversationStarted}
               onLog={onLog}
-              folders={folders}
-              onUploadAndClassify={uploadAndClassify}
-              onMoveFile={moveFile}
-            />
-          ) : (
-            <ComingSoon
-              title={chatKind === "normal" ? "Звичайний чат" : "Збірний вантаж"}
-              note={
+              placeholder={
                 chatKind === "normal"
-                  ? "Глобальний консультант ЗЕД (бекенд готовий) — підключення інтерфейсу триває у Фазі A."
-                  : "Чат «Збірний вантаж» і аналіз збірного (бекенд готовий) — підключення інтерфейсу триває (Фаза A/B)."
+                  ? "Запитайте про ЗЕД, митницю, документи або коди УКТ ЗЕД…"
+                  : chatKind === "consolidated"
+                    ? "Опишіть збірний вантаж або завантажте маніфест для аналізу…"
+                    : undefined
               }
+              folders={chatKind === "supply" ? folders : undefined}
+              onUploadAndClassify={chatKind === "supply" ? uploadAndClassify : undefined}
+              onMoveFile={chatKind === "supply" ? moveFile : undefined}
             />
           )}
         </div>
       </main>
 
-      {rightOpen && (
+      {rightOpen && view === "chat" && chatKind === "supply" && (
         <RightPanel
           tab={rightTab}
           onTab={setRightTab}

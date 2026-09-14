@@ -1,0 +1,4166 @@
+[
+  {
+    "keys": [
+      "l-lysine",
+      "l-лізин",
+      "лізин",
+      "lysine hcl",
+      "lysine hydrochloride",
+      "lysine sulfate",
+      "лізин гідрохлорид",
+      "лізин сульфат",
+      "lysine mono",
+      "l-лизин",
+      "лизин гхл",
+      "лизин гидрохлорид",
+      "лизин сульфат",
+      "лизин"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (Corynebacterium glutamicum), виділення та очищення",
+    "category": "Кормова амінокислота / ПОДВІЙНЕ ПРИЗНАЧЕННЯ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "l-threonine",
+      "l-треонін",
+      "треонін",
+      "threonine"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (E. coli або C. glutamicum), виділення та кристалізація",
+    "category": "Кормова амінокислота / ПОДВІЙНЕ ПРИЗНАЧЕННЯ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "l-tryptophan",
+      "l-триптофан",
+      "триптофан",
+      "tryptophan"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (E. coli або C. glutamicum), виділення, очищення",
+    "category": "Кормова амінокислота / ПОДВІЙНЕ ПРИЗНАЧЕННЯ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "l-valine",
+      "l-валін",
+      "валін",
+      "valine"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (C. glutamicum), виділення та сушіння",
+    "category": "Кормова амінокислота / ПОДВІЙНЕ ПРИЗНАЧЕННЯ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "l-leucine",
+      "l-лейцин",
+      "лейцин",
+      "leucine"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (C. glutamicum), виділення та кристалізація",
+    "category": "Кормова амінокислота / ПОДВІЙНЕ ПРИЗНАЧЕННЯ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "l-isoleucine",
+      "l-ізолейцин",
+      "ізолейцин",
+      "isoleucine"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (C. glutamicum), виділення",
+    "category": "Кормова амінокислота / ПОДВІЙНЕ ПРИЗНАЧЕННЯ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "dl-methionine",
+      "dl-метіонін",
+      "dl-метионин",
+      "метіонін",
+      "methionine"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез з акролеїну та метантіолу",
+    "category": "Кормова амінокислота / ПОДВІЙНЕ ПРИЗНАЧЕННЯ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "l-glutamine",
+      "l-глутамін",
+      "глутамін",
+      "glutamine"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (C. glutamicum), очищення",
+    "category": "Кормова амінокислота / Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "glutamic acid",
+      "глутамінова кислота",
+      "глутамат",
+      "monosodium glutamate",
+      "msg",
+      "глутамат натрію"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (C. glutamicum), нейтралізація та кристалізація",
+    "category": "Харчова добавка / кормова амінокислота",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "aspartic acid",
+      "аспарагінова кислота",
+      "аспарагинова",
+      "dl-aspartic",
+      "аспартат",
+      "аспарагінка",
+      "аспарагинка",
+      "аспарагиновая кислота",
+      "dl-аспарагиновая"
+    ],
+    "originType": "синтетичне або ферментаційне",
+    "productionMethod": "хімічний синтез (фумаровий шлях) або ферментація; потрібне підтвердження CoA",
+    "category": "Кормова амінокислота / Харчова добавка",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "l-arginine",
+      "l-аргінін",
+      "аргінін",
+      "arginine base",
+      "аргинін основание",
+      "аргінін основа"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (C. glutamicum або E. coli), виділення, очищення, кристалізація",
+    "category": "АФІ / Харчова добавка / ПОДВІЙНЕ ПРИЗНАЧЕННЯ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "l-carnitine",
+      "l-карнітин",
+      "левокарнітин",
+      "carnitine base",
+      "карнітин основание",
+      "carnitine tartrate",
+      "карнітин тартрат",
+      "l-карнитин",
+      "левокарнитин",
+      "карнитин основание",
+      "карнитин тартрат",
+      "карнитин"
+    ],
+    "originType": "синтетичне або ферментаційне",
+    "productionMethod": "хімічний синтез (найпоширеніше) або ферментація; уточнити CoA",
+    "category": "АФІ / Харчова добавка / Косметична сировина",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "taurine",
+      "таурін",
+      "таурин"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (аммоніоліз ізетіонової кислоти або з моноетаноламіну)",
+    "category": "Харчова добавка / АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "betaine",
+      "бетаїн",
+      "бетаин",
+      "trimethylglycine",
+      "тріметилгліцин"
+    ],
+    "originType": "рослинне або синтетичне",
+    "productionMethod": "екстракція з мелас цукрового буряка (рослинне) або хімічний синтез; уточнити джерело CoA",
+    "category": "Харчова добавка / Кормова добавка",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "choline chloride",
+      "холін хлорид",
+      "холин хлорид"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (реакція триметиламіну з окисом етилену та соляною кислотою)",
+    "category": "Кормова добавка / Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "ascorbic acid",
+      "аскорбінова кислота",
+      "аскорбинова",
+      "vitamin c",
+      "вітамін c",
+      "аскорбіновая",
+      "аскорбінка"
+    ],
+    "originType": "змішане (ферментаційне + синтетичне)",
+    "productionMethod": "двоступеневий процес: ферментація глюкози до 2-кетогулонової кислоти + хімічна циклізація (Reichstein-Sonneborn або двостадійна ферментація)",
+    "category": "Харчова добавка / АФІ / Кормова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "sodium ascorbate",
+      "натрію аскорбат",
+      "аскорбат натрію"
+    ],
+    "originType": "змішане (ферментаційне + синтетичне)",
+    "productionMethod": "нейтралізація аскорбінової кислоти (ферментація + синтез) гідроксидом натрію",
+    "category": "Харчова добавка / АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "vitamin d3",
+      "вітамін d3",
+      "холекальциферол",
+      "cholecalciferol",
+      "vitamin d 3",
+      "витамин д3",
+      "витамин д 3",
+      "вітамін д3"
+    ],
+    "originType": "тваринне або синтетичне",
+    "productionMethod": "УФ-опромінення 7-дегідрохолестеролу (ланолін з вовни овець) або синтез з ліхену; УФ-конверсія",
+    "category": "АФІ / Кормова добавка / Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "vitamin a",
+      "вітамін а",
+      "ретинол ацетат",
+      "ретинол пальмітат",
+      "retinol acetate",
+      "vitamin a acetate",
+      "retinol palmitate"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (ізопреноїдний шлях від ацетону і ацетилену)",
+    "category": "АФІ / Кормова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "vitamin e",
+      "вітамін е",
+      "tocopherol acetate",
+      "токоферол ацетат",
+      "dl-alpha-tocopheryl",
+      "dl-alpha tocopherol"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез із триметилгідрохінону та ізофітолу",
+    "category": "АФІ / Кормова добавка / Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "vitamin b1",
+      "вітамін b1",
+      "тіамін",
+      "thiamine hcl",
+      "thiamine hydrochloride",
+      "thiamine mononitrate"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (конденсація піримідинового та тіазолового фрагментів)",
+    "category": "АФІ / Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "vitamin b2",
+      "вітамін b2",
+      "рибофлавін",
+      "riboflavin",
+      "рибофлавин"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (Ashbya gossypii або Bacillus subtilis), очищення та кристалізація",
+    "category": "АФІ / Харчова добавка / Кормова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "vitamin b3",
+      "вітамін b3",
+      "ніацин",
+      "нікотинамід",
+      "niacin",
+      "nicotinamide",
+      "nicotinic acid"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (окислення 3-метилпіридину або гідроліз нікотинонітрилу)",
+    "category": "АФІ / Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "pantothenic acid",
+      "пантотенова кислота",
+      "calcium pantothenate",
+      "кальцію пантотенат",
+      "d-pantothenic"
+    ],
+    "originType": "синтетичне або ферментаційне",
+    "productionMethod": "хімічний синтез (конденсація пантолактону з бета-аланіном) або ферментація; потрібне CoA",
+    "category": "АФІ / Харчова добавка / Кормова добавка",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "dexpanthenol",
+      "декспантенол",
+      "d-пантенол",
+      "d-panthenol",
+      "panthenol",
+      "d-пантенол"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез з d-пантолактону та 3-аміно-1-пропанолу",
+    "category": "АФІ / Косметична сировина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "vitamin b6",
+      "вітамін b6",
+      "піридоксин",
+      "pyridoxine hcl",
+      "pyridoxine hydrochloride"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (конденсація оксазолу з оксалоацетатом)",
+    "category": "АФІ / Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "biotin",
+      "біотин",
+      "вітамін h",
+      "vitamin h",
+      "d-biotin"
+    ],
+    "originType": "синтетичне або ферментаційне",
+    "productionMethod": "хімічний синтез або ферментація; більшість комерційного біотину синтетичні",
+    "category": "АФІ / Харчова добавка / Кормова добавка",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "folic acid",
+      "фолієва кислота",
+      "фолат",
+      "folate",
+      "vitamin b9"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (конденсація птеринового альдегіду з п-амінобензоїлглутаміновою кислотою)",
+    "category": "АФІ / Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "cyanocobalamin",
+      "ціанокобаламін",
+      "vitamin b12",
+      "вітамін b12",
+      "cobalamin"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (Pseudomonas denitrificans або Propionibacterium shermanii), очищення хроматографією",
+    "category": "АФІ / Харчова добавка / Кормова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "vitamin k3",
+      "менадіон",
+      "menadione",
+      "msb",
+      "menadione sodium bisulfite"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (окислення 2-метилнафталіну та сульфітація)",
+    "category": "АФІ / Кормова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "colistin sulfate",
+      "колістин сульфат",
+      "colistin",
+      "колістин",
+      "колистин сульфат",
+      "колистин"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (Bacillus polymyxa var. colistinus), виділення та осадження сульфатом",
+    "category": "Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "tylosin tartrate",
+      "тилозин тартрат",
+      "тилозин",
+      "tylosin"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (Streptomyces fradiae), екстракція та солеутворення з винною кислотою",
+    "category": "Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "tiamulin fumarate",
+      "тіамулін фумарат",
+      "тіамулін",
+      "tiamulin",
+      "тиамулин фумарат",
+      "тиамулин"
+    ],
+    "originType": "напівсинтетичне (ферментаційна основа)",
+    "productionMethod": "виділення плевромутиліну з ферментації (Pleurotus mutilus) + хімічна модифікація + солеутворення з фумаратом",
+    "category": "Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "oxytetracycline",
+      "окситетрациклін",
+      "окситетрациклин",
+      "oxytetracycline hcl",
+      "окситетрациклин гхл",
+      "окситетрациклин гидрохлорид"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (Streptomyces rimosus), виділення та очищення, хлороводнева сіль",
+    "category": "Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "chlortetracycline",
+      "хлортетрациклін",
+      "хлортетрациклин",
+      "chlortetracycline hcl"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (Streptomyces aureofaciens), виділення та очищення",
+    "category": "Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "doxycycline",
+      "доксициклін",
+      "доксициклин",
+      "doxycycline hyclate",
+      "doxycycline hydrochloride"
+    ],
+    "originType": "напівсинтетичне (ферментаційна основа)",
+    "productionMethod": "каталітичне дегідрування окситетрацикліну (джерело — ферментація Streptomyces rimosus) + утворення гіклату",
+    "category": "АФІ / Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "amoxicillin",
+      "амоксицилін",
+      "амоксициллин",
+      "amoxicillin trihydrate",
+      "амоксицилин тригидрат",
+      "амоксицилин"
+    ],
+    "originType": "напівсинтетичне (ферментаційна основа)",
+    "productionMethod": "ферментація для отримання 6-APA (Penicillium chrysogenum) + хімічне ацилювання амоксицилінового ланцюга",
+    "category": "АФІ / Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "ampicillin",
+      "ампіцилін",
+      "ампициллин"
+    ],
+    "originType": "напівсинтетичне (ферментаційна основа)",
+    "productionMethod": "напівсинтез з 6-APA (ферментація Penicillium chrysogenum) + D-фенілгліцин",
+    "category": "АФІ / Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "erythromycin",
+      "еритроміцин",
+      "erythromycin thiocyanate",
+      "erythromycin estolate"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (Saccharopolyspora erythraea), екстракція та очищення",
+    "category": "АФІ / Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "lincomycin",
+      "лінкоміцин",
+      "lincomycin hcl"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (Streptomyces lincolnensis), виділення, очищення, хлороводнева сіль",
+    "category": "АФІ / Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "neomycin",
+      "неоміцин",
+      "neomycin sulfate"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (Streptomyces fradiae), виділення та осадження сульфатом",
+    "category": "Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "streptomycin",
+      "стрептоміцин",
+      "streptomycin sulfate"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (Streptomyces griseus), очищення та осадження сульфатом",
+    "category": "АФІ / Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "chloramphenicol",
+      "хлорамфенікол",
+      "левоміцетин",
+      "левомицетин",
+      "chloramphenicol base"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "повний хімічний синтез (початково з ферментації, зараз переважно синтетичне)",
+    "category": "АФІ / Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "ivermectin",
+      "івермектин",
+      "ивермектин"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (Streptomyces avermitilis) для авермектину B1 + часткова хімічна гідрування",
+    "category": "Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "tilmicosin",
+      "тилміцин",
+      "tilmicosin phosphate"
+    ],
+    "originType": "напівсинтетичне (ферментаційна основа)",
+    "productionMethod": "хімічна модифікація тилозину (ферментація Streptomyces fradiae)",
+    "category": "Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "ceftiofur",
+      "цефтіофур",
+      "цефтиофур",
+      "ceftiofur sodium",
+      "ceftiofur hcl"
+    ],
+    "originType": "напівсинтетичне (ферментаційна основа)",
+    "productionMethod": "напівсинтез цефалоспоринового ядра (7-ACA з ферментації Cephalosporium) + синтетична бічна ланцюг",
+    "category": "Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "florfenicol",
+      "флорфенікол"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "повний хімічний синтез (аналог хлорамфеніколу)",
+    "category": "Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "metronidazole",
+      "метронідазол",
+      "метронидазол"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (нітрування 2-метилімідазолу + алкілювання)",
+    "category": "АФІ / Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "fenbendazole",
+      "фенбендазол"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (конденсація о-фенілендіаміну з тіоціанатами)",
+    "category": "Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "albendazole",
+      "альбендазол"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (ряд бензимідазолів)",
+    "category": "Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "olaquindox",
+      "олаквіндокс",
+      "олаквиндокс"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (похідне хінoxalіну)",
+    "category": "Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "enrofloxacin",
+      "енрофлоксацин"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (фторхінолонового ряду)",
+    "category": "Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "ciprofloxacin",
+      "ципрофлоксацин",
+      "ciprofloxacin hcl",
+      "ципрофлоксацин гхл"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (фторхінолонового ряду)",
+    "category": "АФІ / Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "sulfamethoxazole",
+      "сульфаметоксазол"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (сульфонілювання аміносполук)",
+    "category": "АФІ / Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "trimethoprim",
+      "триметоприм"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (конденсація піримідинових та метоксибензилових фрагментів)",
+    "category": "АФІ / Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "acetylsalicylic acid",
+      "ацетилсаліцилова",
+      "аспірин",
+      "аспирин",
+      "aspirin"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (ацетилювання саліцилової кислоти оцтовим ангідридом)",
+    "category": "АФІ / Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "benzocaine",
+      "бензокаїн",
+      "анестезин",
+      "анестезин"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (естерифікація п-амінобензойної кислоти етанолом)",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "procaine",
+      "прокаїн",
+      "новокаїн",
+      "новокаин",
+      "procaine hcl"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (конденсація п-амінобензойної кислоти з диетиламіноетанолом)",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "lidocaine",
+      "лідокаїн",
+      "lignocaine",
+      "lidocaine hcl"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (ацилювання 2,6-диметиланіліну хлороацетилхлоридом + амінування)",
+    "category": "АФІ / Косметична сировина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "metamizole",
+      "метамізол",
+      "аналгін",
+      "аналгин",
+      "dipyrone",
+      "анальгин"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (метилювання антипірину + формілювання + сульфітація)",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "paracetamol",
+      "парацетамол",
+      "acetaminophen"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (ацетилювання п-амінофенолу)",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "ibuprofen",
+      "ібупрофен"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (з ізобутилбензолу)",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "streptocide",
+      "стрептоцид",
+      "стрептоцид",
+      "sulfanilamide"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (з ацетаніліду та хлоросульфонової кислоти)",
+    "category": "АФІ / Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "chondroitin sulfate",
+      "хондроїтин сульфат",
+      "хондроитин сульфат",
+      "хондроитина сульфат"
+    ],
+    "originType": "тваринне",
+    "productionMethod": "екстракція з хрящів великої рогатої худоби або свиней (бичачий/свинячий хрящ), гідроліз, очищення",
+    "category": "АФІ / Харчова добавка / Косметична сировина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "glucosamine hcl",
+      "glucosamine hydrochloride",
+      "глюкозамін",
+      "glucosamine sulfate",
+      "глюкозаміна",
+      "глюкозамина",
+      "глюкозамина гхл"
+    ],
+    "originType": "тваринне",
+    "productionMethod": "кислотний гідроліз хітину з панцирів ракоподібних (креветки, краби) або грибів",
+    "category": "АФІ / Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "collagen",
+      "колаген",
+      "collagen peptide",
+      "hydrolyzed collagen"
+    ],
+    "originType": "тваринне",
+    "productionMethod": "гідроліз з шкіри, кісток та хрящів великої рогатої худоби, свиней або риби",
+    "category": "Косметична сировина / Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "gelatin",
+      "желатин",
+      "gelatin capsules",
+      "empty capsules"
+    ],
+    "originType": "тваринне",
+    "productionMethod": "гідроліз колагену зі шкіри та кісток великої рогатої худоби або свиней",
+    "category": "Ексципієнт / Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "hyaluronic acid",
+      "гіалуронова кислота",
+      "sodium hyaluronate",
+      "гіалуронат натрію",
+      "гіалуронат"
+    ],
+    "originType": "ферментаційне або тваринне",
+    "productionMethod": "ферментація (Streptococcus zooepidemicus або Bacillus subtilis) або екстракція з гребенів півнів",
+    "category": "АФІ / Косметична сировина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "allantoin",
+      "алантоїн"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (окислення сечової кислоти гліоксаловою кислотою)",
+    "category": "Косметична сировина / АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "kojic acid",
+      "коджикова кислота",
+      "кислота кодзі"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (Aspergillus oryzae або A. flavus) на крохмальних субстратах",
+    "category": "Косметична сировина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "alpha arbutin",
+      "альфа-арбутин",
+      "арбутин"
+    ],
+    "originType": "синтетичне або рослинне",
+    "productionMethod": "ензиматичний синтез або хімічний синтез (глюкозилювання гідрохінону); натуральний із брусниці",
+    "category": "Косметична сировина",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "niacinamide",
+      "ніацинамід",
+      "nicotinamide",
+      "nicotin amide"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (аміноліз нікотинової кислоти або гідроліз 3-ціанопіридину)",
+    "category": "АФІ / Косметична сировина / Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "ferulic acid",
+      "ферулова кислота"
+    ],
+    "originType": "синтетичне або рослинне",
+    "productionMethod": "хімічний синтез (конденсація Кнаєвенагеля) або екстракція з висівок рису",
+    "category": "Косметична сировина / Харчова добавка",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "resveratrol",
+      "ресвератрол"
+    ],
+    "originType": "синтетичне або рослинне",
+    "productionMethod": "хімічний синтез або екстракція з горця сахалінського (Polygonum cuspidatum)",
+    "category": "Косметична сировина / Харчова добавка",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "squalane",
+      "сквалан",
+      "squalene",
+      "сквален"
+    ],
+    "originType": "тваринне або рослинне або синтетичне",
+    "productionMethod": "гідрогенізація акулячого (тваринне) або оливкового/цукрового тростини (рослинне) сквалену, або синтез",
+    "category": "Косметична сировина",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "lactic acid",
+      "молочна кислота",
+      "lactic acid 80"
+    ],
+    "originType": "ферментаційне або синтетичне",
+    "productionMethod": "ферментація (Lactobacillus spp.) або синтез; більшість харчового/косм. ряду — ферментаційне",
+    "category": "Харчова добавка / Косметична сировина",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "salicylic acid",
+      "саліцилова кислота",
+      "salicylate"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (синтез Кольбе-Шмітта: карбоксилювання фенолу CO₂)",
+    "category": "АФІ / Косметична сировина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "glycolic acid",
+      "гліколева кислота"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (гідроліз хлороцтової кислоти або з формальдегіду та CO)",
+    "category": "Косметична сировина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "mandelic acid",
+      "мигдалева кислота"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (гідроліз мандел онітрилу або ензиматичне відновлення)",
+    "category": "Косметична сировина / АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "retinol",
+      "ретинол",
+      "retinol pure",
+      "retinol powder"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (ізопреноїдний синтез)",
+    "category": "Косметична сировина / АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "caffeine",
+      "кофеїн",
+      "кофеин"
+    ],
+    "originType": "синтетичне або рослинне",
+    "productionMethod": "хімічний синтез (з теоброміну) або екстракція з кавових зерен / чайного листя",
+    "category": "Харчова добавка / Косметична сировина / АФІ",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "methyl salicylate",
+      "метилсаліцилат",
+      "метилсалицилат",
+      "methyl salicylate oil"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (естерифікація саліцилової кислоти метанолом)",
+    "category": "АФІ / Косметична сировина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "camphor",
+      "камфора",
+      "камфара"
+    ],
+    "originType": "синтетичне або рослинне",
+    "productionMethod": "синтез (більшість комерційного — з терпентинної олії) або екстракція з камфорного дерева",
+    "category": "АФІ / Косметична сировина",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "menthol",
+      "ментол",
+      "l-menthol",
+      "dl-menthol"
+    ],
+    "originType": "синтетичне або рослинне",
+    "productionMethod": "синтетичний (гідрогенізація тимолу) або натуральний із м'яти перцевої",
+    "category": "АФІ / Харчова добавка / Косметична сировина",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "citric acid",
+      "лимонна кислота",
+      "citric acid anhydrous",
+      "лимонна"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (Aspergillus niger) на мелясі або глюкозному сиропі, кристалізація",
+    "category": "Харчова добавка / Промислова хімія",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "sucralose",
+      "сукралоза"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (хлорування сахарози у трьох позиціях гідроксильних груп)",
+    "category": "Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "xylitol",
+      "ксиліт",
+      "ксилит"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "каталітичне гідрогенізування ксилози (з берези чи кукурудзяних качанів)",
+    "category": "Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "sorbitol",
+      "сорбіт",
+      "сорбит"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "каталітичне гідрогенізування глюкози",
+    "category": "Харчова добавка / Ексципієнт",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "maltitol",
+      "мальтит",
+      "maltitol syrup"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "ензиматичний синтез + каталітичне гідрогенізування мальтози (з крохмалю)",
+    "category": "Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "aspartame",
+      "аспартам"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (конденсація аспарагінової кислоти з фенілаланіном)",
+    "category": "Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "tartaric acid",
+      "виннокам'яна кислота",
+      "виннокаменная",
+      "tartrate"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "виділення з виноградного залишку виноробства (побічний продукт)",
+    "category": "Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "acetic acid",
+      "оцтова кислота",
+      "glacial acetic acid",
+      "уксусная"
+    ],
+    "originType": "синтетичне або ферментаційне",
+    "productionMethod": "хімічний синтез (карбонілювання метанолу, процес Монсанто) або ферментація; харчовий оцет — ферментаційний",
+    "category": "Харчова добавка / Промислова хімія",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "sodium benzoate",
+      "натрію бензоат",
+      "бензоат натрію"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (нейтралізація бензойної кислоти гідроксидом натрію; бензойна — окислення толуолу)",
+    "category": "Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "potassium sorbate",
+      "сорбат калію",
+      "potassium sorbate"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (нейтралізація сорбінової кислоти гідроксидом калію; сорбінова — з кетену)",
+    "category": "Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "stevia",
+      "стевія",
+      "steviol glycosides",
+      "стевіол глікозиди",
+      "rebaudioside"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція з листя рослини Stevia rebaudiana, хроматографічне очищення",
+    "category": "Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "xanthan gum",
+      "ксантанова смола",
+      "ксантан"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (Xanthomonas campestris), осадження ізопропанолом, сушіння",
+    "category": "Харчова добавка / Ексципієнт",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "calcium carbonate",
+      "кальцію карбонат",
+      "карбонат кальцію",
+      "caco3"
+    ],
+    "originType": "мінеральне",
+    "productionMethod": "видобуток та розмел вапняку або осадження з хлориду кальцію та карбонату натрію",
+    "category": "Ексципієнт / Харчова добавка / Кормова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "calcium gluconate",
+      "кальцію глюконат",
+      "глюконат кальцію",
+      "кальция глюконат",
+      "глюконат кальция"
+    ],
+    "originType": "синтетичне (мінеральне+органічне)",
+    "productionMethod": "хімічний або ензиматичний синтез (глюконова кислота з ферментації + карбонат кальцію)",
+    "category": "АФІ / Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "magnesium citrate",
+      "магнію цитрат",
+      "цитрат магнію",
+      "магния цитрат",
+      "цитрат магния"
+    ],
+    "originType": "синтетичне (мінеральне+органічне)",
+    "productionMethod": "синтез реакцією карбонату магнію з лимонною кислотою (ферментаційна лимонна кислота)",
+    "category": "АФІ / Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "magnesium glycinate",
+      "магнію гліцинат",
+      "гліцинат магнію",
+      "magnesium bisglycinate",
+      "магния глицерат",
+      "глицерат магния",
+      "магния глицинат"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічна реакція оксиду магнію з гліцином (гліцин — синтетичний або ферментаційний)",
+    "category": "АФІ / Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "zinc sulfate",
+      "цинку сульфат",
+      "сульфат цинку"
+    ],
+    "originType": "мінеральне",
+    "productionMethod": "розчинення цинку в сірчаній кислоті або окислення цинкових руд",
+    "category": "Кормова добавка / АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "ferrous sulfate",
+      "залізо сульфат",
+      "сульфат заліза",
+      "iron sulfate"
+    ],
+    "originType": "мінеральне",
+    "productionMethod": "розчинення металевого заліза в сірчаній кислоті або як побічний продукт обробки сталі",
+    "category": "Кормова добавка / Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "potassium iodate",
+      "калію йодат",
+      "йодат калію"
+    ],
+    "originType": "мінеральне або синтетичне",
+    "productionMethod": "окислення йоду йодною кислотою + нейтралізація гідроксидом калію",
+    "category": "Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "potassium chloride",
+      "калію хлорид",
+      "хлорид калію",
+      "kcl"
+    ],
+    "originType": "мінеральне",
+    "productionMethod": "видобуток та очищення природних відкладів сильвініту",
+    "category": "Харчова добавка / Ексципієнт",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "zirconium oxychloride",
+      "цирконій оксихлорид",
+      "цирконию оксихлорид",
+      "zirconyl chloride",
+      "циркония оксихлорид"
+    ],
+    "originType": "мінеральне / синтетичне",
+    "productionMethod": "хімічна обробка мінералу цирконію (бадделєїту або цирконового піску) кислотами",
+    "category": "Промислова хімія",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "titanium dioxide",
+      "діоксид титану",
+      "titanium oxide",
+      "tio2"
+    ],
+    "originType": "мінеральне / синтетичне",
+    "productionMethod": "хлоридний або сульфатний процес з ільменіту або рутилу",
+    "category": "Ексципієнт / Косметична сировина / Промислова хімія",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "zinc oxide",
+      "цинку оксид",
+      "оксид цинку",
+      "zno"
+    ],
+    "originType": "мінеральне / синтетичне",
+    "productionMethod": "пряме окислення металевого цинку або французький процес",
+    "category": "АФІ / Косметична сировина / Ексципієнт",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "silicon dioxide",
+      "діоксид кремнію",
+      "colloidal silicon dioxide",
+      "аеросил",
+      "aerosil",
+      "silica"
+    ],
+    "originType": "мінеральне або синтетичне",
+    "productionMethod": "видобуток кварцового піску або піроліз тетрахлорсилану (аеросил)",
+    "category": "Ексципієнт",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "talc",
+      "тальк"
+    ],
+    "originType": "мінеральне",
+    "productionMethod": "видобуток та розмел природного тальку (Mg₃Si₄O₁₀(OH)₂)",
+    "category": "Ексципієнт / Косметична сировина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "microcrystalline cellulose",
+      "мікрокристалічна целюлоза",
+      "мкц",
+      "mcc"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "кислотний гідроліз целюлозної пульпи (деревна або бавовняна), часткова деполімеризація",
+    "category": "Ексципієнт",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "lactose",
+      "лактоза",
+      "lactose monohydrate"
+    ],
+    "originType": "тваринне",
+    "productionMethod": "виділення з молочної сироватки (побічний продукт виробництва сиру або казеїну)",
+    "category": "Ексципієнт / Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "pvp",
+      "pvp k30",
+      "povidone",
+      "повідон",
+      "polyvinylpyrrolidone",
+      "полівінілпіролідон",
+      "поливинилпирролидон"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "радикальна полімеризація N-вінілпіролідону (синтетичний мономер)",
+    "category": "Ексципієнт / Косметична сировина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "peg",
+      "polyethylene glycol",
+      "поліетиленгліколь",
+      "макрогол",
+      "macrogol",
+      "полиэтиленоксид",
+      "поліетиленоксид",
+      "полиэтиленгликоль",
+      "макрогол"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "полімеризація етиленоксиду (синтетична), регулювання молекулярної маси тиском та температурою",
+    "category": "Ексципієнт / Промислова хімія",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "hpmc",
+      "hypromellose",
+      "гіпромелоза",
+      "hydroxypropyl methylcellulose"
+    ],
+    "originType": "рослинне (модифіковане)",
+    "productionMethod": "хімічна модифікація целюлози (рослинна основа) метиленхлоридом та пропіленоксидом",
+    "category": "Ексципієнт",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "crosspovidone",
+      "кросповідон",
+      "crospovidone",
+      "pvpp"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "полімеризація N-вінілпіролідону у присутності зшивальних агентів",
+    "category": "Ексципієнт",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "sodium starch glycolate",
+      "натрію крохмальглікат",
+      "крохмальглікат"
+    ],
+    "originType": "рослинне (модифіковане)",
+    "productionMethod": "хімічна модифікація (карбоксиметилювання) крохмалю (картопля або кукурудза)",
+    "category": "Ексципієнт",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "croscarmellose sodium",
+      "кроскармелоза натрію",
+      "кроскармелоза"
+    ],
+    "originType": "рослинне (модифіковане)",
+    "productionMethod": "хімічна модифікація (поперечне зшивання) карбоксиметилцелюлози (рослинна основа)",
+    "category": "Ексципієнт",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "magnesium stearate",
+      "магнію стеарат",
+      "магния стеарат"
+    ],
+    "originType": "тваринне або рослинне",
+    "productionMethod": "нейтралізація стеаринової кислоти (тваринна/рослинна) оксидом магнію; уточнити CoO",
+    "category": "Ексципієнт",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "stearic acid",
+      "стеаринова кислота",
+      "стеарат"
+    ],
+    "originType": "тваринне або рослинне",
+    "productionMethod": "гідрогенізація рослинних олій або фракціонування тваринних жирів",
+    "category": "Ексципієнт / Промислова хімія",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "povidone iodine",
+      "повідон йод",
+      "повідон-йод",
+      "povidone-iodine",
+      "pvp-i"
+    ],
+    "originType": "синтетичне (комплекс полімер+мінерал)",
+    "productionMethod": "комплексоутворення синтетичного ПВП з йодом (молекулярний йод)",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "hydroxypropyl cellulose",
+      "гідроксипропілцелюлоза",
+      "гпц",
+      "hpc"
+    ],
+    "originType": "рослинне (модифіковане)",
+    "productionMethod": "хімічна модифікація целюлози (рослинна основа) пропіленоксидом",
+    "category": "Ексципієнт",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "ashwagandha",
+      "ашваганда",
+      "withania somnifera",
+      "ашваганды"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція кореня Withania somnifera; стандартизація за вітанолідами",
+    "category": "Харчова добавка / Косметична сировина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "silymarin",
+      "силімарин",
+      "milk thistle",
+      "розторопша"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція насіння розторопші плямистої (Silybum marianum); стандартизація за силімарином",
+    "category": "АФІ / Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "echinacea",
+      "ехінацея",
+      "echinacea extract"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція кореня або трави Echinacea purpurea / pallida",
+    "category": "Харчова добавка / АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "curcumin",
+      "куркумін",
+      "turmeric extract",
+      "екстракт куркуми"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція з кореня куркуми (Curcuma longa), стандартизація",
+    "category": "Харчова добавка / Косметична сировина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "ginkgo biloba",
+      "гінкго білоба",
+      "ginkgo extract"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція листя Ginkgo biloba; стандартизація за флавоноглікозидами та терпенами",
+    "category": "АФІ / Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "green tea extract",
+      "екстракт зеленого чаю",
+      "egcg",
+      "epigallocatechin"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція листя Camellia sinensis; стандартизація за катехінами (EGCG)",
+    "category": "Харчова добавка / Косметична сировина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "ginseng",
+      "женьшень",
+      "ginseng extract",
+      "panax ginseng"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція кореня Panax ginseng; стандартизація за гінозидами",
+    "category": "Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "rhodiola",
+      "родіола",
+      "rhodiola extract",
+      "rosavins"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція кореня Rhodiola rosea; стандартизація за розавінами та салідрозидом",
+    "category": "Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "valerian",
+      "валеріана",
+      "valerian extract"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція кореня Valeriana officinalis; стандартизація за валереновою кислотою",
+    "category": "АФІ / Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "elderberry",
+      "бузина",
+      "sambucus extract"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція ягід Sambucus nigra; стандартизація за антоціанами",
+    "category": "Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "1-methyl-2-pyrrolidone",
+      "n-methyl-2-pyrrolidone",
+      "nmp",
+      "1-метил-2-піролідон",
+      "нмп"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (реакція гамма-бутиролактону з метиламіном)",
+    "category": "Промислова хімія",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "phenolphthalein",
+      "фенолфталеїн",
+      "фенолфталеин"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (конденсація фталевого ангідриду з фенолом у кислотному середовищі)",
+    "category": "АФІ / Промислова хімія",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "fipronil",
+      "фіпроніл",
+      "фипронил"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (фенілпіразолового ряду)",
+    "category": "Ветеринарна АФІ / Промислова хімія",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "acetamiprid",
+      "ацетамиприд",
+      "ацетамиприд"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (неонікотиноїдного ряду)",
+    "category": "Промислова хімія",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "chlorhexidine",
+      "хлоргексидин",
+      "chlorhexidine digluconate",
+      "chlorhexidine diacetate"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (конденсація хлорфенілбігуаніду з гексаметилендіаміном)",
+    "category": "АФІ / Косметична сировина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "toltrazuril",
+      "толтразурил",
+      "толтразурил"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (триазинон-похідне)",
+    "category": "Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "diclazuril",
+      "диклазурил"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (бензенацетонітрил-похідне)",
+    "category": "Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "amprolium",
+      "ампроліум"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (аналог тіаміну)",
+    "category": "Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "nicarbazin",
+      "нікарбазин"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (комплекс нікотиніл-похідних)",
+    "category": "Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "levamisole",
+      "левамізол",
+      "levamisole hcl",
+      "levamisole hydrochloride"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (тетрамізол → оптичне розщеплення)",
+    "category": "Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "piperazine",
+      "піперазин",
+      "piperazine citrate",
+      "piperazine adipate"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (конденсація амоніаку з дихлоретаном або дієтаноламіном)",
+    "category": "Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "triclabendazole",
+      "трикілабендазол",
+      "triclabendazole"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (бензимідазол-похідне)",
+    "category": "Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "halquinol",
+      "галквінол"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (галогенування хінолу)",
+    "category": "Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "salinomycin",
+      "саліноміцин",
+      "salinomycin sodium"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (Streptomyces albus), виділення та очищення",
+    "category": "Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "monensin",
+      "монензин",
+      "monensin sodium"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (Streptomyces cinnamonensis), виділення",
+    "category": "Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "virginiamycin",
+      "вірджиніаміцин"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (Streptomyces virginiae), виділення",
+    "category": "Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "bacitracin",
+      "бацитрацин",
+      "zinc bacitracin",
+      "bacitracin zinc"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (Bacillus licheniformis або B. subtilis), виділення та осадження цинком",
+    "category": "Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "gentamicin",
+      "гентаміцин",
+      "gentamicin sulfate"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (Micromonospora purpurea), очищення",
+    "category": "Ветеринарна АФІ / АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "spectinomycin",
+      "спектиноміцин",
+      "spectinomycin hcl"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (Streptomyces spectabilis), виділення",
+    "category": "Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "kanamycin",
+      "канаміцин",
+      "kanamycin sulfate"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (Streptomyces kanamyceticus), виділення",
+    "category": "Ветеринарна АФІ / АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "doramectin",
+      "дорамектин"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (Streptomyces avermitilis мутантний штам), гідрогенізація",
+    "category": "Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "moxidectin",
+      "моксидектин"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (Streptomyces cyanogriseus) + хімічна модифікація",
+    "category": "Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "flunixin",
+      "флуніксин",
+      "flunixin meglumine"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (нікотинова кислота + трифторметил-анілін)",
+    "category": "Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "ketoprofen",
+      "кетопрофен"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (арилоцтова кислота)",
+    "category": "АФІ / Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "meloxicam",
+      "мелоксикам"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (оксикамовий ряд)",
+    "category": "АФІ / Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "diclofenac",
+      "диклофенак",
+      "diclofenac sodium",
+      "diclofenac potassium"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (арилоцтова кислота з дифеніламіновим кільцем)",
+    "category": "АФІ / Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "dexamethasone",
+      "дексаметазон",
+      "dexamethasone sodium phosphate"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "напівсинтез із рослинних стероїдних попередників (діосгенін з ямсу)",
+    "category": "АФІ / Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "prednisolone",
+      "преднізолон",
+      "prednisolone acetate"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "напівсинтез + мікробіологічне окислення стероїдного попередника",
+    "category": "АФІ / Ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "methylprednisolone",
+      "метилпреднізолон",
+      "methylprednisolone acetate"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "напівсинтез стероїдів з рослинних попередників",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "cypermethrin",
+      "циперметрин"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (піретроїдний ряд)",
+    "category": "Ветеринарна АФІ / Промислова хімія",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "deltamethrin",
+      "дельтаметрин"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (піретроїдний ряд)",
+    "category": "Ветеринарна АФІ / Промислова хімія",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "permethrin",
+      "перметрин"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (піретроїдний ряд)",
+    "category": "Ветеринарна АФІ / Промислова хімія",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "omeprazole",
+      "омепразол"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (бензімідазол-сульфоксид)",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "pantoprazole",
+      "пантопразол"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (бензімідазол-сульфоксид)",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "esomeprazole",
+      "езомепразол"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез + асиметричне окислення",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "famotidine",
+      "фамотидин"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (гуанідин-похідне тіазолу)",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "cetirizine",
+      "цетиризин",
+      "cetirizine hcl"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (піперазин-похідне)",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "loratadine",
+      "лоратадин"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (бензоциклогептен-похідне)",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "diphenhydramine",
+      "дифенгідрамін",
+      "diphenhydramine hcl"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (алкілювання дифенілкарбінолу з диметиламіноетанолом)",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "theophylline",
+      "теофілін"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (метилування ксантину)",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "captopril",
+      "каптоприл"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (пролін-похідне)",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "enalapril",
+      "еналаприл",
+      "enalapril maleate"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (пептидомиметик)",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "metformin",
+      "метформін",
+      "metformin hcl",
+      "metformin hydrochloride"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (з диметиламіну та дициандіаміду)",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "glibenclamide",
+      "глібенкламід",
+      "glyburide"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (сульфонілсечовина)",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "atenolol",
+      "атенолол"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (β-блокатор)",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "propranolol",
+      "пропранолол",
+      "propranolol hcl"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (β-блокатор нафталінового ряду)",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "amlodipine",
+      "амлодипін",
+      "amlodipine besylate"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (дигідропіридиновий ряд)",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "atorvastatin",
+      "аторвастатин"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (синтетичний статин)",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "simvastatin",
+      "симвастатин"
+    ],
+    "originType": "напівсинтетичне (ферментаційна основа)",
+    "productionMethod": "хімічна модифікація ловастатину (ферментація Aspergillus terreus)",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "lovastatin",
+      "ловастатин"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (Aspergillus terreus), виділення та очищення",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "pravastatin",
+      "правастатин"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (Nocardia autotrophica мікробне гідроксилювання ловастатину)",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "furosemide",
+      "фуросемід",
+      "furosemide"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (сульфонамід-похідне антранілової кислоти)",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "hydrochlorothiazide",
+      "гідрохлоротіазид",
+      "hctz"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (тіазидний ряд)",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "fluconazole",
+      "флуконазол"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (бістриазол-похідне)",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "ketoconazole",
+      "кетоконазол"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (імідазол-похідне)",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "clotrimazole",
+      "клотримазол"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (імідазол-похідне)",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "miconazole",
+      "міконазол"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (бісфенільний імідазол)",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "nystatin",
+      "ністатин"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (Streptomyces noursei), виділення та очищення",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "griseofulvin",
+      "гризеофульвін"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (Penicillium griseofulvum), виділення",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "acyclovir",
+      "ацикловір"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (ациклічний нуклеозид)",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "diazepam",
+      "діазепам"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (бензодіазепіновий ряд)",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "phenobarbital",
+      "фенобарбітал"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (барбітуровий ряд)",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "valproic acid",
+      "вальпроєва кислота",
+      "sodium valproate",
+      "вальпроат натрію"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (пропілоцтовий ряд)",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "digoxin",
+      "дигоксин"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція з листя наперстянки вовнистої (Digitalis lanata)",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "atropine",
+      "атропін",
+      "atropine sulfate"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція з Atropa belladonna, Datura або напівсинтез",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "heparin",
+      "гепарин",
+      "heparin sodium",
+      "heparin calcium"
+    ],
+    "originType": "тваринне",
+    "productionMethod": "екстракція зі слизової оболонки кишечника свиней або бичачих легень",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "insulin",
+      "інсулін",
+      "insulin human",
+      "insulin regular"
+    ],
+    "originType": "ферментаційне (рекомбінантне)",
+    "productionMethod": "рекомбінантна ферментація (E. coli або Saccharomyces cerevisiae)",
+    "category": "АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "l-proline",
+      "l-пролін",
+      "proline"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (C. glutamicum або E. coli), виділення та кристалізація",
+    "category": "Харчова добавка / Косметична сировина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "l-serine",
+      "l-серін",
+      "serine"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (Corynebacterium), виділення",
+    "category": "Харчова добавка / АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "l-alanine",
+      "l-аланін",
+      "dl-alanine",
+      "аланін"
+    ],
+    "originType": "ферментаційне або синтетичне",
+    "productionMethod": "ферментація або ензиматичне декарбоксилювання аспарагінової кислоти",
+    "category": "Харчова добавка / АФІ",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "l-phenylalanine",
+      "l-фенілаланін",
+      "phenylalanine"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (E. coli), виділення та кристалізація",
+    "category": "Харчова добавка / АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "l-cysteine",
+      "l-цистеїн",
+      "l-cystine",
+      "cysteine hcl"
+    ],
+    "originType": "тваринне або ферментаційне",
+    "productionMethod": "гідроліз волосся та пір'я (тваринне) або ферментація (E. coli), очищення",
+    "category": "АФІ / Харчова добавка",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "l-tyrosine",
+      "l-тирозин",
+      "tyrosine"
+    ],
+    "originType": "ферментаційне або рослинне",
+    "productionMethod": "ферментація (E. coli) або ензиматичне перетворення з фенолу",
+    "category": "Харчова добавка / АФІ",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "glycine",
+      "гліцин",
+      "glycine feed grade",
+      "glycine pharma"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (амонолізис монохлорацтової кислоти)",
+    "category": "Харчова добавка / Кормова добавка / АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "acetyl l-carnitine",
+      "ацетил-l-карнітин",
+      "acetyl carnitine",
+      "alcar"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (ацетилювання L-карнітину оцтовим ангідридом)",
+    "category": "АФІ / Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "n-acetyl cysteine",
+      "nac",
+      "n-ацетилцистеїн",
+      "acetylcysteine"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (ацетилювання L-цистеїну)",
+    "category": "АФІ / Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "adenosine",
+      "аденозин",
+      "adenosine monophosphate",
+      "amp"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (дріжджі або бактерії), ензиматичне виділення нуклеотидів",
+    "category": "АФІ / Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "inosine",
+      "інозин",
+      "inosine monophosphate",
+      "imp"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (Brevibacterium ammoniagenes), виділення та очищення",
+    "category": "Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "guanosine",
+      "гуанозин",
+      "guanosine monophosphate",
+      "gmp"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (Bacillus subtilis), виділення",
+    "category": "Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "methylcobalamin",
+      "метилкобаламін",
+      "methyl b12"
+    ],
+    "originType": "синтетичне або ферментаційне",
+    "productionMethod": "хімічна метилізація ціанокобаламіну (синтетичне) або ферментація",
+    "category": "АФІ / Харчова добавка",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "pyridoxal phosphate",
+      "піридоксаль фосфат",
+      "p5p",
+      "pyridoxal-5-phosphate"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (фосфорилювання піридоксалю)",
+    "category": "АФІ / Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "l-5-methyltetrahydrofolate",
+      "l-5-mthf",
+      "methylfolate",
+      "5-mthf"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (стереоселективне відновлення та метилювання фолату)",
+    "category": "АФІ / Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "coenzyme q10",
+      "coq10",
+      "ubiquinol",
+      "ubiquinone",
+      "коензим q10"
+    ],
+    "originType": "ферментаційне або синтетичне",
+    "productionMethod": "ферментація (Rhodobacter sphaeroides або дріжджі) або хімічний синтез",
+    "category": "АФІ / Харчова добавка / Косметична сировина",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "alpha lipoic acid",
+      "альфа-ліпоєва кислота",
+      "lipoic acid",
+      "thioctic acid"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (з капринової кислоти або октанової кислоти)",
+    "category": "АФІ / Харчова добавка / Косметична сировина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "astaxanthin",
+      "астаксантин"
+    ],
+    "originType": "ферментаційне або синтетичне",
+    "productionMethod": "ферментація (Haematococcus pluvialis водорість) або хімічний синтез",
+    "category": "Харчова добавка / Косметична сировина",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "lutein",
+      "лютеїн",
+      "lutein ester"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція з квітів нагідок (Tagetes erecta), омилення ефірів",
+    "category": "Харчова добавка / Косметична сировина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "beta carotene",
+      "бета-каротин",
+      "beta-carotene"
+    ],
+    "originType": "синтетичне або рослинне або ферментаційне",
+    "productionMethod": "хімічний синтез (більшість комерційного), екстракція з рослин або ферментація (Blakeslea trispora)",
+    "category": "Харчова добавка / Кормова добавка",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "lycopene",
+      "лікопін"
+    ],
+    "originType": "рослинне або синтетичне",
+    "productionMethod": "екстракція з томатної шкірки або хімічний синтез",
+    "category": "Харчова добавка / Косметична сировина",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "zeaxanthin",
+      "зеаксантин"
+    ],
+    "originType": "рослинне або синтетичне",
+    "productionMethod": "екстракція з перцю або квітів, або хімічний синтез",
+    "category": "Харчова добавка",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "quercetin",
+      "кверцетин",
+      "quercetin dihydrate"
+    ],
+    "originType": "рослинне або синтетичне",
+    "productionMethod": "екстракція з кори дуба або цибулиння; або хімічний синтез",
+    "category": "Харчова добавка / Косметична сировина",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "rutin",
+      "рутин"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція з гречки (Fagopyrum esculentum), очищення та кристалізація",
+    "category": "АФІ / Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "hesperidin",
+      "гесперидин"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція зі шкірки цитрусових (Citrus sinensis), кислотно-лужне очищення",
+    "category": "Харчова добавка / АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "grape seed extract",
+      "екстракт виноградних кісточок",
+      "opc",
+      "proanthocyanidins"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція насіння та кісточок винограду (Vitis vinifera), стандартизація за ОПЦ",
+    "category": "Харчова добавка / Косметична сировина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "pine bark extract",
+      "pycnogenol",
+      "екстракт кори сосни"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція кори Pinus pinaster, стандартизація за проантоціанідинами",
+    "category": "Харчова добавка / Косметична сировина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "boswellia",
+      "босвелія",
+      "boswellia extract",
+      "frankincense extract"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція смоли Boswellia serrata, стандартизація за босвеліновими кислотами",
+    "category": "Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "hawthorn extract",
+      "екстракт глоду"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція квітів/листя/плодів Crataegus spp.",
+    "category": "Харчова добавка / АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "artichoke extract",
+      "екстракт артишоку"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція листя Cynara scolymus, стандартизація за цинаріном",
+    "category": "Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "saw palmetto",
+      "екстракт пальми секорної"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція ягід Serenoa repens, стандартизація за жирними кислотами",
+    "category": "Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "tribulus terrestris",
+      "трибулус",
+      "якірці"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція надземної частини Tribulus terrestris",
+    "category": "Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "maca extract",
+      "екстракт маки",
+      "lepidium meyenii"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція кореня Lepidium meyenii, ліофілізація або розпилювальне сушіння",
+    "category": "Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "astragalus extract",
+      "екстракт астрагалу"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція кореня Astragalus membranaceus, стандартизація за полісахаридами",
+    "category": "Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "reishi",
+      "рейши",
+      "reishi extract",
+      "ganoderma"
+    ],
+    "originType": "рослинне або ферментаційне",
+    "productionMethod": "екстракція плодових тіл Ganoderma lucidum або глибинна ферментація",
+    "category": "Харчова добавка",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "cordyceps",
+      "кордицепс",
+      "cordyceps extract"
+    ],
+    "originType": "ферментаційне або рослинне",
+    "productionMethod": "глибинна ферментація (Cordyceps sinensis) або культивування на зернових",
+    "category": "Харчова добавка",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "lions mane",
+      "їжачок гребінчастий",
+      "hericium erinaceus"
+    ],
+    "originType": "рослинне або ферментаційне",
+    "productionMethod": "екстракція плодових тіл або ферментація міцелію",
+    "category": "Харчова добавка",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "schisandra",
+      "схізандра",
+      "лимонник",
+      "schisandra extract"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція ягід Schisandra chinensis, стандартизація за схізандринами",
+    "category": "Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "eleuthero",
+      "елеутерокок",
+      "siberian ginseng",
+      "eleutherococcus"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція кореня Eleutherococcus senticosus",
+    "category": "Харчова добавка / АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "aloe vera",
+      "алое вера",
+      "aloe vera extract",
+      "aloe vera gel"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція гелю або соку Aloe barbadensis, пастеризація та сушіння",
+    "category": "Косметична сировина / Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "chamomile extract",
+      "екстракт ромашки",
+      "chamomile",
+      "matricaria"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція квіткових голівок Matricaria chamomilla",
+    "category": "Косметична сировина / АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "calendula extract",
+      "екстракт календули"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція квіткових голівок Calendula officinalis",
+    "category": "Косметична сировина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "centella asiatica",
+      "центела азійська",
+      "gotu kola",
+      "asiaticoside"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція Centella asiatica, стандартизація за азіатикозидом та мадекасозидом",
+    "category": "Косметична сировина / Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "licorice root extract",
+      "екстракт кореня солодки",
+      "glycyrrhizin",
+      "glycyrrhizic acid"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція кореня Glycyrrhiza glabra, стандартизація за гліциризином",
+    "category": "Косметична сировина / АФІ / Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "bearberry extract",
+      "uva ursi",
+      "толокнянка extract"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція листя Arctostaphylos uva-ursi, стандартизація за арбутином",
+    "category": "Косметична сировина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "fenugreek",
+      "пажитник",
+      "fenugreek extract",
+      "trigonella"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція насіння Trigonella foenum-graecum",
+    "category": "Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "sea buckthorn",
+      "обліпиха",
+      "hippophae extract"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція ягід Hippophae rhamnoides, обліпихова олія або порошок",
+    "category": "Харчова добавка / Косметична сировина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "papain",
+      "папаїн"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція з латексу папайї (Carica papaya), очищення та стандартизація активності",
+    "category": "Харчова добавка / АФІ / Ексципієнт",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "bromelain",
+      "бромелаїн"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція зі стебла ананасу (Ananas comosus), очищення та стандартизація",
+    "category": "Харчова добавка / АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "serrapeptase",
+      "серапептаза",
+      "serratio peptidase"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (Serratia marcescens), виділення та очищення",
+    "category": "АФІ / Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "nattokinase",
+      "наттокіназа"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація сої (Bacillus subtilis natto), виділення та стандартизація",
+    "category": "Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "lipase",
+      "ліпаза"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (Rhizopus oryzae або Candida rugosa), виділення",
+    "category": "Харчова добавка / Ексципієнт",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "amylase",
+      "амілаза",
+      "alpha amylase"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (Bacillus subtilis або Aspergillus oryzae), виділення",
+    "category": "Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "cellulase",
+      "целюлаза"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (Trichoderma reesei або Aspergillus niger), виділення",
+    "category": "Харчова добавка / Промислова хімія",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "protease",
+      "протеаза",
+      "proteinase"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (Bacillus subtilis, Aspergillus spp.), виділення",
+    "category": "Харчова добавка / Ексципієнт",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "inositol",
+      "інозитол",
+      "myo-inositol"
+    ],
+    "originType": "синтетичне або рослинне",
+    "productionMethod": "хімічний синтез або гідроліз фітину (з кукурудзяних висівок)",
+    "category": "Харчова добавка / АФІ",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "glucono delta lactone",
+      "gdl",
+      "глюконо-дельта-лактон",
+      "glucono delta-lactone"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (Aspergillus niger) глюкози до глюконової кислоти + лактонізація",
+    "category": "Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "malic acid",
+      "яблучна кислота",
+      "malic acid food"
+    ],
+    "originType": "синтетичне або ферментаційне",
+    "productionMethod": "хімічний синтез (гідратація фумарової кислоти) або ферментація; більшість — синтетична",
+    "category": "Харчова добавка",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "fumaric acid",
+      "фумарова кислота"
+    ],
+    "originType": "ферментаційне або синтетичне",
+    "productionMethod": "ферментація (Rhizopus oryzae) або синтез (ізомеризація малеїнової кислоти)",
+    "category": "Харчова добавка / Промислова хімія",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "succinic acid",
+      "бурштинова кислота"
+    ],
+    "originType": "ферментаційне або синтетичне",
+    "productionMethod": "ферментація (E. coli або Anaerobiospirillum succiniciproducens) або гідрогенізація малеїнової кислоти",
+    "category": "Харчова добавка / Промислова хімія",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "inulin",
+      "інулін"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція з коренів цикорію (Cichorium intybus) гарячою водою, очищення та сушіння",
+    "category": "Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "pectin",
+      "пектин",
+      "apple pectin",
+      "citrus pectin"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "кислотна екстракція зі шкірки яблук або цитрусових, стандартизація за ступенем етерифікації",
+    "category": "Харчова добавка / Ексципієнт",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "agar",
+      "агар",
+      "agar agar"
+    ],
+    "originType": "рослинне (водорості)",
+    "productionMethod": "екстракція з червоних морських водоростей (Gelidium або Gracilaria)",
+    "category": "Харчова добавка / Ексципієнт",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "carrageenan",
+      "карагінан",
+      "carrageenan food grade"
+    ],
+    "originType": "рослинне (водорості)",
+    "productionMethod": "екстракція з червоних водоростей (Chondrus crispus або Eucheuma)",
+    "category": "Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "guar gum",
+      "гуарова смола",
+      "guar"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "розмол ендосперму насіння гуарового бобу (Cyamopsis tetragonoloba)",
+    "category": "Харчова добавка / Ексципієнт",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "gum arabic",
+      "гуміарабік",
+      "arabic gum",
+      "acacia gum"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "смола акації (Acacia senegal або A. seyal), природний ексудат",
+    "category": "Харчова добавка / Ексципієнт",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "cyclodextrin",
+      "циклодекстрин",
+      "beta cyclodextrin",
+      "hydroxypropyl cyclodextrin"
+    ],
+    "originType": "рослинне (ензиматично модифіковане)",
+    "productionMethod": "ензиматичне перетворення крохмалю (циклодекстрин глюканотрансфераза)",
+    "category": "Ексципієнт / Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "phosphatidylcholine",
+      "фосфатидилхолін",
+      "lecithin",
+      "лецитин",
+      "soy lecithin"
+    ],
+    "originType": "рослинне або тваринне",
+    "productionMethod": "екстракція зі сої (рослинне) або яєчного жовтка (тваринне), очищення",
+    "category": "Харчова добавка / Ексципієнт / Косметична сировина",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "spirulina",
+      "спіруліна",
+      "spirulina extract",
+      "arthrospira"
+    ],
+    "originType": "ферментаційне (мікроводорість)",
+    "productionMethod": "культивування ціанобактерії Arthrospira platensis у фотобіореакторах",
+    "category": "Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "chlorella",
+      "хлорела",
+      "chlorella extract"
+    ],
+    "originType": "ферментаційне (мікроводорість)",
+    "productionMethod": "культивування мікроводорості Chlorella vulgaris, розрив клітинної стінки",
+    "category": "Харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "ceramide",
+      "кераміди",
+      "ceramide np",
+      "ceramide ap",
+      "ceramide eos"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (сфінгозинова основа + жирна кислота)",
+    "category": "Косметична сировина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "palmitoyl pentapeptide",
+      "matrixyl",
+      "паргілін-5",
+      "palmitoyl tripeptide"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "твердофазний хімічний синтез пептидів + пальмітоїлювання",
+    "category": "Косметична сировина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "acetyl hexapeptide",
+      "argireline",
+      "acetyl hexapeptide-3",
+      "ацетил гексапептид"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "твердофазний хімічний синтез пептидів + ацетилювання",
+    "category": "Косметична сировина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "glutathione",
+      "глутатіон"
+    ],
+    "originType": "ферментаційне або синтетичне",
+    "productionMethod": "ферментація (Saccharomyces cerevisiae) або хімічний синтез",
+    "category": "Косметична сировина / АФІ / Харчова добавка",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "tranexamic acid",
+      "транексамова кислота"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (циклогексанкарбонова кислота + аміноетанол)",
+    "category": "АФІ / Косметична сировина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "azelaic acid",
+      "азелаїнова кислота"
+    ],
+    "originType": "синтетичне або рослинне",
+    "productionMethod": "хімічний синтез (озонування олеїнової кислоти) або мікробіологічне перетворення",
+    "category": "Косметична сировина / АФІ",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "cholesterol",
+      "холестерол",
+      "холестерин",
+      "cholesterol powder"
+    ],
+    "originType": "тваринне або синтетичне",
+    "productionMethod": "екстракція з вовняного жиру (ланолін) або синтез",
+    "category": "Ексципієнт / Косметична сировина",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "lanolin",
+      "ланолін",
+      "lanolin alcohol"
+    ],
+    "originType": "тваринне",
+    "productionMethod": "вилучення з вовни овець (очищення жиру вовни), рафінування",
+    "category": "Косметична сировина / Ексципієнт",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "beeswax",
+      "бджолиний віск",
+      "carnauba wax",
+      "белый воск"
+    ],
+    "originType": "тваринне або рослинне",
+    "productionMethod": "тваринне (бджоли Apis mellifera) або рослинне (пальма Copernicia prunifera)",
+    "category": "Косметична сировина / Ексципієнт",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "dimethicone",
+      "диметикон",
+      "silicone oil",
+      "polydimethylsiloxane"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (гідроліз та полімеризація диметилдихлорсилану)",
+    "category": "Косметична сировина / Ексципієнт",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "carbomer",
+      "карбомер",
+      "carbopol",
+      "polyacrylic acid"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "радикальна полімеризація акрилової кислоти",
+    "category": "Косметична сировина / Ексципієнт",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "cetyl alcohol",
+      "цетиловий спирт",
+      "стеариловий спирт",
+      "stearyl alcohol",
+      "cetearyl alcohol"
+    ],
+    "originType": "рослинне або синтетичне",
+    "productionMethod": "гідрогенізація кокосової або пальмового масла або синтез",
+    "category": "Косметична сировина / Ексципієнт",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "sodium lauryl sulfate",
+      "sls",
+      "лаурилсульфат натрію",
+      "sodium laureth sulfate",
+      "sles"
+    ],
+    "originType": "рослинне або синтетичне",
+    "productionMethod": "сульфатування лаурилового спирту (з кокосового масла або нафтохімії)",
+    "category": "Косметична сировина / Промислова хімія",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "methylparaben",
+      "метилпарабен",
+      "propylparaben",
+      "пропілпарабен",
+      "paraben"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (естерифікація п-гідроксибензойної кислоти)",
+    "category": "Косметична сировина / Ексципієнт",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "benzyl alcohol",
+      "бензиловий спирт"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (гідроліз бензил хлориду) або природний (ефірні олії)",
+    "category": "Косметична сировина / Ексципієнт / Промислова хімія",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "propylene glycol",
+      "пропіленгліколь",
+      "pg"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (гідратація пропіленоксиду, нафтохімічний)",
+    "category": "Ексципієнт / Промислова хімія",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "glycerin",
+      "glycerol",
+      "гліцерин",
+      "гліцерол"
+    ],
+    "originType": "рослинне або синтетичне або тваринне",
+    "productionMethod": "побічний продукт виробництва мила/FAME з рослинних олій або тваринних жирів; або синтез",
+    "category": "Ексципієнт / Харчова добавка / Косметична сировина",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "dimethyl sulfoxide",
+      "dmso",
+      "диметилсульфоксид",
+      "дмсо"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (окислення диметилсульфіду)",
+    "category": "АФІ / Промислова хімія",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "benzalkonium chloride",
+      "бензалконій хлорид",
+      "bac",
+      "бензалконію хлорид"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (реакція бензилхлориду з диметиламіном + алкілювання)",
+    "category": "АФІ / Косметична сировина / Промислова хімія",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "cetrimide",
+      "цетримід",
+      "cetrimonium bromide"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (четвертинна амонієва сіль)",
+    "category": "АФІ / Косметична сировина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "hydrogen peroxide",
+      "перекис водню",
+      "hydrogen peroxide 30%",
+      "h2o2"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (антрахіноновий процес)",
+    "category": "Промислова хімія / АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "glutaraldehyde",
+      "глутаральдегід"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (конденсація акролеїну з вінілоацетатом та гідроліз)",
+    "category": "Промислова хімія",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "formaldehyde",
+      "формальдегід",
+      "formalin",
+      "формалін"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (каталітичне окислення метанолу)",
+    "category": "Промислова хімія",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "метамізол натрію",
+      "метамизол натрия",
+      "анальгін",
+      "анальгин",
+      "dipyrone",
+      "metamizole sodium",
+      "novalgin"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез похідного піразолону з подальшим утворенням натрієвої солі",
+    "category": "Фармацевтична АФІ / анальгетик",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "фталілсульфатіазол",
+      "фталилсульфатиазол",
+      "фталазол",
+      "phthalylsulfathiazole",
+      "phthalazol"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез сульфаніламідного похідного з фталільним фрагментом",
+    "category": "Фармацевтична АФІ / сульфаніламід",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "ізоніазид",
+      "изониазид",
+      "isoniazid",
+      "isonicotinic acid hydrazide"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез гідразиду ізонікотинової кислоти",
+    "category": "Фармацевтична АФІ / протитуберкульозна речовина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "ацикловір",
+      "ацикловир",
+      "acyclovir"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "багатостадійний хімічний синтез ациклічного нуклеозидного аналога",
+    "category": "Фармацевтична АФІ / противірусна речовина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "алопуринол",
+      "аллопуринол",
+      "allopurinol"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез піразолопіримідинового похідного",
+    "category": "Фармацевтична АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "кетоконазол",
+      "ketoconazole"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез імідазольного протигрибкового похідного",
+    "category": "Фармацевтична АФІ / протигрибкова речовина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "фуросемід",
+      "фуросемид",
+      "furosemide"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез похідного сульфонаміду та антранілової кислоти",
+    "category": "Фармацевтична АФІ / діуретик",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "німесулід",
+      "нимесулид",
+      "nimesulide"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез похідного сульфонаніліду",
+    "category": "Фармацевтична АФІ / НПЗЗ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "диклофенак натрію",
+      "диклофенак натрия",
+      "diclofenac sodium",
+      "diclofenac"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез похідного феніл-оцтової кислоти з утворенням натрієвої солі",
+    "category": "Фармацевтична АФІ / НПЗЗ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "мелоксикам",
+      "meloxicam"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез оксикамового похідного",
+    "category": "Фармацевтична АФІ / НПЗЗ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "лідокаїну гідрохлорид",
+      "лидокаина гидрохлорид",
+      "лідокаїн гідрохлорид",
+      "лидокаин гидрохлорид",
+      "lidocaine hydrochloride",
+      "lidocaine hcl"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез місцевого анестетика амідного типу з подальшим утворенням хлороводневої солі",
+    "category": "Фармацевтична АФІ / місцевий анестетик",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "новокаїн гідрохлорид",
+      "новокаин гидрохлорид",
+      "прокаїн гідрохлорид",
+      "прокаин гидрохлорид",
+      "procaine hydrochloride",
+      "procaine hcl",
+      "novocaine"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез естерного місцевого анестетика з подальшим утворенням хлороводневої солі",
+    "category": "Фармацевтична АФІ / місцевий анестетик",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "анестезин",
+      "анестезин",
+      "бензокаїн",
+      "бензокаин",
+      "benzocaine",
+      "ethyl aminobenzoate"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез етилового естеру п-амінобензойної кислоти",
+    "category": "Фармацевтична АФІ / місцевий анестетик",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "стрептоцид",
+      "сульфаніламід",
+      "сульфаниламид",
+      "sulfanilamide",
+      "streptocide"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез сульфаніламідної речовини",
+    "category": "Фармацевтична АФІ / сульфаніламід",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "хлоргексидин",
+      "хлоргекседин",
+      "chlorhexidine",
+      "chlorhexidine acetate",
+      "хлоргексидина ацетат",
+      "хлоргексидину ацетат"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез бігуанідного антисептика; сіль/форма залежить від специфікації",
+    "category": "Фармацевтична АФІ / антисептик",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "брильянтовий зелений",
+      "бриллиантовый зеленый",
+      "бриллиантовй зеленый",
+      "зеленка",
+      "brilliant green"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез трифенілметанового барвника",
+    "category": "Фармацевтична/ветеринарна речовина / барвник-антисептик",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "йод",
+      "iodine",
+      "iodum"
+    ],
+    "originType": "мінеральне / неорганічне",
+    "productionMethod": "виділення йоду з природних розсолів або мінеральної сировини з подальшим очищенням",
+    "category": "Фармацевтична / хімічна речовина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "борна кислота",
+      "борная кислота",
+      "boric acid",
+      "orthoboric acid"
+    ],
+    "originType": "мінеральне / синтетичне",
+    "productionMethod": "отримання з борних мінералів або реакцією боратів із мінеральними кислотами",
+    "category": "Фармацевтична / промислова хімія",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "натрію тіосульфат",
+      "натрия тиосульфат",
+      "sodium thiosulfate",
+      "sodium thiosulphate"
+    ],
+    "originType": "мінеральне / синтетичне",
+    "productionMethod": "хімічний синтез з сульфітів/сірки або інших неорганічних сірковмісних сполук",
+    "category": "Фармацевтична / хімічна речовина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "калію йодид",
+      "калия йодид",
+      "potassium iodide",
+      "ki"
+    ],
+    "originType": "мінеральне / синтетичне",
+    "productionMethod": "нейтралізація йодоводневої кислоти калієвою основою або реакції йоду з калійвмісними відновниками",
+    "category": "Фармацевтична / харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "кальцію гліцерофосфат",
+      "кальция глицерофосфат",
+      "calcium glycerophosphate"
+    ],
+    "originType": "синтетичне (мінеральне + органічне)",
+    "productionMethod": "хімічна нейтралізація гліцерофосфорної кислоти кальцієвою основою/сіллю",
+    "category": "Фармацевтична АФІ / мінеральна добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "кальцію глюконат вет",
+      "кальция глюконат вет",
+      "calcium gluconate vet"
+    ],
+    "originType": "синтетичне (мінеральне + ферментаційне органічне)",
+    "productionMethod": "реакція глюконової кислоти з кальцієвою сіллю; глюконова кислота зазвичай отримується ферментацією глюкози",
+    "category": "Ветеринарна/фармацевтична субстанція",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "альбендазол",
+      "albendazole"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез бензимідазольного карбамату",
+    "category": "Ветеринарна/фармацевтична АФІ / антигельмінтик",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "енрофлоксацин основа",
+      "энрофлоксацин основание",
+      "енрофлоксацин",
+      "энрофлоксацин",
+      "enrofloxacin base",
+      "enrofloxacin"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез фторхінолонового похідного",
+    "category": "Ветеринарна АФІ / антибактеріальна речовина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "олаквіндокс",
+      "олаквиндокс",
+      "olaquindox"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез похідного хіноксаліну-N-оксиду",
+    "category": "Ветеринарна/кормова речовина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "метронідазол бензоат",
+      "метронидазол бензоат",
+      "metronidazole benzoate"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез нітроімідазольної речовини з подальшим утворенням бензоатної форми",
+    "category": "Фармацевтична/ветеринарна АФІ",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "хлортетрациклін гідрохлорид",
+      "хлортетрациклина г/х",
+      "хлортетрациклин гхл",
+      "chlortetracycline hydrochloride",
+      "chlortetracycline hcl"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація Streptomyces aureofaciens з подальшим виділенням, очищенням і утворенням хлороводневої солі",
+    "category": "Ветеринарна АФІ / антибіотик",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "окситетрациклін гідрохлорид",
+      "окситетрациклин гхл",
+      "oxytetracycline hydrochloride",
+      "oxytetracycline hcl"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація Streptomyces rimosus з подальшим виділенням, очищенням і утворенням хлороводневої солі",
+    "category": "Ветеринарна/фармацевтична АФІ / антибіотик",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "доксициклін гіклат",
+      "доксициклина хиклат",
+      "doxycycline hyclate"
+    ],
+    "originType": "напівсинтетичне (ферментаційна основа)",
+    "productionMethod": "напівсинтез на основі тетрациклінового ферментаційного ядра з подальшим утворенням гіклату",
+    "category": "Фармацевтична/ветеринарна АФІ / антибіотик",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "тиамулина гидроген фумарат",
+      "тіамуліну гідроген фумарат",
+      "tiamulin hydrogen fumarate"
+    ],
+    "originType": "напівсинтетичне (ферментаційна основа)",
+    "productionMethod": "хімічна модифікація плевромутиліну, отриманого ферментацією, з утворенням фумаратної солі",
+    "category": "Ветеринарна АФІ / антибіотик",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "менадіон нікотинамід бісульфіт",
+      "менадион мnb",
+      "менадион мнб",
+      "mnb",
+      "menadione nicotinamide bisulfite",
+      "vitamin k3 mnb"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез менадіону з подальшим утворенням водорозчинного бісульфітного комплексу з нікотинамідом",
+    "category": "Кормова добавка / вітамін K3",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "мальтитол сироп",
+      "мальтитоловий сироп",
+      "maltitol syrup"
+    ],
+    "originType": "рослинне (модифіковане)",
+    "productionMethod": "гідроліз крохмалю до мальтози з подальшим каталітичним гідруванням до мальтитолу",
+    "category": "Харчова добавка / підсолоджувач",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "сорбітол 70",
+      "сорбитол 70",
+      "sorbitol 70",
+      "sorbitol solution",
+      "сорбітол розчин",
+      "сорбитол раствор"
+    ],
+    "originType": "рослинне (модифіковане)",
+    "productionMethod": "каталітичне гідрування глюкози, отриманої з кукурудзяного або іншого крохмалю",
+    "category": "Харчова добавка / фарм ексципієнт",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "еритритол",
+      "эритритол",
+      "erythritol"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація глюкозного субстрату осмотолерантними дріжджами з подальшим очищенням і кристалізацією",
+    "category": "Харчова добавка / підсолоджувач",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "ціанокобаламін 1% кормовий",
+      "цианокобаламин 1% кормовой",
+      "cyanocobalamin 1% feed"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментаційне отримання вітаміну B12 з подальшим змішуванням з носієм до потрібної концентрації",
+    "category": "Кормова добавка / вітамін B12",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "вітамін а пальмітат",
+      "витамин а пальмитат",
+      "vitamin a palmitate",
+      "retinyl palmitate"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез ретиноїдної речовини з подальшим естерифікуванням пальмітиновою кислотою",
+    "category": "Вітамін / АФІ / кормова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "ізопропіл міристат",
+      "изопропил миристат",
+      "изопропила миристат",
+      "isopropyl myristate",
+      "ipm"
+    ],
+    "originType": "рослинне або синтетичне",
+    "productionMethod": "естерифікація міристинової кислоти з ізопропанолом; жирна кислота часто походить з кокосової або пальмоядрової олії",
+    "category": "Косметична / фармацевтична допоміжна речовина",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "ізопропіл пальмітат",
+      "изопропил пальмитат",
+      "isopropyl palmitate",
+      "ipp"
+    ],
+    "originType": "рослинне або синтетичне",
+    "productionMethod": "естерифікація пальмітинової кислоти ізопропанолом; жирна кислота часто рослинного походження",
+    "category": "Косметична / фармацевтична допоміжна речовина",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "тригліцерид мст",
+      "триглицерид мст",
+      "мст",
+      "medium chain triglycerides",
+      "mct oil",
+      "caprylic capric triglyceride",
+      "каприлові капринові тригліцериди"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "фракціонування кокосової або пальмоядрової олії з подальшою естерифікацією/очищенням середньоланцюгових жирних кислот",
+    "category": "Косметична / харчова / фармацевтична допоміжна речовина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "лауринова кислота",
+      "лауриновая кислота",
+      "lauric acid",
+      "palmac 99-12",
+      "лауринка"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "фракціонування кокосової або пальмоядрової олії з подальшим очищенням жирної кислоти",
+    "category": "Олеохімічна / косметична сировина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "олеїнова кислота",
+      "олеиновая кислота",
+      "oleic acid"
+    ],
+    "originType": "рослинне або тваринне",
+    "productionMethod": "гідроліз і фракціонування рослинних олій або тваринних жирів; джерело підтверджується origin statement",
+    "category": "Олеохімічна / косметична сировина",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "стеаринова кислота 1842",
+      "стеариновая кислота 1842",
+      "stearic acid 1842",
+      "стеаринова кислота 1860",
+      "стеариновая кислота 1860",
+      "stearic acid 1860",
+      "palmac 55-16"
+    ],
+    "originType": "рослинне або тваринне",
+    "productionMethod": "фракціонування та гідрогенізація жирних кислот; для Palmac/олеохімії типово пальмове або пальмоядрове походження",
+    "category": "Олеохімічна / косметична сировина",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "цетилстеариловий спирт",
+      "цетилстеариловый спирт",
+      "цетеариловий спирт",
+      "цетеариловый спирт",
+      "cetearyl alcohol",
+      "cetostearyl alcohol",
+      "cetyl stearyl alcohol"
+    ],
+    "originType": "рослинне або синтетичне",
+    "productionMethod": "гідрогенізація природних жирних кислот/естерів або нафтохімічний синтез жирних спиртів; джерело підтверджується виробником",
+    "category": "Косметична / фармацевтична допоміжна речовина",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "моностеарат 40",
+      "моностеарат 90",
+      "гліцерил моностеарат",
+      "глицерил моностеарат",
+      "glyceryl monostearate",
+      "gms"
+    ],
+    "originType": "рослинне або тваринне",
+    "productionMethod": "естерифікація гліцерину стеариновою/пальмітиновою кислотою; джерело жирної кислоти потрібно підтвердити",
+    "category": "Ексципієнт / емульгатор / косметична сировина",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "кокамідопропілбетаїн 30",
+      "кокамидопропилбетаин 30",
+      "кокамідопропілбетаїн 45",
+      "кокамидопропилбетаин 45",
+      "cocamidopropyl betaine",
+      "capb"
+    ],
+    "originType": "змішане (рослинна жирна кислота + синтетична амінна частина)",
+    "productionMethod": "реакція кокосових/пальмоядрових жирних кислот з диметиламінопропіламіном та монохлороцтовою кислотою",
+    "category": "Косметична ПАР / промислова хімія",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "пропіленгліколь дикаприлат дикапрат",
+      "пропиленгликоль дикаприлат дикапрат",
+      "propylene glycol dicaprylate dicaprate"
+    ],
+    "originType": "рослинне або синтетичне",
+    "productionMethod": "естерифікація пропіленгліколю каприловою/каприновою кислотами; жирні кислоти часто з кокосової або пальмоядрової олії",
+    "category": "Косметична / фармацевтична допоміжна речовина",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "касторова олія",
+      "касторовое масло",
+      "castor oil",
+      "ricinus oil"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "пресування або екстракція насіння рицини Ricinus communis з подальшим очищенням",
+    "category": "Олія / фармацевтична або косметична сировина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "камфора",
+      "camphor"
+    ],
+    "originType": "рослинне або синтетичне",
+    "productionMethod": "екстракція з камфорного дерева або синтез з терпентинної олії/пінену; джерело підтверджується CoA/SDS",
+    "category": "Фармацевтична / косметична речовина",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "ментол",
+      "menthol",
+      "l-menthol"
+    ],
+    "originType": "рослинне або синтетичне",
+    "productionMethod": "виділення з м’ятної олії або синтез/гідрогенізація тимолу; джерело підтверджується виробником",
+    "category": "Фармацевтична / харчова / косметична речовина",
+    "confidence": "medium"
+  },
+  {
+    "keys": [
+      "циклпентасилоксан",
+      "циклопентасилоксан",
+      "cyclopentasiloxane",
+      "d5"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез циклічного силоксану з кремнійорганічних проміжних продуктів",
+    "category": "Косметична сировина / силікон",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "вазелін білий",
+      "вазелин белый",
+      "вазелін",
+      "вазелин",
+      "white petrolatum",
+      "petrolatum",
+      "petroleum jelly"
+    ],
+    "originType": "мінеральне / нафтохімічне",
+    "productionMethod": "очищення нафтових фракцій з подальшою депарафінізацією та рафінацією до фарм/косм grade",
+    "category": "Фармацевтичний/косметичний ексципієнт",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "вазелінова олія",
+      "вазелиновое масло",
+      "paraffinum liquidum",
+      "liquid paraffin",
+      "mineral oil",
+      "масло апар",
+      "apar oil"
+    ],
+    "originType": "мінеральне / нафтохімічне",
+    "productionMethod": "глибоке очищення нафтових мінеральних олив до відповідної в’язкості та grade",
+    "category": "Фармацевтична / косметична / промислова олива",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "гідрогенізована вуглеводнева смола",
+      "водородизированная углеводородная смола",
+      "hydrogenated hydrocarbon resin",
+      "hc-9120"
+    ],
+    "originType": "синтетичне / нафтохімічне",
+    "productionMethod": "полімеризація нафтохімічних C5/C9-фракцій з подальшим гідруванням смоли",
+    "category": "Промислова хімія / полімерна смола",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "плівка пвх",
+      "пленка пвх",
+      "pvc film",
+      "polyvinyl chloride film",
+      "пвх белая",
+      "пвх прозрачная"
+    ],
+    "originType": "синтетичне / нафтохімічне",
+    "productionMethod": "полімеризація вінілхлориду з подальшим каландруванням/екструзією у плівку; може містити пластифікатори та стабілізатори",
+    "category": "Пакувальний полімерний матеріал",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "фільтрувальний папір",
+      "фильтровальная бумага",
+      "filter paper"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "виробництво з целюлозної пульпи з подальшим формуванням, очищенням і сушінням паперу",
+    "category": "Папір / фільтрувальний матеріал",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "акрипол",
+      "акриловий полімер",
+      "акриловый полимер",
+      "carbomer",
+      "carbopol",
+      "polyacrylic acid"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "радикальна полімеризація акрилової кислоти або споріднених акрилатних мономерів",
+    "category": "Ексципієнт / косметична сировина / полімер",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "1-метил-2-піролідон",
+      "1-метил-2 пиролидон",
+      "1-метил-2-пиролидон",
+      "n-methyl-2-pyrrolidone",
+      "nmp"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез розчинника з гамма-бутиролактону та метиламіну або спорідненими маршрутами",
+    "category": "Промисловий розчинник / хімічна сировина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "цирконію оксихлорид",
+      "циркония оксихлорид",
+      "zirconium oxychloride",
+      "zirconyl chloride"
+    ],
+    "originType": "мінеральне / синтетичне",
+    "productionMethod": "хімічна переробка цирконового піску або інших цирконієвих мінералів кислотами з подальшим очищенням",
+    "category": "Промислова хімія",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "васильки",
+      "волошка",
+      "волошки",
+      "cornflower",
+      "centaurea cyanus"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "збір, сушіння та очищення квіток/рослинної сировини Centaurea cyanus",
+    "category": "Рослинна сировина / фарм або чайна сировина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "евкаліпт зелені листки",
+      "евкаліпт листя",
+      "эвкалипт листья",
+      "eucalyptus leaves",
+      "eucalyptus leaf"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "збір, сушіння та очищення листя евкаліпта; важливо підтвердити латинську назву та частину рослини",
+    "category": "Рослинна сировина / фарм або ефіроолійна сировина",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "екстракт ашваганди 10 1",
+      "екстракт ашваганди",
+      "ашваганда 10:1",
+      "ashwagandha extract 10:1"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція кореня Withania somnifera з подальшим концентруванням/стандартизацією",
+    "category": "Рослинний екстракт / харчова добавка",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "рутин",
+      "rutin",
+      "rutoside",
+      "рутозид",
+      "рутин монфарм"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція з рослинної сировини, часто Sophora japonica або гречка, з подальшим очищенням флавоноїду",
+    "category": "Фармацевтична АФІ / рослинний флавоноїд",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "ацетаміприд",
+      "ацетамиприд",
+      "acetamiprid"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез неонікотиноїдної речовини з хлорпіридиновими проміжними продуктами",
+    "category": "Пестицид / промислова хімія",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "фіпроніл",
+      "фипронил",
+      "fipronil"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез фенілпіразольної речовини",
+    "category": "Пестицид / ветеринарна речовина / промислова хімія",
+    "confidence": "high"
+  },
+  {
+    "keys": [
+      "моносульфірам",
+      "моносульфирам",
+      "monosulfiram"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез сірковмісного органічного похідного",
+    "category": "Фармацевтична/ветеринарна речовина",
+    "confidence": "medium"
+  }
+]
