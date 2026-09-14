@@ -23,7 +23,8 @@
     "eval:grounding": "node scripts/eval-grounding.mjs",
     "eval:golden": "tsx eval/run.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "typecheck:eval": "tsc -p eval/tsconfig.json --noEmit"
+    "typecheck:eval": "tsc -p eval/tsconfig.json --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
@@ -51,6 +52,7 @@
     "@types/pdf-parse": "^1.1.4",
     "@types/pg": "^8.11.10",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.9"
   }
 }
