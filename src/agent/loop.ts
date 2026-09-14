@@ -9,11 +9,23 @@ import type { Citation, ToolCallRecord } from '../services/conversations.js';
 import { toolDefinitions, executeTool, type ToolContext } from './tools.js';
 
 export interface AgentTurnParams {
-  workspaceId: string;
+  /**
+   * Present only for shipment-scoped ("supply") turns — it builds the ToolContext
+   * the shipment tools need. Global ("normal") and consolidated turns run without
+   * a workspace (and, for now, without tools).
+   */
+  workspaceId?: string;
   system: string;
   history: { role: 'user' | 'assistant'; content: string }[];
   userMessage: string;
   sse: SseStream;
+  /**
+   * Tool set advertised to Claude for this turn. Defaults to the full
+   * `toolDefinitions` (supply chat). Pass `[]` for tool-less kinds (normal /
+   * consolidated in this slice) — the loop then streams a single assistant
+   * message with no tool_use round-trips.
+   */
+  tools?: typeof toolDefinitions;
 }
 
 export interface AgentTurnResult {
@@ -36,7 +48,9 @@ const MAX_ITERATIONS = 8;
  */
 export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnResult> {
   const { workspaceId, system, history, userMessage, sse } = params;
-  const ctx: ToolContext = { workspaceId };
+  const tools = params.tools ?? toolDefinitions;
+  // Only shipment-scoped turns have a tool context; tool-less turns leave it null.
+  const ctx: ToolContext | null = workspaceId ? { workspaceId } : null;
 
   const messages: ChatMessageParam[] = [
     ...history.map((m) => ({ role: m.role, content: m.content })),
@@ -54,7 +68,7 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
       thinking: { type: 'adaptive' },
       system,
       messages,
-      tools: toolDefinitions,
+      tools,
     });
 
     stream.on('text', (delta: string) => {
@@ -75,6 +89,11 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
 
       let outcome;
       try {
+        if (!ctx) {
+          // Tool-less kinds advertise no tools, so we should never get here; guard
+          // in case the model somehow emits a tool_use without a workspace scope.
+          throw new Error('Інструменти недоступні в цьому режимі.');
+        }
         outcome = await executeTool(block.name, block.input, ctx);
       } catch (err) {
         outcome = {

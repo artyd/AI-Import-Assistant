@@ -33,6 +33,26 @@ export interface Workspace {
   responsible_user_id?: string | null;
 }
 
+// ── ШТУРМАН prototype port · Phase A: collections + chat kinds ────────────────
+
+// A "Збірник" (consolidated cargo) — a second top-level entity alongside
+// Workspace. `supplier` doubles as the manifest source label.
+export type CollectionStatus = "active" | "draft" | "done";
+
+export interface Collection {
+  id: string;
+  number: string | null;
+  supplier: string | null; // manifest source: Демо-маніфест | Google Sheets | Вставлена таблиця
+  status: CollectionStatus;
+  created_at: string;
+}
+
+// Three chat kinds with separate history (see API_CONTRACT.md):
+//   normal       — global ЗЕД consultant (no entity, no tools)
+//   supply       — scoped to a Workspace (Постачання), full agent + tools
+//   consolidated — scoped to a Collection (Збірник), manifest analysis
+export type ChatKind = "normal" | "supply" | "consolidated";
+
 export interface UserLite {
   id: string;
   email: string;

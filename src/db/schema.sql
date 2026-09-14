@@ -288,3 +288,59 @@ UPDATE parties SET role = 'recipient'
   WHERE lower(trim(role)) = ANY(ARRAY['покупець','покупатель','buyer','вантажоодержувач',
     'грузополучатель','consignee','отримувач','получатель','кому','імпортер','importer',
     'our_company','наша компанія','наша компания']);
+
+-- ── ШТУРМАН prototype port · Phase A: chat types + collections (сборники) ──────
+-- Adds a second top-level entity ("Збірник" / consolidated cargo) alongside
+-- workspaces (Постачання), and lets a conversation be one of three kinds
+-- (normal / supply / consolidated). All statements idempotent (db/migrate.ts
+-- applies schema.sql on every boot).
+
+-- Collections == "Збірник" (consolidated cargo) in the UI. Own folder skeleton
+-- + files, mirrors workspaces but for a manifest-of-many-goods analysis flow.
+-- `supplier` doubles as the manifest source ('Демо-маніфест' | 'Google Sheets'
+-- | 'Вставлена таблиця'), matching the workspaces.supplier field shape.
+CREATE TABLE IF NOT EXISTS collections (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  owner_id   UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  number     TEXT NOT NULL,                        -- e.g. "Збірник 06.05"
+  supplier   TEXT NOT NULL DEFAULT '',             -- manifest source label
+  status     TEXT NOT NULL DEFAULT 'draft'
+             CHECK (status IN ('active', 'draft', 'done')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_collections_owner ON collections(owner_id);
+
+-- Generalise folders + files from "belongs to a workspace" to "belongs to a
+-- workspace OR a collection". workspace_id becomes nullable; a nullable
+-- collection_id is added; a CHECK enforces exactly one owner. Existing rows all
+-- have workspace_id set, so they satisfy the new constraint unchanged.
+ALTER TABLE folders ADD COLUMN IF NOT EXISTS collection_id UUID
+  REFERENCES collections(id) ON DELETE CASCADE;
+ALTER TABLE folders ALTER COLUMN workspace_id DROP NOT NULL;
+ALTER TABLE folders DROP CONSTRAINT IF EXISTS folders_owner_chk;
+ALTER TABLE folders ADD CONSTRAINT folders_owner_chk
+  CHECK ((workspace_id IS NOT NULL) <> (collection_id IS NOT NULL));
+CREATE INDEX IF NOT EXISTS idx_folders_collection ON folders(collection_id);
+
+ALTER TABLE files ADD COLUMN IF NOT EXISTS collection_id UUID
+  REFERENCES collections(id) ON DELETE CASCADE;
+ALTER TABLE files ALTER COLUMN workspace_id DROP NOT NULL;
+ALTER TABLE files DROP CONSTRAINT IF EXISTS files_owner_chk;
+ALTER TABLE files ADD CONSTRAINT files_owner_chk
+  CHECK ((workspace_id IS NOT NULL) <> (collection_id IS NOT NULL));
+CREATE INDEX IF NOT EXISTS idx_files_collection ON files(collection_id);
+
+-- Conversations gain a kind + optional collection scope. Existing conversations
+-- are all workspace-scoped supply chats, so default kind = 'supply' and keep
+-- workspace_id. 'normal' chats are global (no entity); 'consolidated' chats hang
+-- off a collection. Exactly-one-scope is NOT enforced at DB level because
+-- 'normal' has neither — the app layer sets the scope per kind.
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS chat_kind TEXT NOT NULL DEFAULT 'supply'
+  CHECK (chat_kind IN ('normal', 'supply', 'consolidated'));
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS collection_id UUID
+  REFERENCES collections(id) ON DELETE CASCADE;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS owner_id UUID
+  REFERENCES users(id) ON DELETE CASCADE;   -- set for 'normal' (global) chats
+ALTER TABLE conversations ALTER COLUMN workspace_id DROP NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_conversations_collection ON conversations(collection_id);
+CREATE INDEX IF NOT EXISTS idx_conversations_owner ON conversations(owner_id);

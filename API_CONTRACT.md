@@ -123,6 +123,49 @@ Request: `{}`. Response `201`: `{ "workspace": {…} }`.
 
 ---
 
+## Collections (Збірник / consolidated cargo)
+
+A second top-level entity alongside workspaces, for grouping documents of a
+multi-supplier consolidated shipment. Collections have no intake / checklist /
+status-derivation — status is a plain tri-state (`active`/`draft`/`done`).
+
+### `POST /api/collections`  (auth)
+Request (all optional): `{ "number"?: string, "supplier"?: string, "status"?: "active"|"draft"|"done" }`
+When `number` is omitted it defaults to `Збірник <DD.MM>` (today's UTC date, e.g. `Збірник 14.09`);
+`supplier` defaults to `""` and `status` to `draft`.
+Creates the collection **and** the 8-folder skeleton
+(`01_Маніфест`, `02_Інвойси`, `03_Сертифікати_походження`, `04_MSDS_SDS`,
+`05_Якість_CoA`, `06_Дозволи_ліцензії`, `07_Транспорт`, `08_Митниця`).
+Response `201`: `{ "collection": { "id","number","supplier","status","created_at" } }`
+
+### `GET /api/collections`  (auth)
+Response `200`: `{ "collections": [ { "id","number","supplier","status","created_at" } ] }`
+
+### `GET /api/collections/:id`  (auth)
+Response `200`:
+```json
+{
+  "collection": { "id","number","supplier","status","created_at" },
+  "folders": [ { "id","name","position" } ]
+}
+```
+`404 not_found` if not owned/found.
+
+### `DELETE /api/collections/:id`  (auth)
+Deletes the collection and everything it owns — folders, files, conversations
+(DB cascade) — and purges its on-disk storage dir (`STORAGE_DIR/<collectionId>`).
+Irreversible. **No Qdrant purge:** collection files are never embedded (see
+"Collection files" below). Response `200`: `{ "ok": true }`. `404 not_found` if not
+owned/found.
+
+### `PATCH /api/collections/:id`  (auth)
+Request (all optional): `{ "number"?: string, "supplier"?: string,
+"status"?: "active"|"draft"|"done" }`. Whitelist-updates the provided columns.
+Response `200`: `{ "collection": { "id","number","supplier","status","created_at" } }`.
+`404 not_found` if not owned/found.
+
+---
+
 ## Parties (contract structure)
 
 ### `GET /api/workspaces/:id/parties`  (auth)
@@ -213,6 +256,49 @@ Move confirmation reuses `PATCH /api/workspaces/:id/files/:fileId` with `{ "fold
 
 ---
 
+## Collection files (Збірник)
+
+> **Not indexed / not embedded (no RAG).** Unlike workspace files, collection
+> files never enter the embedding/Qdrant pipeline. They are panel documents /
+> certificates plus a manifest, parsed **directly** by the Phase-B analysis
+> engine. Uploads therefore skip `queued`/`indexing` and are stored as
+> `status: "ready"` immediately — there is no index job, no Qdrant, and no
+> `file_status` events channel for collections.
+
+All routes are scoped by `getOwnedCollection` and `404 not_found` if the
+collection (or file/folder) isn't owned/found.
+
+### `POST /api/collections/:id/files?folderId=<uuid>`  (auth, multipart)
+- `multipart/form-data` with one or more file parts. `folderId` (query) optional;
+  `400 invalid_folder` if it doesn't belong to this collection.
+- Same allow-list (`pdf, docx, xlsx, csv, png, jpg/jpeg`), per-file size limit
+  (`MAX_UPLOAD_BYTES`), and exact-content SHA-256 dedup (scoped to the collection's
+  `is_latest` files + within the batch) as the workspace upload. Duplicates are
+  reported in `rejected` with `reason: "duplicate_of:<existing name>"`.
+- On accept: stores to disk under the collection's id namespace and writes a
+  `ready` row (with `content_hash`). **No index job, no Qdrant, no events.**
+Response `201`: `{ "files": [ { "id","name","type","status":"ready","folderId","version","replacesFileId":null } ], "rejected": [ { "name","reason" } ] }`
+Response `415` when nothing valid was uploaded: `{ "error":"no_valid_files", "rejected":[…] }`
+
+### `GET /api/collections/:id/files`  (auth)
+Response `200`: `{ "files": [ { "id","folderId","name","type","status","errorReason","sizeBytes","createdAt","version","isLatest","replacesFileId" } ] }`
+(collection files are always `status: "ready"` with `errorReason: null`).
+
+### `DELETE /api/collections/:id/files/:fileId`  (auth)
+Deletes the on-disk file and the row. No Qdrant. Response `200`: `{ "ok": true }`.
+
+### `PATCH /api/collections/:id/files/:fileId`  (auth)
+`{ "name"?: string, "folderId"?: string|null }` → `200 { "file": { "id","name","folderId","type","status" } }`.
+`400 invalid_folder` if the target folder isn't in this collection.
+
+### `GET /api/collections/:id/files/:fileId/content`  (auth)
+Streams the stored file bytes inline (same behaviour as the workspace content route).
+
+### `POST /api/collections/:id/folders`  (auth)
+`{ "name": string }` → `201 { "folder": { "id","name","position" } }` (folder scoped to the collection).
+
+---
+
 ## Chat (SSE)
 
 ### `POST /api/workspaces/:id/chat`  (auth, per-user rate-limited)
@@ -242,9 +328,40 @@ calls, and citations are persisted.
 **Client note:** this is SSE over `POST`, so use `fetch` + a `ReadableStream`
 reader (which can set the `Authorization` header), not the native `EventSource`.
 
+### Chat kinds
+
+Every conversation has a `chat_kind`, which decides its scope and tool set. All
+three kinds share the **same SSE contract above** (`token` / `tool_call` /
+`tool_result` / `done` / `error`, plus `: ping` keep-alives) and the same
+per-user rate limiter. They differ only in scope and available tools:
+
+| kind | endpoint | scope | tools |
+|------|----------|-------|-------|
+| `supply` | `POST /api/workspaces/:id/chat` | a shipment (workspace) | full set (unchanged) |
+| `normal` | `POST /api/chats` | global (the user) | none — general ЗЕД/customs consultant answering from knowledge |
+| `consolidated` | `POST /api/collections/:id/chat` | a collection (Збірник) | none for now — consultant that runs manifest analysis once a manifest is provided (analysis tools land in Phase B) |
+
+The `supply` chat is **unchanged** — same workspace-scoped agent, same full tool
+set, same grounding prompt.
+
+### `POST /api/chats`  (auth, per-user rate-limited) — normal (global) chat
+Request: `{ "message": string, "conversationId"?: string(uuid) }`
+Omitting `conversationId` starts a new global conversation for the user.
+Response: `text/event-stream` — same events as above. No `tool_call` /
+`tool_result` events are emitted (no tools); `citations` is empty.
+
+### `POST /api/collections/:id/chat`  (auth, per-user rate-limited) — consolidated chat
+`404` if the collection is not owned by the user. Request/response identical in
+shape to `POST /api/chats`; the conversation is scoped to the collection. For now
+no tools run (no `tool_call` / `tool_result` events); the manifest-analysis
+engine (CIF / мито / ПДВ per line, origin, EU/UA checks) arrives in Phase B.
+
 ---
 
 ## Conversations
+
+Conversations are scoped by `chat_kind`. Supply conversations hang off a
+workspace, consolidated off a collection, normal off the user.
 
 ### `GET /api/workspaces/:id/conversations`  (auth)
 Response `200`: `{ "conversations": [ { "id","title","created_at","updated_at" } ] }`
@@ -259,6 +376,19 @@ Response `200`:
   ]
 }
 ```
+
+### `GET /api/chats`  (auth) — normal (global) conversations for the user
+Response `200`: `{ "conversations": [ { "id","title","created_at","updated_at" } ] }`
+
+### `GET /api/chats/:convId`  (auth) — messages of a normal conversation (owner-verified, `404` on miss)
+Same message shape as the workspace variant above.
+
+### `GET /api/collections/:id/conversations`  (auth) — a collection's consolidated conversations
+`404` if the collection is not owned. Response shape as above.
+
+### `GET /api/collections/:id/conversations/:convId`  (auth) — messages of a consolidated conversation
+`404` if the collection is not owned or the conversation isn't in that collection.
+Same message shape as above.
 
 ---
 

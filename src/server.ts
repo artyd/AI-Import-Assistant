@@ -6,8 +6,12 @@ import { config } from './config.js';
 import { runMigrations } from './db/migrate.js';
 import { authRoutes } from './routes/auth.js';
 import { workspaceRoutes } from './routes/workspaces.js';
+import { collectionRoutes } from './routes/collections.js';
+import { collectionFileRoutes } from './routes/collectionFiles.js';
 import { fileRoutes } from './routes/files.js';
 import { chatRoutes } from './routes/chat.js';
+import { chatNormalRoutes } from './routes/chatNormal.js';
+import { chatConsolidatedRoutes } from './routes/chatConsolidated.js';
 import { conversationRoutes } from './routes/conversations.js';
 import { eventRoutes } from './routes/events.js';
 import { checklistRoutes } from './routes/checklist.js';
@@ -56,8 +60,12 @@ async function buildServer() {
 
   await app.register(authRoutes);
   await app.register(workspaceRoutes);
+  await app.register(collectionRoutes);
+  await app.register(collectionFileRoutes);
   await app.register(fileRoutes);
   await app.register(chatRoutes);
+  await app.register(chatNormalRoutes);
+  await app.register(chatConsolidatedRoutes);
   await app.register(conversationRoutes);
   await app.register(eventRoutes);
   await app.register(checklistRoutes);

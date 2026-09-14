@@ -16,6 +16,7 @@ import type {
   Workspace,
 } from "@/lib/types";
 import { Chat } from "@/components/Chat";
+import { useAppStore } from "@/lib/store";
 import { AgentLog, type LogEntry } from "@/components/AgentLog";
 import { ShipmentPanel } from "@/components/ShipmentPanel";
 import { VersionsModal } from "@/components/VersionsModal";
@@ -68,6 +69,20 @@ const REQ_LABEL: Record<string, string> = {
   specification: "Специфікація",
 };
 
+// Placeholder for surfaces not yet wired in this phase (non-supply chat kinds,
+// News, Map). Keeps the shell from crashing while the three-kind UI + Phase C/D
+// land; the composer/sidebar switchers still flip `chatKind`/`view` in the store.
+function ComingSoon({ title, note }: { title: string; note: string }) {
+  return (
+    <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+      <div style={{ maxWidth: 440, textAlign: "center" }}>
+        <h2 style={{ margin: "0 0 8px", fontSize: 18, color: "var(--text)" }}>{title}</h2>
+        <p style={{ margin: 0, fontSize: 14, lineHeight: 1.5, color: "var(--muted)" }}>{note}</p>
+      </div>
+    </div>
+  );
+}
+
 export default function WorkspacePage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
@@ -94,6 +109,11 @@ export default function WorkspacePage() {
   const [rightTab, setRightTab] = useState<RightTab>("files");
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [sound, setSound] = useState(false);
+
+  // App-wide store: which chat kind + top-level view are active (prototype port).
+  const chatKind = useAppStore((s) => s.chatKind);
+  const setChatKind = useAppStore((s) => s.setChatKind);
+  const view = useAppStore((s) => s.view);
 
   const [versionsFile, setVersionsFile] = useState<FileItem | null>(null);
   const [previewFile, setPreviewFile] = useState<FileItem | null>(null);
@@ -611,17 +631,49 @@ export default function WorkspacePage() {
           onSaveSupplier={saveSupplier}
         />
         <div style={{ flex: 1, minHeight: 0 }}>
-          <Chat
-            key={`${conversationId ?? "new"}-${chatSeq}`}
-            workspaceId={id}
-            conversationId={conversationId}
-            initialMessages={initialMessages}
-            onConversationStarted={onConversationStarted}
-            onLog={onLog}
-            folders={folders}
-            onUploadAndClassify={uploadAndClassify}
-            onMoveFile={moveFile}
-          />
+          {view === "news" ? (
+            <ComingSoon
+              title="Новини"
+              note="Розділ новин з рубриками — у розробці (Фаза C). Скоро тут зʼявиться жива стрічка галузевих новин."
+            />
+          ) : view === "map" ? (
+            <ComingSoon
+              title="Карта постачань"
+              note="Інтерактивна карта маршрутів і суден — у розробці (Фаза D)."
+            />
+          ) : chatKind === "supply" ? (
+            <Chat
+              key={`${conversationId ?? "new"}-${chatSeq}`}
+              postPath={`/api/workspaces/${id}/chat`}
+              chatKind={chatKind}
+              onChangeKind={setChatKind}
+              selector={{
+                label: "Постачання",
+                value: workspace.id,
+                options: workspaces.map((w) => ({
+                  id: w.id,
+                  label: `№${w.number ?? "—"}${w.supplier ? ` · ${w.supplier}` : ""}`,
+                })),
+                onChange: selectShipment,
+              }}
+              conversationId={conversationId}
+              initialMessages={initialMessages}
+              onConversationStarted={onConversationStarted}
+              onLog={onLog}
+              folders={folders}
+              onUploadAndClassify={uploadAndClassify}
+              onMoveFile={moveFile}
+            />
+          ) : (
+            <ComingSoon
+              title={chatKind === "normal" ? "Звичайний чат" : "Збірний вантаж"}
+              note={
+                chatKind === "normal"
+                  ? "Глобальний консультант ЗЕД (бекенд готовий) — підключення інтерфейсу триває у Фазі A."
+                  : "Чат «Збірний вантаж» і аналіз збірного (бекенд готовий) — підключення інтерфейсу триває (Фаза A/B)."
+              }
+            />
+          )}
         </div>
       </main>
 

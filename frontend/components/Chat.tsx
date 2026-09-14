@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Citation, Folder, Message } from "@/lib/types";
+import type { ChatKind, Citation, Folder, Message } from "@/lib/types";
 import { streamChat } from "@/lib/sse";
 import { folderLabel } from "@/lib/folderLabels";
 import { Markdown } from "./Markdown";
@@ -15,6 +15,7 @@ import {
   IconCheck,
   IconSearch,
 } from "./icons";
+import { LnChevronDown } from "./LineIcons";
 
 const UPLOAD_ACCEPT = ".pdf,.docx,.xlsx,.csv,.png,.jpg,.jpeg";
 const ACCEPT_EXT = UPLOAD_ACCEPT.split(",").map((s) => s.trim().toLowerCase());
@@ -68,15 +69,39 @@ export interface UploadClassifyOutcome {
   folderName: string | null;
 }
 
+// The composer's kind switcher + entity selector (see prototype `typeTabs` /
+// `selectorLabel`/`selectorOptions`). The selector is hidden for the `normal`
+// kind (no entity), shown for `supply` (Постачання) and `consolidated` (Збірник).
+export interface EntitySelector {
+  label: string;
+  value: string;
+  options: { id: string; label: string }[];
+  onChange: (id: string) => void;
+}
+
+export const CHAT_TYPES: { id: ChatKind; label: string }[] = [
+  { id: "normal", label: "Звичайний" },
+  { id: "supply", label: "Постачання" },
+  { id: "consolidated", label: "Збірний" },
+];
+
 interface Props {
-  workspaceId: string;
+  // Kind-specific POST endpoint for streaming (see resolveChatEndpoints).
+  postPath: string;
+  chatKind: ChatKind;
+  onChangeKind: (k: ChatKind) => void;
+  selector?: EntitySelector | null;
   conversationId?: string;
   initialMessages: Message[];
   onConversationStarted: (id: string) => void;
   onLog: (entry: LogEntry) => void;
-  folders: Folder[];
-  onUploadAndClassify: (files: File[]) => Promise<UploadClassifyOutcome[]>;
-  onMoveFile: (fileId: string, folderId: string) => Promise<void>;
+  placeholder?: string;
+  // File intake (paperclip auto-file flow) — supply only. When these are omitted
+  // the composer's attach/drag/paste are disabled (normal has no files;
+  // consolidated files are uploaded via the right-panel Files tab in this phase).
+  folders?: Folder[];
+  onUploadAndClassify?: (files: File[]) => Promise<UploadClassifyOutcome[]>;
+  onMoveFile?: (fileId: string, folderId: string) => Promise<void>;
 }
 
 // Local-only chat items for the paperclip flow. These are NOT persisted to the
@@ -121,15 +146,21 @@ function labelToolCall(tool: string, input: Record<string, unknown>): string {
 }
 
 export function Chat({
-  workspaceId,
+  postPath,
+  chatKind,
+  onChangeKind,
+  selector,
   conversationId,
   initialMessages,
   onConversationStarted,
   onLog,
+  placeholder,
   folders,
   onUploadAndClassify,
   onMoveFile,
 }: Props) {
+  // File intake is only wired when the host supplies the workspace file handlers.
+  const fileIntake = !!(onUploadAndClassify && onMoveFile && folders);
   const [items, setItems] = useState<ChatItem[]>(() =>
     initialMessages.map((m) => ({ kind: "message" as const, ...m }))
   );
@@ -177,6 +208,7 @@ export function Chat({
       }));
       setItems((list) => [...list, ...cards]);
 
+      if (!onUploadAndClassify) return;
       const outcomes = await onUploadAndClassify(files);
 
       // Match outcomes back to cards positionally (upload preserves order). Any
@@ -222,7 +254,7 @@ export function Chat({
 
   const ingest = useCallback(
     (raw: File[]) => {
-      if (streaming) return;
+      if (streaming || !fileIntake) return;
       const files = acceptFiles(raw);
       if (files.length) {
         setNotice(null);
@@ -277,7 +309,7 @@ export function Chat({
 
   const pickFolder = useCallback(
     async (card: ClassifyCard, folder: Folder) => {
-      if (!card.fileId) return;
+      if (!card.fileId || !onMoveFile) return;
       patchCard(card.id, { state: "moving" });
       try {
         await onMoveFile(card.fileId, folder.id);
@@ -320,7 +352,7 @@ export function Chat({
 
     try {
       await streamChat(
-        workspaceId,
+        postPath,
         { message: text, conversationId: convRef.current },
         {
           onToken: (e) => {
@@ -365,7 +397,7 @@ export function Chat({
     } finally {
       setStreaming(false);
     }
-  }, [streaming, workspaceId, onConversationStarted, onLog]);
+  }, [streaming, postPath, onConversationStarted, onLog]);
 
   const send = useCallback(() => runMessage(input), [runMessage, input]);
 
@@ -499,8 +531,12 @@ export function Chat({
               setInput={setInput}
               onPaste={onPaste}
               onSend={send}
-              onAttach={() => fileInputRef.current?.click()}
+              onAttach={fileIntake ? () => fileInputRef.current?.click() : undefined}
               streaming={streaming}
+              chatKind={chatKind}
+              onChangeKind={onChangeKind}
+              selector={selector}
+              placeholder={placeholder}
             />
             <div
               style={{
@@ -545,7 +581,7 @@ export function Chat({
               <DateSeparator />
               {items.map((it) =>
                 it.kind === "classify" ? (
-                  <ClassifyBubble key={it.id} card={it} folders={folders} onPick={pickFolder} />
+                  <ClassifyBubble key={it.id} card={it} folders={folders ?? []} onPick={pickFolder} />
                 ) : it.role === "user" ? (
                   <UserBubble key={it.id} text={it.content} />
                 ) : (
@@ -568,8 +604,12 @@ export function Chat({
                 setInput={setInput}
                 onPaste={onPaste}
                 onSend={send}
-                onAttach={() => fileInputRef.current?.click()}
+                onAttach={fileIntake ? () => fileInputRef.current?.click() : undefined}
                 streaming={streaming}
+                chatKind={chatKind}
+                onChangeKind={onChangeKind}
+                selector={selector}
+                placeholder={placeholder}
               />
               <div
                 style={{
@@ -623,85 +663,184 @@ function Composer({
   onSend,
   onAttach,
   streaming,
+  chatKind,
+  onChangeKind,
+  selector,
+  placeholder,
 }: {
   input: string;
   setInput: (v: string) => void;
   onPaste: (e: React.ClipboardEvent) => void;
   onSend: () => void;
-  onAttach: () => void;
+  onAttach?: () => void;
   streaming: boolean;
+  chatKind: ChatKind;
+  onChangeKind: (k: ChatKind) => void;
+  selector?: EntitySelector | null;
+  placeholder?: string;
 }) {
   return (
     <div
       className="composer"
       style={{
-        display: "flex",
-        alignItems: "flex-end",
-        gap: 10,
-        padding: "8px 8px 8px 15px",
         background: "var(--surface)",
         border: "1px solid var(--border2)",
         borderRadius: 16,
         boxShadow: "var(--shadow)",
       }}
     >
-      <button
-        title="Долучити файл"
-        aria-label="Долучити файл"
-        data-testid="chat-attach"
-        onClick={onAttach}
-        disabled={streaming}
+      {/* Top row: kind pills (Звичайний/Постачання/Збірний) + entity selector. */}
+      <div
         style={{
-          flex: "none",
-          width: 40,
-          height: 40,
-          alignSelf: "center",
           display: "flex",
           alignItems: "center",
-          justifyContent: "center",
-          borderRadius: 10,
-          border: "none",
-          background: "transparent",
-          color: "var(--muted)",
-          cursor: streaming ? "default" : "pointer",
+          gap: 8,
+          flexWrap: "wrap",
+          padding: "8px 10px",
+          borderBottom: "1px solid var(--border)",
         }}
       >
-        <IconAttach size={21} />
-      </button>
-      <textarea
-        value={input}
-        onChange={(e) => setInput(e.target.value)}
-        onPaste={onPaste}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            onSend();
-          }
-        }}
-        placeholder="Спитайте Штурмана або перетягніть / вставте файли"
-        data-testid="chat-input"
-        rows={1}
-        style={{
-          flex: 1,
-          resize: "none",
-          border: "none",
-          outline: "none",
-          background: "transparent",
-          color: "var(--text)",
-          font: "inherit",
-          maxHeight: 160,
-          padding: "8px 4px",
-        }}
-      />
-      <button
-        className="btn btn-primary"
-        onClick={onSend}
-        disabled={streaming || !input.trim()}
-        style={{ height: 40, width: 40, padding: 0, borderRadius: 11 }}
-        aria-label="Надіслати"
-      >
-        {streaming ? <IconSpinner size={16} /> : <IconSend size={16} />}
-      </button>
+        <div style={{ display: "flex", gap: 2, padding: 2, background: "var(--hover)", borderRadius: 9 }}>
+          {CHAT_TYPES.map((t) => {
+            const on = chatKind === t.id;
+            return (
+              <button
+                key={t.id}
+                onClick={() => onChangeKind(t.id)}
+                data-testid={`composer-kind-${t.id}`}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  height: 27,
+                  padding: "0 12px",
+                  border: "none",
+                  borderRadius: 8,
+                  cursor: "pointer",
+                  fontSize: 12,
+                  fontWeight: on ? 600 : 500,
+                  background: on ? "var(--accent)" : "transparent",
+                  color: on ? "var(--accentTx)" : "var(--muted)",
+                  transition: "background .12s",
+                }}
+              >
+                {t.label}
+              </button>
+            );
+          })}
+        </div>
+        {selector && (
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto", minWidth: 0 }}>
+            <span style={{ fontSize: 11.5, color: "var(--faint)", whiteSpace: "nowrap" }}>
+              {selector.label}:
+            </span>
+            <div style={{ position: "relative", minWidth: 0 }}>
+              <select
+                value={selector.value}
+                onChange={(e) => selector.onChange(e.target.value)}
+                data-testid="composer-entity-select"
+                style={{
+                  maxWidth: 230,
+                  height: 28,
+                  padding: "0 26px 0 10px",
+                  background: "var(--card)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 8,
+                  fontSize: 12,
+                  fontWeight: 500,
+                  color: "var(--text)",
+                  outline: "none",
+                  cursor: "pointer",
+                  appearance: "none",
+                  WebkitAppearance: "none",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {selector.options.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+              <span
+                style={{
+                  position: "absolute",
+                  right: 8,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  pointerEvents: "none",
+                  color: "var(--muted)",
+                  display: "flex",
+                }}
+              >
+                <LnChevronDown size={14} />
+              </span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Bottom row: attach / textarea (Enter-send, Shift+Enter-newline) / send. */}
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 10, padding: "8px 8px 8px 15px" }}>
+        {onAttach && (
+          <button
+            title="Долучити файл"
+            aria-label="Долучити файл"
+            data-testid="chat-attach"
+            onClick={onAttach}
+            disabled={streaming}
+            style={{
+              flex: "none",
+              width: 40,
+              height: 40,
+              alignSelf: "center",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              borderRadius: 10,
+              border: "none",
+              background: "transparent",
+              color: "var(--muted)",
+              cursor: streaming ? "default" : "pointer",
+            }}
+          >
+            <IconAttach size={21} />
+          </button>
+        )}
+        <textarea
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onPaste={onPaste}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              onSend();
+            }
+          }}
+          placeholder={placeholder ?? "Спитайте Штурмана або перетягніть / вставте файли"}
+          data-testid="chat-input"
+          rows={1}
+          style={{
+            flex: 1,
+            resize: "none",
+            border: "none",
+            outline: "none",
+            background: "transparent",
+            color: "var(--text)",
+            font: "inherit",
+            maxHeight: 160,
+            padding: "8px 4px",
+          }}
+        />
+        <button
+          className="btn btn-primary"
+          onClick={onSend}
+          disabled={streaming || !input.trim()}
+          style={{ height: 40, width: 40, padding: 0, borderRadius: 11 }}
+          aria-label="Надіслати"
+        >
+          {streaming ? <IconSpinner size={16} /> : <IconSend size={16} />}
+        </button>
+      </div>
     </div>
   );
 }
