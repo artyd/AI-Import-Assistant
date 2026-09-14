@@ -37,6 +37,7 @@ import { MapView } from "@/components/MapView";
 import { CommandPalette, type PaletteAction } from "@/components/CommandPalette";
 import { IconSpinner } from "@/components/icons";
 import {
+  LnChevronDown,
   LnExport,
   LnFolder,
   LnFolderPlus,
@@ -881,42 +882,115 @@ export default function WorkspacePage() {
             </div>
           ) : chatKind === "consolidated" ? (
             /* Збірний = аналіз збірного вантажу (панель вводу + карточка), по центру.
-               Архів переїхав у робочу панель; окремого агент-чату немає. */
-            analysis ? (
-              <div style={{ height: "100%", overflowY: "auto", minHeight: 0 }}>
-                <div style={{ padding: "22px 24px 32px" }}>
-                  <div style={{ maxWidth: 900, margin: "0 auto" }}>
-                    <AnalyzePanel
-                      collectionId={activeCollectionId!}
-                      onResult={setAnalysis}
-                      onOpenAiSettings={() => setAiSettingsOpen(true)}
-                    />
-                    <div style={{ marginTop: 20 }}>
-                      <AnalysisCard analysis={analysis} />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ) : (
+               Зверху — вибір збірника, про який іде мова. Архів у робочій панелі. */
+            <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
               <div
                 style={{
-                  height: "100%",
-                  overflowY: "auto",
+                  flex: "none",
                   display: "flex",
                   alignItems: "center",
-                  justifyContent: "center",
-                  padding: 24,
+                  gap: 12,
+                  padding: "12px 24px",
+                  borderBottom: "1px solid var(--border)",
                 }}
               >
-                <div style={{ width: "100%", maxWidth: 720 }}>
-                  <AnalyzePanel
-                    collectionId={activeCollectionId!}
-                    onResult={setAnalysis}
-                    onOpenAiSettings={() => setAiSettingsOpen(true)}
-                  />
+                <span
+                  style={{
+                    flex: "none",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    letterSpacing: 0.5,
+                    color: "var(--faint)",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Збірник
+                </span>
+                <div style={{ position: "relative", flex: 1, maxWidth: 440, minWidth: 0 }}>
+                  <select
+                    value={activeCollectionId ?? ""}
+                    onChange={(e) => e.target.value && selectCollection(e.target.value)}
+                    style={{
+                      width: "100%",
+                      height: 38,
+                      padding: "0 32px 0 12px",
+                      background: "var(--surface)",
+                      border: "1px solid var(--border2)",
+                      borderRadius: 10,
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: "var(--text)",
+                      outline: "none",
+                      cursor: "pointer",
+                      appearance: "none",
+                      WebkitAppearance: "none",
+                      textOverflow: "ellipsis",
+                    }}
+                  >
+                    {collections.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.number ?? "Збірник"}
+                        {c.supplier ? ` · ${c.supplier}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <span
+                    style={{
+                      position: "absolute",
+                      right: 11,
+                      top: "50%",
+                      transform: "translateY(-50%)",
+                      pointerEvents: "none",
+                      color: "var(--muted)",
+                      display: "flex",
+                    }}
+                  >
+                    <LnChevronDown size={16} />
+                  </span>
                 </div>
+                <button className="btn" onClick={newCollection} title="Новий збірник">
+                  <LnFolderPlus size={15} /> Новий
+                </button>
               </div>
-            )
+
+              <div style={{ flex: 1, minHeight: 0 }}>
+                {analysis ? (
+                  <div style={{ height: "100%", overflowY: "auto", minHeight: 0 }}>
+                    <div style={{ padding: "22px 24px 32px" }}>
+                      <div style={{ maxWidth: 900, margin: "0 auto" }}>
+                        <AnalyzePanel
+                          collectionId={activeCollectionId!}
+                          onResult={setAnalysis}
+                          onOpenAiSettings={() => setAiSettingsOpen(true)}
+                        />
+                        <div style={{ marginTop: 20 }}>
+                          <AnalysisCard analysis={analysis} />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      height: "100%",
+                      overflowY: "auto",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      padding: 24,
+                    }}
+                  >
+                    <div style={{ width: "100%", maxWidth: 720 }}>
+                      <AnalyzePanel
+                        collectionId={activeCollectionId!}
+                        onResult={setAnalysis}
+                        onOpenAiSettings={() => setAiSettingsOpen(true)}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
           ) : (
             /* Звичайний / Постачання — агент-чат на всю висоту з долученням файлів
                (для обох типів файли йдуть у теки поточного постачання). */
