@@ -105,6 +105,10 @@ export default function WorkspacePage() {
   const [notFound, setNotFound] = useState(false);
   const [checklist, setChecklist] = useState<ChecklistItem[] | null>(null);
 
+  // Collection (Збірник) files/folders for the right panel when consolidated is active.
+  const [colFolders, setColFolders] = useState<Folder[]>([]);
+  const [colFiles, setColFiles] = useState<FileItem[]>([]);
+
   // Shell UI state.
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [rightOpen, setRightOpen] = useState(true);
@@ -531,6 +535,114 @@ export default function WorkspacePage() {
     }
   }, [activeCollectionId, removeCollection]);
 
+  // ── Collection files (right panel Files tab for a Збірник) ──
+  const refreshColFiles = useCallback(async () => {
+    if (!activeCollectionId) return;
+    const r = await api<{ files: FileItem[] }>(`/api/collections/${activeCollectionId}/files`);
+    setColFiles(r.files);
+  }, [activeCollectionId]);
+
+  useEffect(() => {
+    if (chatKind !== "consolidated" || !activeCollectionId) {
+      setColFolders([]);
+      setColFiles([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const [colRes, filesRes] = await Promise.all([
+          api<{ collection: Collection; folders: Folder[] }>(`/api/collections/${activeCollectionId}`),
+          api<{ files: FileItem[] }>(`/api/collections/${activeCollectionId}/files`),
+        ]);
+        if (cancelled) return;
+        setColFolders(colRes.folders);
+        setColFiles(filesRes.files);
+      } catch {
+        if (!cancelled) {
+          setColFolders([]);
+          setColFiles([]);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [chatKind, activeCollectionId]);
+
+  const colUpload = useCallback(
+    async (folderId: string | null, fileList: FileList) => {
+      if (!activeCollectionId) return;
+      const form = new FormData();
+      for (const f of Array.from(fileList)) form.append("files", f, f.name || "file");
+      const qs = folderId ? `?folderId=${folderId}` : "";
+      try {
+        await api(`/api/collections/${activeCollectionId}/files${qs}`, { form });
+        await refreshColFiles();
+      } catch {
+        alert("Не вдалося завантажити файл.");
+      }
+    },
+    [activeCollectionId, refreshColFiles]
+  );
+  const colCreateFolder = useCallback(async () => {
+    if (!activeCollectionId) return;
+    const name = window.prompt("Назва теки")?.trim();
+    if (!name) return;
+    try {
+      await api(`/api/collections/${activeCollectionId}/folders`, { body: { name } });
+      const colRes = await api<{ collection: Collection; folders: Folder[] }>(
+        `/api/collections/${activeCollectionId}`
+      );
+      setColFolders(colRes.folders);
+    } catch {
+      alert("Не вдалося створити теку.");
+    }
+  }, [activeCollectionId]);
+  const colRename = useCallback(
+    async (file: FileItem, name: string) => {
+      if (!activeCollectionId) return;
+      try {
+        await api(`/api/collections/${activeCollectionId}/files/${file.id}`, {
+          method: "PATCH",
+          body: { name },
+        });
+        await refreshColFiles();
+      } catch {
+        alert("Не вдалося перейменувати файл.");
+      }
+    },
+    [activeCollectionId, refreshColFiles]
+  );
+  const colDelete = useCallback(
+    async (file: FileItem) => {
+      if (!activeCollectionId) return;
+      if (!window.confirm(`Видалити файл «${file.name}»?`)) return;
+      try {
+        await api(`/api/collections/${activeCollectionId}/files/${file.id}`, { method: "DELETE" });
+        await refreshColFiles();
+      } catch {
+        alert("Не вдалося видалити файл.");
+      }
+    },
+    [activeCollectionId, refreshColFiles]
+  );
+  const colMove = useCallback(
+    async (file: FileItem, folderId: string) => {
+      if (!activeCollectionId) return;
+      try {
+        await api(`/api/collections/${activeCollectionId}/files/${file.id}`, {
+          method: "PATCH",
+          body: { folderId },
+        });
+        await refreshColFiles();
+      } catch {
+        alert("Не вдалося перемістити файл.");
+      }
+    },
+    [activeCollectionId, refreshColFiles]
+  );
+
   const newShipment = useCallback(async () => {
     const number = window.prompt("Номер постачання (необов'язково)") ?? "";
     try {
@@ -814,6 +926,40 @@ export default function WorkspacePage() {
           }
           journal={<AgentLog entries={log} embedded />}
           complete={<ShipmentPanel workspaceId={id} workspace={workspace} onPatch={onPatch} />}
+        />
+      )}
+
+      {rightOpen && view === "chat" && chatKind === "consolidated" && activeCollectionId && (
+        <RightPanel
+          tab={rightTab}
+          onTab={setRightTab}
+          onClose={() => setRightOpen(false)}
+          badges={{ files: colFiles.length }}
+          files={
+            <FilesTab
+              workspaceNumber={null}
+              folders={colFolders}
+              files={colFiles}
+              onUpload={colUpload}
+              onCreateFolder={colCreateFolder}
+              onRenameFile={colRename}
+              onDeleteFile={colDelete}
+              onVersions={() => {}}
+              onMoveFile={colMove}
+              onReindex={() => {}}
+              onPreview={() => {}}
+            />
+          }
+          journal={
+            <div style={{ padding: 16, fontSize: 13, color: "var(--muted)", lineHeight: 1.5 }}>
+              Журнал для збірника зʼявиться разом із аналізом збірного вантажу.
+            </div>
+          }
+          complete={
+            <div style={{ padding: 16, fontSize: 13, color: "var(--muted)", lineHeight: 1.5 }}>
+              Комплектність пакета для збірника — незабаром.
+            </div>
+          }
         />
       )}
 
