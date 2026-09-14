@@ -32,6 +32,7 @@ import { TopBar, type CompletenessStep } from "@/components/TopBar";
 import { RightPanel, type RightTab } from "@/components/RightPanel";
 import { FilesTab } from "@/components/FilesTab";
 import { NewsView } from "@/components/NewsView";
+import { MapView } from "@/components/MapView";
 import { CommandPalette, type PaletteAction } from "@/components/CommandPalette";
 import { IconSpinner } from "@/components/icons";
 import {
@@ -75,20 +76,6 @@ const REQ_LABEL: Record<string, string> = {
   payment: "Оплата",
   specification: "Специфікація",
 };
-
-// Placeholder for surfaces not yet wired in this phase (non-supply chat kinds,
-// News, Map). Keeps the shell from crashing while the three-kind UI + Phase C/D
-// land; the composer/sidebar switchers still flip `chatKind`/`view` in the store.
-function ComingSoon({ title, note }: { title: string; note: string }) {
-  return (
-    <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
-      <div style={{ maxWidth: 440, textAlign: "center" }}>
-        <h2 style={{ margin: "0 0 8px", fontSize: 18, color: "var(--text)" }}>{title}</h2>
-        <p style={{ margin: 0, fontSize: 14, lineHeight: 1.5, color: "var(--muted)" }}>{note}</p>
-      </div>
-    </div>
-  );
-}
 
 export default function WorkspacePage() {
   const params = useParams<{ id: string }>();
@@ -870,10 +857,7 @@ export default function WorkspacePage() {
           {view === "news" ? (
             <NewsView />
           ) : view === "map" ? (
-            <ComingSoon
-              title="Карта постачань"
-              note="Інтерактивна карта маршрутів і суден — у розробці (Фаза D)."
-            />
+            <MapView />
           ) : !endpoints ? (
             <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
               <div style={{ maxWidth: 440, textAlign: "center" }}>

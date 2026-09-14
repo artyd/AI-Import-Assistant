@@ -321,6 +321,43 @@ export interface AnalysisResult {
   aiDegraded: boolean;
 }
 
+// ── Map (Карта постачань) ─────────────────────────────────────────────────────
+// Mirror GET /api/map/{ports,routes,shipments}.
+
+export type PortKind = "sea" | "inland" | "customs";
+
+export interface Port {
+  code: string;
+  name: string;
+  country: string;
+  lat: number;
+  lng: number;
+  kind: PortKind;
+}
+
+export type RouteMode = "sea" | "land";
+export type RouteRisk = "low" | "medium" | "high";
+
+export interface MapRoute {
+  id: string;
+  from_code: string;
+  to_code: string;
+  mode: RouteMode;
+  risk: RouteRisk;
+  // Ordered [lat, lng] polyline vertices.
+  waypoints: [number, number][];
+}
+
+export interface Vessel {
+  id: string;
+  kind: "ship" | "truck";
+  label: string;
+  lat: number;
+  lng: number;
+  status: string;
+  routeId: string | null;
+}
+
 export interface ArchiveRecord {
   id: string;
   source: string;
