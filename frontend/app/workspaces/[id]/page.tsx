@@ -20,7 +20,7 @@ import type {
 import { Chat, type EntitySelector } from "@/components/Chat";
 import { AnalyzePanel } from "@/components/AnalyzePanel";
 import { AnalysisCard } from "@/components/AnalysisCard";
-import { ArchiveModal } from "@/components/ArchiveModal";
+import { ArchiveList } from "@/components/ArchiveModal";
 import { AiSettingsModal } from "@/components/AiSettingsModal";
 import { useAppStore } from "@/lib/store";
 import { resolveChatEndpoints } from "@/lib/chatContext";
@@ -105,7 +105,6 @@ export default function WorkspacePage() {
 
   // Consolidated-cargo analysis result (latest) + archive modal.
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
-  const [archiveOpen, setArchiveOpen] = useState(false);
   const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
 
   // Shell UI state.
@@ -881,29 +880,43 @@ export default function WorkspacePage() {
               </div>
             </div>
           ) : chatKind === "consolidated" ? (
-            /* Збірний = аналіз збірного вантажу (панель вводу + карточка).
-               Без окремого агент-чату — аналіз і є цим екраном. */
-            <div style={{ height: "100%", overflowY: "auto", minHeight: 0 }}>
-              <div style={{ padding: "22px 24px 32px" }}>
-                <div style={{ maxWidth: 900, margin: "0 auto 14px", display: "flex", justifyContent: "flex-end" }}>
-                  <button className="btn" onClick={() => setArchiveOpen(true)}>
-                    <LnList size={15} /> Архів
-                  </button>
+            /* Збірний = аналіз збірного вантажу (панель вводу + карточка), по центру.
+               Архів переїхав у робочу панель; окремого агент-чату немає. */
+            analysis ? (
+              <div style={{ height: "100%", overflowY: "auto", minHeight: 0 }}>
+                <div style={{ padding: "22px 24px 32px" }}>
+                  <div style={{ maxWidth: 900, margin: "0 auto" }}>
+                    <AnalyzePanel
+                      collectionId={activeCollectionId!}
+                      onResult={setAnalysis}
+                      onOpenAiSettings={() => setAiSettingsOpen(true)}
+                    />
+                    <div style={{ marginTop: 20 }}>
+                      <AnalysisCard analysis={analysis} />
+                    </div>
+                  </div>
                 </div>
-                <div style={{ maxWidth: 900, margin: "0 auto" }}>
+              </div>
+            ) : (
+              <div
+                style={{
+                  height: "100%",
+                  overflowY: "auto",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: 24,
+                }}
+              >
+                <div style={{ width: "100%", maxWidth: 720 }}>
                   <AnalyzePanel
                     collectionId={activeCollectionId!}
                     onResult={setAnalysis}
                     onOpenAiSettings={() => setAiSettingsOpen(true)}
                   />
-                  {analysis && (
-                    <div style={{ marginTop: 20 }}>
-                      <AnalysisCard analysis={analysis} />
-                    </div>
-                  )}
                 </div>
               </div>
-            </div>
+            )
           ) : (
             /* Звичайний / Постачання — агент-чат на всю висоту з долученням файлів
                (для обох типів файли йдуть у теки поточного постачання). */
@@ -932,7 +945,7 @@ export default function WorkspacePage() {
 
       {rightOpen && view === "chat" && chatKind === "supply" && (
         <RightPanel
-          tab={rightTab}
+          tab={rightTab === "archive" ? "files" : rightTab}
           onTab={setRightTab}
           onClose={() => setRightOpen(false)}
           badges={{ files: files.filter((f) => f.isLatest !== false).length, complete: missingCount }}
@@ -960,10 +973,14 @@ export default function WorkspacePage() {
 
       {rightOpen && view === "chat" && chatKind === "consolidated" && activeCollectionId && (
         <RightPanel
-          tab={rightTab}
+          tab={rightTab === "archive" ? "archive" : "files"}
           onTab={setRightTab}
           onClose={() => setRightOpen(false)}
           badges={{ files: colFiles.length }}
+          tabs={[
+            { id: "files", label: "Файли" },
+            { id: "archive", label: "Архів" },
+          ]}
           files={
             <FilesTab
               workspaceNumber={null}
@@ -979,16 +996,7 @@ export default function WorkspacePage() {
               onPreview={() => {}}
             />
           }
-          journal={
-            <div style={{ padding: 16, fontSize: 13, color: "var(--muted)", lineHeight: 1.5 }}>
-              Журнал для збірника зʼявиться разом із аналізом збірного вантажу.
-            </div>
-          }
-          complete={
-            <div style={{ padding: 16, fontSize: 13, color: "var(--muted)", lineHeight: 1.5 }}>
-              Комплектність пакета для збірника — незабаром.
-            </div>
-          }
+          archive={<ArchiveList />}
         />
       )}
 
@@ -1007,7 +1015,6 @@ export default function WorkspacePage() {
       {previewFile && (
         <FilePreviewModal workspaceId={id} file={previewFile} onClose={() => setPreviewFile(null)} />
       )}
-      {archiveOpen && <ArchiveModal onClose={() => setArchiveOpen(false)} />}
       {aiSettingsOpen && <AiSettingsModal onClose={() => setAiSettingsOpen(false)} />}
     </div>
   );
