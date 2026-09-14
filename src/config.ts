@@ -85,6 +85,13 @@ const envSchema = z.object({
     .transform((v) => v === 'true'),
   NEWS_CRON: z.string().default('*/30 * * * *'),
   NEWS_RETENTION_DAYS: z.coerce.number().int().positive().default(14),
+
+  // Map / vessel tracking (Phase D). AIS_PROVIDER selects the position source for
+  // GET /api/map/shipments: 'demo' interpolates a deterministic point along each
+  // shipment's route (no network), 'aishub' is a live AIS adapter that needs
+  // AIS_API_KEY. Falls back to demo when 'aishub' is set without a key.
+  AIS_PROVIDER: z.enum(['demo', 'aishub']).default('demo'),
+  AIS_API_KEY: z.string().default(''),
 });
 
 export type AppConfig = z.infer<typeof envSchema>;

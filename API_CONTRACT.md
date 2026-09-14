@@ -584,6 +584,39 @@ where `NewsItem = { id, rubric, title, summary, source, url, published_at }`
 
 ---
 
+## Map (Phase D)
+
+Read-only reference atlas plus live vessel/truck positions. Ports and routes are a
+shared, non-workspace-scoped reference set (seeded in `schema.sql`). Shipment
+positions are owner-scoped (derived from the user's workspaces) and produced by the
+tracking provider — **DEMO by default**: each shipment is placed at a deterministic
+point along its route (a stable hash of the shipment number, no randomness/clock),
+so positions are reproducible across polls. Live AIS is a stub until `AIS_API_KEY`
+is set and `AIS_PROVIDER=aishub` (see `.env.example`); without a key it falls back
+to demo.
+
+Shapes:
+- `Port = { code, name, country, lat, lng, kind }` where `kind ∈ 'sea'|'inland'|'customs'`.
+- `Route = { id, from_code, to_code, mode, risk, waypoints }` where `mode ∈ 'sea'|'land'`,
+  `risk ∈ 'low'|'medium'|'high'`, and `waypoints` is an ordered `[[lat, lng], …]` polyline.
+- `VesselPosition = { id, kind, label, lat, lng, status, routeId }` where
+  `kind ∈ 'ship'|'truck'`, `label` is an emoji-prefixed name (🚢/🚚), `status` is the
+  shipment status, and `routeId` is the assigned route (or `null`).
+
+### `GET /api/map/ports`  (auth)
+Response `200`: `{ "ports": Port[] }` (ordered by `code`).
+
+### `GET /api/map/routes`  (auth)
+Response `200`: `{ "routes": Route[] }` (ordered by `id`).
+
+### `GET /api/map/shipments`  (auth)
+The current user's shipments turned into map markers. Each shipment is assigned a
+seeded route round-robin, then positioned by the tracking provider.
+Response `200`: `{ "vessels": VesselPosition[] }` (empty array if the user has no
+shipments, no seeded routes, or the live provider has no fix).
+
+---
+
 ## Health
 
 ### `GET /health`  (no auth) → `{ "status": "ok" }`

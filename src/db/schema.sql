@@ -403,3 +403,57 @@ CREATE TABLE IF NOT EXISTS news_items (
 );
 CREATE INDEX IF NOT EXISTS idx_news_rubric_published ON news_items(rubric, published_at DESC);
 CREATE INDEX IF NOT EXISTS idx_news_published ON news_items(published_at);
+
+-- ── Phase D: Map — reference ports/routes + live vessel positions ──────────────
+-- NOT workspace-scoped: a shared reference atlas of ports and representative
+-- shipping routes for the map view. Live positions are computed at request time
+-- by the tracking provider (src/services/tracking) — DEMO interpolation until an
+-- AIS_API_KEY is configured. All statements idempotent (seed via ON CONFLICT).
+
+-- Reference ports. `kind` is one of sea | inland | customs. Coordinates are real
+-- (decimal degrees, WGS84). Names are Ukrainian to match the ШТУРМАН UI.
+CREATE TABLE IF NOT EXISTS ports (
+  code    TEXT PRIMARY KEY,
+  name    TEXT NOT NULL,
+  country TEXT NOT NULL DEFAULT '',
+  lat     DOUBLE PRECISION NOT NULL,
+  lng     DOUBLE PRECISION NOT NULL,
+  kind    TEXT NOT NULL DEFAULT 'sea'
+          CHECK (kind IN ('sea', 'inland', 'customs'))
+);
+
+-- Representative routes between ports. `waypoints` is an ordered [[lat,lng],…]
+-- polyline the map draws and the DEMO tracker interpolates along.
+CREATE TABLE IF NOT EXISTS routes (
+  id        TEXT PRIMARY KEY,
+  from_code TEXT NOT NULL,
+  to_code   TEXT NOT NULL,
+  mode      TEXT NOT NULL CHECK (mode IN ('sea', 'land')),
+  risk      TEXT NOT NULL DEFAULT 'low' CHECK (risk IN ('low', 'medium', 'high')),
+  waypoints JSONB NOT NULL DEFAULT '[]'::jsonb
+);
+
+-- Seed ports (idempotent). code | name | country | lat | lng | kind
+INSERT INTO ports (code, name, country, lat, lng, kind) VALUES
+  ('CNYTN', 'Яньтянь',   'CN', 22.56, 114.28, 'sea'),
+  ('CNSHA', 'Шанхай',    'CN', 31.23, 121.47, 'sea'),
+  ('SGSIN', 'Сингапур',  'SG',  1.26, 103.82, 'sea'),
+  ('EGSUZ', 'Суец',      'EG', 30.02,  32.55, 'sea'),
+  ('GRPIR', 'Пірей',     'GR', 37.94,  23.64, 'sea'),
+  ('NLRTM', 'Роттердам', 'NL', 51.95,   4.14, 'sea'),
+  ('DEHAM', 'Гамбург',   'DE', 53.53,   9.98, 'sea'),
+  ('PLGDN', 'Гданськ',   'PL', 54.40,  18.68, 'sea'),
+  ('UAKRK', 'Краковець', 'UA', 49.96,  23.17, 'customs'),
+  ('UALWO', 'Львів',     'UA', 49.84,  24.03, 'inland'),
+  ('UAIEV', 'Київ',      'UA', 50.45,  30.52, 'inland')
+ON CONFLICT (code) DO NOTHING;
+
+-- Seed representative routes (idempotent). Waypoints trace real port coordinates.
+INSERT INTO routes (id, from_code, to_code, mode, risk, waypoints) VALUES
+  ('sea-yantian-gdansk', 'CNYTN', 'PLGDN', 'sea', 'medium',
+     '[[22.56,114.28],[30.02,32.55],[37.94,23.64],[54.40,18.68]]'::jsonb),
+  ('land-gdansk-kyiv', 'PLGDN', 'UAIEV', 'land', 'low',
+     '[[54.40,18.68],[49.96,23.17],[49.84,24.03],[50.45,30.52]]'::jsonb),
+  ('sea-shanghai-rotterdam', 'CNSHA', 'NLRTM', 'sea', 'high',
+     '[[31.23,121.47],[1.26,103.82],[30.02,32.55],[51.95,4.14]]'::jsonb)
+ON CONFLICT (id) DO NOTHING;

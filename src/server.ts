@@ -26,6 +26,7 @@ import { newsRoutes } from './routes/news.js';
 import { partiesRoutes } from './routes/parties.js';
 import { reportRoutes } from './routes/report.js';
 import { exportRoutes } from './routes/export.js';
+import { mapRoutes } from './routes/map.js';
 import { ensureQdrantCollection } from './services/qdrant.js';
 
 async function buildServer() {
@@ -82,6 +83,7 @@ async function buildServer() {
   await app.register(partiesRoutes);
   await app.register(reportRoutes);
   await app.register(exportRoutes);
+  await app.register(mapRoutes);
 
   return app;
 }
