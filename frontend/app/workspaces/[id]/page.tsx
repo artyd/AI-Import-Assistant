@@ -21,6 +21,7 @@ import { Chat, type EntitySelector } from "@/components/Chat";
 import { AnalyzePanel } from "@/components/AnalyzePanel";
 import { AnalysisCard } from "@/components/AnalysisCard";
 import { ArchiveModal } from "@/components/ArchiveModal";
+import { AiSettingsModal } from "@/components/AiSettingsModal";
 import { useAppStore } from "@/lib/store";
 import { resolveChatEndpoints } from "@/lib/chatContext";
 import { AgentLog, type LogEntry } from "@/components/AgentLog";
@@ -43,6 +44,7 @@ import {
   LnLock,
   LnMoon,
   LnPencil,
+  LnSettings,
   LnUpload,
 } from "@/components/LineIcons";
 
@@ -104,6 +106,7 @@ export default function WorkspacePage() {
   // Consolidated-cargo analysis result (latest) + archive modal.
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [archiveOpen, setArchiveOpen] = useState(false);
+  const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
 
   // Shell UI state.
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -749,6 +752,14 @@ export default function WorkspacePage() {
     ];
     if (hasInbox)
       a.push({ id: "sort", label: "Розкласти інбокс", icon: <LnFolder size={17} />, run: sortInbox });
+    a.push({
+      id: "ai-settings",
+      label: "Налаштування AI",
+      hint: "BYOK",
+      icon: <LnSettings size={17} />,
+      keywords: "byok ключ провайдер openai gemini claude openrouter engine",
+      run: () => setAiSettingsOpen(true),
+    });
     a.push({ id: "theme", label: "Перемкнути тему", icon: <LnMoon size={17} />, run: toggleTheme });
     a.push({ id: "lock", label: "Заблокувати (вийти)", icon: <LnLock size={17} />, run: lock });
     return a;
@@ -880,7 +891,11 @@ export default function WorkspacePage() {
                         <LnList size={15} /> Архів
                       </button>
                     </div>
-                    <AnalyzePanel collectionId={activeCollectionId} onResult={setAnalysis} />
+                    <AnalyzePanel
+                      collectionId={activeCollectionId}
+                      onResult={setAnalysis}
+                      onOpenAiSettings={() => setAiSettingsOpen(true)}
+                    />
                     {analysis && (
                       <div style={{ maxWidth: 900, margin: "20px auto 0" }}>
                         <AnalysisCard analysis={analysis} />
@@ -1001,6 +1016,7 @@ export default function WorkspacePage() {
         <FilePreviewModal workspaceId={id} file={previewFile} onClose={() => setPreviewFile(null)} />
       )}
       {archiveOpen && <ArchiveModal onClose={() => setArchiveOpen(false)} />}
+      {aiSettingsOpen && <AiSettingsModal onClose={() => setAiSettingsOpen(false)} />}
     </div>
   );
 }

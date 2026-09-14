@@ -11,6 +11,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import type { AnalysisResult } from "@/lib/types";
+import { LnSettings } from "./LineIcons";
 
 // Prototype sample manifest (line 1243) — for the "Вставити приклад" affordance.
 const SAMPLE_MANIFEST =
@@ -31,9 +32,11 @@ const LOADER_STEPS = [
 export function AnalyzePanel({
   collectionId,
   onResult,
+  onOpenAiSettings,
 }: {
   collectionId: string;
   onResult: (result: AnalysisResult) => void;
+  onOpenAiSettings?: () => void;
 }) {
   const [text, setText] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -259,6 +262,19 @@ export function AnalyzePanel({
             </svg>
             Вставити приклад
           </button>
+
+          {onOpenAiSettings ? (
+            <button
+              type="button"
+              onClick={onOpenAiSettings}
+              disabled={running}
+              title="Налаштування AI"
+              aria-label="Налаштування AI"
+              style={{ ...affBtn, padding: "0 11px" }}
+            >
+              <LnSettings size={15} />
+            </button>
+          ) : null}
 
           <div style={{ flex: 1 }} />
 

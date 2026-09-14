@@ -358,6 +358,19 @@ export interface Vessel {
   routeId: string | null;
 }
 
+// ── AI settings (BYOK) ────────────────────────────────────────────────────────
+// Mirrors GET/PUT /api/ai-config. `engine` = builtin (server-side Claude) or byok
+// (customer-supplied key for the consolidated-cargo analysis engine). `keyMask` is
+// a masked hint (e.g. "••••1234"); the real key never comes back to the browser.
+export type AiProvider = "openai" | "gemini" | "claude" | "openrouter";
+
+export interface AiConfig {
+  engine: "builtin" | "byok";
+  provider: string | null;
+  hasKey: boolean;
+  keyMask: string | null;
+}
+
 export interface ArchiveRecord {
   id: string;
   source: string;
