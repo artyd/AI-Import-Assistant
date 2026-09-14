@@ -1,45 +1,81 @@
-// Icon set. Glyphs are Font Awesome Free 6.7.2 solid (CC BY 4.0), vendored as raw
-// path data from github.com/FortAwesome/Font-Awesome so there is no runtime
-// dependency. Each icon is fill-based and inherits `currentColor`, so the caller's
-// text color (or the `--icon-fg` token) drives contrast. The 3D treatment (a
-// stacked drop-shadow + subtle bevel) is applied via the `.ico3d` class in
-// globals.css. `IconLogo` stays a bespoke brand mark.
+// Icon set — flat, minimalist 2D line icons (Lucide-style stroke) matching the
+// ШТУРМАН look. This replaces the former Font Awesome *solid* glyphs with the
+// stacked drop-shadow "3D" treatment (`.ico3d`). Most names alias the LineIcons
+// equivalents; the few without a direct match are defined inline in the same
+// stroke style. Import sites are unchanged (same export names + `{size}` API).
 import type { SVGProps } from "react";
+import {
+  LnFolder,
+  LnFolderPlus,
+  LnFile,
+  LnSend,
+  LnAttach,
+  LnUpload,
+  LnRefresh,
+  LnHistory,
+  LnCheck,
+  LnChevronDown,
+  LnChevronRight,
+  LnSearch,
+  LnTrash,
+  LnPencil,
+  LnMoon,
+  LnSun,
+  LnPlus,
+  LnExport,
+} from "./LineIcons";
 
 type P = SVGProps<SVGSVGElement> & { size?: number };
 
-/**
- * Renders one FA path. Width is derived from the icon's own viewBox so non-square
- * glyphs (e.g. robot 640×512) keep their aspect instead of being squished.
- */
-function Svg({
+// Shared stroke wrapper (mirrors LineIcons' `S`) for the inline-defined icons.
+function L({
   size = 18,
-  viewBox,
-  path,
-  className,
+  strokeWidth = 1.9,
+  children,
   ...p
-}: P & { viewBox: string; path: string }) {
-  const parts = viewBox.split(" ").map(Number);
-  const w = parts[2] || 512;
-  const h = parts[3] || 512;
-  const width = Math.round(size * (w / h) * 100) / 100;
+}: P & { children: React.ReactNode }) {
   return (
     <svg
-      width={width}
+      width={size}
       height={size}
-      viewBox={viewBox}
-      fill="currentColor"
-      className={`ico3d ${className ?? ""}`.trim()}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
       aria-hidden="true"
       {...p}
     >
-      <path d={path} />
+      {children}
     </svg>
   );
 }
 
-// Bespoke brand mark (not Font Awesome) — kept as the Штурман logo.
-export const IconLogo = ({ size = 18, className, ...p }: P) => (
+// ── Aliases to the flat line set (names kept for existing import sites) ──
+export const IconFolder = LnFolder;
+export const IconFolderPlus = LnFolderPlus;
+export const IconFile = LnFile;
+export const IconSend = LnSend;
+export const IconAttach = LnAttach;
+export const IconUpload = LnUpload;
+export const IconRefresh = LnRefresh;
+export const IconHistory = LnHistory;
+export const IconCheck = LnCheck;
+export const IconChevronDown = LnChevronDown;
+export const IconChevronRight = LnChevronRight;
+export const IconSearch = LnSearch;
+export const IconTrash = LnTrash;
+export const IconEdit = LnPencil;
+export const IconMoon = LnMoon;
+export const IconSun = LnSun;
+export const IconPlus = LnPlus;
+export const IconDownload = LnExport;
+
+// ── Bespoke / not in LineIcons — inline, same minimalist stroke style ──
+
+// Штурман brand mark (kept — now flat, no 3D shadow).
+export const IconLogo = ({ size = 18, ...p }: P) => (
   <svg
     width={size}
     height={size}
@@ -49,7 +85,6 @@ export const IconLogo = ({ size = 18, className, ...p }: P) => (
     strokeWidth={1.8}
     strokeLinecap="round"
     strokeLinejoin="round"
-    className={`ico3d ${className ?? ""}`.trim()}
     aria-hidden="true"
     {...p}
   >
@@ -59,165 +94,39 @@ export const IconLogo = ({ size = 18, className, ...p }: P) => (
   </svg>
 );
 
-export const IconFolder = (p: P) => (
-  <Svg
-    {...p}
-    viewBox="0 0 512 512"
-    path="M64 480H448c35.3 0 64-28.7 64-64V160c0-35.3-28.7-64-64-64H288c-10.1 0-19.6-4.7-25.6-12.8L243.2 57.6C231.1 41.5 212.1 32 192 32H64C28.7 32 0 60.7 0 96V416c0 35.3 28.7 64 64 64z"
-  />
-);
-export const IconFolderPlus = (p: P) => (
-  <Svg
-    {...p}
-    viewBox="0 0 512 512"
-    path="M512 416c0 35.3-28.7 64-64 64L64 480c-35.3 0-64-28.7-64-64L0 96C0 60.7 28.7 32 64 32l128 0c20.1 0 39.1 9.5 51.2 25.6l19.2 25.6c6 8.1 15.5 12.8 25.6 12.8l160 0c35.3 0 64 28.7 64 64l0 256zM232 376c0 13.3 10.7 24 24 24s24-10.7 24-24l0-64 64 0c13.3 0 24-10.7 24-24s-10.7-24-24-24l-64 0 0-64c0-13.3-10.7-24-24-24s-24 10.7-24 24l0 64-64 0c-13.3 0-24 10.7-24 24s10.7 24 24 24l64 0 0 64z"
-  />
-);
-export const IconFile = (p: P) => (
-  <Svg
-    {...p}
-    viewBox="0 0 384 512"
-    path="M64 0C28.7 0 0 28.7 0 64L0 448c0 35.3 28.7 64 64 64l256 0c35.3 0 64-28.7 64-64l0-288-128 0c-17.7 0-32-14.3-32-32L224 0 64 0zM256 0l0 128 128 0L256 0zM112 256l160 0c8.8 0 16 7.2 16 16s-7.2 16-16 16l-160 0c-8.8 0-16-7.2-16-16s7.2-16 16-16zm0 64l160 0c8.8 0 16 7.2 16 16s-7.2 16-16 16l-160 0c-8.8 0-16-7.2-16-16s7.2-16 16-16zm0 64l160 0c8.8 0 16 7.2 16 16s-7.2 16-16 16l-160 0c-8.8 0-16-7.2-16-16s7.2-16 16-16z"
-  />
-);
-export const IconUpload = (p: P) => (
-  <Svg
-    {...p}
-    viewBox="0 0 448 512"
-    path="M246.6 9.4c-12.5-12.5-32.8-12.5-45.3 0l-128 128c-12.5 12.5-12.5 32.8 0 45.3s32.8 12.5 45.3 0L192 109.3 192 320c0 17.7 14.3 32 32 32s32-14.3 32-32l0-210.7 73.4 73.4c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3l-128-128zM64 352c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 64c0 53 43 96 96 96l256 0c53 0 96-43 96-96l0-64c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 64c0 17.7-14.3 32-32 32L96 448c-17.7 0-32-14.3-32-32l0-64z"
-  />
-);
-export const IconSearch = (p: P) => (
-  <Svg
-    {...p}
-    viewBox="0 0 512 512"
-    path="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352a144 144 0 1 0 0-288 144 144 0 1 0 0 288z"
-  />
-);
-export const IconChevronDown = (p: P) => (
-  <Svg
-    {...p}
-    viewBox="0 0 512 512"
-    path="M233.4 406.6c12.5 12.5 32.8 12.5 45.3 0l192-192c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L256 338.7 86.6 169.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3l192 192z"
-  />
-);
-export const IconChevronRight = (p: P) => (
-  <Svg
-    {...p}
-    viewBox="0 0 320 512"
-    path="M310.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-192 192c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L242.7 256 73.4 86.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l192 192z"
-  />
-);
-export const IconPlus = (p: P) => (
-  <Svg
-    {...p}
-    viewBox="0 0 448 512"
-    path="M256 80c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 144L48 224c-17.7 0-32 14.3-32 32s14.3 32 32 32l144 0 0 144c0 17.7 14.3 32 32 32s32-14.3 32-32l0-144 144 0c17.7 0 32-14.3 32-32s-14.3-32-32-32l-144 0 0-144z"
-  />
-);
-export const IconEdit = (p: P) => (
-  <Svg
-    {...p}
-    viewBox="0 0 512 512"
-    path="M471.6 21.7c-21.9-21.9-57.3-21.9-79.2 0L362.3 51.7l97.9 97.9 30.1-30.1c21.9-21.9 21.9-57.3 0-79.2L471.6 21.7zm-299.2 220c-6.1 6.1-10.8 13.6-13.5 21.9l-29.6 88.8c-2.9 8.6-.6 18.1 5.8 24.6s15.9 8.7 24.6 5.8l88.8-29.6c8.2-2.7 15.7-7.4 21.9-13.5L437.7 172.3 339.7 74.3 172.4 241.7zM96 64C43 64 0 107 0 160L0 416c0 53 43 96 96 96l256 0c53 0 96-43 96-96l0-96c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 96c0 17.7-14.3 32-32 32L96 448c-17.7 0-32-14.3-32-32l0-256c0-17.7 14.3-32 32-32l96 0c17.7 0 32-14.3 32-32s-14.3-32-32-32L96 64z"
-  />
-);
-export const IconTrash = (p: P) => (
-  <Svg
-    {...p}
-    viewBox="0 0 448 512"
-    path="M135.2 17.7C140.6 6.8 151.7 0 163.8 0L284.2 0c12.1 0 23.2 6.8 28.6 17.7L320 32l96 0c17.7 0 32 14.3 32 32s-14.3 32-32 32L32 96C14.3 96 0 81.7 0 64S14.3 32 32 32l96 0 7.2-14.3zM32 128l384 0 0 320c0 35.3-28.7 64-64 64L96 512c-35.3 0-64-28.7-64-64l0-320zm96 64c-8.8 0-16 7.2-16 16l0 224c0 8.8 7.2 16 16 16s16-7.2 16-16l0-224c0-8.8-7.2-16-16-16zm96 0c-8.8 0-16 7.2-16 16l0 224c0 8.8 7.2 16 16 16s16-7.2 16-16l0-224c0-8.8-7.2-16-16-16zm96 0c-8.8 0-16 7.2-16 16l0 224c0 8.8 7.2 16 16 16s16-7.2 16-16l0-224c0-8.8-7.2-16-16-16z"
-  />
-);
-export const IconMoon = (p: P) => (
-  <Svg
-    {...p}
-    viewBox="0 0 384 512"
-    path="M223.5 32C100 32 0 132.3 0 256S100 480 223.5 480c60.6 0 115.5-24.2 155.8-63.4c5-4.9 6.3-12.5 3.1-18.7s-10.1-9.7-17-8.5c-9.8 1.7-19.8 2.6-30.1 2.6c-96.9 0-175.5-78.8-175.5-176c0-65.8 36-123.1 89.3-153.3c6.1-3.5 9.2-10.5 7.7-17.3s-7.3-11.9-14.3-12.5c-6.3-.5-12.6-.8-19-.8z"
-  />
-);
-export const IconSun = (p: P) => (
-  <Svg
-    {...p}
-    viewBox="0 0 512 512"
-    path="M361.5 1.2c5 2.1 8.6 6.6 9.6 11.9L391 121l107.9 19.8c5.3 1 9.8 4.6 11.9 9.6s1.5 10.7-1.6 15.2L446.9 256l62.3 90.3c3.1 4.5 3.7 10.2 1.6 15.2s-6.6 8.6-11.9 9.6L391 391 371.1 498.9c-1 5.3-4.6 9.8-9.6 11.9s-10.7 1.5-15.2-1.6L256 446.9l-90.3 62.3c-4.5 3.1-10.2 3.7-15.2 1.6s-8.6-6.6-9.6-11.9L121 391 13.1 371.1c-5.3-1-9.8-4.6-11.9-9.6s-1.5-10.7 1.6-15.2L65.1 256 2.8 165.7c-3.1-4.5-3.7-10.2-1.6-15.2s6.6-8.6 11.9-9.6L121 121 140.9 13.1c1-5.3 4.6-9.8 9.6-11.9s10.7-1.5 15.2 1.6L256 65.1 346.3 2.8c4.5-3.1 10.2-3.7 15.2-1.6zM160 256a96 96 0 1 1 192 0 96 96 0 1 1 -192 0zm224 0a128 128 0 1 0 -256 0 128 128 0 1 0 256 0z"
-  />
-);
-export const IconAgent = (p: P) => (
-  <Svg
-    {...p}
-    viewBox="0 0 640 512"
-    path="M320 0c17.7 0 32 14.3 32 32l0 64 120 0c39.8 0 72 32.2 72 72l0 272c0 39.8-32.2 72-72 72l-304 0c-39.8 0-72-32.2-72-72l0-272c0-39.8 32.2-72 72-72l120 0 0-64c0-17.7 14.3-32 32-32zM208 384c-8.8 0-16 7.2-16 16s7.2 16 16 16l32 0c8.8 0 16-7.2 16-16s-7.2-16-16-16l-32 0zm96 0c-8.8 0-16 7.2-16 16s7.2 16 16 16l32 0c8.8 0 16-7.2 16-16s-7.2-16-16-16l-32 0zm96 0c-8.8 0-16 7.2-16 16s7.2 16 16 16l32 0c8.8 0 16-7.2 16-16s-7.2-16-16-16l-32 0zM264 256a40 40 0 1 0 -80 0 40 40 0 1 0 80 0zm152 40a40 40 0 1 0 0-80 40 40 0 1 0 0 80zM48 224l16 0 0 192-16 0c-26.5 0-48-21.5-48-48l0-96c0-26.5 21.5-48 48-48zm544 0c26.5 0 48 21.5 48 48l0 96c0 26.5-21.5 48-48 48l-16 0 0-192 16 0z"
-  />
-);
-export const IconSend = (p: P) => (
-  <Svg
-    {...p}
-    viewBox="0 0 512 512"
-    path="M498.1 5.6c10.1 7 15.4 19.1 13.5 31.2l-64 416c-1.5 9.7-7.4 18.2-16 23s-18.9 5.4-28 1.6L284 427.7l-68.5 74.1c-8.9 9.7-22.9 12.9-35.2 8.1S160 493.2 160 480l0-83.6c0-4 1.5-7.8 4.2-10.8L331.8 202.8c5.8-6.3 5.6-16-.4-22s-15.7-6.4-22-.7L106 360.8 17.7 316.6C7.1 311.3 .3 300.7 0 288.9s5.9-22.8 16.1-28.7l448-256c10.7-6.1 23.9-5.5 34 1.4z"
-  />
-);
-export const IconAttach = (p: P) => (
-  <Svg
-    {...p}
-    viewBox="0 0 448 512"
-    path="M364.2 83.8c-24.4-24.4-64-24.4-88.4 0l-184 184c-42.1 42.1-42.1 110.3 0 152.4s110.3 42.1 152.4 0l152-152c10.9-10.9 28.7-10.9 39.6 0s10.9 28.7 0 39.6l-152 152c-64 64-167.6 64-231.6 0s-64-167.6 0-231.6l184-184c46.3-46.3 121.3-46.3 167.6 0s46.3 121.3 0 167.6l-176 176c-28.6 28.6-75 28.6-103.6 0s-28.6-75 0-103.6l144-144c10.9-10.9 28.7-10.9 39.6 0s10.9 28.7 0 39.6l-144 144c-6.7 6.7-6.7 17.7 0 24.4s17.7 6.7 24.4 0l176-176c24.4-24.4 24.4-64 0-88.4z"
-  />
-);
-export const IconClock = (p: P) => (
-  <Svg
-    {...p}
-    viewBox="0 0 512 512"
-    path="M256 0a256 256 0 1 1 0 512A256 256 0 1 1 256 0zM232 120l0 136c0 8 4 15.5 10.7 20l96 64c11 7.4 25.9 4.4 33.3-6.7s4.4-25.9-6.7-33.3L280 243.2 280 120c0-13.3-10.7-24-24-24s-24 10.7-24 24z"
-  />
-);
-export const IconCheck = (p: P) => (
-  <Svg
-    {...p}
-    viewBox="0 0 448 512"
-    path="M438.6 105.4c12.5 12.5 12.5 32.8 0 45.3l-256 256c-12.5 12.5-32.8 12.5-45.3 0l-128-128c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0L160 338.7 393.4 105.4c12.5-12.5 32.8-12.5 45.3 0z"
-  />
-);
-export const IconLogout = (p: P) => (
-  <Svg
-    {...p}
-    viewBox="0 0 512 512"
-    path="M377.9 105.9L500.7 228.7c7.2 7.2 11.3 17.1 11.3 27.3s-4.1 20.1-11.3 27.3L377.9 406.1c-6.4 6.4-15 9.9-24 9.9c-18.7 0-33.9-15.2-33.9-33.9l0-62.1-128 0c-17.7 0-32-14.3-32-32l0-64c0-17.7 14.3-32 32-32l128 0 0-62.1c0-18.7 15.2-33.9 33.9-33.9c9 0 17.6 3.6 24 9.9zM160 96L96 96c-17.7 0-32 14.3-32 32l0 256c0 17.7 14.3 32 32 32l64 0c17.7 0 32 14.3 32 32s-14.3 32-32 32l-64 0c-53 0-96-43-96-96L0 128C0 75 43 32 96 32l64 0c17.7 0 32 14.3 32 32s-14.3 32-32 32z"
-  />
-);
-export const IconSpinner = (p: P) => (
-  <Svg
-    {...p}
-    className={`spin ${p.className ?? ""}`.trim()}
-    viewBox="0 0 512 512"
-    path="M304 48a48 48 0 1 0 -96 0 48 48 0 1 0 96 0zm0 416a48 48 0 1 0 -96 0 48 48 0 1 0 96 0zM48 304a48 48 0 1 0 0-96 48 48 0 1 0 0 96zm464-48a48 48 0 1 0 -96 0 48 48 0 1 0 96 0zM142.9 437A48 48 0 1 0 75 369.1 48 48 0 1 0 142.9 437zm0-294.2A48 48 0 1 0 75 75a48 48 0 1 0 67.9 67.9zM369.1 437A48 48 0 1 0 437 369.1 48 48 0 1 0 369.1 437z"
-  />
-);
-export const IconDownload = (p: P) => (
-  <Svg
-    {...p}
-    viewBox="0 0 512 512"
-    path="M288 32c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 242.7-73.4-73.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3l128 128c12.5 12.5 32.8 12.5 45.3 0l128-128c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L288 274.7 288 32zM64 352c-35.3 0-64 28.7-64 64l0 32c0 35.3 28.7 64 64 64l384 0c35.3 0 64-28.7 64-64l0-32c0-35.3-28.7-64-64-64l-101.5 0-45.3 45.3c-25 25-65.5 25-90.5 0L165.5 352 64 352zm368 56a24 24 0 1 1 0 48 24 24 0 1 1 0-48z"
-  />
-);
 export const IconBell = (p: P) => (
-  <Svg
-    {...p}
-    viewBox="0 0 448 512"
-    path="M224 0c-17.7 0-32 14.3-32 32l0 19.2C119 66 64 130.6 64 208l0 18.8c0 47-17.3 92.4-48.5 127.6l-7.4 8.3c-8.4 9.4-10.4 22.9-5.3 34.4S19.4 416 32 416l384 0c12.6 0 24-7.4 29.2-18.9s3.1-25-5.3-34.4l-7.4-8.3C401.3 319.2 384 273.9 384 226.8l0-18.8c0-77.4-55-142-128-156.8L256 32c0-17.7-14.3-32-32-32zm45.3 493.3c12-12 18.7-28.3 18.7-45.3l-64 0-64 0c0 17 6.7 33.3 18.7 45.3s28.3 18.7 45.3 18.7s33.3-6.7 45.3-18.7z"
-  />
+  <L {...p}>
+    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+    <path d="M13.7 21a2 2 0 0 1-3.4 0" />
+  </L>
 );
-export const IconHistory = (p: P) => (
-  <Svg
-    {...p}
-    viewBox="0 0 512 512"
-    path="M75 75L41 41C25.9 25.9 0 36.6 0 57.9L0 168c0 13.3 10.7 24 24 24l110.1 0c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24l0 104c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65 0-94.1c0-13.3-10.7-24-24-24z"
-  />
+
+export const IconClock = (p: P) => (
+  <L {...p}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 7v5l3 2" />
+  </L>
 );
-export const IconRefresh = (p: P) => (
-  <Svg
-    {...p}
-    viewBox="0 0 512 512"
-    path="M105.1 202.6c7.7-21.8 20.2-42.3 37.8-59.8c62.5-62.5 163.8-62.5 226.3 0L386.3 160 352 160c-17.7 0-32 14.3-32 32s14.3 32 32 32l111.5 0c0 0 0 0 0 0l.4 0c17.7 0 32-14.3 32-32l0-112c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 35.2L414.4 97.6c-87.5-87.5-229.3-87.5-316.8 0C73.2 122 55.6 150.7 44.8 181.4c-5.9 16.7 2.9 34.9 19.5 40.8s34.9-2.9 40.8-19.5zM39 289.3c-5 1.5-9.8 4.2-13.7 8.2c-4 4-6.7 8.8-8.1 14c-.3 1.2-.6 2.5-.8 3.8c-.3 1.7-.4 3.4-.4 5.1L16 432c0 17.7 14.3 32 32 32s32-14.3 32-32l0-35.1 17.6 17.5c0 0 0 0 0 0c87.5 87.4 229.3 87.4 316.7 0c24.4-24.4 42.1-53.1 52.9-83.8c5.9-16.7-2.9-34.9-19.5-40.8s-34.9 2.9-40.8 19.5c-7.7 21.8-20.2 42.3-37.8 59.8c-62.5 62.5-163.8 62.5-226.3 0l-.1-.1L125.6 352l34.4 0c17.7 0 32-14.3 32-32s-14.3-32-32-32L48.4 288c-1.6 0-3.2 .1-4.8 .3s-3.1 .5-4.6 1z"
-  />
+
+export const IconLogout = (p: P) => (
+  <L {...p}>
+    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+    <path d="M16 17l5-5-5-5" />
+    <path d="M21 12H9" />
+  </L>
+);
+
+export const IconAgent = (p: P) => (
+  <L {...p}>
+    <rect x="4" y="8" width="16" height="11" rx="2.5" />
+    <path d="M12 8V4.5" />
+    <circle cx="12" cy="3.2" r="1.1" />
+    <path d="M9 13h.01M15 13h.01" />
+  </L>
+);
+
+export const IconSpinner = ({ className, ...p }: P) => (
+  <L {...p} className={`spin ${className ?? ""}`.trim()}>
+    <path d="M21 12a9 9 0 1 1-6.2-8.6" opacity="0.9" />
+  </L>
 );

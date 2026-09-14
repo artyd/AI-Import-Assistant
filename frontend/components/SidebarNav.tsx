@@ -10,7 +10,6 @@ import {
   LnList,
   LnPanelLeft,
   LnPencil,
-  LnSearch,
   LnTrash,
 } from "./LineIcons";
 
@@ -28,7 +27,6 @@ interface Props {
   collapsed: boolean;
   onToggleCollapsed: () => void;
   onNewChat: () => void;
-  onOpenSearch: () => void;
   onSelectShipment: (id: string) => void;
   onDeleteShipment: () => void;
   onSelectCollection: (id: string) => void;
@@ -68,7 +66,6 @@ export function SidebarNav(props: Props) {
     collapsed,
     onToggleCollapsed,
     onNewChat,
-    onOpenSearch,
     onSelectShipment,
     onDeleteShipment,
     onSelectCollection,
@@ -124,9 +121,6 @@ export function SidebarNav(props: Props) {
         </button>
         <button style={railBtn} onClick={() => onSetView("map")} title="Карта">
           <LnGrid size={18} />
-        </button>
-        <button style={railBtn} onClick={onOpenSearch} title="Пошук">
-          <LnSearch size={18} />
         </button>
       </aside>
     );
@@ -231,12 +225,6 @@ export function SidebarNav(props: Props) {
             <LnGrid size={18} />
           </span>
           Карта
-        </button>
-        <button style={navBtn} onClick={onOpenSearch} className="nav-row">
-          <span style={{ color: "var(--muted)", display: "flex" }}>
-            <LnSearch size={18} />
-          </span>
-          Пошук
         </button>
       </div>
 

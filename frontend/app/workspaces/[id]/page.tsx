@@ -841,7 +841,6 @@ export default function WorkspacePage() {
         collapsed={sidebarCollapsed}
         onToggleCollapsed={() => setSidebarCollapsed((v) => !v)}
         onNewChat={newChat}
-        onOpenSearch={() => setPaletteOpen(true)}
         onSelectShipment={selectShipment}
         onDeleteShipment={deleteShipment}
         onSelectCollection={selectCollection}
@@ -881,59 +880,52 @@ export default function WorkspacePage() {
                 </button>
               </div>
             </div>
-          ) : (
-            <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
-              {chatKind === "consolidated" && activeCollectionId && (
-                <div style={{ flex: "1 1 58%", overflowY: "auto", minHeight: 0 }}>
-                  <div style={{ padding: "20px 24px 10px" }}>
-                    <div style={{ maxWidth: 640, margin: "0 auto 14px", display: "flex", justifyContent: "flex-end" }}>
-                      <button className="btn" onClick={() => setArchiveOpen(true)}>
-                        <LnList size={15} /> Архів
-                      </button>
-                    </div>
-                    <AnalyzePanel
-                      collectionId={activeCollectionId}
-                      onResult={setAnalysis}
-                      onOpenAiSettings={() => setAiSettingsOpen(true)}
-                    />
-                    {analysis && (
-                      <div style={{ maxWidth: 900, margin: "20px auto 0" }}>
-                        <AnalysisCard analysis={analysis} />
-                      </div>
-                    )}
-                  </div>
+          ) : chatKind === "consolidated" ? (
+            /* Збірний = аналіз збірного вантажу (панель вводу + карточка).
+               Без окремого агент-чату — аналіз і є цим екраном. */
+            <div style={{ height: "100%", overflowY: "auto", minHeight: 0 }}>
+              <div style={{ padding: "22px 24px 32px" }}>
+                <div style={{ maxWidth: 900, margin: "0 auto 14px", display: "flex", justifyContent: "flex-end" }}>
+                  <button className="btn" onClick={() => setArchiveOpen(true)}>
+                    <LnList size={15} /> Архів
+                  </button>
                 </div>
-              )}
-              <div
-                style={{
-                  flex: chatKind === "consolidated" ? "1 1 42%" : "1 1 auto",
-                  minHeight: 0,
-                  borderTop: chatKind === "consolidated" ? "1px solid var(--border)" : undefined,
-                }}
-              >
-                <Chat
-                  key={`${chatKind}-${activeCollectionId ?? "ws"}-${conversationId ?? "new"}-${chatSeq}`}
-                  postPath={endpoints.postPath}
-                  chatKind={chatKind}
-                  onChangeKind={setChatKind}
-                  selector={composerSelector}
-                  conversationId={conversationId}
-                  initialMessages={initialMessages}
-                  onConversationStarted={onConversationStarted}
-                  onLog={onLog}
-                  placeholder={
-                    chatKind === "normal"
-                      ? "Запитайте про ЗЕД, митницю, документи або коди УКТ ЗЕД…"
-                      : chatKind === "consolidated"
-                        ? "Опишіть збірний вантаж або завантажте маніфест для аналізу…"
-                        : undefined
-                  }
-                  folders={chatKind === "supply" ? folders : undefined}
-                  onUploadAndClassify={chatKind === "supply" ? uploadAndClassify : undefined}
-                  onMoveFile={chatKind === "supply" ? moveFile : undefined}
-                />
+                <div style={{ maxWidth: 900, margin: "0 auto" }}>
+                  <AnalyzePanel
+                    collectionId={activeCollectionId!}
+                    onResult={setAnalysis}
+                    onOpenAiSettings={() => setAiSettingsOpen(true)}
+                  />
+                  {analysis && (
+                    <div style={{ marginTop: 20 }}>
+                      <AnalysisCard analysis={analysis} />
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
+          ) : (
+            /* Звичайний / Постачання — агент-чат на всю висоту з долученням файлів
+               (для обох типів файли йдуть у теки поточного постачання). */
+            <Chat
+              key={`${chatKind}-${conversationId ?? "new"}-${chatSeq}`}
+              postPath={endpoints.postPath}
+              chatKind={chatKind}
+              onChangeKind={setChatKind}
+              selector={composerSelector}
+              conversationId={conversationId}
+              initialMessages={initialMessages}
+              onConversationStarted={onConversationStarted}
+              onLog={onLog}
+              placeholder={
+                chatKind === "normal"
+                  ? "Запитайте про ЗЕД, митницю, документи або коди УКТ ЗЕД…"
+                  : undefined
+              }
+              folders={folders}
+              onUploadAndClassify={uploadAndClassify}
+              onMoveFile={moveFile}
+            />
           )}
         </div>
       </main>
