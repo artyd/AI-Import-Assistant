@@ -147,6 +147,24 @@ export interface Folder {
   position: number;
 }
 
+// ── News (Новини логістики) ───────────────────────────────────────────────────
+// Mirrors GET /api/news?rubric=<key> → { items: NewsItem[], counts }.
+// `rubric` is one of the 8 frozen keys (see NEWS_RUBRICS in lib/news.ts).
+export interface NewsItem {
+  id: string;
+  rubric: string;
+  title: string;
+  summary: string;
+  source: string;
+  url: string;
+  published_at: string;
+}
+
+export interface NewsResponse {
+  items: NewsItem[];
+  counts: Record<string, number> & { total: number };
+}
+
 // Backend emits queued|indexing|ready|error; the UI maps ready -> done.
 export type FileStatus = "queued" | "indexing" | "ready" | "error";
 export type UiFileStatus = "queued" | "indexing" | "done" | "error";

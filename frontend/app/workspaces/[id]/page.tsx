@@ -31,6 +31,7 @@ import { SidebarNav } from "@/components/SidebarNav";
 import { TopBar, type CompletenessStep } from "@/components/TopBar";
 import { RightPanel, type RightTab } from "@/components/RightPanel";
 import { FilesTab } from "@/components/FilesTab";
+import { NewsView } from "@/components/NewsView";
 import { CommandPalette, type PaletteAction } from "@/components/CommandPalette";
 import { IconSpinner } from "@/components/icons";
 import {
@@ -867,10 +868,7 @@ export default function WorkspacePage() {
         />
         <div style={{ flex: 1, minHeight: 0 }}>
           {view === "news" ? (
-            <ComingSoon
-              title="Новини"
-              note="Розділ новин з рубриками — у розробці (Фаза C). Скоро тут зʼявиться жива стрічка галузевих новин."
-            />
+            <NewsView />
           ) : view === "map" ? (
             <ComingSoon
               title="Карта постачань"
