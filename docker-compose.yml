@@ -74,12 +74,15 @@ services:
       CORS_ORIGIN: ${CORS_ORIGIN}
       STORAGE_DIR: /data/storage
       MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-26214400}
+      # Internal logist-mcp URL (Phase 1). Empty disables the Phase-2 tools.
+      LOGIST_MCP_URL: ${LOGIST_MCP_URL:-http://logist-mcp:8000}
     volumes:
       - storage_data:/data/storage
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
       qdrant: { condition: service_healthy }
+      logist-mcp: { condition: service_started }
 
   worker:
     build:
@@ -98,12 +101,14 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       CORS_ORIGIN: ${CORS_ORIGIN}
       STORAGE_DIR: /data/storage
+      LOGIST_MCP_URL: ${LOGIST_MCP_URL:-http://logist-mcp:8000}
     volumes:
       - storage_data:/data/storage
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
       qdrant: { condition: service_healthy }
+      logist-mcp: { condition: service_started }
 
   frontend:
     build:
@@ -122,8 +127,25 @@ services:
     depends_on:
       - backend
 
+  # Internal customs/logistics tool server (FastMCP, Streamable HTTP). INTERNAL
+  # ONLY — no host port, no Caddy route: the backend reaches it on the compose
+  # network at http://logist-mcp:8000. Nothing here is exposed to the shared host
+  # or the other sites on it. Its 6 read-only tools hit only public upstreams
+  # (qdpro.com.ua, bank.gov.ua, PubChem) + a local DRLZ cache on the volume below.
+  logist-mcp:
+    build:
+      context: ./logist-mcp
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      FASTMCP_HOST: 0.0.0.0
+      DRLZ_CACHE_PATH: /data/cache/drlz_cache.json
+    volumes:
+      - logist_cache:/data/cache
+
 volumes:
   postgres_data:
   redis_data:
   qdrant_data:
   storage_data:
+  logist_cache:

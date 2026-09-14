@@ -287,6 +287,49 @@ stateful or many more MCP servers. Either keeps the server internal.
 
 ---
 
+## Part 5 — Phase 0 smoke-test RESULTS (executed 2026-09-14)
+
+Ran a faithful replica of each tool's network+parse logic (URLs/headers/marker
+copied verbatim into a `httpx`+`bs4` harness — the `mcp`/`pydantic` stack isn't
+needed to exercise the real upstreams, which also sidesteps their lack of Python
+3.14 wheels). All against LIVE sources. No repo change.
+
+**7/7 upstreams returned data. Graded by real quality, not just HTTP 200:**
+
+- ✅ **Production-ready as-is:**
+  - `get_exchange_rate` — NBU JSON, `USD = 44.55 грн (14.09.2026)`. Clean, fast.
+  - `pubchem_identify_substance` — `aspirin` AND CAS `50-78-2` both → CID 2244,
+    `C9H8O4`, correct IUPAC + synonyms. Name and CAS paths both work.
+  - `drlz_build_cache` parser — **30 records from 3 pages, columns correct**
+    (`reg_number`/`name`/`reg_end_date`/…; first: `UA/3656/01/05 · РИСПЕТРИЛ ·
+    Безстроково`). The biggest flagged risk (parser written without live HTML)
+    is **cleared — it parses the real table correctly.**
+- ⚠️ **Works but needs a fix before production:**
+  - `uktzed_lookup_code` — returns the real authoritative data (`мито`@910,
+    `Пільг`@1165, `ПДВ`@15555, `Ліценз`@22752) BUT the payload is **~48 KB** and
+    the `"Головне меню"` marker sits at the very end (pos 47488), so it only trims
+    the footer — the top site nav is retained. → **Trim to the data block + cap
+    size** before feeding the model (token cost / latency / noise). Not broken,
+    but wasteful and noisy as-is.
+  - `uktzed_browse_classifier` — returns the section list; UKTZED codes are
+    textual (in-path navigation), so drill-down is viable. Lightly tested.
+- ❌ **Navigation broken as written (must fix before trusting):**
+  - `dualuse_browse_classifier` — the root DOES list the 10 real sections
+    (`Розділ 1. Спеціальні матеріали…` … `Розділ 9. Авіакосмічна промисловість`),
+    and the node_ids exist in the page as `/uk/dualuse/1`, `/174`, `/1005`, …
+    BUT the tool returns `soup.get_text()`, which **strips the href node_ids** —
+    so the model receives section *names* with **no node_id to descend with**,
+    while the tool's own contract says "node_id comes from links in the previous
+    response." → As written the drill-down dead-ends at the root. **Fix required:
+    surface the child node_ids alongside the section names** (parse `<a href>`,
+    don't flatten to text). This confirms + sharpens the author's "never
+    live-tested" flag for this specific tool.
+
+**Phase 0 verdict:** the network reachability and the highest-risk parser (drlz)
+are sound; the two qdpro *browse/lookup* tools need output shaping (uktzed: trim
++ cap; dualuse: keep node_ids) as part of the Phase-2 TS wrapper, not blindly
+passed through. Exchange-rate + PubChem + the drlz crawl can be trusted now.
+
 ## One-line bottom line
 
 Manual TS wrappers over an **internal-only** `logist-mcp` service (no Caddy, no host

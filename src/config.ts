@@ -100,6 +100,14 @@ const envSchema = z.object({
   // BYOK is scoped to the consolidated-analysis AI step only; the main Штурман
   // agent always uses the built-in Anthropic key.
   BYOK_ENC_KEY: z.string().default(''),
+
+  // logist-mcp integration (Phase 1): base URL of the internal FastMCP service
+  // (docker-compose `logist-mcp`) that exposes the UKTZED / dual-use / NBU rate /
+  // PubChem / drug-register tools. Reachable on the Compose network only — NO
+  // host port and NO Caddy route. Empty (default) = integration disabled; the
+  // Phase-2 agent tools that call it become available once this is set (e.g.
+  // http://logist-mcp:8000).
+  LOGIST_MCP_URL: z.string().default(''),
 });
 
 export type AppConfig = z.infer<typeof envSchema>;

@@ -1,0 +1,7 @@
+# logist-mcp Python service dependencies.
+# Pinned MCP SDK (FastMCP lives in mcp.server.fastmcp); the rest are the HTTP +
+# HTML-parse stack the 6 tools use. Kept minimal — no secrets, all upstreams public.
+mcp==1.9.4
+httpx>=0.27,<1.0
+beautifulsoup4>=4.12,<5.0
+pydantic>=2.6,<3.0

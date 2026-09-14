@@ -1,0 +1,496 @@
+"""
+logist_mcp — MCP-сервер професійної перевірки товарів для імпорту: коди УКТЗЕД,
+подвійне використання (qdpro.com.ua), офіційний курс НБУ, ідентифікація
+хімічних речовин (PubChem) та перевірка реєстрації ліків (кеш drlz.info).
+
+Задум: разом з контекстом документів (Штурман) дає точну, звірену з
+першоджерелами відповідь замість здогадки з пам'яті моделі.
+
+Шість інструментів:
+  - uktzed_lookup_code: повна довідка по 10-значному коду УКТЗЕД (мито, ПДВ,
+    ліцензування, пільги за угодами, обмеження, наркотичні речовини тощо)
+  - uktzed_browse_classifier: навігація по ієрархії класифікатора УКТЗЕД
+    (розділ -> група -> товарна позиція -> підпозиція)
+  - dualuse_browse_classifier: навігація по Єдиному списку товарів подвійного
+    використання, з переліком пов'язаних кодів УКТЗЕД по кожній категорії
+  - get_exchange_rate: офіційний курс гривні НБУ до заданої валюти на дату
+  - pubchem_identify_substance: ідентифікація хімічної речовини за назвою чи
+    CAS-номером (формула, маса, синоніми) — звірка "це той самий реагент"
+  - drlz_lookup_registration: пошук по локальному кешу Держреєстру ліків
+    (кеш будується окремо, див. drlz_build_cache.py — сайт не має робочого
+    живого пошуку, а старий www.drlz.com.ua мертвий і застарілий з 2021)
+
+Свідомо НЕ додано:
+  - EDQM CEP database: extranet.edqm.eu забороняє автоматичний доступ через
+    robots.txt і вимагає sign-in — перевірка CEP залишається ручною
+
+Запуск локально (stdio, для тестування через MCP Inspector):
+    python logist_mcp.py
+
+Запуск як віддалений сервер (Streamable HTTP, для docker-compose + Caddy):
+    python logist_mcp.py --http --port 8000
+"""
+
+import json
+import os
+import re
+import sys
+from urllib.parse import quote
+
+import httpx
+from bs4 import BeautifulSoup
+from pydantic import BaseModel, Field, ConfigDict, field_validator
+
+from mcp.server.fastmcp import FastMCP
+
+mcp = FastMCP("logist_mcp")
+
+BASE_URL = "https://www.qdpro.com.ua/uk"
+HTTP_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; AG95-LogistBot/1.0)"}
+REQUEST_TIMEOUT = 20.0
+
+# На кожній сторінці сайту після основного контенту йде однаковий блок
+# сайтового меню/футера — відрізаємо все, що починається з цього маркера,
+# замість того щоб покладатись на конкретні CSS-класи Drupal-теми (вони можуть
+# змінитись при редизайні сайту, текстовий маркер надійніший).
+BOILERPLATE_MARKER = "Головне меню"
+
+
+async def _fetch_clean_text(path: str) -> str:
+    """Забрати сторінку qdpro.com.ua і повернути очищений текст без меню/футера."""
+    url = f"{BASE_URL}/{path.lstrip('/')}"
+    async with httpx.AsyncClient(
+        headers=HTTP_HEADERS, timeout=REQUEST_TIMEOUT, follow_redirects=True
+    ) as client:
+        try:
+            resp = await client.get(url)
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                raise ValueError(f"Сторінку не знайдено: {url}") from e
+            raise ValueError(
+                f"Помилка запиту до qdpro.com.ua: HTTP {e.response.status_code}"
+            ) from e
+        except httpx.TimeoutException as e:
+            raise ValueError("Таймаут запиту до qdpro.com.ua, спробуйте ще раз") from e
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+    for tag in soup(["script", "style", "nav"]):
+        tag.decompose()
+    text = soup.get_text("\n", strip=True)
+
+    cut_at = text.find(BOILERPLATE_MARKER)
+    if cut_at != -1:
+        text = text[:cut_at]
+    return text.strip()
+
+
+class LookupCodeInput(BaseModel):
+    """Вхідні дані для пошуку довідки по коду УКТЗЕД."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    code: str = Field(
+        ...,
+        description=(
+            "10-значний код УКТЗЕД, з пробілами або без "
+            "(наприклад '3004 32 00 00' або '3004320000')"
+        ),
+        min_length=4,
+        max_length=15,
+    )
+
+    @field_validator("code")
+    @classmethod
+    def normalize_code(cls, v: str) -> str:
+        digits = re.sub(r"\D", "", v)
+        if len(digits) != 10:
+            raise ValueError(
+                f"Код УКТЗЕД має складатись з 10 цифр, отримано {len(digits)}: {v!r}"
+            )
+        return digits
+
+
+@mcp.tool(
+    name="uktzed_lookup_code",
+    annotations={
+        "title": "Довідка по коду УКТЗЕД",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
+async def uktzed_lookup_code(params: LookupCodeInput) -> str:
+    """Отримати повну митну довідку по 10-значному коду УКТЗЕД.
+
+    Повертає опис товару та (окремо для імпорту/експорту/транзиту): ставки
+    ввізного/вивізного мита (пільгова і повна), ПДВ, пільгові ставки за
+    торговими угодами (ЄС, ЄАВТ, Канада, Британія тощо), вимоги ліцензування,
+    обмеження щодо наркотичних засобів і прекурсорів, застосування
+    техрегламентів, заборони ввезення та інші митні формальності.
+
+    Args:
+        params (LookupCodeInput): 10-значний код УКТЗЕД.
+
+    Returns:
+        str: Текст довідки по товару (джерело: qdpro.com.ua, дані ДФС/Мінфіну).
+    """
+    return await _fetch_clean_text(f"goodinfo/{params.code}")
+
+
+class BrowseClassifierInput(BaseModel):
+    """Вхідні дані для навігації по ієрархії УКТЗЕД."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    code: str = Field(
+        default="",
+        description=(
+            "Код рівня класифікатора: порожній рядок — усі 21 розділ; "
+            "римська цифра (напр. 'VI') — розділ; 2 цифри (напр. '30') — група; "
+            "4+ цифри (напр. '3004') — товарна позиція чи підпозиція"
+        ),
+        max_length=15,
+    )
+
+
+@mcp.tool(
+    name="uktzed_browse_classifier",
+    annotations={
+        "title": "Навігація по класифікатору УКТЗЕД",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
+async def uktzed_browse_classifier(params: BrowseClassifierInput) -> str:
+    """Переглянути ієрархію класифікатора УКТЗЕД, щоб знайти потрібний код.
+
+    Структура: Розділ (I-XXI, римські цифри) -> Група (2 цифри) ->
+    Товарна позиція (4 цифри) -> Підпозиція (6-10 цифр, кінцевий код для
+    uktzed_lookup_code). Викликати без коду, щоб побачити всі 21 розділ,
+    потім заглиблюватись по одному рівню за раз.
+
+    Args:
+        params (BrowseClassifierInput): Код рівня класифікатора (може бути
+            порожнім, розділом, групою чи товарною позицією).
+
+    Returns:
+        str: Список дочірніх елементів (код + опис) для заданого рівня.
+    """
+    path = "uktzed" if not params.code else f"uktzed/{params.code}"
+    return await _fetch_clean_text(path)
+
+
+class DualUseBrowseInput(BaseModel):
+    """Вхідні дані для навігації по списку товарів подвійного використання."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    node_id: str = Field(
+        default="",
+        description=(
+            "Внутрішній ID вузла класифікатора подвійного використання. "
+            "Порожньо — корінь списку (усі розділи). ID дочірніх вузлів "
+            "беруться з посилань у відповіді попереднього виклику цього тулу."
+        ),
+        max_length=15,
+    )
+
+
+@mcp.tool(
+    name="dualuse_browse_classifier",
+    annotations={
+        "title": "Навігація по списку товарів подвійного використання",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
+async def dualuse_browse_classifier(params: DualUseBrowseInput) -> str:
+    """Переглянути Єдиний список товарів подвійного використання (експортний контроль).
+
+    Список організовано за категоріями експортного контролю (напр. "8A002" —
+    морське обладнання), а НЕ за кодами УКТЗЕД напряму: кожна кінцева
+    категорія переліковує пов'язані з нею коди УКТЗЕД. Щоб перевірити, чи
+    підпадає товар під подвійне використання — знайдіть його категорію в
+    ієрархії (почніть виклик без node_id, щоб побачити корінь дерева) і
+    звірте перелічені у відповіді коди УКТЗЕД з кодом товару.
+
+    ВАЖЛИВО: node_id — це внутрішній ID вузла сайту-джерела, НЕ сам код
+    категорії експортного контролю (на кшталт "8A002"). Значення node_id для
+    заглиблення треба брати з посилань у відповіді попереднього виклику.
+
+    Args:
+        params (DualUseBrowseInput): ID вузла для заглиблення (порожньо —
+            корінь списку).
+
+    Returns:
+        str: Дочірні категорії та/або пов'язані коди УКТЗЕД для цього вузла.
+    """
+    path = "dualuse" if not params.node_id else f"dualuse/{params.node_id}"
+    return await _fetch_clean_text(path)
+
+
+class ExchangeRateInput(BaseModel):
+    """Вхідні дані для запиту офіційного курсу НБУ."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    currency: str = Field(
+        ...,
+        description="Літерний код валюти за ISO-4217 (напр. 'USD', 'EUR', 'CNY', 'INR')",
+        min_length=3,
+        max_length=3,
+    )
+    date: str = Field(
+        default="",
+        description="Дата у форматі YYYYMMDD (напр. '20260914'); порожньо — курс на сьогодні",
+    )
+
+    @field_validator("currency")
+    @classmethod
+    def upper_currency(cls, v: str) -> str:
+        return v.upper()
+
+    @field_validator("date")
+    @classmethod
+    def validate_date(cls, v: str) -> str:
+        if v and not re.fullmatch(r"\d{8}", v):
+            raise ValueError(f"Дата має бути у форматі YYYYMMDD, отримано: {v!r}")
+        return v
+
+
+NBU_EXCHANGE_URL = "https://bank.gov.ua/NBUStatService/v1/statdirectory/exchange"
+
+
+@mcp.tool(
+    name="get_exchange_rate",
+    annotations={
+        "title": "Офіційний курс НБУ",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
+async def get_exchange_rate(params: ExchangeRateInput) -> str:
+    """Отримати офіційний курс гривні НБУ до заданої валюти.
+
+    Корисно для перерахунку вартості товару з валюти контракту (USD, EUR,
+    CNY, INR тощо) в гривню на конкретну дату — наприклад для оцінки митної
+    вартості або порівняння пропозицій постачальників з різних країн.
+
+    Args:
+        params (ExchangeRateInput): Код валюти (ISO-4217) і опціонально дата
+            у форматі YYYYMMDD (без дати — курс на сьогодні).
+
+    Returns:
+        str: Курс у форматі "1 XXX = YY.YYYY грн (станом на DD.MM.YYYY)".
+    """
+    query = {"json": "", "valcode": params.currency}
+    if params.date:
+        query["date"] = params.date
+
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+        try:
+            resp = await client.get(NBU_EXCHANGE_URL, params=query)
+            resp.raise_for_status()
+            data = resp.json()
+        except httpx.HTTPStatusError as e:
+            raise ValueError(f"Помилка запиту до НБУ: HTTP {e.response.status_code}") from e
+        except httpx.TimeoutException as e:
+            raise ValueError("Таймаут запиту до НБУ, спробуйте ще раз") from e
+
+    if not data:
+        raise ValueError(
+            f"Курс для {params.currency} не знайдено — перевірте код валюти "
+            f"(ISO-4217, напр. USD/EUR/CNY) або дату"
+        )
+    rate = data[0]
+    return (
+        f"1 {rate['cc']} ({rate['txt']}) = {rate['rate']} грн, "
+        f"станом на {rate['exchangedate']} (джерело: НБУ)"
+    )
+
+
+class SubstanceIdentifyInput(BaseModel):
+    """Вхідні дані для ідентифікації хімічної речовини через PubChem."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    identifier: str = Field(
+        ...,
+        description=(
+            "Назва речовини, торгова назва/синонім, або CAS-номер "
+            "(напр. 'aspirin' або '50-78-2') — PubChem шукає CAS-номери "
+            "як синонім, окремого поля для них не потрібно"
+        ),
+        min_length=1,
+        max_length=200,
+    )
+
+
+PUBCHEM_BASE = "https://pubchem.ncbi.nlm.nih.gov/rest/pug"
+# Політика NCBI: не більше 5 запитів/сек з одного джерела — для одиничних
+# викликів у діалозі це не проблема, але не варто заганяти цей тул у цикл
+# без затримки, якщо колись знадобиться перевірити список речовин масово.
+PUBCHEM_PROPERTIES = "IUPACName,MolecularFormula,MolecularWeight,CanonicalSMILES,InChIKey"
+
+
+@mcp.tool(
+    name="pubchem_identify_substance",
+    annotations={
+        "title": "Ідентифікація хімічної речовини (PubChem)",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
+async def pubchem_identify_substance(params: SubstanceIdentifyInput) -> str:
+    """Ідентифікувати хімічну речовину за назвою або CAS-номером через PubChem.
+
+    Корисно, коли два постачальники називають одну й ту саму субстанцію
+    різними торговими іменами — тул повертає канонічну IUPAC-назву,
+    молекулярну формулу, молекулярну масу, InChIKey та перелік синонімів
+    (включно з CAS-номерами), щоб звірити, чи це справді одна й та сама
+    речовина, до підписання контракту.
+
+    Args:
+        params (SubstanceIdentifyInput): Назва, синонім або CAS-номер речовини.
+
+    Returns:
+        str: Структурні дані речовини та до 10 відомих синонімів
+            (джерело: PubChem, National Library of Medicine, США).
+    """
+    encoded = quote(params.identifier, safe="")
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+        try:
+            prop_resp = await client.get(
+                f"{PUBCHEM_BASE}/compound/name/{encoded}/property/{PUBCHEM_PROPERTIES}/JSON"
+            )
+            prop_resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                raise ValueError(
+                    f"Речовину '{params.identifier}' не знайдено в PubChem — "
+                    f"перевірте написання назви чи CAS-номер"
+                ) from e
+            raise ValueError(f"Помилка запиту до PubChem: HTTP {e.response.status_code}") from e
+        except httpx.TimeoutException as e:
+            raise ValueError("Таймаут запиту до PubChem, спробуйте ще раз") from e
+
+        props = prop_resp.json()["PropertyTable"]["Properties"][0]
+
+        synonyms: list[str] = []
+        try:
+            syn_resp = await client.get(f"{PUBCHEM_BASE}/compound/name/{encoded}/synonyms/JSON")
+            syn_resp.raise_for_status()
+            synonyms = syn_resp.json()["InformationList"]["Information"][0]["Synonym"][:10]
+        except (httpx.HTTPStatusError, httpx.TimeoutException, KeyError, IndexError):
+            pass  # синоніми не критичні — основні властивості вже отримані
+
+    lines = [
+        f"CID (PubChem ID): {props['CID']}",
+        f"IUPAC-назва: {props.get('IUPACName', '—')}",
+        f"Молекулярна формула: {props.get('MolecularFormula', '—')}",
+        f"Молекулярна маса: {props.get('MolecularWeight', '—')}",
+        f"InChIKey: {props.get('InChIKey', '—')}",
+    ]
+    if synonyms:
+        lines.append("Синоніми (перші 10): " + ", ".join(synonyms))
+    return "\n".join(lines)
+
+
+class DrlzLookupInput(BaseModel):
+    """Вхідні дані для пошуку в локальному кеші реєстру лікарських засобів."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    query: str = Field(
+        ...,
+        description="Назва препарату, діюча речовина або власник РП (пошук підрядком, без урахування регістру)",
+        min_length=2,
+        max_length=200,
+    )
+    limit: int = Field(default=15, description="Максимум результатів", ge=1, le=100)
+
+
+DRLZ_CACHE_PATH = os.environ.get("DRLZ_CACHE_PATH", "drlz_cache.json")
+
+
+@mcp.tool(
+    name="drlz_lookup_registration",
+    annotations={
+        "title": "Пошук у Державному реєстрі лікарських засобів (кеш)",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def drlz_lookup_registration(params: DrlzLookupInput) -> str:
+    """Перевірити реєстрацію лікарського засобу в Україні по локальному кешу.
+
+    Кеш будується окремим скриптом drlz_build_cache.py (запускається за
+    розкладом, напр. раз на тиждень) з drlz.info — офіційної заміни
+    застарілого www.drlz.com.ua, чия форма пошуку не працює, а CSV-експорт
+    не оновлювався з 2021 року. Цей тул НЕ ходить у мережу — шукає підрядком
+    по назві, діючій речовині чи власнику РП у вже збудованому файлі.
+
+    Args:
+        params (DrlzLookupInput): Пошуковий запит і ліміт результатів.
+
+    Returns:
+        str: Знайдені записи (№ РП, назва, дата закінчення реєстрації,
+            діючі речовини, виробник, власник) або повідомлення про
+            відсутність кешу з інструкцією, як його побудувати.
+    """
+    if not os.path.exists(DRLZ_CACHE_PATH):
+        return (
+            f"Локальний кеш реєстру не знайдено ({DRLZ_CACHE_PATH}). "
+            f"Побудуйте його: python drlz_build_cache.py --out {DRLZ_CACHE_PATH}"
+        )
+
+    with open(DRLZ_CACHE_PATH, "r", encoding="utf-8") as f:
+        cache = json.load(f)
+
+    query_lower = params.query.lower()
+    matches = [
+        r
+        for r in cache["records"]
+        if query_lower in r.get("name", "").lower()
+        or query_lower in r.get("active_substances", "").lower()
+        or query_lower in r.get("reg_holder", "").lower()
+    ][: params.limit]
+
+    if not matches:
+        return (
+            f"Нічого не знайдено за запитом '{params.query}' у кеші "
+            f"({cache['count']} записів, станом на {cache['fetched_at']})"
+        )
+
+    lines = [
+        f"Знайдено {len(matches)} (з кешу на {cache['fetched_at']}, джерело: drlz.info):"
+    ]
+    for r in matches:
+        lines.append(
+            f"- {r.get('name', '—')} | № РП {r.get('reg_number', '—')} | "
+            f"до {r.get('reg_end_date', '—')} | {r.get('active_substances', '—')} | "
+            f"власник: {r.get('reg_holder', '—')}"
+        )
+    return "\n".join(lines)
+
+
+if __name__ == "__main__":
+    if "--http" in sys.argv:
+        port = 8000
+        if "--port" in sys.argv:
+            port = int(sys.argv[sys.argv.index("--port") + 1])
+        mcp.run(transport="streamable_http", port=port)
+    else:
+        mcp.run()
