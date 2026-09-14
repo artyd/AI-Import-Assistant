@@ -6,6 +6,7 @@ import { MODEL } from '../anthropic/client.js';
 import { createRedis } from '../queue/connection.js';
 import { INDEX_QUEUE, type IndexJobData } from '../queue/index.js';
 import { REMINDERS_QUEUE, scheduleReminders, type ReminderJobData } from '../queue/reminders.js';
+import { NEWS_QUEUE, scheduleNews, type NewsJobData } from '../queue/news.js';
 import { readStoredFile } from '../services/storage.js';
 import { extractText } from '../services/extract/index.js';
 import { ocrDocument } from '../services/ocr/claudeOcr.js';
@@ -20,6 +21,7 @@ import { refreshWorkspaceState } from '../services/status.js';
 import { computeRisks } from '../services/risks.js';
 import { insertNotification } from '../services/notifications.js';
 import { scanAndNotify } from '../services/reminders.js';
+import { ingestNews, purgeOldNews } from '../services/news/index.js';
 import { embedForIndex } from '../services/embeddings/index.js';
 import {
   ensureQdrantCollection,
@@ -218,6 +220,20 @@ async function processReminders(_job: Job<ReminderJobData>): Promise<void> {
   console.log(`Reminder scan: ${n} notification(s) inserted.`);
 }
 
+/**
+ * News ingest: fetch every configured RSS/Atom feed, upsert new items, then purge
+ * anything older than NEWS_RETENTION_DAYS. Individual feed failures are tolerated
+ * inside ingestNews — the job always completes.
+ */
+async function processNews(_job: Job<NewsJobData>): Promise<void> {
+  const { inserted, ok, failed } = await ingestNews();
+  const purged = await purgeOldNews();
+  // eslint-disable-next-line no-console
+  console.log(
+    `News ingest: +${inserted} new item(s) from ${ok} feed(s) (${failed} failed), ${purged} purged.`,
+  );
+}
+
 async function main(): Promise<void> {
   await runMigrations();
   await ensureQdrantCollection();
@@ -245,14 +261,28 @@ async function main(): Promise<void> {
     });
   }
 
+  // News ingest (RSS → news_items). Optional — gated by NEWS_ENABLED.
+  let newsWorker: Worker<NewsJobData> | null = null;
+  if (config.NEWS_ENABLED) {
+    await scheduleNews();
+    newsWorker = new Worker<NewsJobData>(NEWS_QUEUE, processNews, {
+      connection: createRedis(),
+    });
+    newsWorker.on('failed', (job, err) => {
+      // eslint-disable-next-line no-console
+      console.error(`News job ${job?.id} failed:`, err.message);
+    });
+  }
+
   // eslint-disable-next-line no-console
   console.log(
-    `Indexing worker started (env=${config.NODE_ENV}, extraction=${config.EXTRACTION_ENABLED}, ocr=${config.OCR_ENABLED}, reminders=${config.REMINDERS_ENABLED}).`,
+    `Indexing worker started (env=${config.NODE_ENV}, extraction=${config.EXTRACTION_ENABLED}, ocr=${config.OCR_ENABLED}, reminders=${config.REMINDERS_ENABLED}, news=${config.NEWS_ENABLED}).`,
   );
 
   const shutdown = async (): Promise<void> => {
     await worker.close();
     if (remindersWorker) await remindersWorker.close();
+    if (newsWorker) await newsWorker.close();
     await pool.end();
     process.exit(0);
   };

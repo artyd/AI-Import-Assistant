@@ -22,6 +22,7 @@ import { riskRoutes } from './routes/risks.js';
 import { supplierInstructionRoutes } from './routes/supplierInstruction.js';
 import { userRoutes } from './routes/users.js';
 import { notificationRoutes } from './routes/notifications.js';
+import { newsRoutes } from './routes/news.js';
 import { partiesRoutes } from './routes/parties.js';
 import { reportRoutes } from './routes/report.js';
 import { exportRoutes } from './routes/export.js';
@@ -77,6 +78,7 @@ async function buildServer() {
   await app.register(supplierInstructionRoutes);
   await app.register(userRoutes);
   await app.register(notificationRoutes);
+  await app.register(newsRoutes);
   await app.register(partiesRoutes);
   await app.register(reportRoutes);
   await app.register(exportRoutes);

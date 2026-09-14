@@ -551,6 +551,39 @@ Response `200`: `{ "notifications": [ { "id","workspace_id","type","message","re
 
 ---
 
+## News
+
+A single shared feed of import/customs-relevant news, ingested from public
+RSS/Atom sources by the worker cron (`NEWS_CRON`, gated by `NEWS_ENABLED`) and
+served read-only. **Retention:** only *fresh* news is ever returned or counted —
+items with `published_at` older than `NEWS_RETENTION_DAYS` (default `14`) are
+excluded from the API and purged on each ingest run. Not workspace-scoped.
+
+**Rubric keys** (frozen; the 8 keys the FE filter bar renders — the aggregate
+"Всі новини" tab is FE-only, requested by omitting `rubric` or passing `all`):
+
+| key | Ukrainian label |
+| --- | --- |
+| `customs` | Митниця України |
+| `ncts` | Транзит ЄС / NCTS |
+| `freight` | Фрахтові ставки |
+| `sanctions` | Санкції / експортний контроль |
+| `ports` | Порти |
+| `fx` | Курси валют / ПДВ |
+| `pharma` | Фарм/хім регулювання |
+| `adr` | ADR / небезпечні |
+
+### `GET /api/news?rubric=<key>`  (auth)
+Fresh news within the retention window, newest first (`published_at DESC`, capped
+at 200 items). `rubric` omitted or `all` ⇒ every rubric; any of the 8 keys ⇒
+that rubric only (an unknown value is treated as `all`).
+Response `200`: `{ "items": NewsItem[], "counts": { <rubric>: number, …, "total": number } }`
+where `NewsItem = { id, rubric, title, summary, source, url, published_at }`
+(`published_at` is an ISO string or `null`). `counts` has all 8 rubric keys
+(zero-filled) plus `total`, computed over the same retention window.
+
+---
+
 ## Health
 
 ### `GET /health`  (no auth) → `{ "status": "ok" }`

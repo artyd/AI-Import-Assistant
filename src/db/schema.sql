@@ -383,3 +383,23 @@ CREATE TABLE IF NOT EXISTS archive_records (
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_archive_records_owner ON archive_records(owner_id);
+
+-- ── Phase C: News — live RSS ingest with retention ────────────────────────────
+-- NOT workspace-scoped: a single shared feed of Ukrainian import/customs-relevant
+-- news, ingested by the NEWS cron (src/queue/news.ts + worker) from public RSS/Atom
+-- feeds and served read-only by GET /api/news. `rubric` is one of the 8 keys in
+-- src/services/news/sources.ts. `hash` = sha256(url + '|' + title) dedups re-fetches
+-- (ON CONFLICT DO NOTHING). Rows older than NEWS_RETENTION_DAYS are purged each run.
+CREATE TABLE IF NOT EXISTS news_items (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  rubric       TEXT NOT NULL,
+  title        TEXT,
+  summary      TEXT,
+  source       TEXT,
+  url          TEXT,
+  published_at TIMESTAMPTZ,
+  hash         TEXT UNIQUE,
+  fetched_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_news_rubric_published ON news_items(rubric, published_at DESC);
+CREATE INDEX IF NOT EXISTS idx_news_published ON news_items(published_at);

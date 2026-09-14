@@ -75,6 +75,16 @@ const envSchema = z.object({
     .default('true')
     .transform((v) => v === 'true'),
   REMINDERS_CRON: z.string().default('0 6 * * *'),
+
+  // News ingest (worker cron): fetch public RSS/Atom feeds into news_items and
+  // purge anything older than NEWS_RETENTION_DAYS. Off by default — enable only
+  // where outbound network to the feed sources is available.
+  NEWS_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+  NEWS_CRON: z.string().default('*/30 * * * *'),
+  NEWS_RETENTION_DAYS: z.coerce.number().int().positive().default(14),
 });
 
 export type AppConfig = z.infer<typeof envSchema>;
