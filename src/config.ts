@@ -92,6 +92,14 @@ const envSchema = z.object({
   // AIS_API_KEY. Falls back to demo when 'aishub' is set without a key.
   AIS_PROVIDER: z.enum(['demo', 'aishub']).default('demo'),
   AIS_API_KEY: z.string().default(''),
+
+  // BYOK (Phase E): symmetric key that encrypts each user's provider API key at
+  // rest (AES-256-GCM). Must decode to exactly 32 bytes — accepts base64 or hex.
+  // Leave empty to DISABLE BYOK entirely: everything stays on the built-in
+  // server-side Claude and `PUT /api/ai-config { engine:'byok' }` returns 400.
+  // BYOK is scoped to the consolidated-analysis AI step only; the main Штурман
+  // agent always uses the built-in Anthropic key.
+  BYOK_ENC_KEY: z.string().default(''),
 });
 
 export type AppConfig = z.infer<typeof envSchema>;

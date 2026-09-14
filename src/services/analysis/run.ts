@@ -122,7 +122,11 @@ async function resolveSheets(input: AnalysisInput): Promise<{ sheets: SheetInput
   return { sheets: [{ name: 'Вставлена таблиця', rows: parseCSV(input.text) }], source: 'Вставлена таблиця' };
 }
 
-export async function runAnalysis(input: AnalysisInput): Promise<AnalysisResult> {
+/**
+ * @param ownerId  when set, the AI enrichment step routes through that user's
+ *   BYOK provider (falling back to built-in Claude); omitted → always built-in.
+ */
+export async function runAnalysis(input: AnalysisInput, ownerId?: string): Promise<AnalysisResult> {
   const { sheets, source } = await resolveSheets(input);
 
   const det = analyzeDeterministic(sheets, DEFAULT_SHIPMENT, new Date());
@@ -143,7 +147,7 @@ export async function runAnalysis(input: AnalysisInput): Promise<AnalysisResult>
     };
   });
 
-  const enrichment = await enrichWithAi(aiInput);
+  const enrichment = await enrichWithAi(aiInput, ownerId);
 
   const rows: AnalysisRow[] = det.lines.map((l) => {
     const rec = l.originOptions.find((o) => o.recommended) ?? l.originOptions[0];

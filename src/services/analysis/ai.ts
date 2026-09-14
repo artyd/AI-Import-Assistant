@@ -1,4 +1,4 @@
-import { anthropic, MODEL } from '../../anthropic/client.js';
+import { callAnalysisAi } from '../aiProxy/index.js';
 import { AiResponse, type AiItem } from './types/aiSchema.js';
 import { normalize } from './engines/classify.js';
 import { ZED_TOPICS, type ZedTopic } from './data/index.js';
@@ -11,12 +11,10 @@ import { ZED_TOPICS, type ZedTopic } from './data/index.js';
  * engine already computed every number; the model returns ONLY descriptive /
  * classification fields (origin type, category, EU/UA broker checks, risk).
  *
- * Runs through OUR server-side Anthropic client (built-in Claude, MODEL from
- * config) — the key stays server-side. Items are sent in batches of 5 so each
- * request stays small and one failing batch never sinks the whole analysis.
- *
- * TODO(Phase E): route through BYOK aiProxy when engine=byok (provider selection
- * will branch here instead of always using the built-in Anthropic client).
+ * Routes through the BYOK aiProxy (`callAnalysisAi`): built-in server-side Claude
+ * (MODEL from config) unless the owner opted into a BYOK provider — the key
+ * always stays server-side. Items are sent in batches of 5 so each request stays
+ * small and one failing batch never sinks the whole analysis.
  */
 
 /** One line handed to the AI, pre-grounded by the deterministic engine + KB. */
@@ -206,19 +204,10 @@ function extractJson(text: string): unknown {
   }
 }
 
-async function callModel(system: string, user: string): Promise<string> {
-  // TODO(Phase E): route through BYOK aiProxy when engine=byok.
-  const resp = await anthropic.messages.create({
-    model: MODEL,
-    max_tokens: MAX_TOKENS,
-    system,
-    messages: [{ role: 'user', content: `${user}\n\nПоверни ТІЛЬКИ валідний JSON, без markdown.` }],
-  });
-  let raw = '';
-  for (const block of resp.content) {
-    if (block.type === 'text') raw += block.text;
-  }
-  return raw;
+async function callModel(system: string, user: string, ownerId?: string): Promise<string> {
+  // Built-in Claude by default; BYOK provider when the owner configured one. The
+  // proxy appends the JSON nudge for built-in, so pass the raw user prompt here.
+  return callAnalysisAi(ownerId, { system, user, maxTokens: MAX_TOKENS });
 }
 
 function chunk<T>(arr: T[], size: number): T[][] {
@@ -227,7 +216,10 @@ function chunk<T>(arr: T[], size: number): T[][] {
   return out;
 }
 
-export async function enrichWithAi(items: AiEnrichInputItem[]): Promise<AiEnrichment> {
+export async function enrichWithAi(
+  items: AiEnrichInputItem[],
+  ownerId?: string,
+): Promise<AiEnrichment> {
   const byName = new Map<string, AiItem>();
   let criticalAlert = '';
   const nctsSet = new Set<string>();
@@ -240,7 +232,7 @@ export async function enrichWithAi(items: AiEnrichInputItem[]): Promise<AiEnrich
   for (const batch of chunk(items, BATCH_SIZE)) {
     try {
       const system = buildSystemPrompt(buildTariffFacts(batch), buildRagContext(batch));
-      const raw = await callModel(system, buildUserPrompt(batch));
+      const raw = await callModel(system, buildUserPrompt(batch), ownerId);
       const parsed = AiResponse.parse(extractJson(raw));
       for (const it of parsed.items) byName.set(normalize(it.name), it);
       if (!criticalAlert && parsed.criticalAlert) criticalAlert = parsed.criticalAlert;

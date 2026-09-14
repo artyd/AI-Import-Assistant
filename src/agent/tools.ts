@@ -667,7 +667,7 @@ async function runConsolidatedAnalysis(ctx: ToolContext): Promise<ToolOutcome> {
 
   let result;
   try {
-    result = await runAnalysis({ kind: 'file', buffer: buf, filename: file.name });
+    result = await runAnalysis({ kind: 'file', buffer: buf, filename: file.name }, ctx.ownerId);
   } catch (err) {
     return { result: `Аналіз не вдався: ${(err as Error).message}`, summary: 'Аналіз: помилка', citations: [] };
   }

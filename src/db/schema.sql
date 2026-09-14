@@ -12,6 +12,19 @@ CREATE TABLE IF NOT EXISTS users (
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Per-user AI provider config (Phase E — BYOK). `engine='builtin'` uses the
+-- server-side Claude; `engine='byok'` routes the analysis AI step through the
+-- user's own provider, with `enc_key` an AES-256-GCM blob (never returned raw).
+-- Scoped to the consolidated-analysis engine only; the main agent stays builtin.
+CREATE TABLE IF NOT EXISTS ai_configs (
+  user_id    UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  engine     TEXT NOT NULL DEFAULT 'builtin'
+             CHECK (engine IN ('builtin', 'byok')),
+  provider   TEXT CHECK (provider IN ('openai', 'gemini', 'claude', 'openrouter')),
+  enc_key    TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Workspaces == "shipments" (Постачання) in the UI.
 CREATE TABLE IF NOT EXISTS workspaces (
   id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -551,6 +551,33 @@ Response `200`: `{ "notifications": [ { "id","workspace_id","type","message","re
 
 ---
 
+## AI settings (BYOK — Phase E)
+
+Per-user AI provider config. Controls ONLY the **consolidated-analysis AI step**:
+`engine:'builtin'` uses the server-side Штурман Claude; `engine:'byok'` routes that
+step through the user's own provider key. The main chat/agent always uses the
+built-in Anthropic key. **Provider keys stay server-side, encrypted at rest
+(AES-256-GCM);** the browser never receives a raw or encrypted key — only a masked
+tail. BYOK requires `BYOK_ENC_KEY` (32 bytes, base64/hex) to be set on the server;
+if empty, BYOK is disabled. On any BYOK failure the analysis silently falls back
+to the built-in Claude.
+
+### `GET /api/ai-config`  (auth)
+Response `200`: `{ "engine": "builtin"|"byok", "provider": "openai"|"gemini"|"claude"|"openrouter"|null, "hasKey": boolean, "keyMask": "••••1234"|null }`.
+
+### `PUT /api/ai-config`  (auth)
+Body: `{ "engine": "builtin"|"byok", "provider"?: "openai"|"gemini"|"claude"|"openrouter", "key"?: string }`.
+- `engine:'builtin'` clears any stored provider/key and returns to the built-in Claude.
+- `engine:'byok'` requires `BYOK_ENC_KEY` set on the server, a valid `provider`, and
+  a `key` (unless one is already stored). The key is encrypted before storage and
+  never returned.
+Response `200`: same shape as GET.
+Errors `400`: `{ "error": "byok_disabled" }` (server has no `BYOK_ENC_KEY`),
+`{ "error": "provider_required" }`, `{ "error": "key_required" }`, or
+`{ "error": "invalid_request", "issues": [...] }`.
+
+---
+
 ## News
 
 A single shared feed of import/customs-relevant news, ingested from public

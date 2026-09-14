@@ -71,7 +71,7 @@ export async function analysisRoutes(app: FastifyInstance): Promise<void> {
 
       let result;
       try {
-        result = await runAnalysis(input);
+        result = await runAnalysis(input, req.user!.sub);
       } catch (err) {
         return reply.code(422).send({ error: 'analysis_failed', message: (err as Error).message });
       }
