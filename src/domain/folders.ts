@@ -15,6 +15,22 @@ export const FOLDER_SKELETON = [
   '07_Final',
 ] as const;
 
+/**
+ * The folder skeleton for Collections (Збірник / consolidated cargo). Distinct
+ * from the workspace skeleton above — collections group documents for a
+ * multi-supplier consolidated shipment rather than a single reconciliation.
+ */
+export const COLLECTION_FOLDER_SKELETON = [
+  '01_Маніфест',
+  '02_Інвойси',
+  '03_Сертифікати_походження',
+  '04_MSDS_SDS',
+  '05_Якість_CoA',
+  '06_Дозволи_ліцензії',
+  '07_Транспорт',
+  '08_Митниця',
+] as const;
+
 export type FileType = 'pdf' | 'docx' | 'xlsx' | 'csv' | 'image' | 'md';
 
 /** Infer the stored file type from a filename, matching the prototype rules. */

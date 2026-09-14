@@ -1,0 +1,310 @@
+[
+  {
+    "name": {
+      "__regex": true,
+      "source": "ephedrine|ефедрин",
+      "flags": "i"
+    },
+    "code": {
+      "__regex": true,
+      "source": "^2939[34]",
+      "flags": ""
+    },
+    "table": 1,
+    "note": "Таблиця 1 ООН/ДСКН · Попередник амфетамінів · Дозвіл ДСКН обов'язковий"
+  },
+  {
+    "name": {
+      "__regex": true,
+      "source": "pseudoephedrine|псевдоефедрин",
+      "flags": "i"
+    },
+    "code": {
+      "__regex": true,
+      "source": "^29394",
+      "flags": ""
+    },
+    "table": 1,
+    "note": "Таблиця 1 ООН/ДСКН · Список I · Дозвіл на кожну операцію"
+  },
+  {
+    "name": {
+      "__regex": true,
+      "source": "ergotamine|ерготамін",
+      "flags": "i"
+    },
+    "code": {
+      "__regex": true,
+      "source": "^293962",
+      "flags": ""
+    },
+    "table": 1,
+    "note": "Таблиця 1 · Алкалоїд споринний · Дозвіл МОЗ+ДСКН"
+  },
+  {
+    "name": {
+      "__regex": true,
+      "source": "ergometrine|ергометрин",
+      "flags": "i"
+    },
+    "code": {
+      "__regex": true,
+      "source": "^293961",
+      "flags": ""
+    },
+    "table": 1,
+    "note": "Таблиця 1 · Медичне застосування тільки · ДСКН"
+  },
+  {
+    "name": {
+      "__regex": true,
+      "source": "norephedrine|норефедрин|phenylpropanolamine",
+      "flags": "i"
+    },
+    "code": {
+      "__regex": true,
+      "source": "^293944",
+      "flags": ""
+    },
+    "table": 1,
+    "note": "Таблиця 1 · Список I ЄС/UA · Контроль"
+  },
+  {
+    "name": {
+      "__regex": true,
+      "source": "lysergic|лізергін",
+      "flags": "i"
+    },
+    "code": {
+      "__regex": true,
+      "source": "^293963",
+      "flags": ""
+    },
+    "table": 1,
+    "note": "Таблиця 1 · Попередник LSD · Заборона без дозволу ДСКН"
+  },
+  {
+    "name": {
+      "__regex": true,
+      "source": "1-phenyl-2-propanone|p2p|phenylacetone|фенілацетон",
+      "flags": "i"
+    },
+    "code": {
+      "__regex": true,
+      "source": "^291431",
+      "flags": ""
+    },
+    "table": 1,
+    "note": "Таблиця 1 ЄС Reg.111/2005 · Попередник амфетаміну"
+  },
+  {
+    "name": {
+      "__regex": true,
+      "source": "pmk|3,4-mdp|piperonylmethylketone|піперонілметилкетон",
+      "flags": "i"
+    },
+    "code": {
+      "__regex": true,
+      "source": "^293292",
+      "flags": ""
+    },
+    "table": 1,
+    "note": "Таблиця 1 ЄС · Попередник MDMA · Заборона без дозволу"
+  },
+  {
+    "name": {
+      "__regex": true,
+      "source": "safrole|сафрол",
+      "flags": "i"
+    },
+    "code": {
+      "__regex": true,
+      "source": "^293219",
+      "flags": ""
+    },
+    "table": 1,
+    "note": "Таблиця 1 · Попередник MDMA · Суворий контроль"
+  },
+  {
+    "name": {
+      "__regex": true,
+      "source": "acetic anhydride|оцтовий ангідрид",
+      "flags": "i"
+    },
+    "code": {
+      "__regex": true,
+      "source": "^291524",
+      "flags": ""
+    },
+    "table": 2,
+    "note": "Таблиця 2 · Попередник героїну · Ліцензія >1 л · Огляд 100%"
+  },
+  {
+    "name": {
+      "__regex": true,
+      "source": "potassium permanganate|перманганат калію",
+      "flags": "i"
+    },
+    "code": {
+      "__regex": true,
+      "source": "^284161",
+      "flags": ""
+    },
+    "table": 2,
+    "note": "Таблиця 2 · Попередник кокаїну · ДСКН-ліцензія"
+  },
+  {
+    "name": {
+      "__regex": true,
+      "source": "acetone|ацетон",
+      "flags": "i"
+    },
+    "code": {
+      "__regex": true,
+      "source": "^291411",
+      "flags": ""
+    },
+    "table": 2,
+    "note": "Таблиця 2 · Ліцензія від 2 кг · Підтвердити призначення"
+  },
+  {
+    "name": {
+      "__regex": true,
+      "source": "toluene|толуол",
+      "flags": "i"
+    },
+    "code": {
+      "__regex": true,
+      "source": "^290230",
+      "flags": ""
+    },
+    "table": 2,
+    "note": "Таблиця 2 · Розчинник-прекурсор · Non-precursor statement"
+  },
+  {
+    "name": {
+      "__regex": true,
+      "source": "methyl ethyl ketone|mek|бутанон",
+      "flags": "i"
+    },
+    "code": {
+      "__regex": true,
+      "source": "^291412",
+      "flags": ""
+    },
+    "table": 2,
+    "note": "Таблиця 2 · MEK · Ліцензія >5 л"
+  },
+  {
+    "name": {
+      "__regex": true,
+      "source": "hydrochloric acid|хлористоводнева|соляна кислота",
+      "flags": "i"
+    },
+    "code": {
+      "__regex": true,
+      "source": "^280610",
+      "flags": ""
+    },
+    "table": 2,
+    "note": "Таблиця 2 · HCl >20% · Підтвердити призначення (ADR Кл.8)"
+  },
+  {
+    "name": {
+      "__regex": true,
+      "source": "sulfuric acid|сірчана кислота",
+      "flags": "i"
+    },
+    "code": {
+      "__regex": true,
+      "source": "^280700",
+      "flags": ""
+    },
+    "table": 2,
+    "note": "Таблиця 2 · H₂SO₄ · Ліцензія промислові обсяги · ADR Кл.8"
+  },
+  {
+    "name": {
+      "__regex": true,
+      "source": "piperonal|піперонал",
+      "flags": "i"
+    },
+    "code": {
+      "__regex": true,
+      "source": "^293219",
+      "flags": ""
+    },
+    "table": 2,
+    "note": "Таблиця 2 · Heliotropin · Попередник MDMA"
+  },
+  {
+    "name": {
+      "__regex": true,
+      "source": "codeine|кодеїн",
+      "flags": "i"
+    },
+    "code": {
+      "__regex": true,
+      "source": "^293911",
+      "flags": ""
+    },
+    "table": 0,
+    "note": "Наркотичний: Список II ДСКН · Ліцензія обов'язкова · Суворий облік"
+  },
+  {
+    "name": {
+      "__regex": true,
+      "source": "morphine|морфін",
+      "flags": "i"
+    },
+    "code": {
+      "__regex": true,
+      "source": "^293911",
+      "flags": ""
+    },
+    "table": 0,
+    "note": "Наркотичний: Список I ДСКН · Тільки для медичних цілей"
+  },
+  {
+    "name": {
+      "__regex": true,
+      "source": "cocaine|кокаїн",
+      "flags": "i"
+    },
+    "code": {
+      "__regex": true,
+      "source": "^293919",
+      "flags": ""
+    },
+    "table": 0,
+    "note": "Наркотичний: Список I · Імпорт заборонений без ДСКН-дозволу"
+  },
+  {
+    "name": {
+      "__regex": true,
+      "source": "fentanyl|фентаніл",
+      "flags": "i"
+    },
+    "code": {
+      "__regex": true,
+      "source": "^293399",
+      "flags": ""
+    },
+    "table": 0,
+    "note": "Наркотичний: Список I · Суворий облік · Тільки для медицини"
+  },
+  {
+    "name": {
+      "__regex": true,
+      "source": "oxycodone|оксикодон",
+      "flags": "i"
+    },
+    "code": {
+      "__regex": true,
+      "source": "^293399",
+      "flags": ""
+    },
+    "table": 0,
+    "note": "Наркотичний: Список I · Міжнародний дозвіл INCB"
+  }
+]

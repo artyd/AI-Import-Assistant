@@ -75,6 +75,31 @@ const envSchema = z.object({
     .default('true')
     .transform((v) => v === 'true'),
   REMINDERS_CRON: z.string().default('0 6 * * *'),
+
+  // News ingest (worker cron): fetch public RSS/Atom feeds into news_items and
+  // purge anything older than NEWS_RETENTION_DAYS. Off by default — enable only
+  // where outbound network to the feed sources is available.
+  NEWS_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+  NEWS_CRON: z.string().default('*/30 * * * *'),
+  NEWS_RETENTION_DAYS: z.coerce.number().int().positive().default(14),
+
+  // Map / vessel tracking (Phase D). AIS_PROVIDER selects the position source for
+  // GET /api/map/shipments: 'demo' interpolates a deterministic point along each
+  // shipment's route (no network), 'aishub' is a live AIS adapter that needs
+  // AIS_API_KEY. Falls back to demo when 'aishub' is set without a key.
+  AIS_PROVIDER: z.enum(['demo', 'aishub']).default('demo'),
+  AIS_API_KEY: z.string().default(''),
+
+  // BYOK (Phase E): symmetric key that encrypts each user's provider API key at
+  // rest (AES-256-GCM). Must decode to exactly 32 bytes — accepts base64 or hex.
+  // Leave empty to DISABLE BYOK entirely: everything stays on the built-in
+  // server-side Claude and `PUT /api/ai-config { engine:'byok' }` returns 400.
+  // BYOK is scoped to the consolidated-analysis AI step only; the main Штурман
+  // agent always uses the built-in Anthropic key.
+  BYOK_ENC_KEY: z.string().default(''),
 });
 
 export type AppConfig = z.infer<typeof envSchema>;

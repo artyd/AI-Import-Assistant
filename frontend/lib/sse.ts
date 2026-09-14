@@ -23,17 +23,20 @@ export interface ChatHandlers {
 }
 
 /**
- * POST a chat message and dispatch the SSE stream to handlers.
+ * POST a chat message to `path` and dispatch the SSE stream to handlers.
+ * `path` is the kind-specific chat endpoint (see `resolveChatEndpoints`):
+ * `/api/workspaces/:id/chat`, `/api/chats`, or `/api/collections/:id/chat`.
+ * All three speak the same event contract, so parsing below is identical.
  * Resolves when the stream ends. Abort via `signal`.
  */
 export async function streamChat(
-  workspaceId: string,
+  path: string,
   payload: { message: string; conversationId?: string },
   handlers: ChatHandlers,
   signal?: AbortSignal
 ): Promise<void> {
   const token = getToken();
-  const res = await fetch(`/api/workspaces/${workspaceId}/chat`, {
+  const res = await fetch(path, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

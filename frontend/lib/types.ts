@@ -33,6 +33,26 @@ export interface Workspace {
   responsible_user_id?: string | null;
 }
 
+// ── ШТУРМАН prototype port · Phase A: collections + chat kinds ────────────────
+
+// A "Збірник" (consolidated cargo) — a second top-level entity alongside
+// Workspace. `supplier` doubles as the manifest source label.
+export type CollectionStatus = "active" | "draft" | "done";
+
+export interface Collection {
+  id: string;
+  number: string | null;
+  supplier: string | null; // manifest source: Демо-маніфест | Google Sheets | Вставлена таблиця
+  status: CollectionStatus;
+  created_at: string;
+}
+
+// Three chat kinds with separate history (see API_CONTRACT.md):
+//   normal       — global ЗЕД consultant (no entity, no tools)
+//   supply       — scoped to a Workspace (Постачання), full agent + tools
+//   consolidated — scoped to a Collection (Збірник), manifest analysis
+export type ChatKind = "normal" | "supply" | "consolidated";
+
 export interface UserLite {
   id: string;
   email: string;
@@ -125,6 +145,24 @@ export interface Folder {
   id: string;
   name: string;
   position: number;
+}
+
+// ── News (Новини логістики) ───────────────────────────────────────────────────
+// Mirrors GET /api/news?rubric=<key> → { items: NewsItem[], counts }.
+// `rubric` is one of the 8 frozen keys (see NEWS_RUBRICS in lib/news.ts).
+export interface NewsItem {
+  id: string;
+  rubric: string;
+  title: string;
+  summary: string;
+  source: string;
+  url: string;
+  published_at: string;
+}
+
+export interface NewsResponse {
+  items: NewsItem[];
+  counts: Record<string, number> & { total: number };
 }
 
 // Backend emits queued|indexing|ready|error; the UI maps ready -> done.
@@ -223,4 +261,122 @@ export interface FileStatusEvent {
 
 export function toUiStatus(s: FileStatus): UiFileStatus {
   return s === "ready" ? "done" : s;
+}
+
+// ── Consolidated-cargo analysis (Аналіз збірного вантажу) ─────────────────────
+// Mirrors the backend AnalysisResult returned by POST /api/collections/:id/analyze.
+
+// One broker check line. status drives the coloured dot: green|yellow|red →
+// var(--ok)|var(--warn)|var(--err).
+export interface AnalysisCheck {
+  item: string;
+  status: string; // "green" | "yellow" | "red"
+  note: string;
+}
+
+export interface AnalysisRow {
+  name: string;
+  code: string | null; // УКТ ЗЕД
+  qtyKg: number;
+  price: number;
+  dutyRate: number | null;
+  category: string;
+  origin: string | null; // plant|animal|fermentation|mineral|synthetic|mixed|unknown
+  risk: string | null; // Критичний | Середній | Низький
+  riskNote: string;
+  cif: number;
+  duty: number | null;
+  vat: number | null;
+  eu: AnalysisCheck[];
+  ua: AnalysisCheck[];
+  needsReview: boolean;
+}
+
+export interface AnalysisMeta {
+  sheet: string;
+  date: string | null;
+  reason: string;
+  ignored: string[];
+}
+
+export interface AnalysisTotals {
+  cif: number;
+  duty: number;
+  vat: number;
+  payable: number;
+  count: number;
+}
+
+export interface AnalysisResult {
+  id: string | null;
+  meta: AnalysisMeta;
+  rows: AnalysisRow[];
+  totals: AnalysisTotals;
+  source: string;
+  sheet: string;
+  criticalAlert: string;
+  nctsList: string[];
+  warnings: string[];
+  hasHigh: boolean;
+  aiDegraded: boolean;
+}
+
+// ── Map (Карта постачань) ─────────────────────────────────────────────────────
+// Mirror GET /api/map/{ports,routes,shipments}.
+
+export type PortKind = "sea" | "inland" | "customs";
+
+export interface Port {
+  code: string;
+  name: string;
+  country: string;
+  lat: number;
+  lng: number;
+  kind: PortKind;
+}
+
+export type RouteMode = "sea" | "land";
+export type RouteRisk = "low" | "medium" | "high";
+
+export interface MapRoute {
+  id: string;
+  from_code: string;
+  to_code: string;
+  mode: RouteMode;
+  risk: RouteRisk;
+  // Ordered [lat, lng] polyline vertices.
+  waypoints: [number, number][];
+}
+
+export interface Vessel {
+  id: string;
+  kind: "ship" | "truck";
+  label: string;
+  lat: number;
+  lng: number;
+  status: string;
+  routeId: string | null;
+}
+
+// ── AI settings (BYOK) ────────────────────────────────────────────────────────
+// Mirrors GET/PUT /api/ai-config. `engine` = builtin (server-side Claude) or byok
+// (customer-supplied key for the consolidated-cargo analysis engine). `keyMask` is
+// a masked hint (e.g. "••••1234"); the real key never comes back to the browser.
+export type AiProvider = "openai" | "gemini" | "claude" | "openrouter";
+
+export interface AiConfig {
+  engine: "builtin" | "byok";
+  provider: string | null;
+  hasKey: boolean;
+  keyMask: string | null;
+}
+
+export interface ArchiveRecord {
+  id: string;
+  source: string;
+  sheet: string;
+  item_count: number;
+  payable: number | string;
+  has_high: boolean;
+  created_at: string;
 }

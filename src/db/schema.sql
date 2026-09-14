@@ -12,6 +12,19 @@ CREATE TABLE IF NOT EXISTS users (
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Per-user AI provider config (Phase E — BYOK). `engine='builtin'` uses the
+-- server-side Claude; `engine='byok'` routes the analysis AI step through the
+-- user's own provider, with `enc_key` an AES-256-GCM blob (never returned raw).
+-- Scoped to the consolidated-analysis engine only; the main agent stays builtin.
+CREATE TABLE IF NOT EXISTS ai_configs (
+  user_id    UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  engine     TEXT NOT NULL DEFAULT 'builtin'
+             CHECK (engine IN ('builtin', 'byok')),
+  provider   TEXT CHECK (provider IN ('openai', 'gemini', 'claude', 'openrouter')),
+  enc_key    TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Workspaces == "shipments" (Постачання) in the UI.
 CREATE TABLE IF NOT EXISTS workspaces (
   id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -288,3 +301,172 @@ UPDATE parties SET role = 'recipient'
   WHERE lower(trim(role)) = ANY(ARRAY['покупець','покупатель','buyer','вантажоодержувач',
     'грузополучатель','consignee','отримувач','получатель','кому','імпортер','importer',
     'our_company','наша компанія','наша компания']);
+
+-- ── ШТУРМАН prototype port · Phase A: chat types + collections (сборники) ──────
+-- Adds a second top-level entity ("Збірник" / consolidated cargo) alongside
+-- workspaces (Постачання), and lets a conversation be one of three kinds
+-- (normal / supply / consolidated). All statements idempotent (db/migrate.ts
+-- applies schema.sql on every boot).
+
+-- Collections == "Збірник" (consolidated cargo) in the UI. Own folder skeleton
+-- + files, mirrors workspaces but for a manifest-of-many-goods analysis flow.
+-- `supplier` doubles as the manifest source ('Демо-маніфест' | 'Google Sheets'
+-- | 'Вставлена таблиця'), matching the workspaces.supplier field shape.
+CREATE TABLE IF NOT EXISTS collections (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  owner_id   UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  number     TEXT NOT NULL,                        -- e.g. "Збірник 06.05"
+  supplier   TEXT NOT NULL DEFAULT '',             -- manifest source label
+  status     TEXT NOT NULL DEFAULT 'draft'
+             CHECK (status IN ('active', 'draft', 'done')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_collections_owner ON collections(owner_id);
+
+-- Generalise folders + files from "belongs to a workspace" to "belongs to a
+-- workspace OR a collection". workspace_id becomes nullable; a nullable
+-- collection_id is added; a CHECK enforces exactly one owner. Existing rows all
+-- have workspace_id set, so they satisfy the new constraint unchanged.
+ALTER TABLE folders ADD COLUMN IF NOT EXISTS collection_id UUID
+  REFERENCES collections(id) ON DELETE CASCADE;
+ALTER TABLE folders ALTER COLUMN workspace_id DROP NOT NULL;
+ALTER TABLE folders DROP CONSTRAINT IF EXISTS folders_owner_chk;
+ALTER TABLE folders ADD CONSTRAINT folders_owner_chk
+  CHECK ((workspace_id IS NOT NULL) <> (collection_id IS NOT NULL));
+CREATE INDEX IF NOT EXISTS idx_folders_collection ON folders(collection_id);
+
+ALTER TABLE files ADD COLUMN IF NOT EXISTS collection_id UUID
+  REFERENCES collections(id) ON DELETE CASCADE;
+ALTER TABLE files ALTER COLUMN workspace_id DROP NOT NULL;
+ALTER TABLE files DROP CONSTRAINT IF EXISTS files_owner_chk;
+ALTER TABLE files ADD CONSTRAINT files_owner_chk
+  CHECK ((workspace_id IS NOT NULL) <> (collection_id IS NOT NULL));
+CREATE INDEX IF NOT EXISTS idx_files_collection ON files(collection_id);
+
+-- Conversations gain a kind + optional collection scope. Existing conversations
+-- are all workspace-scoped supply chats, so default kind = 'supply' and keep
+-- workspace_id. 'normal' chats are global (no entity); 'consolidated' chats hang
+-- off a collection. Exactly-one-scope is NOT enforced at DB level because
+-- 'normal' has neither — the app layer sets the scope per kind.
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS chat_kind TEXT NOT NULL DEFAULT 'supply'
+  CHECK (chat_kind IN ('normal', 'supply', 'consolidated'));
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS collection_id UUID
+  REFERENCES collections(id) ON DELETE CASCADE;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS owner_id UUID
+  REFERENCES users(id) ON DELETE CASCADE;   -- set for 'normal' (global) chats
+ALTER TABLE conversations ALTER COLUMN workspace_id DROP NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_conversations_collection ON conversations(collection_id);
+CREATE INDEX IF NOT EXISTS idx_conversations_owner ON conversations(owner_id);
+
+-- ── ШТУРМАН prototype port · Phase B-2: consolidated analysis persistence ─────
+-- The consolidated-cargo analysis engine (CIF / мито / ПДВ per line, origin,
+-- EU/UA checks) writes one `analyses` row per run (the full result the FE card
+-- reads back) plus a lightweight `archive_records` row (the "Архів" list). Both
+-- are owner/collection scoped. All statements idempotent.
+
+-- One computed analysis of a collection's manifest. `meta`/`rows`/`totals` hold
+-- the consolidated AnalysisResult shape the frontend card renders; `checks`
+-- holds the AI enrichment payload (euChecks/uaChecks/criticalAlert/nctsList) so
+-- the .xlsx export can be rebuilt without re-running the engine.
+CREATE TABLE IF NOT EXISTS analyses (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  collection_id UUID NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+  message_id    UUID,                                    -- optional link to the chat message that triggered it
+  source        TEXT NOT NULL DEFAULT '',                -- manifest source label (filename | Google Sheets | Вставлена таблиця)
+  sheet         TEXT NOT NULL DEFAULT '',                -- selected sheet name
+  meta          JSONB NOT NULL DEFAULT '{}'::jsonb,
+  rows          JSONB NOT NULL DEFAULT '[]'::jsonb,
+  totals        JSONB NOT NULL DEFAULT '{}'::jsonb,
+  checks        JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_analyses_collection ON analyses(collection_id);
+
+-- Lightweight archive index (owner-scoped, capped FIFO in the route). Survives
+-- collection deletion (collection_id → NULL) so the "Архів" list is durable.
+CREATE TABLE IF NOT EXISTS archive_records (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  owner_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  collection_id UUID REFERENCES collections(id) ON DELETE SET NULL,
+  source        TEXT NOT NULL DEFAULT '',
+  sheet         TEXT NOT NULL DEFAULT '',
+  item_count    INT NOT NULL DEFAULT 0,
+  payable       NUMERIC NOT NULL DEFAULT 0,
+  has_high      BOOLEAN NOT NULL DEFAULT false,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_archive_records_owner ON archive_records(owner_id);
+
+-- ── Phase C: News — live RSS ingest with retention ────────────────────────────
+-- NOT workspace-scoped: a single shared feed of Ukrainian import/customs-relevant
+-- news, ingested by the NEWS cron (src/queue/news.ts + worker) from public RSS/Atom
+-- feeds and served read-only by GET /api/news. `rubric` is one of the 8 keys in
+-- src/services/news/sources.ts. `hash` = sha256(url + '|' + title) dedups re-fetches
+-- (ON CONFLICT DO NOTHING). Rows older than NEWS_RETENTION_DAYS are purged each run.
+CREATE TABLE IF NOT EXISTS news_items (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  rubric       TEXT NOT NULL,
+  title        TEXT,
+  summary      TEXT,
+  source       TEXT,
+  url          TEXT,
+  published_at TIMESTAMPTZ,
+  hash         TEXT UNIQUE,
+  fetched_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_news_rubric_published ON news_items(rubric, published_at DESC);
+CREATE INDEX IF NOT EXISTS idx_news_published ON news_items(published_at);
+
+-- ── Phase D: Map — reference ports/routes + live vessel positions ──────────────
+-- NOT workspace-scoped: a shared reference atlas of ports and representative
+-- shipping routes for the map view. Live positions are computed at request time
+-- by the tracking provider (src/services/tracking) — DEMO interpolation until an
+-- AIS_API_KEY is configured. All statements idempotent (seed via ON CONFLICT).
+
+-- Reference ports. `kind` is one of sea | inland | customs. Coordinates are real
+-- (decimal degrees, WGS84). Names are Ukrainian to match the ШТУРМАН UI.
+CREATE TABLE IF NOT EXISTS ports (
+  code    TEXT PRIMARY KEY,
+  name    TEXT NOT NULL,
+  country TEXT NOT NULL DEFAULT '',
+  lat     DOUBLE PRECISION NOT NULL,
+  lng     DOUBLE PRECISION NOT NULL,
+  kind    TEXT NOT NULL DEFAULT 'sea'
+          CHECK (kind IN ('sea', 'inland', 'customs'))
+);
+
+-- Representative routes between ports. `waypoints` is an ordered [[lat,lng],…]
+-- polyline the map draws and the DEMO tracker interpolates along.
+CREATE TABLE IF NOT EXISTS routes (
+  id        TEXT PRIMARY KEY,
+  from_code TEXT NOT NULL,
+  to_code   TEXT NOT NULL,
+  mode      TEXT NOT NULL CHECK (mode IN ('sea', 'land')),
+  risk      TEXT NOT NULL DEFAULT 'low' CHECK (risk IN ('low', 'medium', 'high')),
+  waypoints JSONB NOT NULL DEFAULT '[]'::jsonb
+);
+
+-- Seed ports (idempotent). code | name | country | lat | lng | kind
+INSERT INTO ports (code, name, country, lat, lng, kind) VALUES
+  ('CNYTN', 'Яньтянь',   'CN', 22.56, 114.28, 'sea'),
+  ('CNSHA', 'Шанхай',    'CN', 31.23, 121.47, 'sea'),
+  ('SGSIN', 'Сингапур',  'SG',  1.26, 103.82, 'sea'),
+  ('EGSUZ', 'Суец',      'EG', 30.02,  32.55, 'sea'),
+  ('GRPIR', 'Пірей',     'GR', 37.94,  23.64, 'sea'),
+  ('NLRTM', 'Роттердам', 'NL', 51.95,   4.14, 'sea'),
+  ('DEHAM', 'Гамбург',   'DE', 53.53,   9.98, 'sea'),
+  ('PLGDN', 'Гданськ',   'PL', 54.40,  18.68, 'sea'),
+  ('UAKRK', 'Краковець', 'UA', 49.96,  23.17, 'customs'),
+  ('UALWO', 'Львів',     'UA', 49.84,  24.03, 'inland'),
+  ('UAIEV', 'Київ',      'UA', 50.45,  30.52, 'inland')
+ON CONFLICT (code) DO NOTHING;
+
+-- Seed representative routes (idempotent). Waypoints trace real port coordinates.
+INSERT INTO routes (id, from_code, to_code, mode, risk, waypoints) VALUES
+  ('sea-yantian-gdansk', 'CNYTN', 'PLGDN', 'sea', 'medium',
+     '[[22.56,114.28],[30.02,32.55],[37.94,23.64],[54.40,18.68]]'::jsonb),
+  ('land-gdansk-kyiv', 'PLGDN', 'UAIEV', 'land', 'low',
+     '[[54.40,18.68],[49.96,23.17],[49.84,24.03],[50.45,30.52]]'::jsonb),
+  ('sea-shanghai-rotterdam', 'CNSHA', 'NLRTM', 'sea', 'high',
+     '[[31.23,121.47],[1.26,103.82],[30.02,32.55],[51.95,4.14]]'::jsonb)
+ON CONFLICT (id) DO NOTHING;

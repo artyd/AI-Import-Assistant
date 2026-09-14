@@ -26,24 +26,27 @@ function safeName(name: string): string {
   return base.replace(/[^\w.\-() +]/g, '_').slice(0, 200);
 }
 
-function workspaceDir(workspaceId: string): string {
-  return resolve(config.STORAGE_DIR, workspaceId);
+// The storage namespace is just a directory keyed by an entity id. Both
+// workspaces (Постачання) and collections (Збірник) own files, so the param is
+// a neutral `entityId` rather than a workspace-specific name.
+function entityDir(entityId: string): string {
+  return resolve(config.STORAGE_DIR, entityId);
 }
 
 /** Absolute on-disk path for a stored file. */
-export function diskPathFor(workspaceId: string, fileId: string, name: string): string {
-  return join(workspaceDir(workspaceId), `${fileId}-${safeName(name)}`);
+export function diskPathFor(entityId: string, fileId: string, name: string): string {
+  return join(entityDir(entityId), `${fileId}-${safeName(name)}`);
 }
 
 export async function storeFile(
-  workspaceId: string,
+  entityId: string,
   fileId: string,
   name: string,
   data: Buffer,
 ): Promise<string> {
-  const dir = workspaceDir(workspaceId);
+  const dir = entityDir(entityId);
   await mkdir(dir, { recursive: true });
-  const path = diskPathFor(workspaceId, fileId, name);
+  const path = diskPathFor(entityId, fileId, name);
   await writeFile(path, data);
   return path;
 }
@@ -65,13 +68,16 @@ export async function deleteStoredFile(path: string): Promise<void> {
   }
 }
 
-/** Removes a workspace's entire on-disk file directory (used on workspace delete). */
-export async function deleteWorkspaceStorage(workspaceId: string): Promise<void> {
+/** Removes an entity's entire on-disk file directory (workspace or collection delete). */
+export async function deleteEntityStorage(entityId: string): Promise<void> {
   try {
-    await rm(workspaceDir(workspaceId), { recursive: true, force: true });
+    await rm(entityDir(entityId), { recursive: true, force: true });
   } catch {
     // Nothing stored yet / already gone — ignore.
   }
 }
+
+/** @deprecated Use {@link deleteEntityStorage}. Kept for the workspace-delete caller. */
+export const deleteWorkspaceStorage = deleteEntityStorage;
 
 export type { FileType };

@@ -123,6 +123,49 @@ Request: `{}`. Response `201`: `{ "workspace": {…} }`.
 
 ---
 
+## Collections (Збірник / consolidated cargo)
+
+A second top-level entity alongside workspaces, for grouping documents of a
+multi-supplier consolidated shipment. Collections have no intake / checklist /
+status-derivation — status is a plain tri-state (`active`/`draft`/`done`).
+
+### `POST /api/collections`  (auth)
+Request (all optional): `{ "number"?: string, "supplier"?: string, "status"?: "active"|"draft"|"done" }`
+When `number` is omitted it defaults to `Збірник <DD.MM>` (today's UTC date, e.g. `Збірник 14.09`);
+`supplier` defaults to `""` and `status` to `draft`.
+Creates the collection **and** the 8-folder skeleton
+(`01_Маніфест`, `02_Інвойси`, `03_Сертифікати_походження`, `04_MSDS_SDS`,
+`05_Якість_CoA`, `06_Дозволи_ліцензії`, `07_Транспорт`, `08_Митниця`).
+Response `201`: `{ "collection": { "id","number","supplier","status","created_at" } }`
+
+### `GET /api/collections`  (auth)
+Response `200`: `{ "collections": [ { "id","number","supplier","status","created_at" } ] }`
+
+### `GET /api/collections/:id`  (auth)
+Response `200`:
+```json
+{
+  "collection": { "id","number","supplier","status","created_at" },
+  "folders": [ { "id","name","position" } ]
+}
+```
+`404 not_found` if not owned/found.
+
+### `DELETE /api/collections/:id`  (auth)
+Deletes the collection and everything it owns — folders, files, conversations
+(DB cascade) — and purges its on-disk storage dir (`STORAGE_DIR/<collectionId>`).
+Irreversible. **No Qdrant purge:** collection files are never embedded (see
+"Collection files" below). Response `200`: `{ "ok": true }`. `404 not_found` if not
+owned/found.
+
+### `PATCH /api/collections/:id`  (auth)
+Request (all optional): `{ "number"?: string, "supplier"?: string,
+"status"?: "active"|"draft"|"done" }`. Whitelist-updates the provided columns.
+Response `200`: `{ "collection": { "id","number","supplier","status","created_at" } }`.
+`404 not_found` if not owned/found.
+
+---
+
 ## Parties (contract structure)
 
 ### `GET /api/workspaces/:id/parties`  (auth)
@@ -213,6 +256,127 @@ Move confirmation reuses `PATCH /api/workspaces/:id/files/:fileId` with `{ "fold
 
 ---
 
+## Collection files (Збірник)
+
+> **Not indexed / not embedded (no RAG).** Unlike workspace files, collection
+> files never enter the embedding/Qdrant pipeline. They are panel documents /
+> certificates plus a manifest, parsed **directly** by the Phase-B analysis
+> engine. Uploads therefore skip `queued`/`indexing` and are stored as
+> `status: "ready"` immediately — there is no index job, no Qdrant, and no
+> `file_status` events channel for collections.
+
+All routes are scoped by `getOwnedCollection` and `404 not_found` if the
+collection (or file/folder) isn't owned/found.
+
+### `POST /api/collections/:id/files?folderId=<uuid>`  (auth, multipart)
+- `multipart/form-data` with one or more file parts. `folderId` (query) optional;
+  `400 invalid_folder` if it doesn't belong to this collection.
+- Same allow-list (`pdf, docx, xlsx, csv, png, jpg/jpeg`), per-file size limit
+  (`MAX_UPLOAD_BYTES`), and exact-content SHA-256 dedup (scoped to the collection's
+  `is_latest` files + within the batch) as the workspace upload. Duplicates are
+  reported in `rejected` with `reason: "duplicate_of:<existing name>"`.
+- On accept: stores to disk under the collection's id namespace and writes a
+  `ready` row (with `content_hash`). **No index job, no Qdrant, no events.**
+Response `201`: `{ "files": [ { "id","name","type","status":"ready","folderId","version","replacesFileId":null } ], "rejected": [ { "name","reason" } ] }`
+Response `415` when nothing valid was uploaded: `{ "error":"no_valid_files", "rejected":[…] }`
+
+### `GET /api/collections/:id/files`  (auth)
+Response `200`: `{ "files": [ { "id","folderId","name","type","status","errorReason","sizeBytes","createdAt","version","isLatest","replacesFileId" } ] }`
+(collection files are always `status: "ready"` with `errorReason: null`).
+
+### `DELETE /api/collections/:id/files/:fileId`  (auth)
+Deletes the on-disk file and the row. No Qdrant. Response `200`: `{ "ok": true }`.
+
+### `PATCH /api/collections/:id/files/:fileId`  (auth)
+`{ "name"?: string, "folderId"?: string|null }` → `200 { "file": { "id","name","folderId","type","status" } }`.
+`400 invalid_folder` if the target folder isn't in this collection.
+
+### `GET /api/collections/:id/files/:fileId/content`  (auth)
+Streams the stored file bytes inline (same behaviour as the workspace content route).
+
+### `POST /api/collections/:id/folders`  (auth)
+`{ "name": string }` → `201 { "folder": { "id","name","position" } }` (folder scoped to the collection).
+
+---
+
+## Consolidated analysis (Збірник)
+
+The analysis engine turns a **manifest** (uploaded file, Google Sheets link, or
+pasted table) into a per-line customs breakdown: митна вартість (CIF), мито, ПДВ,
+країна походження, and EU/UA broker checks. Numbers are computed deterministically
+(engine + built-in tariff/MFN tables); the AI step only fills descriptive fields
+(origin type, category, per-item EU/UA checks, risk). If the AI step fails it
+**degrades gracefully** — the deterministic result is still returned, with
+`aiDegraded: true` and every row flagged `needsReview`.
+
+### `POST /api/collections/:id/analyze`  (auth) — run analysis
+Accepts **either** `multipart/form-data` with a single file field (`.xlsx`/`.xls`/
+`.csv`/`.txt`) **or** JSON with exactly one of:
+- `{ "sheetUrl": string }` — a Google Sheets link (exported as CSV server-side);
+- `{ "text": string }` — a pasted CSV/TSV table.
+
+`404 not_found` when the collection is not owned by the caller. `415
+unsupported_type` (bad file ext), `413 too_large`, `422 analysis_failed`
+(`{ message }`), or `400 invalid_request` on a malformed JSON body.
+
+Runs the engine, persists one `analyses` row + one `archive_records` row (the
+archive is FIFO-capped at 50 newest per owner), and returns `201 { "analysis": <AnalysisResult> }`.
+
+**`AnalysisResult`** (the frontend card renders these exact fields):
+```jsonc
+{
+  "id": "uuid",                 // persisted analysis id (null before persistence)
+  "meta": {
+    "sheet": "06.05",           // selected sheet name
+    "date": "06.05.2026" | null,// parsed sheet date (uk-UA), or null
+    "reason": "…",              // why this sheet was chosen
+    "ignored": ["Лист2", "…"]   // other sheet names skipped
+  },
+  "rows": [
+    {
+      "name": "Гіалуронова кислота",
+      "code": "3913900090" | null,   // УКТЗЕД
+      "qtyKg": 25,
+      "price": 210.0,                // per-kg, shipment currency
+      "dutyRate": 6.5 | null,        // %
+      "category": "…",
+      "origin": "Синтетичне" | null, // origin type (KB-confident, else AI)
+      "risk": "Критичний" | "Середній" | "Низький" | null,
+      "riskNote": "…",
+      "cif": 5250.0,                 // customs value
+      "duty": 341.25 | null,
+      "vat": 1118.25 | null,
+      "eu": [ { "item": "…", "status": "green|yellow|red", "note": "…" } ],
+      "ua": [ { "item": "…", "status": "green|yellow|red", "note": "…" } ],
+      "needsReview": true
+    }
+  ],
+  "totals": { "cif": 7650.0, "duty": 0, "vat": 0, "payable": 0, "count": 2 },
+  "source": "manifest.xlsx",    // source label (filename | Google Sheets | Вставлена таблиця)
+  "sheet": "06.05",             // mirror of meta.sheet
+  "criticalAlert": "",          // AI cross-cutting alert (may be empty)
+  "nctsList": ["…"],            // AI NCTS checklist (may be empty)
+  "warnings": ["…"],            // deterministic warnings
+  "hasHigh": false,             // any high-risk item / red check
+  "aiDegraded": false           // true when the AI step failed (deterministic-only)
+}
+```
+
+### `GET /api/analyses/archive`  (auth) — archive list
+`200 { "records": [ { "id","collectionId","source","sheet","itemCount","payable","hasHigh","createdAt" } ] }`,
+newest first, owner-scoped.
+
+### `DELETE /api/analyses/archive/:id`  (auth) — remove one archive record
+`200 { "ok": true }`, or `404 not_found`. Owner-scoped.
+
+### `GET /api/analyses/:id/xlsx`  (auth) — export
+Rebuilds the `.xlsx` report from the stored analysis (sheets: Зведена / Детальний /
+Перевірки ЄС / Розмитнення UA) and streams it as an attachment
+(`analysis-<sheet>.xlsx`). Owner-scoped via the analysis's collection; `404
+not_found` on miss.
+
+---
+
 ## Chat (SSE)
 
 ### `POST /api/workspaces/:id/chat`  (auth, per-user rate-limited)
@@ -242,9 +406,40 @@ calls, and citations are persisted.
 **Client note:** this is SSE over `POST`, so use `fetch` + a `ReadableStream`
 reader (which can set the `Authorization` header), not the native `EventSource`.
 
+### Chat kinds
+
+Every conversation has a `chat_kind`, which decides its scope and tool set. All
+three kinds share the **same SSE contract above** (`token` / `tool_call` /
+`tool_result` / `done` / `error`, plus `: ping` keep-alives) and the same
+per-user rate limiter. They differ only in scope and available tools:
+
+| kind | endpoint | scope | tools |
+|------|----------|-------|-------|
+| `supply` | `POST /api/workspaces/:id/chat` | a shipment (workspace) | full set (unchanged) |
+| `normal` | `POST /api/chats` | global (the user) | none — general ЗЕД/customs consultant answering from knowledge |
+| `consolidated` | `POST /api/collections/:id/chat` | a collection (Збірник) | one tool — `run_consolidated_analysis` (analyses the collection's latest manifest: CIF/мито/ПДВ per line, origin, EU/UA checks; persists the result and returns an `analysisId` in the reply text for the FE to fetch via `GET /api/analyses/:id/xlsx` / the stored `AnalysisResult`) |
+
+The `supply` chat is **unchanged** — same workspace-scoped agent, same full tool
+set, same grounding prompt.
+
+### `POST /api/chats`  (auth, per-user rate-limited) — normal (global) chat
+Request: `{ "message": string, "conversationId"?: string(uuid) }`
+Omitting `conversationId` starts a new global conversation for the user.
+Response: `text/event-stream` — same events as above. No `tool_call` /
+`tool_result` events are emitted (no tools); `citations` is empty.
+
+### `POST /api/collections/:id/chat`  (auth, per-user rate-limited) — consolidated chat
+`404` if the collection is not owned by the user. Request/response identical in
+shape to `POST /api/chats`; the conversation is scoped to the collection. For now
+no tools run (no `tool_call` / `tool_result` events); the manifest-analysis
+engine (CIF / мито / ПДВ per line, origin, EU/UA checks) arrives in Phase B.
+
 ---
 
 ## Conversations
+
+Conversations are scoped by `chat_kind`. Supply conversations hang off a
+workspace, consolidated off a collection, normal off the user.
 
 ### `GET /api/workspaces/:id/conversations`  (auth)
 Response `200`: `{ "conversations": [ { "id","title","created_at","updated_at" } ] }`
@@ -259,6 +454,19 @@ Response `200`:
   ]
 }
 ```
+
+### `GET /api/chats`  (auth) — normal (global) conversations for the user
+Response `200`: `{ "conversations": [ { "id","title","created_at","updated_at" } ] }`
+
+### `GET /api/chats/:convId`  (auth) — messages of a normal conversation (owner-verified, `404` on miss)
+Same message shape as the workspace variant above.
+
+### `GET /api/collections/:id/conversations`  (auth) — a collection's consolidated conversations
+`404` if the collection is not owned. Response shape as above.
+
+### `GET /api/collections/:id/conversations/:convId`  (auth) — messages of a consolidated conversation
+`404` if the collection is not owned or the conversation isn't in that collection.
+Same message shape as above.
 
 ---
 
@@ -340,6 +548,99 @@ Response `200`: `{ "users": [ { "id","email","name" } ] }`.
 Current user's in-app notifications (reminders). Delivery is **in-app only** —
 the stack has no email/SMTP provider. Mark-read + live push are deferred.
 Response `200`: `{ "notifications": [ { "id","workspace_id","type","message","read","created_at" } ] }`.
+
+---
+
+## AI settings (BYOK — Phase E)
+
+Per-user AI provider config. Controls ONLY the **consolidated-analysis AI step**:
+`engine:'builtin'` uses the server-side Штурман Claude; `engine:'byok'` routes that
+step through the user's own provider key. The main chat/agent always uses the
+built-in Anthropic key. **Provider keys stay server-side, encrypted at rest
+(AES-256-GCM);** the browser never receives a raw or encrypted key — only a masked
+tail. BYOK requires `BYOK_ENC_KEY` (32 bytes, base64/hex) to be set on the server;
+if empty, BYOK is disabled. On any BYOK failure the analysis silently falls back
+to the built-in Claude.
+
+### `GET /api/ai-config`  (auth)
+Response `200`: `{ "engine": "builtin"|"byok", "provider": "openai"|"gemini"|"claude"|"openrouter"|null, "hasKey": boolean, "keyMask": "••••1234"|null }`.
+
+### `PUT /api/ai-config`  (auth)
+Body: `{ "engine": "builtin"|"byok", "provider"?: "openai"|"gemini"|"claude"|"openrouter", "key"?: string }`.
+- `engine:'builtin'` clears any stored provider/key and returns to the built-in Claude.
+- `engine:'byok'` requires `BYOK_ENC_KEY` set on the server, a valid `provider`, and
+  a `key` (unless one is already stored). The key is encrypted before storage and
+  never returned.
+Response `200`: same shape as GET.
+Errors `400`: `{ "error": "byok_disabled" }` (server has no `BYOK_ENC_KEY`),
+`{ "error": "provider_required" }`, `{ "error": "key_required" }`, or
+`{ "error": "invalid_request", "issues": [...] }`.
+
+---
+
+## News
+
+A single shared feed of import/customs-relevant news, ingested from public
+RSS/Atom sources by the worker cron (`NEWS_CRON`, gated by `NEWS_ENABLED`) and
+served read-only. **Retention:** only *fresh* news is ever returned or counted —
+items with `published_at` older than `NEWS_RETENTION_DAYS` (default `14`) are
+excluded from the API and purged on each ingest run. Not workspace-scoped.
+
+**Rubric keys** (frozen; the 8 keys the FE filter bar renders — the aggregate
+"Всі новини" tab is FE-only, requested by omitting `rubric` or passing `all`):
+
+| key | Ukrainian label |
+| --- | --- |
+| `customs` | Митниця України |
+| `ncts` | Транзит ЄС / NCTS |
+| `freight` | Фрахтові ставки |
+| `sanctions` | Санкції / експортний контроль |
+| `ports` | Порти |
+| `fx` | Курси валют / ПДВ |
+| `pharma` | Фарм/хім регулювання |
+| `adr` | ADR / небезпечні |
+
+### `GET /api/news?rubric=<key>`  (auth)
+Fresh news within the retention window, newest first (`published_at DESC`, capped
+at 200 items). `rubric` omitted or `all` ⇒ every rubric; any of the 8 keys ⇒
+that rubric only (an unknown value is treated as `all`).
+Response `200`: `{ "items": NewsItem[], "counts": { <rubric>: number, …, "total": number } }`
+where `NewsItem = { id, rubric, title, summary, source, url, published_at }`
+(`published_at` is an ISO string or `null`). `counts` has all 8 rubric keys
+(zero-filled) plus `total`, computed over the same retention window.
+
+---
+
+## Map (Phase D)
+
+Read-only reference atlas plus live vessel/truck positions. Ports and routes are a
+shared, non-workspace-scoped reference set (seeded in `schema.sql`). Shipment
+positions are owner-scoped (derived from the user's workspaces) and produced by the
+tracking provider — **DEMO by default**: each shipment is placed at a deterministic
+point along its route (a stable hash of the shipment number, no randomness/clock),
+so positions are reproducible across polls. Live AIS is a stub until `AIS_API_KEY`
+is set and `AIS_PROVIDER=aishub` (see `.env.example`); without a key it falls back
+to demo.
+
+Shapes:
+- `Port = { code, name, country, lat, lng, kind }` where `kind ∈ 'sea'|'inland'|'customs'`.
+- `Route = { id, from_code, to_code, mode, risk, waypoints }` where `mode ∈ 'sea'|'land'`,
+  `risk ∈ 'low'|'medium'|'high'`, and `waypoints` is an ordered `[[lat, lng], …]` polyline.
+- `VesselPosition = { id, kind, label, lat, lng, status, routeId }` where
+  `kind ∈ 'ship'|'truck'`, `label` is an emoji-prefixed name (🚢/🚚), `status` is the
+  shipment status, and `routeId` is the assigned route (or `null`).
+
+### `GET /api/map/ports`  (auth)
+Response `200`: `{ "ports": Port[] }` (ordered by `code`).
+
+### `GET /api/map/routes`  (auth)
+Response `200`: `{ "routes": Route[] }` (ordered by `id`).
+
+### `GET /api/map/shipments`  (auth)
+The current user's shipments turned into map markers. Each shipment is assigned a
+seeded route round-robin, then positioned by the tracking provider.
+Response `200`: `{ "vessels": VesselPosition[] }` (empty array if the user has no
+shipments, no seeded routes, or the live provider has no fix).
 
 ---
 

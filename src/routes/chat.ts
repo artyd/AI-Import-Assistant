@@ -1,8 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { config } from '../config.js';
 import { authenticate } from '../auth/hook.js';
-import { verifyToken } from '../auth/jwt.js';
 import { getOwnedWorkspace } from '../services/workspaceAccess.js';
 import {
   ensureConversation,
@@ -12,6 +10,7 @@ import {
 import { SseStream } from '../sse/sse.js';
 import { buildSystemPrompt } from '../agent/systemPrompt.js';
 import { runAgentTurn } from '../agent/loop.js';
+import { chatRateLimitConfig } from './chatRateLimit.js';
 
 const chatSchema = z.object({
   message: z.string().min(1),
@@ -25,27 +24,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
   // Per-user rate limit to bound Anthropic cost from runaway usage.
   app.post<{ Params: { id: string } }>(
     '/api/workspaces/:id/chat',
-    {
-      config: {
-        rateLimit: {
-          max: config.CHAT_RATE_MAX,
-          timeWindow: config.CHAT_RATE_WINDOW,
-          // The rate-limit onRequest hook runs before the auth preHandler, so
-          // req.user isn't set yet — decode the JWT here to key per-user.
-          keyGenerator: (req) => {
-            const header = req.headers.authorization;
-            if (header?.startsWith('Bearer ')) {
-              try {
-                return verifyToken(header.slice('Bearer '.length).trim()).sub;
-              } catch {
-                /* fall through to IP */
-              }
-            }
-            return req.ip;
-          },
-        },
-      },
-    },
+    { config: chatRateLimitConfig },
     async (req, reply) => {
       const parsed = chatSchema.safeParse(req.body);
       if (!parsed.success) {

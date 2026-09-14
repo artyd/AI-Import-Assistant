@@ -1,0 +1,362 @@
+[
+  {
+    "keys": [
+      "hebei shengxue",
+      "shengxue dacheng"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (GMP виробник Колістин / антибіотики)",
+    "gmpStatus": "GMP",
+    "country": "China"
+  },
+  {
+    "keys": [
+      "hubei hongyuan",
+      "hongyuan pharmaceutical"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (Метронідазол / хімфарма)",
+    "gmpStatus": "GMP",
+    "country": "China"
+  },
+  {
+    "keys": [
+      "yancheng dafeng",
+      "tiansheng joint pharmaceutical"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (Окситетрациклін)",
+    "gmpStatus": "GMP",
+    "country": "China"
+  },
+  {
+    "keys": [
+      "chengdu biopurify",
+      "biopurify"
+    ],
+    "originType": "ферментаційне або рослинне",
+    "productionMethod": "ферментація / екстракція стандартів",
+    "gmpStatus": "ISO",
+    "country": "China"
+  },
+  {
+    "keys": [
+      "north china pharmaceutical",
+      "ncpc"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (пеніциліни, вітаміни, амінокислоти)",
+    "gmpStatus": "GMP",
+    "country": "China"
+  },
+  {
+    "keys": [
+      "zhejiang medicine",
+      "zmc"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (Вітамін C, E, антибіотики)",
+    "gmpStatus": "GMP",
+    "country": "China"
+  },
+  {
+    "keys": [
+      "dsm nutritional",
+      "dsm china"
+    ],
+    "originType": "синтетичне або ферментаційне",
+    "productionMethod": "DSM — вітаміни, ферментація/синтез",
+    "gmpStatus": "GMP",
+    "country": "China/Switzerland"
+  },
+  {
+    "keys": [
+      "hebei jiuzhou",
+      "jiuzhou pharmaceutical"
+    ],
+    "originType": "ферментаційне або синтетичне",
+    "productionMethod": "ферментація / синтез (антибіотики, АФІ)",
+    "gmpStatus": "GMP",
+    "country": "China"
+  },
+  {
+    "keys": [
+      "ningxia eppen",
+      "eppen biotech"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (L-Лізин, кормові амінокислоти)",
+    "gmpStatus": "ISO",
+    "country": "China"
+  },
+  {
+    "keys": [
+      "evonik",
+      "degussa"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "хімічний синтез (DL-Метіонін, аміно)",
+    "gmpStatus": "GMP",
+    "country": "Germany/China"
+  },
+  {
+    "keys": [
+      "cj cheiljedang",
+      "cj bio"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (L-Лізин, L-Треонін, L-Триптофан)",
+    "gmpStatus": "GMP",
+    "country": "South Korea"
+  },
+  {
+    "keys": [
+      "global bio-chem",
+      "global bio"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (L-Лізин, кормові амінокислоти)",
+    "gmpStatus": "GMP",
+    "country": "China"
+  },
+  {
+    "keys": [
+      "fufeng group",
+      "fufeng"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (L-Глутамат, амінокислоти)",
+    "gmpStatus": "ISO",
+    "country": "China"
+  },
+  {
+    "keys": [
+      "meihua holdings",
+      "meihua"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "ферментація (амінокислоти, глутамат)",
+    "gmpStatus": "ISO",
+    "country": "China"
+  },
+  {
+    "keys": [
+      "boai nky",
+      "boai nky pharmaceuticals"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "полімеризація (ПВП, ПВА)",
+    "gmpStatus": "GMP",
+    "country": "China"
+  },
+  {
+    "keys": [
+      "henan chuange",
+      "jinhe industry"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "полімеризація (ПЕГ, Макрогол)",
+    "gmpStatus": "ISO",
+    "country": "China"
+  },
+  {
+    "keys": [
+      "ashland",
+      "ashland specialty"
+    ],
+    "originType": "синтетичне або рослинне",
+    "productionMethod": "ексципієнти (ГПМЦ, целюлоза, полімери)",
+    "gmpStatus": "GMP",
+    "country": "USA"
+  },
+  {
+    "keys": [
+      "dow chemical",
+      "dow"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "полімерна хімія (ПЕГ, МКЦ)",
+    "gmpStatus": "GMP",
+    "country": "USA"
+  },
+  {
+    "keys": [
+      "jrs pharma",
+      "jrs"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "МКЦ, целюлозні ексципієнти",
+    "gmpStatus": "GMP",
+    "country": "Germany"
+  },
+  {
+    "keys": [
+      "mingtai chemical",
+      "mingtai"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "МКЦ",
+    "gmpStatus": "GMP",
+    "country": "Taiwan"
+  },
+  {
+    "keys": [
+      "aoxin",
+      "aoxin glucosamine"
+    ],
+    "originType": "тваринне",
+    "productionMethod": "Глюкозамін гхл — гідроліз хітину (ракоподібні)",
+    "gmpStatus": "GMP",
+    "country": "China"
+  },
+  {
+    "keys": [
+      "hengjie",
+      "hengjie chondroitin"
+    ],
+    "originType": "тваринне",
+    "productionMethod": "Хондроїтин сульфат — екстракція хрящів ВРХ/свиней",
+    "gmpStatus": "GMP",
+    "country": "China"
+  },
+  {
+    "keys": [
+      "shandong focuschem",
+      "focuschem"
+    ],
+    "originType": "тваринне або рослинне",
+    "productionMethod": "колаген, гіалуронова кислота (ферментація або тваринне)",
+    "gmpStatus": "GMP",
+    "country": "China"
+  },
+  {
+    "keys": [
+      "bloomage biotechnology",
+      "bloomage"
+    ],
+    "originType": "ферментаційне",
+    "productionMethod": "Гіалуронова кислота — ферментація",
+    "gmpStatus": "GMP",
+    "country": "China"
+  },
+  {
+    "keys": [
+      "hebei liwellso",
+      "liwellso biotech"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "Магнію гліцинат — хімічна реакція MgO + гліцин",
+    "gmpStatus": "ISO",
+    "country": "China"
+  },
+  {
+    "keys": [
+      "jiangsu kolod",
+      "kolod food"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "Магнію цитрат — реакція MgCO₃ + лимонна кислота",
+    "gmpStatus": "ISO",
+    "country": "China"
+  },
+  {
+    "keys": [
+      "prosperity",
+      "prosperity chemical"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "мінеральні солі (цитрати, глюконати, фосфати)",
+    "gmpStatus": "ISO",
+    "country": "China"
+  },
+  {
+    "keys": [
+      "natural remedy",
+      "natural remedy llp"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "екстракція рослинної сировини (Ашваганда, Силімарин)",
+    "gmpStatus": "ISO",
+    "country": "India"
+  },
+  {
+    "keys": [
+      "sabinsa",
+      "sabinsa corporation"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "стандартизовані рослинні екстракти",
+    "gmpStatus": "GMP",
+    "country": "India"
+  },
+  {
+    "keys": [
+      "naturex",
+      "givaudan naturex"
+    ],
+    "originType": "рослинне",
+    "productionMethod": "рослинні екстракти (стандартизовані)",
+    "gmpStatus": "GMP",
+    "country": "France"
+  },
+  {
+    "keys": [
+      "india glycols",
+      "india glycols ltd"
+    ],
+    "originType": "рослинне або синтетичне",
+    "productionMethod": "ПЕГ з рослинного (цукрова тростина) або нафтохімії",
+    "gmpStatus": "GMP",
+    "country": "India"
+  },
+  {
+    "keys": [
+      "cipla",
+      "cipla limited"
+    ],
+    "originType": "синтетичне або ферментаційне",
+    "productionMethod": "фармацевтичний синтез / ферментація",
+    "gmpStatus": "GMP/WHO",
+    "country": "India"
+  },
+  {
+    "keys": [
+      "sun pharma",
+      "sun pharmaceutical"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "фармацевтичний синтез",
+    "gmpStatus": "GMP/USFDA",
+    "country": "India"
+  },
+  {
+    "keys": [
+      "aurobindo",
+      "aurobindo pharma"
+    ],
+    "originType": "синтетичне або ферментаційне",
+    "productionMethod": "синтез / ферментація",
+    "gmpStatus": "GMP/USFDA",
+    "country": "India"
+  },
+  {
+    "keys": [
+      "divi's laboratories",
+      "divis lab"
+    ],
+    "originType": "синтетичне",
+    "productionMethod": "фармацевтичний хімічний синтез",
+    "gmpStatus": "GMP/USFDA",
+    "country": "India"
+  },
+  {
+    "keys": [
+      "wuhan grand hoyo",
+      "grand hoyo"
+    ],
+    "originType": "синтетичне або ферментаційне",
+    "productionMethod": "амінокислоти / хімфарма синтез",
+    "gmpStatus": "ISO",
+    "country": "China"
+  }
+]

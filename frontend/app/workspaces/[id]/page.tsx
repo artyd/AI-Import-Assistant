@@ -7,7 +7,9 @@ import { useAuth } from "@/lib/auth";
 import { useTheme } from "@/lib/theme";
 import { openEventsChannel } from "@/lib/sse";
 import type {
+  AnalysisResult,
   ChecklistItem,
+  Collection,
   ConversationMeta,
   FileItem,
   FileStatusEvent,
@@ -15,7 +17,13 @@ import type {
   Message,
   Workspace,
 } from "@/lib/types";
-import { Chat } from "@/components/Chat";
+import { Chat, type EntitySelector } from "@/components/Chat";
+import { AnalyzePanel } from "@/components/AnalyzePanel";
+import { AnalysisCard } from "@/components/AnalysisCard";
+import { ArchiveModal } from "@/components/ArchiveModal";
+import { AiSettingsModal } from "@/components/AiSettingsModal";
+import { useAppStore } from "@/lib/store";
+import { resolveChatEndpoints } from "@/lib/chatContext";
 import { AgentLog, type LogEntry } from "@/components/AgentLog";
 import { ShipmentPanel } from "@/components/ShipmentPanel";
 import { VersionsModal } from "@/components/VersionsModal";
@@ -24,6 +32,8 @@ import { SidebarNav } from "@/components/SidebarNav";
 import { TopBar, type CompletenessStep } from "@/components/TopBar";
 import { RightPanel, type RightTab } from "@/components/RightPanel";
 import { FilesTab } from "@/components/FilesTab";
+import { NewsView } from "@/components/NewsView";
+import { MapView } from "@/components/MapView";
 import { CommandPalette, type PaletteAction } from "@/components/CommandPalette";
 import { IconSpinner } from "@/components/icons";
 import {
@@ -34,6 +44,7 @@ import {
   LnLock,
   LnMoon,
   LnPencil,
+  LnSettings,
   LnUpload,
 } from "@/components/LineIcons";
 
@@ -88,12 +99,40 @@ export default function WorkspacePage() {
   const [notFound, setNotFound] = useState(false);
   const [checklist, setChecklist] = useState<ChecklistItem[] | null>(null);
 
+  // Collection (Збірник) files/folders for the right panel when consolidated is active.
+  const [colFolders, setColFolders] = useState<Folder[]>([]);
+  const [colFiles, setColFiles] = useState<FileItem[]>([]);
+
+  // Consolidated-cargo analysis result (latest) + archive modal.
+  const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
+
   // Shell UI state.
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [rightOpen, setRightOpen] = useState(true);
   const [rightTab, setRightTab] = useState<RightTab>("files");
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [sound, setSound] = useState(false);
+
+  // App-wide store: which chat kind + top-level view + collections are active.
+  const chatKind = useAppStore((s) => s.chatKind);
+  const setChatKind = useAppStore((s) => s.setChatKind);
+  const view = useAppStore((s) => s.view);
+  const setView = useAppStore((s) => s.setView);
+  const collections = useAppStore((s) => s.collections);
+  const setCollections = useAppStore((s) => s.setCollections);
+  const activeCollectionId = useAppStore((s) => s.activeCollectionId);
+  const setActiveCollectionId = useAppStore((s) => s.setActiveCollectionId);
+  const addCollection = useAppStore((s) => s.addCollection);
+  const removeCollection = useAppStore((s) => s.removeCollection);
+
+  // Chat endpoints for the active (kind, entity). null = consolidated without a
+  // selected collection (the UI then prompts to create/select one).
+  const endpoints = useMemo(
+    () => resolveChatEndpoints(chatKind, id, activeCollectionId),
+    [chatKind, id, activeCollectionId]
+  );
 
   const [versionsFile, setVersionsFile] = useState<FileItem | null>(null);
   const [previewFile, setPreviewFile] = useState<FileItem | null>(null);
@@ -119,37 +158,19 @@ export default function WorkspacePage() {
     setLoading(true);
     (async () => {
       try {
-        const [wsRes, filesRes, listRes] = await Promise.all([
+        const [wsRes, filesRes, listRes, colRes] = await Promise.all([
           api<{ workspace: Workspace; folders: Folder[] }>(`/api/workspaces/${id}`),
           api<{ files: FileItem[] }>(`/api/workspaces/${id}/files`),
           api<{ workspaces: Workspace[] }>(`/api/workspaces`),
+          api<{ collections: Collection[] }>(`/api/collections`),
         ]);
         if (cancelled) return;
         setWorkspace(wsRes.workspace);
         setFolders(wsRes.folders);
         setFiles(filesRes.files);
         setWorkspaces(listRes.workspaces);
-
-        try {
-          const { conversations } = await api<{ conversations: ConversationMeta[] }>(
-            `/api/workspaces/${id}/conversations`
-          );
-          if (!cancelled) setConversations(conversations);
-          if (!cancelled && conversations.length > 0) {
-            const latest = [...conversations].sort((a, b) =>
-              b.updated_at.localeCompare(a.updated_at)
-            )[0]!;
-            const conv = await api<{ conversationId: string; messages: Message[] }>(
-              `/api/workspaces/${id}/conversations/${latest.id}`
-            );
-            if (!cancelled) {
-              setConversationId(conv.conversationId);
-              setInitialMessages(conv.messages);
-            }
-          }
-        } catch {
-          /* no conversations yet — fine */
-        }
+        setCollections(colRes.collections);
+        // Conversations load in the separate (kind/entity)-driven effect below.
       } catch (err) {
         if (cancelled) return;
         if (err instanceof ApiError && err.status === 404) setNotFound(true);
@@ -161,6 +182,54 @@ export default function WorkspacePage() {
       cancelled = true;
     };
   }, [id, user]);
+
+  // Load conversations for the active (kind, entity). Re-runs whenever the user
+  // switches chat kind or the selected collection — each kind/entity keeps its
+  // own history (prototype `normalChats` / per-shipment / per-collection chats).
+  useEffect(() => {
+    if (!user) return;
+    if (!endpoints) {
+      // consolidated without a selected collection — nothing to load.
+      setConversations([]);
+      setConversationId(undefined);
+      setInitialMessages([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const { conversations } = await api<{ conversations: ConversationMeta[] }>(
+          endpoints.convListPath
+        );
+        if (cancelled) return;
+        setConversations(conversations);
+        if (conversations.length > 0) {
+          const latest = [...conversations].sort((a, b) =>
+            b.updated_at.localeCompare(a.updated_at)
+          )[0]!;
+          const conv = await api<{ conversationId: string; messages: Message[] }>(
+            endpoints.convMsgPath(latest.id)
+          );
+          if (!cancelled) {
+            setConversationId(conv.conversationId);
+            setInitialMessages(conv.messages);
+          }
+        } else if (!cancelled) {
+          setConversationId(undefined);
+          setInitialMessages([]);
+        }
+      } catch {
+        if (!cancelled) {
+          setConversations([]);
+          setConversationId(undefined);
+          setInitialMessages([]);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, endpoints]);
 
   // Completeness for the top-bar step dots + right-panel badge.
   const refreshChecklist = useCallback(() => {
@@ -376,22 +445,23 @@ export default function WorkspacePage() {
   }, [id, refreshFiles]);
 
   const refreshConversations = useCallback(async () => {
+    if (!endpoints) return;
     try {
       const { conversations } = await api<{ conversations: ConversationMeta[] }>(
-        `/api/workspaces/${id}/conversations`
+        endpoints.convListPath
       );
       setConversations(conversations);
     } catch {
       /* ignore */
     }
-  }, [id]);
+  }, [endpoints]);
 
   const loadConversation = useCallback(
     async (convId: string) => {
-      if (convId === conversationId) return;
+      if (!endpoints || convId === conversationId) return;
       try {
         const conv = await api<{ conversationId: string; messages: Message[] }>(
-          `/api/workspaces/${id}/conversations/${convId}`
+          endpoints.convMsgPath(convId)
         );
         setConversationId(conv.conversationId);
         setInitialMessages(conv.messages);
@@ -399,7 +469,7 @@ export default function WorkspacePage() {
         alert("Не вдалося завантажити розмову.");
       }
     },
-    [id, conversationId]
+    [endpoints, conversationId]
   );
 
   const newChat = useCallback(() => {
@@ -433,6 +503,149 @@ export default function WorkspacePage() {
 
   // Shell actions.
   const selectShipment = useCallback((wid: string) => router.push(`/workspaces/${wid}`), [router]);
+
+  // Collections (Збірник). Kept in the app store; created/selected/deleted here.
+  const selectCollection = useCallback(
+    (cid: string) => setActiveCollectionId(cid),
+    [setActiveCollectionId]
+  );
+  const newCollection = useCallback(async () => {
+    try {
+      const { collection } = await api<{ collection: Collection }>(`/api/collections`, {
+        body: { status: "active" },
+      });
+      addCollection(collection); // prepends + sets it active
+      setChatKind("consolidated");
+    } catch {
+      alert("Не вдалося створити збірник.");
+    }
+  }, [addCollection, setChatKind]);
+  const deleteActiveCollection = useCallback(async () => {
+    if (!activeCollectionId) return;
+    const ok = window.confirm(
+      "Видалити збірник?\n\nБуде видалено всі файли, теки та чати. Дію не можна скасувати."
+    );
+    if (!ok) return;
+    try {
+      await api(`/api/collections/${activeCollectionId}`, { method: "DELETE" });
+      removeCollection(activeCollectionId);
+    } catch {
+      alert("Не вдалося видалити збірник.");
+    }
+  }, [activeCollectionId, removeCollection]);
+
+  // ── Collection files (right panel Files tab for a Збірник) ──
+  const refreshColFiles = useCallback(async () => {
+    if (!activeCollectionId) return;
+    const r = await api<{ files: FileItem[] }>(`/api/collections/${activeCollectionId}/files`);
+    setColFiles(r.files);
+  }, [activeCollectionId]);
+
+  useEffect(() => {
+    if (chatKind !== "consolidated" || !activeCollectionId) {
+      setColFolders([]);
+      setColFiles([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const [colRes, filesRes] = await Promise.all([
+          api<{ collection: Collection; folders: Folder[] }>(`/api/collections/${activeCollectionId}`),
+          api<{ files: FileItem[] }>(`/api/collections/${activeCollectionId}/files`),
+        ]);
+        if (cancelled) return;
+        setColFolders(colRes.folders);
+        setColFiles(filesRes.files);
+      } catch {
+        if (!cancelled) {
+          setColFolders([]);
+          setColFiles([]);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [chatKind, activeCollectionId]);
+
+  // Drop the shown analysis when switching collection / leaving consolidated.
+  useEffect(() => {
+    setAnalysis(null);
+  }, [activeCollectionId, chatKind]);
+
+  const colUpload = useCallback(
+    async (folderId: string | null, fileList: FileList) => {
+      if (!activeCollectionId) return;
+      const form = new FormData();
+      for (const f of Array.from(fileList)) form.append("files", f, f.name || "file");
+      const qs = folderId ? `?folderId=${folderId}` : "";
+      try {
+        await api(`/api/collections/${activeCollectionId}/files${qs}`, { form });
+        await refreshColFiles();
+      } catch {
+        alert("Не вдалося завантажити файл.");
+      }
+    },
+    [activeCollectionId, refreshColFiles]
+  );
+  const colCreateFolder = useCallback(async () => {
+    if (!activeCollectionId) return;
+    const name = window.prompt("Назва теки")?.trim();
+    if (!name) return;
+    try {
+      await api(`/api/collections/${activeCollectionId}/folders`, { body: { name } });
+      const colRes = await api<{ collection: Collection; folders: Folder[] }>(
+        `/api/collections/${activeCollectionId}`
+      );
+      setColFolders(colRes.folders);
+    } catch {
+      alert("Не вдалося створити теку.");
+    }
+  }, [activeCollectionId]);
+  const colRename = useCallback(
+    async (file: FileItem, name: string) => {
+      if (!activeCollectionId) return;
+      try {
+        await api(`/api/collections/${activeCollectionId}/files/${file.id}`, {
+          method: "PATCH",
+          body: { name },
+        });
+        await refreshColFiles();
+      } catch {
+        alert("Не вдалося перейменувати файл.");
+      }
+    },
+    [activeCollectionId, refreshColFiles]
+  );
+  const colDelete = useCallback(
+    async (file: FileItem) => {
+      if (!activeCollectionId) return;
+      if (!window.confirm(`Видалити файл «${file.name}»?`)) return;
+      try {
+        await api(`/api/collections/${activeCollectionId}/files/${file.id}`, { method: "DELETE" });
+        await refreshColFiles();
+      } catch {
+        alert("Не вдалося видалити файл.");
+      }
+    },
+    [activeCollectionId, refreshColFiles]
+  );
+  const colMove = useCallback(
+    async (file: FileItem, folderId: string) => {
+      if (!activeCollectionId) return;
+      try {
+        await api(`/api/collections/${activeCollectionId}/files/${file.id}`, {
+          method: "PATCH",
+          body: { folderId },
+        });
+        await refreshColFiles();
+      } catch {
+        alert("Не вдалося перемістити файл.");
+      }
+    },
+    [activeCollectionId, refreshColFiles]
+  );
 
   const newShipment = useCallback(async () => {
     const number = window.prompt("Номер постачання (необов'язково)") ?? "";
@@ -539,6 +752,14 @@ export default function WorkspacePage() {
     ];
     if (hasInbox)
       a.push({ id: "sort", label: "Розкласти інбокс", icon: <LnFolder size={17} />, run: sortInbox });
+    a.push({
+      id: "ai-settings",
+      label: "Налаштування AI",
+      hint: "BYOK",
+      icon: <LnSettings size={17} />,
+      keywords: "byok ключ провайдер openai gemini claude openrouter engine",
+      run: () => setAiSettingsOpen(true),
+    });
     a.push({ id: "theme", label: "Перемкнути тему", icon: <LnMoon size={17} />, run: toggleTheme });
     a.push({ id: "lock", label: "Заблокувати (вийти)", icon: <LnLock size={17} />, run: lock });
     return a;
@@ -567,6 +788,31 @@ export default function WorkspacePage() {
 
   if (!workspace) return null;
 
+  // Composer entity selector: shipments for supply, collections for consolidated,
+  // hidden (null) for the global normal chat.
+  const composerSelector: EntitySelector | null =
+    chatKind === "supply"
+      ? {
+          label: "Постачання",
+          value: workspace.id,
+          options: workspaces.map((w) => ({
+            id: w.id,
+            label: `№${w.number ?? "—"}${w.supplier ? ` · ${w.supplier}` : ""}`,
+          })),
+          onChange: selectShipment,
+        }
+      : chatKind === "consolidated"
+        ? {
+            label: "Збірник",
+            value: activeCollectionId ?? "",
+            options: collections.map((c) => ({
+              id: c.id,
+              label: `${c.number ?? "Збірник"}${c.supplier ? ` · ${c.supplier}` : ""}`,
+            })),
+            onChange: selectCollection,
+          }
+        : null;
+
   return (
     <div style={{ height: "100vh", display: "flex", overflow: "hidden", background: "var(--chat)" }}>
       <input
@@ -584,15 +830,23 @@ export default function WorkspacePage() {
       <SidebarNav
         workspaces={workspaces}
         current={workspace}
+        collections={collections}
+        activeCollectionId={activeCollectionId}
+        chatKind={chatKind}
+        onChangeKind={setChatKind}
+        view={view}
+        onSetView={setView}
         conversations={conversations}
         currentConversationId={conversationId}
         collapsed={sidebarCollapsed}
         onToggleCollapsed={() => setSidebarCollapsed((v) => !v)}
         onNewChat={newChat}
-        onNewShipment={newShipment}
         onOpenSearch={() => setPaletteOpen(true)}
         onSelectShipment={selectShipment}
         onDeleteShipment={deleteShipment}
+        onSelectCollection={selectCollection}
+        onNewCollection={newCollection}
+        onDeleteActiveCollection={deleteActiveCollection}
         onSelectConversation={loadConversation}
       />
 
@@ -611,21 +865,80 @@ export default function WorkspacePage() {
           onSaveSupplier={saveSupplier}
         />
         <div style={{ flex: 1, minHeight: 0 }}>
-          <Chat
-            key={`${conversationId ?? "new"}-${chatSeq}`}
-            workspaceId={id}
-            conversationId={conversationId}
-            initialMessages={initialMessages}
-            onConversationStarted={onConversationStarted}
-            onLog={onLog}
-            folders={folders}
-            onUploadAndClassify={uploadAndClassify}
-            onMoveFile={moveFile}
-          />
+          {view === "news" ? (
+            <NewsView />
+          ) : view === "map" ? (
+            <MapView />
+          ) : !endpoints ? (
+            <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+              <div style={{ maxWidth: 440, textAlign: "center" }}>
+                <h2 style={{ margin: "0 0 8px", fontSize: 18, color: "var(--text)" }}>Збірний вантаж</h2>
+                <p style={{ margin: "0 0 16px", fontSize: 14, lineHeight: 1.5, color: "var(--muted)" }}>
+                  Оберіть збірник у полі вводу або створіть новий, щоб почати роботу та аналіз збірної партії.
+                </p>
+                <button className="btn btn-primary" onClick={newCollection}>
+                  Створити збірник
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
+              {chatKind === "consolidated" && activeCollectionId && (
+                <div style={{ flex: "1 1 58%", overflowY: "auto", minHeight: 0 }}>
+                  <div style={{ padding: "20px 24px 10px" }}>
+                    <div style={{ maxWidth: 640, margin: "0 auto 14px", display: "flex", justifyContent: "flex-end" }}>
+                      <button className="btn" onClick={() => setArchiveOpen(true)}>
+                        <LnList size={15} /> Архів
+                      </button>
+                    </div>
+                    <AnalyzePanel
+                      collectionId={activeCollectionId}
+                      onResult={setAnalysis}
+                      onOpenAiSettings={() => setAiSettingsOpen(true)}
+                    />
+                    {analysis && (
+                      <div style={{ maxWidth: 900, margin: "20px auto 0" }}>
+                        <AnalysisCard analysis={analysis} />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+              <div
+                style={{
+                  flex: chatKind === "consolidated" ? "1 1 42%" : "1 1 auto",
+                  minHeight: 0,
+                  borderTop: chatKind === "consolidated" ? "1px solid var(--border)" : undefined,
+                }}
+              >
+                <Chat
+                  key={`${chatKind}-${activeCollectionId ?? "ws"}-${conversationId ?? "new"}-${chatSeq}`}
+                  postPath={endpoints.postPath}
+                  chatKind={chatKind}
+                  onChangeKind={setChatKind}
+                  selector={composerSelector}
+                  conversationId={conversationId}
+                  initialMessages={initialMessages}
+                  onConversationStarted={onConversationStarted}
+                  onLog={onLog}
+                  placeholder={
+                    chatKind === "normal"
+                      ? "Запитайте про ЗЕД, митницю, документи або коди УКТ ЗЕД…"
+                      : chatKind === "consolidated"
+                        ? "Опишіть збірний вантаж або завантажте маніфест для аналізу…"
+                        : undefined
+                  }
+                  folders={chatKind === "supply" ? folders : undefined}
+                  onUploadAndClassify={chatKind === "supply" ? uploadAndClassify : undefined}
+                  onMoveFile={chatKind === "supply" ? moveFile : undefined}
+                />
+              </div>
+            </div>
+          )}
         </div>
       </main>
 
-      {rightOpen && (
+      {rightOpen && view === "chat" && chatKind === "supply" && (
         <RightPanel
           tab={rightTab}
           onTab={setRightTab}
@@ -653,6 +966,40 @@ export default function WorkspacePage() {
         />
       )}
 
+      {rightOpen && view === "chat" && chatKind === "consolidated" && activeCollectionId && (
+        <RightPanel
+          tab={rightTab}
+          onTab={setRightTab}
+          onClose={() => setRightOpen(false)}
+          badges={{ files: colFiles.length }}
+          files={
+            <FilesTab
+              workspaceNumber={null}
+              folders={colFolders}
+              files={colFiles}
+              onUpload={colUpload}
+              onCreateFolder={colCreateFolder}
+              onRenameFile={colRename}
+              onDeleteFile={colDelete}
+              onVersions={() => {}}
+              onMoveFile={colMove}
+              onReindex={() => {}}
+              onPreview={() => {}}
+            />
+          }
+          journal={
+            <div style={{ padding: 16, fontSize: 13, color: "var(--muted)", lineHeight: 1.5 }}>
+              Журнал для збірника зʼявиться разом із аналізом збірного вантажу.
+            </div>
+          }
+          complete={
+            <div style={{ padding: 16, fontSize: 13, color: "var(--muted)", lineHeight: 1.5 }}>
+              Комплектність пакета для збірника — незабаром.
+            </div>
+          }
+        />
+      )}
+
       {paletteOpen && (
         <CommandPalette actions={paletteActions} onClose={() => setPaletteOpen(false)} />
       )}
@@ -668,6 +1015,8 @@ export default function WorkspacePage() {
       {previewFile && (
         <FilePreviewModal workspaceId={id} file={previewFile} onClose={() => setPreviewFile(null)} />
       )}
+      {archiveOpen && <ArchiveModal onClose={() => setArchiveOpen(false)} />}
+      {aiSettingsOpen && <AiSettingsModal onClose={() => setAiSettingsOpen(false)} />}
     </div>
   );
 }
