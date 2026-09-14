@@ -344,3 +344,42 @@ ALTER TABLE conversations ADD COLUMN IF NOT EXISTS owner_id UUID
 ALTER TABLE conversations ALTER COLUMN workspace_id DROP NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_conversations_collection ON conversations(collection_id);
 CREATE INDEX IF NOT EXISTS idx_conversations_owner ON conversations(owner_id);
+
+-- ── ШТУРМАН prototype port · Phase B-2: consolidated analysis persistence ─────
+-- The consolidated-cargo analysis engine (CIF / мито / ПДВ per line, origin,
+-- EU/UA checks) writes one `analyses` row per run (the full result the FE card
+-- reads back) plus a lightweight `archive_records` row (the "Архів" list). Both
+-- are owner/collection scoped. All statements idempotent.
+
+-- One computed analysis of a collection's manifest. `meta`/`rows`/`totals` hold
+-- the consolidated AnalysisResult shape the frontend card renders; `checks`
+-- holds the AI enrichment payload (euChecks/uaChecks/criticalAlert/nctsList) so
+-- the .xlsx export can be rebuilt without re-running the engine.
+CREATE TABLE IF NOT EXISTS analyses (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  collection_id UUID NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+  message_id    UUID,                                    -- optional link to the chat message that triggered it
+  source        TEXT NOT NULL DEFAULT '',                -- manifest source label (filename | Google Sheets | Вставлена таблиця)
+  sheet         TEXT NOT NULL DEFAULT '',                -- selected sheet name
+  meta          JSONB NOT NULL DEFAULT '{}'::jsonb,
+  rows          JSONB NOT NULL DEFAULT '[]'::jsonb,
+  totals        JSONB NOT NULL DEFAULT '{}'::jsonb,
+  checks        JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_analyses_collection ON analyses(collection_id);
+
+-- Lightweight archive index (owner-scoped, capped FIFO in the route). Survives
+-- collection deletion (collection_id → NULL) so the "Архів" list is durable.
+CREATE TABLE IF NOT EXISTS archive_records (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  owner_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  collection_id UUID REFERENCES collections(id) ON DELETE SET NULL,
+  source        TEXT NOT NULL DEFAULT '',
+  sheet         TEXT NOT NULL DEFAULT '',
+  item_count    INT NOT NULL DEFAULT 0,
+  payable       NUMERIC NOT NULL DEFAULT 0,
+  has_high      BOOLEAN NOT NULL DEFAULT false,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_archive_records_owner ON archive_records(owner_id);

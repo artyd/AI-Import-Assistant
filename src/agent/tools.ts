@@ -17,11 +17,27 @@ import { getMissingContext, upsertParties, type PartyInput } from '../services/p
 import { classifyAndFile, sortInbox } from '../services/classify.js';
 import { buildAndSaveReport } from '../services/report.js';
 import { compareFileVersions, previousVersionId } from '../services/versions.js';
+import { runAnalysis } from '../services/analysis/run.js';
+import { persistAnalysis } from '../services/analyses.js';
 import type { Citation } from '../services/conversations.js';
 import type { FileType } from '../domain/folders.js';
 
+/**
+ * Tool execution scope. Shipment ("supply") tools need a `workspaceId`; the
+ * consolidated-analysis tool needs a `collectionId` (+ `ownerId` to persist).
+ * Both are optional so one shape covers every chat kind — handlers narrow via
+ * `requireWorkspace(ctx)` / `requireCollection(ctx)`.
+ */
 export interface ToolContext {
-  workspaceId: string;
+  workspaceId?: string;
+  collectionId?: string;
+  ownerId?: string;
+}
+
+/** Narrows to a shipment scope; throws if the tool was called without one. */
+function requireWorkspace(ctx: ToolContext): string {
+  if (!requireWorkspace(ctx)) throw new Error('Цей інструмент доступний лише в межах постачання.');
+  return requireWorkspace(ctx);
 }
 
 export interface ToolOutcome {
@@ -205,6 +221,16 @@ export const toolDefinitions: ChatTool[] = [
       required: ['file_id'],
     },
   },
+  {
+    name: 'run_consolidated_analysis',
+    description:
+      'Запускає повний аналіз маніфесту поточного збірника: бере останній файл-маніфест ' +
+      '(xlsx/csv), рахує митну вартість (CIF), мито та ПДВ по кожній позиції, визначає ' +
+      'країну походження та перевірки ЄС/UA, оцінює ризики. Використовуй, коли користувач ' +
+      'просить проаналізувати збірник / порахувати платежі / перевірити позиції. Повертає ' +
+      'короткий підсумок і analysisId (за ним фронтенд підвантажує повний результат).',
+    input_schema: { type: 'object', properties: {} },
+  },
 ];
 
 interface FileRow {
@@ -252,13 +278,15 @@ export async function executeTool(
       return runGenerateReport(ctx);
     case 'compare_document_versions':
       return runCompareVersions(input, ctx);
+    case 'run_consolidated_analysis':
+      return runConsolidatedAnalysis(ctx);
     default:
       return { result: `Невідомий інструмент: ${name}`, summary: `Невідомий інструмент`, citations: [] };
   }
 }
 
 async function runChecklist(ctx: ToolContext): Promise<ToolOutcome> {
-  const ws = await getWorkspaceById(ctx.workspaceId);
+  const ws = await getWorkspaceById(requireWorkspace(ctx));
   if (!ws) return { result: 'Постачання не знайдено.', summary: 'Чек-лист: помилка', citations: [] };
   const { checklist, status } = await refreshWorkspaceState(ws);
   if (checklist.length === 0) {
@@ -281,7 +309,7 @@ function statusUa(s: string): string {
 }
 
 async function runDiscrepancies(ctx: ToolContext): Promise<ToolOutcome> {
-  const findings = await computeDiscrepancies(ctx.workspaceId);
+  const findings = await computeDiscrepancies(requireWorkspace(ctx));
   if (findings.length === 0) {
     return {
       result: 'Розбіжностей між інвойсом / PO / пакувальним листом не виявлено (за наявними даними).',
@@ -319,7 +347,7 @@ async function runDiscrepancies(ctx: ToolContext): Promise<ToolOutcome> {
 }
 
 async function runRegistryCheck(ctx: ToolContext): Promise<ToolOutcome> {
-  const findings = await computeRegistryChecks(ctx.workspaceId);
+  const findings = await computeRegistryChecks(requireWorkspace(ctx));
   if (findings.length === 0) {
     return {
       result:
@@ -340,7 +368,7 @@ async function runRegistryCheck(ctx: ToolContext): Promise<ToolOutcome> {
 }
 
 async function runRisks(ctx: ToolContext): Promise<ToolOutcome> {
-  const ws = await getWorkspaceById(ctx.workspaceId);
+  const ws = await getWorkspaceById(requireWorkspace(ctx));
   if (!ws) return { result: 'Постачання не знайдено.', summary: 'Ризики: помилка', citations: [] };
   const risks = await computeRisks(ws);
   if (risks.length === 0) {
@@ -357,7 +385,7 @@ async function runRisks(ctx: ToolContext): Promise<ToolOutcome> {
 }
 
 async function runSupplierInstruction(ctx: ToolContext): Promise<ToolOutcome> {
-  const ws = await getWorkspaceById(ctx.workspaceId);
+  const ws = await getWorkspaceById(requireWorkspace(ctx));
   if (!ws) return { result: 'Постачання не знайдено.', summary: 'Інструкція: помилка', citations: [] };
   const res = await buildSupplierInstruction(ws);
   if ('missing' in res) {
@@ -371,7 +399,7 @@ async function runSupplierInstruction(ctx: ToolContext): Promise<ToolOutcome> {
 }
 
 async function runMissingContext(ctx: ToolContext): Promise<ToolOutcome> {
-  const ws = await getWorkspaceById(ctx.workspaceId);
+  const ws = await getWorkspaceById(requireWorkspace(ctx));
   if (!ws) return { result: 'Постачання не знайдено.', summary: 'Контекст: помилка', citations: [] };
   const missing = await getMissingContext(ws);
   if (missing.length === 0) {
@@ -410,7 +438,7 @@ async function runSaveContext(input: unknown, ctx: ToolContext): Promise<ToolOut
   if (!parsed.success) {
     return { result: 'Некоректні дані для збереження контексту.', summary: 'Контекст: помилка', citations: [] };
   }
-  const ws = await getWorkspaceById(ctx.workspaceId);
+  const ws = await getWorkspaceById(requireWorkspace(ctx));
   if (!ws) return { result: 'Постачання не знайдено.', summary: 'Контекст: помилка', citations: [] };
 
   const scalarKeys = [
@@ -442,7 +470,7 @@ async function runSaveContext(input: unknown, ctx: ToolContext): Promise<ToolOut
   }
 
   // Recompute intake_complete and refresh derived state.
-  const merged = (await getWorkspaceById(ctx.workspaceId))!;
+  const merged = (await getWorkspaceById(requireWorkspace(ctx)))!;
   const complete = Boolean(
     merged.contract_type &&
       merged.product_category &&
@@ -453,7 +481,7 @@ async function runSaveContext(input: unknown, ctx: ToolContext): Promise<ToolOut
   if (complete !== merged.intake_complete) {
     await query('UPDATE workspaces SET intake_complete = $2 WHERE id = $1', [ws.id, complete]);
   }
-  const finalWs = (await getWorkspaceById(ctx.workspaceId))!;
+  const finalWs = (await getWorkspaceById(requireWorkspace(ctx)))!;
   if (finalWs.intake_complete) await refreshWorkspaceState(finalWs);
 
   const missing = await getMissingContext(finalWs);
@@ -469,7 +497,7 @@ async function runSaveContext(input: unknown, ctx: ToolContext): Promise<ToolOut
 async function runClassifyAndFile(input: unknown, ctx: ToolContext): Promise<ToolOutcome> {
   const fileId = String((input as { file_id?: unknown })?.file_id ?? '').trim();
   if (!fileId) return { result: 'Не вказано file_id.', summary: 'Класифікація: помилка', citations: [] };
-  const res = await classifyAndFile(ctx.workspaceId, fileId);
+  const res = await classifyAndFile(requireWorkspace(ctx), fileId);
   if (!res) return { result: 'Файл не знайдено.', summary: 'Класифікація: не знайдено', citations: [] };
   if (!res.to) {
     // Low-confidence guess left in inbox with a suggestion, or truly unclassified.
@@ -492,7 +520,7 @@ async function runClassifyAndFile(input: unknown, ctx: ToolContext): Promise<Too
 async function runCompareVersions(input: unknown, ctx: ToolContext): Promise<ToolOutcome> {
   const fileId = String((input as { file_id?: unknown })?.file_id ?? '').trim();
   if (!fileId) return { result: 'Не вказано file_id.', summary: 'Порівняння: помилка', citations: [] };
-  const prev = await previousVersionId(ctx.workspaceId, fileId);
+  const prev = await previousVersionId(requireWorkspace(ctx), fileId);
   if (!prev) {
     return {
       result: 'У цього файлу немає попередньої версії для порівняння.',
@@ -500,7 +528,7 @@ async function runCompareVersions(input: unknown, ctx: ToolContext): Promise<Too
       citations: [],
     };
   }
-  const cmp = await compareFileVersions(ctx.workspaceId, fileId, prev);
+  const cmp = await compareFileVersions(requireWorkspace(ctx), fileId, prev);
   if (!cmp) return { result: 'Файл не знайдено в постачанні.', summary: 'Порівняння: не знайдено', citations: [] };
   if (cmp.differences.length === 0) {
     return {
@@ -524,7 +552,7 @@ function fmt(v: unknown): string {
 }
 
 async function runGenerateReport(ctx: ToolContext): Promise<ToolOutcome> {
-  const ws = await getWorkspaceById(ctx.workspaceId);
+  const ws = await getWorkspaceById(requireWorkspace(ctx));
   if (!ws) return { result: 'Постачання не знайдено.', summary: 'Звіт: помилка', citations: [] };
   const { id } = await buildAndSaveReport(ws);
   return {
@@ -536,7 +564,7 @@ async function runGenerateReport(ctx: ToolContext): Promise<ToolOutcome> {
 }
 
 async function runSortInbox(ctx: ToolContext): Promise<ToolOutcome> {
-  const { moved, unclassified } = await sortInbox(ctx.workspaceId);
+  const { moved, unclassified } = await sortInbox(requireWorkspace(ctx));
   if (moved.length === 0 && unclassified.length === 0) {
     return { result: 'Інбокс порожній — нема чого сортувати.', summary: 'Сортування: 0', citations: [] };
   }
@@ -560,7 +588,7 @@ async function runNormalizeShipmentFiles(ctx: ToolContext): Promise<ToolOutcome>
   const { rows: unhashed } = await query<{ id: string; disk_path: string }>(
     `SELECT id, disk_path FROM files
      WHERE workspace_id = $1 AND is_latest = true AND content_hash IS NULL`,
-    [ctx.workspaceId],
+    [requireWorkspace(ctx)],
   );
   let backfilled = 0;
   for (const f of unhashed) {
@@ -579,18 +607,18 @@ async function runNormalizeShipmentFiles(ctx: ToolContext): Promise<ToolOutcome>
      FROM files
      WHERE workspace_id = $1 AND is_latest = true AND content_hash IS NOT NULL
      GROUP BY content_hash HAVING COUNT(*) > 1`,
-    [ctx.workspaceId],
+    [requireWorkspace(ctx)],
   );
 
   // 3. Bulk-retry currently-errored files (same primitive as POST …/reindex).
   const { rows: errored } = await query<{ id: string; name: string }>(
     `SELECT id, name FROM files WHERE workspace_id = $1 AND status = 'error'`,
-    [ctx.workspaceId],
+    [requireWorkspace(ctx)],
   );
   for (const f of errored) {
     await query(`UPDATE files SET status = 'queued', error_reason = NULL WHERE id = $1`, [f.id]);
     await enqueueIndexJob(f.id);
-    await publishFileStatus(ctx.workspaceId, { fileId: f.id, status: 'queued', name: f.name });
+    await publishFileStatus(requireWorkspace(ctx), { fileId: f.id, status: 'queued', name: f.name });
   }
 
   const lines: string[] = [];
@@ -610,11 +638,67 @@ async function runNormalizeShipmentFiles(ctx: ToolContext): Promise<ToolOutcome>
   };
 }
 
+async function runConsolidatedAnalysis(ctx: ToolContext): Promise<ToolOutcome> {
+  if (!ctx.collectionId) {
+    return { result: 'Аналіз доступний лише в межах збірника.', summary: 'Аналіз: помилка', citations: [] };
+  }
+  // Latest manifest file (xlsx/csv) in this collection.
+  const { rows } = await query<{ id: string; name: string; type: string; disk_path: string }>(
+    `SELECT id, name, type, disk_path FROM files
+     WHERE collection_id = $1 AND is_latest = true AND type IN ('xlsx', 'csv')
+     ORDER BY created_at DESC LIMIT 1`,
+    [ctx.collectionId],
+  );
+  const file = rows[0];
+  if (!file) {
+    return {
+      result: 'У збірнику немає файлу-маніфесту (xlsx або csv). Додайте маніфест і повторіть аналіз.',
+      summary: 'Аналіз: немає маніфесту',
+      citations: [],
+    };
+  }
+
+  let buf: Buffer;
+  try {
+    buf = await readStoredFile(file.disk_path);
+  } catch {
+    return { result: `Не вдалося прочитати файл «${file.name}».`, summary: 'Аналіз: помилка читання', citations: [] };
+  }
+
+  let result;
+  try {
+    result = await runAnalysis({ kind: 'file', buffer: buf, filename: file.name });
+  } catch (err) {
+    return { result: `Аналіз не вдався: ${(err as Error).message}`, summary: 'Аналіз: помилка', citations: [] };
+  }
+
+  // Persist like the route (best-effort — still return the computed result on failure).
+  if (ctx.ownerId) {
+    try {
+      await persistAnalysis(ctx.ownerId, ctx.collectionId, result);
+    } catch {
+      // Persistence failed — the analysis text is still useful this turn.
+    }
+  }
+
+  const t = result.totals;
+  const idNote = result.id ? ` (analysisId: ${result.id})` : '';
+  const highNote = result.hasHigh ? ' Є позиції підвищеного ризику.' : '';
+  const degradedNote = result.aiDegraded
+    ? ' AI-перевірки недоступні — показано лише детермінований розрахунок.'
+    : '';
+  const text =
+    `Проаналізовано маніфест «${file.name}» (лист «${result.sheet}»): ${t.count} позицій. ` +
+    `Митна вартість ${t.cif}, мито ${t.duty}, ПДВ ${t.vat}, до сплати ${t.payable}.` +
+    `${highNote}${degradedNote}${idNote}`;
+  return { result: text, summary: `Аналіз збірника: ${t.count} позицій`, citations: [] };
+}
+
 async function runSearch(input: unknown, ctx: ToolContext): Promise<ToolOutcome> {
   const q = String((input as { query?: unknown })?.query ?? '').trim();
   if (!q) return { result: 'Порожній запит.', summary: 'Пошук: порожній запит', citations: [] };
 
-  const hits = await searchWorkspace(ctx.workspaceId, q, 6);
+  const hits = await searchWorkspace(requireWorkspace(ctx), q, 6);
   if (hits.length === 0) {
     return { result: 'Нічого не знайдено серед проіндексованих документів.', summary: 'Пошук: 0 результатів', citations: [] };
   }
@@ -635,7 +719,7 @@ async function runReadFile(input: unknown, ctx: ToolContext): Promise<ToolOutcom
   const range = (input as { range?: unknown })?.range;
   if (!path) return { result: 'Не вказано файл.', summary: 'Читання: не вказано файл', citations: [] };
 
-  const file = await findFile(ctx.workspaceId, path);
+  const file = await findFile(requireWorkspace(ctx), path);
   if (!file) {
     return { result: `Файл "${path}" не знайдено в постачанні.`, summary: `Файл не знайдено: ${path}`, citations: [] };
   }
@@ -684,7 +768,7 @@ async function runReadFile(input: unknown, ctx: ToolContext): Promise<ToolOutcom
 }
 
 async function runListFiles(ctx: ToolContext): Promise<ToolOutcome> {
-  const files = await listFiles(ctx.workspaceId);
+  const files = await listFiles(requireWorkspace(ctx));
   if (files.length === 0) {
     return { result: 'У постачанні поки немає файлів.', summary: 'Список файлів: порожньо', citations: [] };
   }

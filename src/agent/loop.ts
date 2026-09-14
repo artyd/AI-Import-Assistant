@@ -11,10 +11,15 @@ import { toolDefinitions, executeTool, type ToolContext } from './tools.js';
 export interface AgentTurnParams {
   /**
    * Present only for shipment-scoped ("supply") turns — it builds the ToolContext
-   * the shipment tools need. Global ("normal") and consolidated turns run without
-   * a workspace (and, for now, without tools).
+   * the shipment tools need. Global ("normal") turns run without any scope.
    */
   workspaceId?: string;
+  /**
+   * Present for consolidated (Збірник) turns — scopes the run_consolidated_analysis
+   * tool. `ownerId` lets that tool persist the analysis like the REST route.
+   */
+  collectionId?: string;
+  ownerId?: string;
   system: string;
   history: { role: 'user' | 'assistant'; content: string }[];
   userMessage: string;
@@ -47,10 +52,15 @@ const MAX_ITERATIONS = 8;
  * chips and agent-log panel.
  */
 export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnResult> {
-  const { workspaceId, system, history, userMessage, sse } = params;
+  const { workspaceId, collectionId, ownerId, system, history, userMessage, sse } = params;
   const tools = params.tools ?? toolDefinitions;
-  // Only shipment-scoped turns have a tool context; tool-less turns leave it null.
-  const ctx: ToolContext | null = workspaceId ? { workspaceId } : null;
+  // Scope the tool context per chat kind: shipment (workspaceId) or consolidated
+  // (collectionId + ownerId). Global/tool-less turns leave it null.
+  const ctx: ToolContext | null = workspaceId
+    ? { workspaceId }
+    : collectionId
+      ? { collectionId, ownerId }
+      : null;
 
   const messages: ChatMessageParam[] = [
     ...history.map((m) => ({ role: m.role, content: m.content })),

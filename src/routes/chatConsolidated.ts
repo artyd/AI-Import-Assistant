@@ -12,7 +12,13 @@ import {
 import { SseStream } from '../sse/sse.js';
 import { buildConsolidatedSystemPrompt } from '../agent/systemPrompt.js';
 import { runAgentTurn } from '../agent/loop.js';
+import { toolDefinitions } from '../agent/tools.js';
 import { chatRateLimitConfig } from './chatRateLimit.js';
+
+// Consolidated (Збірник) chats run with a single tool: the manifest analysis
+// engine. Shipment tools (checklist/discrepancies/…) are workspace-scoped and
+// intentionally excluded here.
+const consolidatedTools = toolDefinitions.filter((t) => t.name === 'run_consolidated_analysis');
 
 const chatSchema = z.object({
   message: z.string().min(1),
@@ -21,13 +27,10 @@ const chatSchema = z.object({
 
 /**
  * The "consolidated" chat — a consultant scoped to a Збірник (consolidated
- * cargo). Conversations are collection-scoped. For this slice the agent runs with
- * NO tools: collection file retrieval + the consolidated-analysis engine (CIF /
- * мито / ПДВ per line, origin, EU/UA checks) land in a later slice (Phase B).
- *
- * TODO(Phase B): once the collection manifest retrieval + analysis tools exist,
- * pass a consolidated tool set here (instead of `tools: []`) and build the
- * ToolContext for a collection scope in the agent loop.
+ * cargo). Conversations are collection-scoped. The agent runs with a single tool,
+ * `run_consolidated_analysis`, which analyses the collection's latest manifest
+ * (CIF / мито / ПДВ per line, origin, EU/UA checks) and persists the result; the
+ * loop is given a collection-scoped ToolContext (collectionId + ownerId).
  */
 export async function chatConsolidatedRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('preHandler', authenticate);
@@ -64,7 +67,9 @@ export async function chatConsolidatedRoutes(app: FastifyInstance): Promise<void
           history,
           userMessage: message,
           sse,
-          tools: [], // Phase B: swap for the consolidated manifest/analysis tools
+          collectionId: col.id,
+          ownerId: req.user!.sub,
+          tools: consolidatedTools,
         });
 
         const messageId = await appendMessage(

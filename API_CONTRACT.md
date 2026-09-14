@@ -299,6 +299,84 @@ Streams the stored file bytes inline (same behaviour as the workspace content ro
 
 ---
 
+## Consolidated analysis (Збірник)
+
+The analysis engine turns a **manifest** (uploaded file, Google Sheets link, or
+pasted table) into a per-line customs breakdown: митна вартість (CIF), мито, ПДВ,
+країна походження, and EU/UA broker checks. Numbers are computed deterministically
+(engine + built-in tariff/MFN tables); the AI step only fills descriptive fields
+(origin type, category, per-item EU/UA checks, risk). If the AI step fails it
+**degrades gracefully** — the deterministic result is still returned, with
+`aiDegraded: true` and every row flagged `needsReview`.
+
+### `POST /api/collections/:id/analyze`  (auth) — run analysis
+Accepts **either** `multipart/form-data` with a single file field (`.xlsx`/`.xls`/
+`.csv`/`.txt`) **or** JSON with exactly one of:
+- `{ "sheetUrl": string }` — a Google Sheets link (exported as CSV server-side);
+- `{ "text": string }` — a pasted CSV/TSV table.
+
+`404 not_found` when the collection is not owned by the caller. `415
+unsupported_type` (bad file ext), `413 too_large`, `422 analysis_failed`
+(`{ message }`), or `400 invalid_request` on a malformed JSON body.
+
+Runs the engine, persists one `analyses` row + one `archive_records` row (the
+archive is FIFO-capped at 50 newest per owner), and returns `201 { "analysis": <AnalysisResult> }`.
+
+**`AnalysisResult`** (the frontend card renders these exact fields):
+```jsonc
+{
+  "id": "uuid",                 // persisted analysis id (null before persistence)
+  "meta": {
+    "sheet": "06.05",           // selected sheet name
+    "date": "06.05.2026" | null,// parsed sheet date (uk-UA), or null
+    "reason": "…",              // why this sheet was chosen
+    "ignored": ["Лист2", "…"]   // other sheet names skipped
+  },
+  "rows": [
+    {
+      "name": "Гіалуронова кислота",
+      "code": "3913900090" | null,   // УКТЗЕД
+      "qtyKg": 25,
+      "price": 210.0,                // per-kg, shipment currency
+      "dutyRate": 6.5 | null,        // %
+      "category": "…",
+      "origin": "Синтетичне" | null, // origin type (KB-confident, else AI)
+      "risk": "Критичний" | "Середній" | "Низький" | null,
+      "riskNote": "…",
+      "cif": 5250.0,                 // customs value
+      "duty": 341.25 | null,
+      "vat": 1118.25 | null,
+      "eu": [ { "item": "…", "status": "green|yellow|red", "note": "…" } ],
+      "ua": [ { "item": "…", "status": "green|yellow|red", "note": "…" } ],
+      "needsReview": true
+    }
+  ],
+  "totals": { "cif": 7650.0, "duty": 0, "vat": 0, "payable": 0, "count": 2 },
+  "source": "manifest.xlsx",    // source label (filename | Google Sheets | Вставлена таблиця)
+  "sheet": "06.05",             // mirror of meta.sheet
+  "criticalAlert": "",          // AI cross-cutting alert (may be empty)
+  "nctsList": ["…"],            // AI NCTS checklist (may be empty)
+  "warnings": ["…"],            // deterministic warnings
+  "hasHigh": false,             // any high-risk item / red check
+  "aiDegraded": false           // true when the AI step failed (deterministic-only)
+}
+```
+
+### `GET /api/analyses/archive`  (auth) — archive list
+`200 { "records": [ { "id","collectionId","source","sheet","itemCount","payable","hasHigh","createdAt" } ] }`,
+newest first, owner-scoped.
+
+### `DELETE /api/analyses/archive/:id`  (auth) — remove one archive record
+`200 { "ok": true }`, or `404 not_found`. Owner-scoped.
+
+### `GET /api/analyses/:id/xlsx`  (auth) — export
+Rebuilds the `.xlsx` report from the stored analysis (sheets: Зведена / Детальний /
+Перевірки ЄС / Розмитнення UA) and streams it as an attachment
+(`analysis-<sheet>.xlsx`). Owner-scoped via the analysis's collection; `404
+not_found` on miss.
+
+---
+
 ## Chat (SSE)
 
 ### `POST /api/workspaces/:id/chat`  (auth, per-user rate-limited)
@@ -339,7 +417,7 @@ per-user rate limiter. They differ only in scope and available tools:
 |------|----------|-------|-------|
 | `supply` | `POST /api/workspaces/:id/chat` | a shipment (workspace) | full set (unchanged) |
 | `normal` | `POST /api/chats` | global (the user) | none — general ЗЕД/customs consultant answering from knowledge |
-| `consolidated` | `POST /api/collections/:id/chat` | a collection (Збірник) | none for now — consultant that runs manifest analysis once a manifest is provided (analysis tools land in Phase B) |
+| `consolidated` | `POST /api/collections/:id/chat` | a collection (Збірник) | one tool — `run_consolidated_analysis` (analyses the collection's latest manifest: CIF/мито/ПДВ per line, origin, EU/UA checks; persists the result and returns an `analysisId` in the reply text for the FE to fetch via `GET /api/analyses/:id/xlsx` / the stored `AnalysisResult`) |
 
 The `supply` chat is **unchanged** — same workspace-scoped agent, same full tool
 set, same grounding prompt.

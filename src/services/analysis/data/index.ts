@@ -94,3 +94,12 @@ export const HS_HEAD = loadJson<Record<string, string>>('hs_head.json');
 
 /** Сирі записи вбудованого статутного 10-значного тарифу (наразі порожньо). */
 export const UA_TARIFF10_RAW = loadJson<unknown[]>('ua_tariff10.json');
+
+/** Експертний рулбук ЗЕД (теми) — джерело RAG-контексту для AI-перевірок. */
+export interface ZedTopic {
+  ico: string;
+  topic: string;
+  short: string;
+  sections: { title: string; rows: string[][] }[];
+}
+export const ZED_TOPICS = loadJson<ZedTopic[]>('zed_topics.json');
