@@ -7,6 +7,7 @@ import { useAuth } from "@/lib/auth";
 import { useTheme } from "@/lib/theme";
 import { openEventsChannel } from "@/lib/sse";
 import type {
+  AnalysisResult,
   ChecklistItem,
   Collection,
   ConversationMeta,
@@ -17,6 +18,9 @@ import type {
   Workspace,
 } from "@/lib/types";
 import { Chat, type EntitySelector } from "@/components/Chat";
+import { AnalyzePanel } from "@/components/AnalyzePanel";
+import { AnalysisCard } from "@/components/AnalysisCard";
+import { ArchiveModal } from "@/components/ArchiveModal";
 import { useAppStore } from "@/lib/store";
 import { resolveChatEndpoints } from "@/lib/chatContext";
 import { AgentLog, type LogEntry } from "@/components/AgentLog";
@@ -108,6 +112,10 @@ export default function WorkspacePage() {
   // Collection (Збірник) files/folders for the right panel when consolidated is active.
   const [colFolders, setColFolders] = useState<Folder[]>([]);
   const [colFiles, setColFiles] = useState<FileItem[]>([]);
+
+  // Consolidated-cargo analysis result (latest) + archive modal.
+  const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
+  const [archiveOpen, setArchiveOpen] = useState(false);
 
   // Shell UI state.
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -570,6 +578,11 @@ export default function WorkspacePage() {
     };
   }, [chatKind, activeCollectionId]);
 
+  // Drop the shown analysis when switching collection / leaving consolidated.
+  useEffect(() => {
+    setAnalysis(null);
+  }, [activeCollectionId, chatKind]);
+
   const colUpload = useCallback(
     async (folderId: string | null, fileList: FileList) => {
       if (!activeCollectionId) return;
@@ -876,27 +889,54 @@ export default function WorkspacePage() {
               </div>
             </div>
           ) : (
-            <Chat
-              key={`${chatKind}-${activeCollectionId ?? "ws"}-${conversationId ?? "new"}-${chatSeq}`}
-              postPath={endpoints.postPath}
-              chatKind={chatKind}
-              onChangeKind={setChatKind}
-              selector={composerSelector}
-              conversationId={conversationId}
-              initialMessages={initialMessages}
-              onConversationStarted={onConversationStarted}
-              onLog={onLog}
-              placeholder={
-                chatKind === "normal"
-                  ? "Запитайте про ЗЕД, митницю, документи або коди УКТ ЗЕД…"
-                  : chatKind === "consolidated"
-                    ? "Опишіть збірний вантаж або завантажте маніфест для аналізу…"
-                    : undefined
-              }
-              folders={chatKind === "supply" ? folders : undefined}
-              onUploadAndClassify={chatKind === "supply" ? uploadAndClassify : undefined}
-              onMoveFile={chatKind === "supply" ? moveFile : undefined}
-            />
+            <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
+              {chatKind === "consolidated" && activeCollectionId && (
+                <div style={{ flex: "1 1 58%", overflowY: "auto", minHeight: 0 }}>
+                  <div style={{ padding: "20px 24px 10px" }}>
+                    <div style={{ maxWidth: 640, margin: "0 auto 14px", display: "flex", justifyContent: "flex-end" }}>
+                      <button className="btn" onClick={() => setArchiveOpen(true)}>
+                        <LnList size={15} /> Архів
+                      </button>
+                    </div>
+                    <AnalyzePanel collectionId={activeCollectionId} onResult={setAnalysis} />
+                    {analysis && (
+                      <div style={{ maxWidth: 900, margin: "20px auto 0" }}>
+                        <AnalysisCard analysis={analysis} />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+              <div
+                style={{
+                  flex: chatKind === "consolidated" ? "1 1 42%" : "1 1 auto",
+                  minHeight: 0,
+                  borderTop: chatKind === "consolidated" ? "1px solid var(--border)" : undefined,
+                }}
+              >
+                <Chat
+                  key={`${chatKind}-${activeCollectionId ?? "ws"}-${conversationId ?? "new"}-${chatSeq}`}
+                  postPath={endpoints.postPath}
+                  chatKind={chatKind}
+                  onChangeKind={setChatKind}
+                  selector={composerSelector}
+                  conversationId={conversationId}
+                  initialMessages={initialMessages}
+                  onConversationStarted={onConversationStarted}
+                  onLog={onLog}
+                  placeholder={
+                    chatKind === "normal"
+                      ? "Запитайте про ЗЕД, митницю, документи або коди УКТ ЗЕД…"
+                      : chatKind === "consolidated"
+                        ? "Опишіть збірний вантаж або завантажте маніфест для аналізу…"
+                        : undefined
+                  }
+                  folders={chatKind === "supply" ? folders : undefined}
+                  onUploadAndClassify={chatKind === "supply" ? uploadAndClassify : undefined}
+                  onMoveFile={chatKind === "supply" ? moveFile : undefined}
+                />
+              </div>
+            </div>
           )}
         </div>
       </main>
@@ -978,6 +1018,7 @@ export default function WorkspacePage() {
       {previewFile && (
         <FilePreviewModal workspaceId={id} file={previewFile} onClose={() => setPreviewFile(null)} />
       )}
+      {archiveOpen && <ArchiveModal onClose={() => setArchiveOpen(false)} />}
     </div>
   );
 }

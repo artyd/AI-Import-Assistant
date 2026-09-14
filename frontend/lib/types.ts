@@ -244,3 +244,71 @@ export interface FileStatusEvent {
 export function toUiStatus(s: FileStatus): UiFileStatus {
   return s === "ready" ? "done" : s;
 }
+
+// ── Consolidated-cargo analysis (Аналіз збірного вантажу) ─────────────────────
+// Mirrors the backend AnalysisResult returned by POST /api/collections/:id/analyze.
+
+// One broker check line. status drives the coloured dot: green|yellow|red →
+// var(--ok)|var(--warn)|var(--err).
+export interface AnalysisCheck {
+  item: string;
+  status: string; // "green" | "yellow" | "red"
+  note: string;
+}
+
+export interface AnalysisRow {
+  name: string;
+  code: string | null; // УКТ ЗЕД
+  qtyKg: number;
+  price: number;
+  dutyRate: number | null;
+  category: string;
+  origin: string | null; // plant|animal|fermentation|mineral|synthetic|mixed|unknown
+  risk: string | null; // Критичний | Середній | Низький
+  riskNote: string;
+  cif: number;
+  duty: number | null;
+  vat: number | null;
+  eu: AnalysisCheck[];
+  ua: AnalysisCheck[];
+  needsReview: boolean;
+}
+
+export interface AnalysisMeta {
+  sheet: string;
+  date: string | null;
+  reason: string;
+  ignored: string[];
+}
+
+export interface AnalysisTotals {
+  cif: number;
+  duty: number;
+  vat: number;
+  payable: number;
+  count: number;
+}
+
+export interface AnalysisResult {
+  id: string | null;
+  meta: AnalysisMeta;
+  rows: AnalysisRow[];
+  totals: AnalysisTotals;
+  source: string;
+  sheet: string;
+  criticalAlert: string;
+  nctsList: string[];
+  warnings: string[];
+  hasHigh: boolean;
+  aiDegraded: boolean;
+}
+
+export interface ArchiveRecord {
+  id: string;
+  source: string;
+  sheet: string;
+  item_count: number;
+  payable: number | string;
+  has_high: boolean;
+  created_at: string;
+}
