@@ -177,10 +177,16 @@ export function Chat({
   // Files chosen via paperclip/drag/paste are STAGED here (chips above the input)
   // and only uploaded when the message is sent — never on pick. Cleared on send.
   const [pending, setPending] = useState<File[]>([]);
+  // "Highlight-to-ask" (ChatGPT-style): a fragment selected from an assistant
+  // answer, staged as a quote chip above the composer to ask a follow-up about it.
+  const [quote, setQuote] = useState<string | null>(null);
+  // The floating "ask about this" button shown at the current selection.
+  const [sel, setSel] = useState<{ text: string; x: number; y: number } | null>(null);
   const convRef = useRef<string | undefined>(conversationId);
   const scrollRef = useRef<HTMLDivElement>(null);
   const streamTextRef = useRef("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   // Drag events fire on every child; count enters/leaves so the overlay only
   // clears when the cursor truly leaves the chat container.
   const dragDepth = useRef(0);
@@ -198,6 +204,48 @@ export function Chat({
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [items, streaming]);
+
+  // Highlight-to-ask: after a mouse selection inside an assistant answer, show a
+  // small floating "ask about this" button anchored to the selection. Ignores
+  // selections outside assistant bubbles (user text, file cards, empty ranges).
+  const onThreadMouseUp = useCallback(() => {
+    const s = window.getSelection();
+    if (!s || s.isCollapsed) {
+      setSel(null);
+      return;
+    }
+    const text = s.toString().trim();
+    if (text.length < 2) {
+      setSel(null);
+      return;
+    }
+    const node = s.anchorNode;
+    const el = node instanceof Element ? node : node?.parentElement ?? null;
+    if (!el || !el.closest('[data-role="assistant"]')) {
+      setSel(null);
+      return;
+    }
+    const rect = s.getRangeAt(0).getBoundingClientRect();
+    setSel({ text, x: rect.left + rect.width / 2, y: rect.top });
+  }, []);
+
+  // Dismiss the floating button on scroll (its anchor would drift otherwise).
+  useEffect(() => {
+    if (!sel) return;
+    const el = scrollRef.current;
+    const hide = () => setSel(null);
+    el?.addEventListener("scroll", hide, { passive: true });
+    return () => el?.removeEventListener("scroll", hide);
+  }, [sel]);
+
+  const askAboutSelection = useCallback(() => {
+    if (!sel) return;
+    setQuote(sel.text);
+    setSel(null);
+    window.getSelection()?.removeAllRanges();
+    // Focus the composer so the user can type the follow-up straight away.
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, [sel]);
 
   const patchCard = useCallback(
     (cardId: string, patch: Partial<ClassifyCard>) =>
@@ -429,15 +477,24 @@ export function Chat({
   // message if there is one. Sending is allowed with files only, text only, or both.
   const send = useCallback(async () => {
     if (streaming) return;
-    const text = input;
+    const text = input.trim();
     const files = pending;
-    if (!text.trim() && files.length === 0) return;
+    const q = quote;
+    if (!text && files.length === 0 && !q) return;
     if (files.length) {
       setPending([]);
       await handleFiles(files);
     }
-    if (text.trim()) await runMessage(text);
-  }, [streaming, input, pending, handleFiles, runMessage]);
+    if (text || q) {
+      // When a fragment is quoted, prepend it as context so the agent answers
+      // about that exact excerpt. A quote with no question ⇒ "explain it".
+      const composed = q
+        ? `Стосовно цього фрагмента попередньої відповіді:\n«${q}»\n\n${text || "Поясни детальніше."}`
+        : input;
+      if (q) setQuote(null);
+      await runMessage(composed);
+    }
+  }, [streaming, input, pending, quote, handleFiles, runMessage]);
 
   return (
     <div
@@ -455,6 +512,37 @@ export function Chat({
         background: "var(--chat)",
       }}
     >
+      {sel && (
+        <button
+          // preventDefault on mousedown so clicking doesn't clear the selection
+          // before onClick reads it.
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={askAboutSelection}
+          style={{
+            position: "fixed",
+            left: sel.x,
+            top: Math.max(sel.y - 44, 8),
+            transform: "translateX(-50%)",
+            zIndex: 60,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            height: 32,
+            padding: "0 12px",
+            background: "var(--accent)",
+            color: "var(--accentTx)",
+            border: "none",
+            borderRadius: 16,
+            boxShadow: "0 6px 18px var(--accentSoft)",
+            fontSize: 12.5,
+            fontWeight: 600,
+            cursor: "pointer",
+            whiteSpace: "nowrap",
+          }}
+        >
+          <span style={{ fontWeight: 800, fontSize: 15, lineHeight: 1 }}>„“</span> Спитати про це
+        </button>
+      )}
       {dragging && (
         <div
           style={{
@@ -567,6 +655,7 @@ export function Chat({
             <Composer
               input={input}
               setInput={setInput}
+              inputRef={inputRef}
               onPaste={onPaste}
               onSend={send}
               onAttach={fileIntake ? () => fileInputRef.current?.click() : undefined}
@@ -577,6 +666,8 @@ export function Chat({
               placeholder={placeholder}
               pending={pending}
               onRemovePending={removePending}
+              quote={quote}
+              onClearQuote={() => setQuote(null)}
             />
             <div
               style={{
@@ -616,7 +707,11 @@ export function Chat({
       ) : (
         /* ── Conversation thread ── */
         <>
-          <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "24px 0" }}>
+          <div
+            ref={scrollRef}
+            onMouseUp={onThreadMouseUp}
+            style={{ flex: 1, overflowY: "auto", padding: "24px 0" }}
+          >
             <div style={{ maxWidth: 760, margin: "0 auto", padding: "0 28px" }}>
               <DateSeparator />
               {items.map((it) =>
@@ -642,6 +737,7 @@ export function Chat({
               <Composer
                 input={input}
                 setInput={setInput}
+                inputRef={inputRef}
                 onPaste={onPaste}
                 onSend={send}
                 onAttach={fileIntake ? () => fileInputRef.current?.click() : undefined}
@@ -652,6 +748,8 @@ export function Chat({
                 placeholder={placeholder}
                 pending={pending}
                 onRemovePending={removePending}
+                quote={quote}
+                onClearQuote={() => setQuote(null)}
               />
               <div
                 style={{
@@ -701,6 +799,7 @@ function Notice({ text, onClear }: { text: string; onClear: () => void }) {
 function Composer({
   input,
   setInput,
+  inputRef,
   onPaste,
   onSend,
   onAttach,
@@ -711,9 +810,12 @@ function Composer({
   placeholder,
   pending,
   onRemovePending,
+  quote,
+  onClearQuote,
 }: {
   input: string;
   setInput: (v: string) => void;
+  inputRef?: React.Ref<HTMLTextAreaElement>;
   onPaste: (e: React.ClipboardEvent) => void;
   onSend: () => void;
   onAttach?: () => void;
@@ -724,6 +826,8 @@ function Composer({
   placeholder?: string;
   pending: File[];
   onRemovePending: (f: File) => void;
+  quote: string | null;
+  onClearQuote: () => void;
 }) {
   return (
     <div
@@ -888,6 +992,68 @@ function Composer({
         </div>
       )}
 
+      {/* Quoted fragment (highlight-to-ask): shown above the input; sent as context. */}
+      {quote && (
+        <div
+          data-testid="composer-quote"
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 8,
+            padding: "8px 10px",
+            borderBottom: "1px solid var(--border)",
+          }}
+        >
+          <span
+            style={{
+              flex: "none",
+              alignSelf: "stretch",
+              width: 3,
+              borderRadius: 2,
+              background: "var(--accent)",
+            }}
+          />
+          <span
+            style={{
+              flex: 1,
+              minWidth: 0,
+              fontSize: 12.5,
+              lineHeight: 1.4,
+              color: "var(--muted)",
+              display: "-webkit-box",
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: "vertical",
+              overflow: "hidden",
+            }}
+            title={quote}
+          >
+            {quote}
+          </span>
+          <button
+            onClick={onClearQuote}
+            aria-label="Прибрати цитату"
+            title="Прибрати"
+            style={{
+              flex: "none",
+              width: 20,
+              height: 20,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              border: "none",
+              borderRadius: 6,
+              background: "transparent",
+              color: "var(--muted)",
+              cursor: "pointer",
+              fontSize: 15,
+              lineHeight: 1,
+            }}
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       {/* Bottom row: attach / textarea (Enter-send, Shift+Enter-newline) / send. */}
       <div style={{ display: "flex", alignItems: "flex-end", gap: 10, padding: "8px 8px 8px 15px" }}>
         {onAttach && (
@@ -916,6 +1082,7 @@ function Composer({
           </button>
         )}
         <textarea
+          ref={inputRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onPaste={onPaste}
@@ -925,7 +1092,11 @@ function Composer({
               onSend();
             }
           }}
-          placeholder={placeholder ?? "Спитайте Штурмана або перетягніть / вставте файли"}
+          placeholder={
+            quote
+              ? "Спитайте про виділений фрагмент…"
+              : placeholder ?? "Спитайте Штурмана або перетягніть / вставте файли"
+          }
           data-testid="chat-input"
           rows={1}
           style={{
@@ -943,7 +1114,7 @@ function Composer({
         <button
           className="btn btn-primary"
           onClick={onSend}
-          disabled={streaming || (!input.trim() && pending.length === 0)}
+          disabled={streaming || (!input.trim() && pending.length === 0 && !quote)}
           style={{ height: 40, width: 40, padding: 0, borderRadius: 11 }}
           aria-label="Надіслати"
         >
@@ -1129,7 +1300,8 @@ function AssistantBubble({
   return (
     <div style={{ display: "flex", gap: 14, margin: "18px 0 28px" }} data-anim>
       <AgentAvatar />
-      <div style={{ flex: 1, minWidth: 0 }}>
+      {/* data-role marks the selectable answer region for highlight-to-ask. */}
+      <div style={{ flex: 1, minWidth: 0 }} data-role="assistant">
         <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8 }}>
           Штурман
         </div>
