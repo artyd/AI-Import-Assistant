@@ -110,6 +110,9 @@ interface Props {
   // Fired after every assistant turn completes (used to refresh side state, e.g.
   // reload the latest analysis when it was triggered from the consolidated chat).
   onTurnComplete?: () => void;
+  // Consolidated manifest attach: upload a picked xlsx/csv into the collection,
+  // then the chat auto-asks the agent to analyse it. Enables a composer paperclip.
+  onManifestUpload?: (file: File) => Promise<{ ok: boolean; name: string }>;
   // File intake (paperclip auto-file flow) — supply only. When these are omitted
   // the composer's attach/drag/paste are disabled (normal has no files;
   // consolidated files are uploaded via the right-panel Files tab in this phase).
@@ -174,6 +177,7 @@ export function Chat({
   emptyStarters,
   emptyAction,
   onTurnComplete,
+  onManifestUpload,
   folders,
   onUploadAndClassify,
   onMoveFile,
@@ -199,6 +203,7 @@ export function Chat({
   const scrollRef = useRef<HTMLDivElement>(null);
   const streamTextRef = useRef("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const manifestInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   // Drag events fire on every child; count enters/leaves so the overlay only
   // clears when the cursor truly leaves the chat container.
@@ -510,6 +515,37 @@ export function Chat({
     }
   }, [streaming, input, pending, quote, handleFiles, runMessage]);
 
+  // Manifest paperclip (consolidated): upload the picked file into the collection,
+  // then ask the agent to analyse it — the answer streams into the thread.
+  const handleManifestPick = useCallback(
+    async (file: File) => {
+      if (!onManifestUpload || streaming) return;
+      setNotice(`Завантажую маніфест «${file.name}»…`);
+      try {
+        const res = await onManifestUpload(file);
+        if (res.ok) {
+          setNotice(null);
+          await runMessage(
+            `Проаналізуй завантажений файл-маніфест «${res.name}» повністю, по кожній позиції.`
+          );
+        } else {
+          setNotice("Не вдалося завантажити маніфест.");
+        }
+      } catch {
+        setNotice("Не вдалося завантажити маніфест.");
+      }
+    },
+    [onManifestUpload, streaming, runMessage]
+  );
+
+  // Which action the composer paperclip performs: manifest analyse (consolidated)
+  // or the supply auto-file staging flow.
+  const attachAction = onManifestUpload
+    ? () => manifestInputRef.current?.click()
+    : fileIntake
+      ? () => fileInputRef.current?.click()
+      : undefined;
+
   return (
     <div
       onDragEnter={onDragEnter}
@@ -602,6 +638,20 @@ export function Chat({
           e.target.value = "";
         }}
       />
+      {/* Manifest picker (consolidated): a single xlsx/csv → upload + analyse. */}
+      {onManifestUpload && (
+        <input
+          ref={manifestInputRef}
+          type="file"
+          hidden
+          accept=".xlsx,.xls,.csv"
+          onChange={(e) => {
+            const f = e.target.files && e.target.files[0];
+            if (f) void handleManifestPick(f);
+            e.target.value = "";
+          }}
+        />
+      )}
 
       {items.length === 0 ? (
         /* ── Onboarding / new chat — centered, like the AI-chat empty state ── */
@@ -676,7 +726,7 @@ export function Chat({
               inputRef={inputRef}
               onPaste={onPaste}
               onSend={send}
-              onAttach={fileIntake ? () => fileInputRef.current?.click() : undefined}
+              onAttach={attachAction}
               streaming={streaming}
               chatKind={chatKind}
               onChangeKind={onChangeKind}
@@ -763,7 +813,7 @@ export function Chat({
                 inputRef={inputRef}
                 onPaste={onPaste}
                 onSend={send}
-                onAttach={fileIntake ? () => fileInputRef.current?.click() : undefined}
+                onAttach={attachAction}
                 streaming={streaming}
                 chatKind={chatKind}
                 onChangeKind={onChangeKind}

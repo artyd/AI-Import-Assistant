@@ -598,6 +598,24 @@ export default function WorkspacePage() {
     ).catch(() => alert("Не вдалося завантажити звіт."));
   }, [analysis]);
 
+  // Paperclip in the сборник chat: upload a picked manifest (xlsx/csv) into the
+  // collection so the agent's run_consolidated_analysis picks it up as the latest
+  // manifest. Returns ok + the file name for the chat to phrase the analyse request.
+  const uploadManifestToCollection = useCallback(
+    async (file: File): Promise<{ ok: boolean; name: string }> => {
+      if (!activeCollectionId) return { ok: false, name: file.name };
+      try {
+        const form = new FormData();
+        form.append("files", file, file.name || "manifest");
+        await api(`/api/collections/${activeCollectionId}/files`, { form });
+        return { ok: true, name: file.name };
+      } catch {
+        return { ok: false, name: file.name };
+      }
+    },
+    [activeCollectionId]
+  );
+
   // After a consolidated chat turn (analysis may have been run from chat), pull the
   // collection's latest analysis so the toolbar/table/export reflect it.
   const reloadLatestAnalysis = useCallback(async () => {
@@ -1024,9 +1042,11 @@ export default function WorkspacePage() {
                 </div>
               ) : null}
 
-              {/* On-demand manifest intake (file / URL / paste). Toggled by
-                  «Завантажити файл» in the welcome or «Новий аналіз» in the toolbar. */}
-              {showIntake ? (
+              {/* On-demand manifest intake ABOVE existing results (only when there
+                  is already an analysis — «Новий аналіз» toolbar toggle). Without an
+                  analysis the intake is shown CENTERED in the main area below instead
+                  of splitting the screen. */}
+              {analysis && showIntake ? (
                 <div
                   style={{
                     flex: "0 0 auto",
@@ -1062,11 +1082,33 @@ export default function WorkspacePage() {
                 </div>
               ) : null}
 
-              {/* Discussion chat — tied to this collection. Analysis can be run
-                  straight from here (paste a Google Sheets link / table); the answer
-                  lands as per-product blocks. New chat = centered welcome. */}
+              {/* Main area: centered intake (when explicitly requested and no
+                  analysis yet — single view, NO split), else the discussion chat
+                  (analysis can be run straight from here — paste a link/table or
+                  attach a file via the paperclip; the answer lands as per-product
+                  blocks). New chat = centered welcome. */}
               <div style={{ flex: 1, minHeight: 0 }}>
-                {endpoints ? (
+                {!analysis && showIntake ? (
+                  <div
+                    style={{
+                      height: "100%",
+                      overflowY: "auto",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      padding: 24,
+                    }}
+                  >
+                    <div style={{ width: "100%", maxWidth: 720 }}>
+                      <AnalyzePanel
+                        resolveCollectionId={ensureCollectionForAnalysis}
+                        conversationId={conversationId}
+                        onResult={onAnalysisResult}
+                        onOpenAiSettings={() => setAiSettingsOpen(true)}
+                      />
+                    </div>
+                  </div>
+                ) : endpoints ? (
                   <Chat
                     key={`consolidated-${activeCollectionId ?? "none"}-${chatSeq}`}
                     postPath={endpoints.postPath}
@@ -1078,21 +1120,17 @@ export default function WorkspacePage() {
                     onConversationStarted={onConversationStarted}
                     onLog={onLog}
                     onTurnComplete={reloadLatestAnalysis}
-                    placeholder="Вставте посилання на Google Sheets / таблицю, або спитайте про збірник…"
+                    onManifestUpload={uploadManifestToCollection}
+                    placeholder="Вставте посилання / таблицю, прикріпіть файл-маніфест 📎, або спитайте про збірник…"
                     emptyTitle="Аналіз збірного вантажу"
                     emptySubtitle={
                       <>
-                        Вставте посилання на Google&nbsp;Sheets або таблицю-маніфест — і я
-                        проаналізую збірник: коди, CIF&nbsp;/&nbsp;мито&nbsp;/&nbsp;ПДВ,
-                        походження та документи для транзиту&nbsp;ЄС і розмитнення в Україні.
+                        Вставте посилання на Google&nbsp;Sheets, таблицю-маніфест або
+                        прикріпіть файл (xlsx/csv) — і я проаналізую збірник: коди,
+                        CIF&nbsp;/&nbsp;мито&nbsp;/&nbsp;ПДВ, походження та документи.
                       </>
                     }
                     emptyStarters={CONSOLIDATED_STARTERS}
-                    emptyAction={
-                      <button className="btn" onClick={() => setShowIntake(true)}>
-                        <LnUpload size={15} /> Завантажити файл-маніфест
-                      </button>
-                    }
                   />
                 ) : (
                   /* No сборник yet — centered intake that AUTO-CREATES one on analysis. */
