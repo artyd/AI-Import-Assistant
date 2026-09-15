@@ -10,6 +10,7 @@ import {
 import { SseStream } from '../sse/sse.js';
 import { buildSystemPrompt } from '../agent/systemPrompt.js';
 import { runAgentTurn } from '../agent/loop.js';
+import { toolDefinitions, logistTools } from '../agent/tools.js';
 import { chatRateLimitConfig } from './chatRateLimit.js';
 
 const chatSchema = z.object({
@@ -50,6 +51,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           history,
           userMessage: message,
           sse,
+          // Shipment tools + the customs/logistics reference tools (when enabled).
+          tools: [...toolDefinitions, ...logistTools()],
         });
 
         const messageId = await appendMessage(

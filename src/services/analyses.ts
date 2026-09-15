@@ -16,6 +16,7 @@ interface ChecksBlob {
   warnings: string[];
   hasHigh: boolean;
   aiDegraded: boolean;
+  sourceChecked?: boolean;
 }
 
 export interface ArchiveRecord {
@@ -45,6 +46,7 @@ export async function persistAnalysis(
     warnings: result.warnings,
     hasHigh: result.hasHigh,
     aiDegraded: result.aiDegraded,
+    sourceChecked: result.sourceChecked,
   };
 
   const client = await pool.connect();
@@ -122,6 +124,22 @@ export async function listArchive(ownerId: string): Promise<ArchiveRecord[]> {
   }));
 }
 
+/** The most recent analysis for a collection (owner-scoped), or null. */
+export async function getLatestAnalysisForCollection(
+  ownerId: string,
+  collectionId: string,
+): Promise<AnalysisResult | null> {
+  const { rows } = await query<{ id: string }>(
+    `SELECT a.id FROM analyses a
+     JOIN collections c ON c.id = a.collection_id
+     WHERE a.collection_id = $1 AND c.owner_id = $2
+     ORDER BY a.created_at DESC LIMIT 1`,
+    [collectionId, ownerId],
+  );
+  const id = rows[0]?.id;
+  return id ? getAnalysisForOwner(ownerId, id) : null;
+}
+
 /** Owner-scoped delete of one archive record. Returns false when not found. */
 export async function deleteArchiveRecord(ownerId: string, id: string): Promise<boolean> {
   const { rowCount } = await query(
@@ -168,5 +186,6 @@ export async function getAnalysisForOwner(
     warnings: row.checks?.warnings ?? [],
     hasHigh: row.checks?.hasHigh ?? false,
     aiDegraded: row.checks?.aiDegraded ?? false,
+    sourceChecked: row.checks?.sourceChecked ?? false,
   };
 }

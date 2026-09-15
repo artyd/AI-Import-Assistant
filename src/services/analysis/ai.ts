@@ -148,6 +148,8 @@ function buildSystemPrompt(tariffFacts: string, ragContext: string): string {
 4. Код УКТЗЕД можеш ЗАПРОПОНУВАТИ (suggestedUctzedCode) — його окремо перевірить система за тарифом. Якщо не впевнений — null.
 5. euChecks/uaChecks мають бути практичними діями для брокера (NCTS/T1, MRN, ICS2, CMR/BL, packing list, seal, BCP/TRACES, фіто/вет, ДПСС, ADR/SDS, температурний режим), і спиратись на CONTEXT.
 6. Відповідь — суворий JSON за схемою, без markdown.
+7. ГЛИБИНА: давай КОНКРЕТНІ, дієві перевірки, а не загальні фрази. Розділяй режими: euChecks = транзит ЄС (NCTS/T1, ICS2/ENS, фінансова гарантія, MRN, статус союзного/несоюзного товару, офіс призначення, пломби, CMR/CIM); uaChecks = розмитнення в Україні (митна процедура, дозволи/ліцензії, контроль вет/фіто/ДПСС/радіологічний, сертифікати CoA/SDS, для фарми — CEP/GMP/реєстрація, маркування/пакування, температурний режим для термолабільних). riskNote — з ПРИЧИНОЮ ризику і тим, що САМЕ перевірити.
+8. За замовчуванням товар — ХІМІЧНА/ФАРМ СУБСТАНЦІЯ (АФІ), імпортер — торгова компанія в Україні. Якщо назва позиції вказує на іншу форму (готовий препарат, in-bulk, обладнання) — познач це в riskNote і став needsReview=true (це змінює код, режим і документи).
 
 === CONTEXT: ТАРИФНІ ФАКТИ ===
 ${tariffFacts || '(немає)'}
@@ -219,6 +221,7 @@ function chunk<T>(arr: T[], size: number): T[][] {
 export async function enrichWithAi(
   items: AiEnrichInputItem[],
   ownerId?: string,
+  onBatch?: (done: number, total: number) => void,
 ): Promise<AiEnrichment> {
   const byName = new Map<string, AiItem>();
   let criticalAlert = '';
@@ -229,7 +232,9 @@ export async function enrichWithAi(
     return { byName, criticalAlert, nctsList: [], degraded };
   }
 
-  for (const batch of chunk(items, BATCH_SIZE)) {
+  const batches = chunk(items, BATCH_SIZE);
+  let done = 0;
+  for (const batch of batches) {
     try {
       const system = buildSystemPrompt(buildTariffFacts(batch), buildRagContext(batch));
       const raw = await callModel(system, buildUserPrompt(batch), ownerId);
@@ -242,6 +247,7 @@ export async function enrichWithAi(
       // forces needsReview on any row without an AI item. Never crash.
       degraded = true;
     }
+    onBatch?.(++done, batches.length);
   }
 
   return { byName, criticalAlert, nctsList: [...nctsSet], degraded };

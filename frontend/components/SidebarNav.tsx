@@ -10,7 +10,6 @@ import {
   LnList,
   LnPanelLeft,
   LnPencil,
-  LnSearch,
   LnTrash,
 } from "./LineIcons";
 
@@ -28,11 +27,12 @@ interface Props {
   collapsed: boolean;
   onToggleCollapsed: () => void;
   onNewChat: () => void;
-  onOpenSearch: () => void;
   onSelectShipment: (id: string) => void;
+  onRenameShipment: () => void;
   onDeleteShipment: () => void;
   onSelectCollection: (id: string) => void;
   onNewCollection: () => void;
+  onRenameActiveCollection: () => void;
   onDeleteActiveCollection: () => void;
   onSelectConversation: (id: string) => void;
 }
@@ -68,11 +68,12 @@ export function SidebarNav(props: Props) {
     collapsed,
     onToggleCollapsed,
     onNewChat,
-    onOpenSearch,
     onSelectShipment,
+    onRenameShipment,
     onDeleteShipment,
     onSelectCollection,
     onNewCollection,
+    onRenameActiveCollection,
     onDeleteActiveCollection,
     onSelectConversation,
   } = props;
@@ -111,22 +112,19 @@ export function SidebarNav(props: Props) {
         </button>
         <button
           style={{ ...railBtn, background: "var(--surface)", border: "1px solid var(--border2)", color: "var(--accent)" }}
-          onClick={onNewChat}
+          onClick={() => {
+            onSetView("chat");
+            onNewChat();
+          }}
           title="Новий чат"
         >
           <LnPencil size={17} />
-        </button>
-        <button style={railBtn} onClick={() => { onSetView("chat"); onNewChat(); }} title="Новий чат">
-          <LnPencil size={18} />
         </button>
         <button style={railBtn} onClick={() => onSetView("news")} title="Новини">
           <LnList size={18} />
         </button>
         <button style={railBtn} onClick={() => onSetView("map")} title="Карта">
           <LnGrid size={18} />
-        </button>
-        <button style={railBtn} onClick={onOpenSearch} title="Пошук">
-          <LnSearch size={18} />
         </button>
       </aside>
     );
@@ -232,12 +230,6 @@ export function SidebarNav(props: Props) {
           </span>
           Карта
         </button>
-        <button style={navBtn} onClick={onOpenSearch} className="nav-row">
-          <span style={{ color: "var(--muted)", display: "flex" }}>
-            <LnSearch size={18} />
-          </span>
-          Пошук
-        </button>
       </div>
 
       {/* Chat type switcher (Звичайний / Постачання / Збірний) — dubs the composer one */}
@@ -302,6 +294,8 @@ export function SidebarNav(props: Props) {
                 value={chatKind === "supply" ? current.id : activeCollectionId ?? ""}
                 onChange={(e) => {
                   const v = e.target.value;
+                  // Picking an entity from News/Map must return to the chat view.
+                  onSetView("chat");
                   if (chatKind === "supply") {
                     if (v !== current.id) onSelectShipment(v);
                   } else if (v) {
@@ -380,6 +374,26 @@ export function SidebarNav(props: Props) {
               </button>
             )}
             <button
+              onClick={chatKind === "supply" ? onRenameShipment : onRenameActiveCollection}
+              title={chatKind === "supply" ? "Перейменувати постачання" : "Перейменувати збірник"}
+              disabled={chatKind === "consolidated" && !activeCollectionId}
+              style={{
+                flex: "none",
+                width: 40,
+                height: 40,
+                borderRadius: 10,
+                background: "var(--surface)",
+                border: "1px solid var(--border)",
+                color: "var(--muted)",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <LnPencil size={15} />
+            </button>
+            <button
               onClick={chatKind === "supply" ? onDeleteShipment : onDeleteActiveCollection}
               title={chatKind === "supply" ? "Видалити постачання" : "Видалити збірник"}
               disabled={chatKind === "consolidated" && !activeCollectionId}
@@ -428,7 +442,11 @@ export function SidebarNav(props: Props) {
             return (
               <button
                 key={c.id}
-                onClick={() => onSelectConversation(c.id)}
+                onClick={() => {
+                  // From News/Map, opening a chat must switch back to the chat view.
+                  onSetView("chat");
+                  onSelectConversation(c.id);
+                }}
                 className="nav-row"
                 style={{
                   display: "flex",

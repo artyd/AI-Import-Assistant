@@ -1,8 +1,9 @@
 "use client";
 
 // Archive of past consolidated-cargo analyses — a port of the prototype's archive
-// modal (ШТУРМАН.dc.html lines ~844–869). Lists GET /api/analyses/archive and
-// allows deleting a record via DELETE /api/analyses/archive/:id.
+// (ШТУРМАН.dc.html lines ~844–869). Lists GET /api/analyses/archive and allows
+// deleting a record via DELETE /api/analyses/archive/:id. Exposed both as an
+// embeddable list (ArchiveList — used in the Збірний working panel) and a modal.
 
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
@@ -25,7 +26,8 @@ function fmtDate(iso: string): string {
   );
 }
 
-export function ArchiveModal({ onClose }: { onClose: () => void }) {
+// Embeddable archive list (no overlay/header). Used in the working panel.
+export function ArchiveList() {
   const [records, setRecords] = useState<ArchiveRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -59,6 +61,105 @@ export function ArchiveModal({ onClose }: { onClose: () => void }) {
     }
   };
 
+  return (
+    <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "12px 14px 18px" }}>
+      {loading ? (
+        <div style={{ display: "grid", placeItems: "center", padding: 36 }}>
+          <IconSpinner size={22} />
+        </div>
+      ) : error ? (
+        <div style={{ padding: "36px 16px", textAlign: "center", color: "var(--err)", fontSize: 13 }}>{error}</div>
+      ) : records.length === 0 ? (
+        <div style={{ padding: "36px 16px", textAlign: "center", color: "var(--muted)", fontSize: 13, lineHeight: 1.5 }}>
+          Архів порожній. Зробіть аналіз збірного вантажу — результати зберігатимуться тут.
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {records.map((rec) => (
+            <div
+              key={rec.id}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                padding: "12px 14px",
+                background: "var(--card)",
+                border: "1px solid var(--border)",
+                borderRadius: 12,
+              }}
+            >
+              <span
+                style={{
+                  flex: "none",
+                  width: 36,
+                  height: 36,
+                  borderRadius: 10,
+                  background: "var(--accentSoft)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "var(--accent)",
+                }}
+              >
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 3v18h18" />
+                  <path d="M7 15l3-4 3 3 4-6" />
+                </svg>
+              </span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
+                  {rec.source} · лист «{rec.sheet}»
+                </div>
+                <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 2, fontVariantNumeric: "tabular-nums" }}>
+                  {rec.item_count} позицій · до сплати {fmtPayable(rec.payable)} · {fmtDate(rec.created_at)}
+                </div>
+              </div>
+              {rec.has_high ? (
+                <span
+                  style={{
+                    flex: "none",
+                    fontSize: 10.5,
+                    fontWeight: 600,
+                    color: "var(--err)",
+                    background: "var(--errBg)",
+                    borderRadius: 6,
+                    padding: "3px 8px",
+                  }}
+                >
+                  ризик
+                </span>
+              ) : null}
+              <button
+                onClick={() => remove(rec)}
+                title="Видалити"
+                style={{
+                  flex: "none",
+                  width: 30,
+                  height: 30,
+                  border: "none",
+                  background: "transparent",
+                  color: "var(--muted)",
+                  cursor: "pointer",
+                  borderRadius: 8,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                </svg>
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Modal wrapper (kept for any standalone use).
+export function ArchiveModal({ onClose }: { onClose: () => void }) {
   return (
     <div
       onClick={onClose}
@@ -121,100 +222,7 @@ export function ArchiveModal({ onClose }: { onClose: () => void }) {
             </svg>
           </button>
         </div>
-
-        <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px 18px" }}>
-          {loading ? (
-            <div style={{ display: "grid", placeItems: "center", padding: 36 }}>
-              <IconSpinner size={22} />
-            </div>
-          ) : error ? (
-            <div style={{ padding: "36px 16px", textAlign: "center", color: "var(--err)", fontSize: 13 }}>{error}</div>
-          ) : records.length === 0 ? (
-            <div style={{ padding: "36px 16px", textAlign: "center", color: "var(--muted)", fontSize: 13, lineHeight: 1.5 }}>
-              Архів порожній. Зробіть аналіз збірного вантажу — результати зберігатимуться тут.
-            </div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {records.map((rec) => (
-                <div
-                  key={rec.id}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 12,
-                    padding: "12px 14px",
-                    background: "var(--card)",
-                    border: "1px solid var(--border)",
-                    borderRadius: 12,
-                  }}
-                >
-                  <span
-                    style={{
-                      flex: "none",
-                      width: 36,
-                      height: 36,
-                      borderRadius: 10,
-                      background: "var(--accentSoft)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      color: "var(--accent)",
-                    }}
-                  >
-                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M3 3v18h18" />
-                      <path d="M7 15l3-4 3 3 4-6" />
-                    </svg>
-                  </span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
-                      {rec.source} · лист «{rec.sheet}»
-                    </div>
-                    <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 2, fontVariantNumeric: "tabular-nums" }}>
-                      {rec.item_count} позицій · до сплати {fmtPayable(rec.payable)} · {fmtDate(rec.created_at)}
-                    </div>
-                  </div>
-                  {rec.has_high ? (
-                    <span
-                      style={{
-                        flex: "none",
-                        fontSize: 10.5,
-                        fontWeight: 600,
-                        color: "var(--err)",
-                        background: "var(--errBg)",
-                        borderRadius: 6,
-                        padding: "3px 8px",
-                      }}
-                    >
-                      ризик
-                    </span>
-                  ) : null}
-                  <button
-                    onClick={() => remove(rec)}
-                    title="Видалити"
-                    style={{
-                      flex: "none",
-                      width: 30,
-                      height: 30,
-                      border: "none",
-                      background: "transparent",
-                      color: "var(--muted)",
-                      cursor: "pointer",
-                      borderRadius: 8,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                    </svg>
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        <ArchiveList />
       </div>
     </div>
   );

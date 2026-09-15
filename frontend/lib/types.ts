@@ -290,6 +290,22 @@ export interface AnalysisRow {
   eu: AnalysisCheck[];
   ua: AnalysisCheck[];
   needsReview: boolean;
+  sourceCheck?: SourceCheck | null;
+}
+
+// Live cross-check with the official source (qdpro via logist-mcp). Enrichment
+// only — never alters the CIF/мито/ПДВ numbers above.
+export interface SourceCheck {
+  dutyPref: string | null;
+  dutyFull: string | null;
+  banRf: boolean;
+  license: boolean;
+  vetControl: boolean;
+  phyto: boolean;
+  dualUse: boolean;
+  narcotic: boolean;
+  dutyMismatch: boolean;
+  source: string;
 }
 
 export interface AnalysisMeta {
@@ -319,6 +335,7 @@ export interface AnalysisResult {
   warnings: string[];
   hasHigh: boolean;
   aiDegraded: boolean;
+  sourceChecked?: boolean;
 }
 
 // ── Map (Карта постачань) ─────────────────────────────────────────────────────

@@ -74,12 +74,15 @@ services:
       CORS_ORIGIN: ${CORS_ORIGIN}
       STORAGE_DIR: /data/storage
       MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-26214400}
+      # Internal logist-mcp URL (Phase 1). Empty disables the Phase-2 tools.
+      LOGIST_MCP_URL: ${LOGIST_MCP_URL:-http://logist-mcp:8015}
     volumes:
       - storage_data:/data/storage
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
       qdrant: { condition: service_healthy }
+      logist-mcp: { condition: service_started }
 
   worker:
     build:
@@ -98,12 +101,18 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       CORS_ORIGIN: ${CORS_ORIGIN}
       STORAGE_DIR: /data/storage
+      LOGIST_MCP_URL: ${LOGIST_MCP_URL:-http://logist-mcp:8015}
+      # News RSS ingest (worker cron). On by default; tune or disable via .env.
+      NEWS_ENABLED: ${NEWS_ENABLED:-true}
+      NEWS_CRON: ${NEWS_CRON:-*/30 * * * *}
+      NEWS_RETENTION_DAYS: ${NEWS_RETENTION_DAYS:-14}
     volumes:
       - storage_data:/data/storage
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
       qdrant: { condition: service_healthy }
+      logist-mcp: { condition: service_started }
 
   frontend:
     build:
@@ -122,8 +131,31 @@ services:
     depends_on:
       - backend
 
+  # Internal customs/logistics tool server (plain-REST over HTTP). INTERNAL
+  # ONLY — no host port, no Caddy route: the backend reaches it on the compose
+  # network at http://logist-mcp:8015. Nothing here is exposed to the shared host
+  # or the other sites on it. Its read-only endpoints hit only public upstreams
+  # (qdpro.com.ua, bank.gov.ua, PubChem) + a local DRLZ cache on the volume below.
+  logist-mcp:
+    build:
+      context: ./logist-mcp
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      FASTMCP_HOST: 0.0.0.0
+      DRLZ_CACHE_PATH: /data/cache/drlz_cache.json
+    volumes:
+      - logist_cache:/data/cache
+    healthcheck:
+      test: ['CMD-SHELL', 'python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen(''http://127.0.0.1:8015/health'',timeout=3).status==200 else 1)"']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
 volumes:
   postgres_data:
   redis_data:
   qdrant_data:
   storage_data:
+  logist_cache:

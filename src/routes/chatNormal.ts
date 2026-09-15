@@ -11,6 +11,7 @@ import {
 import { SseStream } from '../sse/sse.js';
 import { buildNormalSystemPrompt } from '../agent/systemPrompt.js';
 import { runAgentTurn } from '../agent/loop.js';
+import { logistTools } from '../agent/tools.js';
 import { chatRateLimitConfig } from './chatRateLimit.js';
 
 const chatSchema = z.object({
@@ -54,7 +55,9 @@ export async function chatNormalRoutes(app: FastifyInstance): Promise<void> {
         history,
         userMessage: message,
         sse,
-        tools: [], // global consultant: no shipment tools
+        // Global consultant: no shipment tools, but the customs/logistics
+        // reference lookups (УКТ ЗЕД / dual-use / НБУ / PubChem) when enabled.
+        tools: logistTools(),
       });
 
       const messageId = await appendMessage(

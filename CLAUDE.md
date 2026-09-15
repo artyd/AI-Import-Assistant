@@ -40,10 +40,22 @@ re-checks them manually.
    discrepancies ⇒ `get_discrepancies` (backed by `document_extractions`); report
    ⇒ `generate_report`. Retrieval tools locate/quote source text, they do not
    compute verdicts.
-3. **HS codes advisory only.** Ask product clarifiers first, offer **multiple**
-   candidates with reasoning, and state that a customs specialist must confirm —
-   never one code as fact. (A ТН ВЭД reference DB / official-source checks /
-   duties / risk = **Phase 6**, out of scope for now.)
+3. **HS codes advisory, verified against qdpro.** Ask product clarifiers first,
+   offer **multiple** candidates with reasoning, and state that a customs
+   specialist must confirm — never one code as fact. But the **source of truth**
+   for the code, origin, duties/VAT/preferences, restrictions and required
+   documents (EU transit / UA import) is now the **official qdpro source via the
+   `logist-mcp` tools** (`uktzed_lookup_code`/`browse`/`dualuse`, gated on
+   `LOGIST_MCP_URL`). The self-written static base (`uktzed_code_db.json`,
+   `product_origin_kb.json`, `hs_duty_table.json`, `ua_mfn*.json`) is a **fallback
+   only** — used when qdpro is unavailable, and the agent must say so. The
+   consolidated-analysis engine keeps its static numeric calc but cross-checks
+   each line against qdpro (`/rest/uktzed/flags`) and flags divergences.
+
+   **User portrait** (encoded in every system prompt): a Ukraine trading-company
+   import specialist who most often ships chemical/pharma **substances** (APIs) —
+   "substance" is the default assumed form; any other form (finished product,
+   in-bulk, equipment) must be clarified because it changes the code/regime/docs.
 4. **No fabrication on empty data.** If a tool returns "no data", say so; never
    infer from memory or filename.
 

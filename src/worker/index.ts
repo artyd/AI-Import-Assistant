@@ -182,19 +182,24 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
           }
         }
 
-        // Detect the document TYPE and record it as a suggestion — never a
-        // silent move (plan Q14/Q16). The single-list UI shows the label; folders
-        // are assembled only at export time. Guarded on folder_id IS NULL so we
-        // never touch a file the user already placed by hand.
+        // Auto-file the document into its skeleton folder using the CLAUDE
+        // classifier (structured extraction → filename heuristic → LLM-on-text —
+        // Voyage/embeddings are never consulted here). High/medium confidence
+        // moves the file; low confidence stays in the inbox with a suggestion for
+        // the user to confirm. Guarded on folder_id IS NULL so we never touch a
+        // file the user already placed by hand.
         const { rows: cur } = await query<{ folder_id: string | null }>(
           'SELECT folder_id FROM files WHERE id = $1',
           [file.id],
         );
         if (cur[0] && cur[0].folder_id === null) {
-          const res = await classifyAndFile(file.workspace_id, file.id, { move: false });
-          if (res?.suggested) {
+          const res = await classifyAndFile(file.workspace_id, file.id, { move: true });
+          if (res?.to) {
             // eslint-disable-next-line no-console
-            console.log(`Suggested type for ${file.id} (${file.name}) → ${res.suggested}.`);
+            console.log(`Auto-filed ${file.id} (${file.name}) → ${res.to}.`);
+          } else if (res?.suggested) {
+            // eslint-disable-next-line no-console
+            console.log(`Suggested folder for ${file.id} (${file.name}) → ${res.suggested} (needs confirm).`);
           }
         }
       } catch (err) {
