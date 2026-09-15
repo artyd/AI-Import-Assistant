@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { api, ApiError, downloadBlob } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useTheme } from "@/lib/theme";
-import { openEventsChannel } from "@/lib/sse";
+import { openEventsChannel, streamAnalyze } from "@/lib/sse";
 import type {
   AnalysisResult,
   ChecklistItem,
@@ -114,6 +114,9 @@ export default function WorkspacePage() {
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [showIntake, setShowIntake] = useState(false);
   const [showTable, setShowTable] = useState(false);
+  // Progress for a chat-triggered analysis (paperclip / pasted link) run directly
+  // through the analyze endpoint so the EXACT per-product blocks land in the thread.
+  const [analyzeProgress, setAnalyzeProgress] = useState<{ pct: number; step: string } | null>(null);
   const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
 
   // Shell UI state.
@@ -616,22 +619,47 @@ export default function WorkspacePage() {
     ).catch(() => alert("Не вдалося завантажити звіт."));
   }, [analysis]);
 
-  // Paperclip in the сборник chat: upload a picked manifest (xlsx/csv) into the
-  // collection so the agent's run_consolidated_analysis picks it up as the latest
-  // manifest. Returns ok + the file name for the chat to phrase the analyse request.
-  const uploadManifestToCollection = useCallback(
-    async (file: File): Promise<{ ok: boolean; name: string }> => {
-      if (!activeCollectionId) return { ok: false, name: file.name };
-      try {
-        const form = new FormData();
-        form.append("files", file, file.name || "manifest");
-        await api(`/api/collections/${activeCollectionId}/files`, { form });
-        return { ok: true, name: file.name };
-      } catch {
-        return { ok: false, name: file.name };
+  // Chat-triggered analysis (paperclip file / pasted Google Sheets link): runs the
+  // analyze endpoint DIRECTLY (not via the agent), which posts the exact per-product
+  // Markdown into the conversation — so the answer isn't reformatted into a table.
+  const analyzeManifest = useCallback(
+    async (source: { file?: File; url?: string }) => {
+      if (analyzeProgress) return; // one at a time
+      const suggestedName = source.file
+        ? source.file.name.replace(/\.[^.]+$/, "").slice(0, 80)
+        : "Google Sheets";
+      const cid = await ensureCollectionForAnalysis(suggestedName);
+      if (!cid) {
+        alert("Не вдалося визначити збірник.");
+        return;
       }
+      const path = `/api/collections/${cid}/analyze`;
+      let body: Record<string, unknown> | FormData;
+      if (source.file) {
+        const form = new FormData();
+        if (conversationId) form.append("conversationId", conversationId);
+        form.append("files", source.file, source.file.name || "manifest");
+        body = form;
+      } else {
+        body = conversationId
+          ? { sheetUrl: source.url, conversationId }
+          : { sheetUrl: source.url };
+      }
+      setAnalyzeProgress({ pct: 0, step: "Готую аналіз…" });
+      await streamAnalyze(path, body, {
+        onProgress: (e) => setAnalyzeProgress(e),
+        onDone: (d) => {
+          setAnalyzeProgress(null);
+          setAnalysis(d.analysis);
+          if (d.conversationId) void showAnalysisConversation(cid, d.conversationId);
+        },
+        onError: (m) => {
+          setAnalyzeProgress(null);
+          alert(m || "Не вдалося виконати аналіз.");
+        },
+      });
     },
-    [activeCollectionId]
+    [analyzeProgress, ensureCollectionForAnalysis, conversationId, showAnalysisConversation]
   );
 
   // After a consolidated chat turn (analysis may have been run from chat), pull the
@@ -1075,6 +1103,45 @@ export default function WorkspacePage() {
                 </div>
               ) : null}
 
+              {/* Chat-triggered analysis progress (paperclip / pasted link). */}
+              {analyzeProgress ? (
+                <div
+                  style={{
+                    flex: "none",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    padding: "9px 20px",
+                    borderBottom: "1px solid var(--border)",
+                  }}
+                >
+                  <IconSpinner size={15} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                      {analyzeProgress.step} · {analyzeProgress.pct}%
+                    </div>
+                    <div
+                      style={{
+                        height: 4,
+                        background: "var(--hover)",
+                        borderRadius: 999,
+                        marginTop: 4,
+                        overflow: "hidden",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: `${analyzeProgress.pct}%`,
+                          height: "100%",
+                          background: "var(--accent)",
+                          transition: "width .3s ease",
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
               {/* On-demand manifest intake ABOVE existing results (only when there
                   is already an analysis — «Новий аналіз» toolbar toggle). Without an
                   analysis the intake is shown CENTERED in the main area below instead
@@ -1153,7 +1220,7 @@ export default function WorkspacePage() {
                     onConversationStarted={onConversationStarted}
                     onLog={onLog}
                     onTurnComplete={reloadLatestAnalysis}
-                    onManifestUpload={uploadManifestToCollection}
+                    onAnalyzeManifest={analyzeManifest}
                     placeholder="Вставте посилання / таблицю, прикріпіть файл-маніфест 📎, або спитайте про збірник…"
                     emptyTitle="Аналіз збірного вантажу"
                     emptySubtitle={

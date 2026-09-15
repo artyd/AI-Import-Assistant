@@ -110,9 +110,10 @@ interface Props {
   // Fired after every assistant turn completes (used to refresh side state, e.g.
   // reload the latest analysis when it was triggered from the consolidated chat).
   onTurnComplete?: () => void;
-  // Consolidated manifest attach: upload a picked xlsx/csv into the collection,
-  // then the chat auto-asks the agent to analyse it. Enables a composer paperclip.
-  onManifestUpload?: (file: File) => Promise<{ ok: boolean; name: string }>;
+  // Consolidated: run the manifest analysis DIRECTLY (not via the agent) so the
+  // exact per-product answer lands in the thread. Triggered by the paperclip (a
+  // picked xlsx/csv) or by pasting a Google Sheets link into the composer.
+  onAnalyzeManifest?: (source: { file?: File; url?: string }) => void;
   // File intake (paperclip auto-file flow) — supply only. When these are omitted
   // the composer's attach/drag/paste are disabled (normal has no files;
   // consolidated files are uploaded via the right-panel Files tab in this phase).
@@ -177,7 +178,7 @@ export function Chat({
   emptyStarters,
   emptyAction,
   onTurnComplete,
-  onManifestUpload,
+  onAnalyzeManifest,
   folders,
   onUploadAndClassify,
   onMoveFile,
@@ -500,6 +501,17 @@ export function Chat({
     const files = pending;
     const q = quote;
     if (!text && files.length === 0 && !q) return;
+
+    // Consolidated: a pasted Google Sheets link runs the analysis DIRECTLY (exact
+    // per-product blocks), not through the agent (which would reformat it).
+    if (onAnalyzeManifest && !q && files.length === 0) {
+      const m = text.match(/https?:\/\/docs\.google\.com\/spreadsheets\/\S+/i);
+      if (m) {
+        setInput("");
+        onAnalyzeManifest({ url: m[0] });
+        return;
+      }
+    }
     if (files.length) {
       setPending([]);
       await handleFiles(files);
@@ -513,34 +525,11 @@ export function Chat({
       if (q) setQuote(null);
       await runMessage(composed);
     }
-  }, [streaming, input, pending, quote, handleFiles, runMessage]);
-
-  // Manifest paperclip (consolidated): upload the picked file into the collection,
-  // then ask the agent to analyse it — the answer streams into the thread.
-  const handleManifestPick = useCallback(
-    async (file: File) => {
-      if (!onManifestUpload || streaming) return;
-      setNotice(`Завантажую маніфест «${file.name}»…`);
-      try {
-        const res = await onManifestUpload(file);
-        if (res.ok) {
-          setNotice(null);
-          await runMessage(
-            `Проаналізуй завантажений файл-маніфест «${res.name}» повністю, по кожній позиції.`
-          );
-        } else {
-          setNotice("Не вдалося завантажити маніфест.");
-        }
-      } catch {
-        setNotice("Не вдалося завантажити маніфест.");
-      }
-    },
-    [onManifestUpload, streaming, runMessage]
-  );
+  }, [streaming, input, pending, quote, handleFiles, runMessage, onAnalyzeManifest]);
 
   // Which action the composer paperclip performs: manifest analyse (consolidated)
   // or the supply auto-file staging flow.
-  const attachAction = onManifestUpload
+  const attachAction = onAnalyzeManifest
     ? () => manifestInputRef.current?.click()
     : fileIntake
       ? () => fileInputRef.current?.click()
@@ -638,8 +627,8 @@ export function Chat({
           e.target.value = "";
         }}
       />
-      {/* Manifest picker (consolidated): a single xlsx/csv → upload + analyse. */}
-      {onManifestUpload && (
+      {/* Manifest picker (consolidated): a single xlsx/csv → analyse directly. */}
+      {onAnalyzeManifest && (
         <input
           ref={manifestInputRef}
           type="file"
@@ -647,7 +636,7 @@ export function Chat({
           accept=".xlsx,.xls,.csv"
           onChange={(e) => {
             const f = e.target.files && e.target.files[0];
-            if (f) void handleManifestPick(f);
+            if (f) onAnalyzeManifest({ file: f });
             e.target.value = "";
           }}
         />
