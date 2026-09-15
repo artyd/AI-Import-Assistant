@@ -37,7 +37,6 @@ import { MapView } from "@/components/MapView";
 import { CommandPalette, type PaletteAction } from "@/components/CommandPalette";
 import { IconSpinner } from "@/components/icons";
 import {
-  LnChevronDown,
   LnExport,
   LnFolder,
   LnFolderPlus,
@@ -106,6 +105,7 @@ export default function WorkspacePage() {
 
   // Consolidated-cargo analysis result (latest) + archive modal.
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
+  const [showIntake, setShowIntake] = useState(false);
   const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
 
   // Shell UI state.
@@ -569,9 +569,30 @@ export default function WorkspacePage() {
     };
   }, [chatKind, activeCollectionId]);
 
-  // Drop the shown analysis when switching collection / leaving consolidated.
+  // Load the collection's latest persisted analysis (so a сборник keeps its
+  // analysis instead of losing it on reload / switch). Cleared when leaving
+  // consolidated or with no collection selected.
   useEffect(() => {
+    setShowIntake(false);
+    if (chatKind !== "consolidated" || !activeCollectionId) {
+      setAnalysis(null);
+      return;
+    }
+    let cancelled = false;
     setAnalysis(null);
+    (async () => {
+      try {
+        const r = await api<{ analysis: AnalysisResult | null }>(
+          `/api/collections/${activeCollectionId}/analysis/latest`
+        );
+        if (!cancelled) setAnalysis(r.analysis);
+      } catch {
+        if (!cancelled) setAnalysis(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [activeCollectionId, chatKind]);
 
   const colUpload = useCallback(
@@ -850,19 +871,24 @@ export default function WorkspacePage() {
       />
 
       <main style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, background: "var(--chat)" }}>
-        <TopBar
-          workspace={workspace}
-          steps={steps}
-          rightOpen={rightOpen}
-          onToggleRight={() => setRightOpen((v) => !v)}
-          onTogglePalette={() => setPaletteOpen((v) => !v)}
-          sound={sound}
-          onToggleSound={toggleSound}
-          onLock={lock}
-          theme={theme}
-          onToggleTheme={toggleTheme}
-          onSaveSupplier={saveSupplier}
-        />
+        {/* Supply-oriented top bar (number / completeness / supplier). Hidden in
+            the Збірний view — a сборник has no supply completeness, so it would
+            just be a misleading duplicate bar. */}
+        {!(view === "chat" && chatKind === "consolidated") && (
+          <TopBar
+            workspace={workspace}
+            steps={steps}
+            rightOpen={rightOpen}
+            onToggleRight={() => setRightOpen((v) => !v)}
+            onTogglePalette={() => setPaletteOpen((v) => !v)}
+            sound={sound}
+            onToggleSound={toggleSound}
+            onLock={lock}
+            theme={theme}
+            onToggleTheme={toggleTheme}
+            onSaveSupplier={saveSupplier}
+          />
+        )}
         <div style={{ flex: 1, minHeight: 0 }}>
           {view === "news" ? (
             <NewsView />
@@ -881,114 +907,90 @@ export default function WorkspacePage() {
               </div>
             </div>
           ) : chatKind === "consolidated" ? (
-            /* Збірний = аналіз збірного вантажу (панель вводу + карточка), по центру.
-               Зверху — вибір збірника, про який іде мова. Архів у робочій панелі. */
+            /* Збірний: (1) картка аналізу, прив'язана до цього збірника, зверху;
+               (2) блок вводу маніфесту (файл/URL/таблиця) — коли аналізу ще нема
+               або натиснуто «Новий аналіз»; (3) чат обговорення, прив'язаний до
+               збірника (композер з вибором збірника). Жодних топ-барів. */
             <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
-              <div
-                style={{
-                  flex: "none",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 12,
-                  padding: "12px 24px",
-                  borderBottom: "1px solid var(--border)",
-                }}
-              >
-                <span
+              {analysis ? (
+                <div
                   style={{
-                    flex: "none",
-                    fontSize: 11,
-                    fontWeight: 600,
-                    letterSpacing: 0.5,
-                    color: "var(--faint)",
-                    textTransform: "uppercase",
+                    flex: "0 0 auto",
+                    maxHeight: "52%",
+                    overflowY: "auto",
+                    borderBottom: "1px solid var(--border)",
                   }}
                 >
-                  Збірник
-                </span>
-                <div style={{ position: "relative", flex: 1, maxWidth: 440, minWidth: 0 }}>
-                  <select
-                    value={activeCollectionId ?? ""}
-                    onChange={(e) => e.target.value && selectCollection(e.target.value)}
-                    style={{
-                      width: "100%",
-                      height: 38,
-                      padding: "0 32px 0 12px",
-                      background: "var(--surface)",
-                      border: "1px solid var(--border2)",
-                      borderRadius: 10,
-                      fontSize: 13,
-                      fontWeight: 600,
-                      color: "var(--text)",
-                      outline: "none",
-                      cursor: "pointer",
-                      appearance: "none",
-                      WebkitAppearance: "none",
-                      textOverflow: "ellipsis",
-                    }}
-                  >
-                    {collections.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.number ?? "Збірник"}
-                        {c.supplier ? ` · ${c.supplier}` : ""}
-                      </option>
-                    ))}
-                  </select>
-                  <span
-                    style={{
-                      position: "absolute",
-                      right: 11,
-                      top: "50%",
-                      transform: "translateY(-50%)",
-                      pointerEvents: "none",
-                      color: "var(--muted)",
-                      display: "flex",
-                    }}
-                  >
-                    <LnChevronDown size={16} />
-                  </span>
-                </div>
-                <button className="btn" onClick={newCollection} title="Новий збірник">
-                  <LnFolderPlus size={15} /> Новий
-                </button>
-              </div>
-
-              <div style={{ flex: 1, minHeight: 0 }}>
-                {analysis ? (
-                  <div style={{ height: "100%", overflowY: "auto", minHeight: 0 }}>
-                    <div style={{ padding: "22px 24px 32px" }}>
-                      <div style={{ maxWidth: 900, margin: "0 auto" }}>
+                  <div style={{ padding: "16px 24px 20px", maxWidth: 960, margin: "0 auto" }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 12,
+                        marginBottom: 8,
+                      }}
+                    >
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>
+                        Аналіз збірного вантажу
+                      </div>
+                      <button className="btn" onClick={() => setShowIntake((v) => !v)}>
+                        {showIntake ? "Сховати ввід" : "Новий аналіз"}
+                      </button>
+                    </div>
+                    {showIntake ? (
+                      <div style={{ marginBottom: 16 }}>
                         <AnalyzePanel
                           collectionId={activeCollectionId!}
-                          onResult={setAnalysis}
+                          onResult={(r) => {
+                            setAnalysis(r);
+                            setShowIntake(false);
+                          }}
                           onOpenAiSettings={() => setAiSettingsOpen(true)}
                         />
-                        <div style={{ marginTop: 20 }}>
-                          <AnalysisCard analysis={analysis} />
-                        </div>
                       </div>
-                    </div>
+                    ) : null}
+                    <AnalysisCard analysis={analysis} />
                   </div>
-                ) : (
-                  <div
-                    style={{
-                      height: "100%",
-                      overflowY: "auto",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      padding: 24,
-                    }}
-                  >
-                    <div style={{ width: "100%", maxWidth: 720 }}>
-                      <AnalyzePanel
-                        collectionId={activeCollectionId!}
-                        onResult={setAnalysis}
-                        onOpenAiSettings={() => setAiSettingsOpen(true)}
-                      />
-                    </div>
+                </div>
+              ) : (
+                <div
+                  style={{
+                    flex: "0 0 auto",
+                    padding: "20px 24px",
+                    display: "flex",
+                    justifyContent: "center",
+                    borderBottom: "1px solid var(--border)",
+                  }}
+                >
+                  <div style={{ width: "100%", maxWidth: 720 }}>
+                    <AnalyzePanel
+                      collectionId={activeCollectionId!}
+                      onResult={(r) => {
+                        setAnalysis(r);
+                        setShowIntake(false);
+                      }}
+                      onOpenAiSettings={() => setAiSettingsOpen(true)}
+                    />
                   </div>
-                )}
+                </div>
+              )}
+
+              {/* Discussion chat — tied to this collection (composer has the
+                  сборник selector). Appears in the sidebar chat list, persists. */}
+              <div style={{ flex: 1, minHeight: 0 }}>
+                <Chat
+                  key={`consolidated-${activeCollectionId ?? "none"}-${chatSeq}`}
+                  postPath={endpoints.postPath}
+                  chatKind={chatKind}
+                  onChangeKind={setChatKind}
+                  selector={composerSelector}
+                  conversationId={conversationId}
+                  initialMessages={initialMessages}
+                  onConversationStarted={onConversationStarted}
+                  onLog={onLog}
+                  placeholder="Запитайте про аналіз збірника: коди, ставки, документи, походження…"
+                />
               </div>
             </div>
           ) : (

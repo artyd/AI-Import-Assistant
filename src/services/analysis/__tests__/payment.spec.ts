@@ -110,13 +110,16 @@ describe('calculatePayments — ставка мита', () => {
     expect(mfn.duty!.value).toBe(50);
   });
 
-  it('невідома ставка → мито/ПДВ не рахуються, needsReview', () => {
+  it('невідома ставка → мито null, але ПДВ нараховується на митну вартість, needsReview', () => {
     const l = calc({ incoterm: 'CIF' }, [
       { name: 'X', qtyKg: 100, unitPrice: 10, dutyRatePercent: null },
     ]).lines[0]!;
+    // Мито невідоме → не рахуємо, але ПДВ 20% нараховується на митну вартість
+    // (1000), а не пропускається — інакше загальний ПДВ занижується.
     expect(l.duty).toBeNull();
-    expect(l.vat).toBeNull();
-    expect(l.totalPayable).toBeNull();
+    expect(l.vat!.value).toBe(200);
+    expect(l.vat!.estimated).toBe(true);
+    expect(l.totalPayable!.value).toBe(200);
     expect(l.needsReview).toBe(true);
   });
 

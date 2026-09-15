@@ -151,20 +151,26 @@ export function calculatePayments(req: CalcRequest): CalcResponse {
     const excise = num(exciseRaw, line.exciseAmountPerKg != null ? 'db' : 'unknown');
 
     // ── ПДВ ──
+    // ПДВ нараховується на (митна вартість + мито + акциз) НЕЗАЛЕЖНО від того, чи
+    // вдалося визначити ставку мита. Невизначене мито = 0 у базі (рядок уже
+    // позначено needsReview вище) — раніше ПДВ для таких рядків просто пропускався,
+    // що ЗАНИЖУВАЛО загальний ПДВ і «До сплати».
     const vatRatePercent = VAT_RATE_BY_REGIME[line.vatRegime];
-    let vat: NumberWithSource | null = null;
-    let totalPayable: NumberWithSource | null = null;
-    if (duty != null) {
-      const vatBase = customsValueRaw + duty.value + exciseRaw;
-      const vatEstimated = customsValue.estimated || duty.estimated;
-      vat = num(vatBase * vatRatePercent, vatEstimated ? 'fallback' : 'db', vatEstimated);
-      totalPayable = num(
-        duty.value + exciseRaw + vat.value,
-        vatEstimated ? 'fallback' : 'db',
-        vatEstimated,
-      );
-    } else {
-      warnings.push('ПДВ не розраховано, бо не визначено мито.');
+    const dutyForVat = duty?.value ?? 0;
+    const vatBase = customsValueRaw + dutyForVat + exciseRaw;
+    const vatEstimated = customsValue.estimated || duty == null || duty.estimated;
+    const vat: NumberWithSource = num(
+      vatBase * vatRatePercent,
+      vatEstimated ? 'fallback' : 'db',
+      vatEstimated,
+    );
+    const totalPayable: NumberWithSource = num(
+      dutyForVat + exciseRaw + vat.value,
+      vatEstimated ? 'fallback' : 'db',
+      vatEstimated,
+    );
+    if (duty == null) {
+      warnings.push('Мито не визначено (0 у розрахунку) — ПДВ нараховано на митну вартість; уточнити ставку мита.');
     }
 
     return {

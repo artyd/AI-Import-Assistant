@@ -143,3 +143,25 @@ export function pubchemIdentify(identifier: string): Promise<PubchemResult> {
 export function uktzedFlags(code: string): Promise<UktzedFlagsResult> {
   return logistGet<UktzedFlagsResult>('/rest/uktzed/flags', { code });
 }
+
+/** Build a styled .xlsx report from an AnalysisResult (Python xlsxwriter). */
+export async function exportXlsx(analysis: unknown): Promise<Buffer> {
+  if (!logistEnabled()) throw new Error('Сервіс довідок не налаштований (LOGIST_MCP_URL).');
+  const base = config.LOGIST_MCP_URL.replace(/\/+$/, '');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30_000);
+  try {
+    const res = await fetch(`${base}/rest/export/xlsx`, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: { 'content-type': 'application/json', accept: XLSX_MEDIA },
+      body: JSON.stringify(analysis),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return Buffer.from(await res.arrayBuffer());
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const XLSX_MEDIA = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';

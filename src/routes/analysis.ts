@@ -8,9 +8,11 @@ import {
   listArchive,
   deleteArchiveRecord,
   getAnalysisForOwner,
+  getLatestAnalysisForCollection,
 } from '../services/analyses.js';
 import { buildConsolidatedReportXlsx } from '../services/analysis/export/xlsx.js';
 import { SseStream } from '../sse/sse.js';
+import { exportXlsx as logistExportXlsx, logistEnabled } from '../services/logist/index.js';
 
 /**
  * B-2 consolidated analysis endpoints. `POST /api/collections/:id/analyze` runs
@@ -90,6 +92,18 @@ export async function analysisRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
+  // GET /api/collections/:id/analysis/latest — the collection's most recent
+  // analysis (so the сборник reloads its analysis instead of losing it). null ok.
+  app.get<{ Params: { id: string } }>(
+    '/api/collections/:id/analysis/latest',
+    async (req, reply) => {
+      const col = await getOwnedCollection(req.user!.sub, req.params.id);
+      if (!col) return reply.code(404).send({ error: 'not_found' });
+      const analysis = await getLatestAnalysisForCollection(req.user!.sub, col.id);
+      return reply.send({ analysis });
+    },
+  );
+
   // GET /api/analyses/archive — owner-scoped archive list (newest first).
   app.get('/api/analyses/archive', async (req, reply) => {
     const records = await listArchive(req.user!.sub);
@@ -112,7 +126,17 @@ export async function analysisRoutes(app: FastifyInstance): Promise<void> {
     async (req, reply) => {
       const analysis = await getAnalysisForOwner(req.user!.sub, req.params.id);
       if (!analysis) return reply.code(404).send({ error: 'not_found' });
-      const buf = buildConsolidatedReportXlsx(analysis);
+      // Prefer the styled Python (xlsxwriter) report via logist-mcp; fall back to
+      // the built-in TS builder if the service is off or errors.
+      let buf: Buffer;
+      try {
+        buf = logistEnabled()
+          ? await logistExportXlsx(analysis)
+          : buildConsolidatedReportXlsx(analysis);
+      } catch (err) {
+        req.log.warn({ err }, 'logist xlsx export failed — falling back to TS builder');
+        buf = buildConsolidatedReportXlsx(analysis);
+      }
       const filename = `analysis-${safeFilePart(analysis.sheet || 'report')}.xlsx`;
       reply.header(
         'Content-Type',

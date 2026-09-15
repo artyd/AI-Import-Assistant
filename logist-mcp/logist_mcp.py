@@ -31,6 +31,7 @@ logist_mcp — MCP-сервер професійної перевірки тов
     python logist_mcp.py --http --port 8000
 """
 
+import io
 import json
 import os
 import re
@@ -44,7 +45,7 @@ from pydantic import BaseModel, Field, ConfigDict, field_validator, ValidationEr
 from mcp.server.fastmcp import FastMCP
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 mcp = FastMCP("logist_mcp")
@@ -759,6 +760,154 @@ async def _rest_pubchem(request: Request) -> JSONResponse:
     return JSONResponse({"identifier": params.identifier, "text": text})
 
 
+XLSX_MEDIA = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def _num(v) -> float:
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _build_analysis_xlsx(a: dict) -> bytes:
+    """Build a styled .xlsx report for a consolidated-cargo analysis.
+
+    Uses xlsxwriter for real formatting (branded header, summary tiles, a manifest
+    table with zebra rows + colour-coded risk/qdpro flags, and an EU/UA checks
+    sheet). Consumes the AnalysisResult JSON the backend already produces.
+    """
+    import xlsxwriter
+
+    rows = a.get("rows") or []
+    totals = a.get("totals") or {}
+    meta = a.get("meta") or {}
+    sheet_name = a.get("sheet") or meta.get("sheet") or "Аналіз"
+
+    buf = io.BytesIO()
+    wb = xlsxwriter.Workbook(buf, {"in_memory": True})
+
+    # ── palette / formats ────────────────────────────────────────────────────
+    ACCENT = "#2563EB"
+    fmt_title = wb.add_format({"bold": True, "font_size": 17, "font_color": "#0F172A"})
+    fmt_sub = wb.add_format({"font_size": 10, "font_color": "#64748B"})
+    fmt_tile_lbl = wb.add_format({"font_size": 9, "font_color": "#64748B"})
+    fmt_tile_val = wb.add_format({"bold": True, "font_size": 15, "font_color": "#0F172A", "num_format": "#,##0 $"})
+    fmt_tile_val_hi = wb.add_format({"bold": True, "font_size": 15, "font_color": ACCENT, "num_format": "#,##0 $"})
+    fmt_hdr = wb.add_format({
+        "bold": True, "font_size": 9, "font_color": "#FFFFFF", "bg_color": ACCENT,
+        "align": "left", "valign": "vcenter", "border": 1, "border_color": "#1D4ED8",
+    })
+    fmt_cell = wb.add_format({"font_size": 10, "valign": "vcenter", "border": 1, "border_color": "#E2E8F0"})
+    fmt_cell_alt = wb.add_format({"font_size": 10, "valign": "vcenter", "border": 1, "border_color": "#E2E8F0", "bg_color": "#F8FAFC"})
+    fmt_money = wb.add_format({"font_size": 10, "valign": "vcenter", "border": 1, "border_color": "#E2E8F0", "num_format": "#,##0 $"})
+    fmt_money_alt = wb.add_format({"font_size": 10, "valign": "vcenter", "border": 1, "border_color": "#E2E8F0", "num_format": "#,##0 $", "bg_color": "#F8FAFC"})
+    fmt_warn = wb.add_format({"font_size": 9, "font_color": "#B45309"})
+    fmt_bad = wb.add_format({"font_size": 9, "font_color": "#DC2626", "bold": True})
+    fmt_ok = wb.add_format({"font_size": 9, "font_color": "#059669"})
+
+    # ── Sheet 1: Зведена ─────────────────────────────────────────────────────
+    ws = wb.add_worksheet("Зведена")
+    ws.hide_gridlines(2)
+    ws.set_column("A:A", 22)
+    ws.set_column("B:E", 18)
+    ws.write("A1", "Аналіз збірного вантажу", fmt_title)
+    ws.write("A2", f"Джерело: {a.get('source', '—')}  ·  Лист: {sheet_name}"
+             + (f"  ·  {meta.get('date')}" if meta.get("date") else ""), fmt_sub)
+
+    tiles = [
+        ("Митна вартість (CIF)", _num(totals.get("cif")), fmt_tile_val),
+        ("Мито", _num(totals.get("duty")), fmt_tile_val),
+        ("ПДВ", _num(totals.get("vat")), fmt_tile_val),
+        ("До сплати", _num(totals.get("payable")), fmt_tile_val_hi),
+    ]
+    for i, (lbl, val, vfmt) in enumerate(tiles):
+        ws.write(4, i, lbl, fmt_tile_lbl)
+        ws.write(5, i, val, vfmt)
+    ws.write(7, 0, f"Позицій: {totals.get('count', len(rows))}", fmt_sub)
+    if a.get("criticalAlert"):
+        ws.write(8, 0, a["criticalAlert"], fmt_bad)
+    if a.get("aiDegraded"):
+        ws.write(9, 0, "AI-перевірки були недоступні — показано детермінований розрахунок.", fmt_warn)
+    if a.get("sourceChecked"):
+        ws.write(10, 0, "Коди звірено з офіційним джерелом qdpro (див. колонку «Обмеження»).", fmt_ok)
+
+    # ── Sheet 2: Маніфест ────────────────────────────────────────────────────
+    wsm = wb.add_worksheet("Маніфест")
+    wsm.hide_gridlines(2)
+    headers = ["Товар", "УКТЗЕД", "Кг", "Ціна/кг", "CIF", "Ставка %", "Мито", "ПДВ",
+               "Походження", "Ризик", "Обмеження (qdpro)", "Перевірити"]
+    widths = [30, 14, 8, 9, 12, 9, 11, 11, 14, 12, 26, 11]
+    for c, (h, w) in enumerate(zip(headers, widths)):
+        wsm.set_column(c, c, w)
+        wsm.write(0, c, h, fmt_hdr)
+    wsm.freeze_panes(1, 0)
+
+    for i, r in enumerate(rows):
+        alt = i % 2 == 1
+        cf, mf = (fmt_cell_alt, fmt_money_alt) if alt else (fmt_cell, fmt_money)
+        sc = r.get("sourceCheck") or {}
+        flags = []
+        if sc.get("banRf"): flags.append("Заборона РФ")
+        if sc.get("dualUse"): flags.append("Подвійне викор.")
+        if sc.get("narcotic"): flags.append("Наркотич./прекурсор")
+        if sc.get("license"): flags.append("Ліцензія")
+        if sc.get("vetControl"): flags.append("Ветконтроль")
+        if sc.get("phyto"): flags.append("Фітоконтроль")
+        if sc.get("dutyMismatch") and sc.get("dutyPref"): flags.append(f"qdpro мито {sc['dutyPref']}")
+        flag_txt = "; ".join(flags) if flags else ("✓ без обмежень" if sc else "")
+        rr = i + 1
+        wsm.write(rr, 0, r.get("name", ""), cf)
+        wsm.write(rr, 1, r.get("code") or "—", cf)
+        wsm.write(rr, 2, _num(r.get("qtyKg")), cf)
+        wsm.write(rr, 3, _num(r.get("price")), cf)
+        wsm.write(rr, 4, _num(r.get("cif")), mf)
+        wsm.write(rr, 5, ("—" if r.get("dutyRate") is None else _num(r.get("dutyRate"))), cf)
+        wsm.write(rr, 6, _num(r.get("duty")), mf)
+        wsm.write(rr, 7, _num(r.get("vat")), mf)
+        wsm.write(rr, 8, r.get("origin") or "—", cf)
+        wsm.write(rr, 9, r.get("risk") or "—", cf)
+        wsm.write(rr, 10, flag_txt, cf)
+        wsm.write(rr, 11, "ТАК" if r.get("needsReview") else "", cf)
+
+    # ── Sheet 3: Перевірки ЄС / UA ───────────────────────────────────────────
+    wsc = wb.add_worksheet("Перевірки")
+    wsc.hide_gridlines(2)
+    wsc.set_column("A:A", 30)
+    wsc.set_column("B:B", 12)
+    wsc.set_column("C:C", 70)
+    for c, h in enumerate(["Позиція / напрям", "Статус", "Коментар"]):
+        wsc.write(0, c, h, fmt_hdr)
+    row_i = 1
+    for r in rows:
+        for label, checks in (("ЄС / транзит", r.get("eu") or []), ("UA / розмитнення", r.get("ua") or [])):
+            for ch in checks:
+                st = ch.get("status", "")
+                sfmt = fmt_bad if st == "red" else (fmt_warn if st == "yellow" else fmt_ok)
+                wsc.write(row_i, 0, f"{r.get('name', '')} · {label}", fmt_cell)
+                wsc.write(row_i, 1, {"red": "🔴", "yellow": "🟡"}.get(st, "🟢"), sfmt)
+                wsc.write(row_i, 2, f"{ch.get('item', '')} {ch.get('note', '')}".strip(), fmt_cell)
+                row_i += 1
+
+    wb.close()
+    buf.seek(0)
+    return buf.read()
+
+
+async def _rest_export_xlsx(request: Request) -> Response:
+    try:
+        analysis = await request.json()
+    except Exception:
+        return _json_err("Некоректний JSON аналізу.")
+    if not isinstance(analysis, dict):
+        return _json_err("Очікувався об'єкт аналізу.")
+    try:
+        data = _build_analysis_xlsx(analysis)
+    except Exception as e:  # noqa: BLE001
+        return _json_err(f"Не вдалося сформувати Excel: {e}", status=500)
+    return Response(content=data, media_type=XLSX_MEDIA)
+
+
 def build_rest_app() -> Starlette:
     return Starlette(
         routes=[
@@ -769,6 +918,7 @@ def build_rest_app() -> Starlette:
             Route("/rest/dualuse", _rest_dualuse, methods=["GET"]),
             Route("/rest/rate", _rest_rate, methods=["GET"]),
             Route("/rest/pubchem", _rest_pubchem, methods=["GET"]),
+            Route("/rest/export/xlsx", _rest_export_xlsx, methods=["POST"]),
         ]
     )
 
