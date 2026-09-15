@@ -1,3 +1,31 @@
+import { config } from '../config.js';
+
+/**
+ * Guidance for the customs/logistics reference tools (logist-mcp). Appended to
+ * every chat kind's prompt ONLY when LOGIST_MCP_URL is set — otherwise the tools
+ * are not advertised and mentioning them would be misleading. Reconciles with the
+ * advisory-HS-code rule: SELECTING a code stays advisory (multiple candidates +
+ * specialist confirmation), but duty/VAT/rate facts for a KNOWN code come from
+ * the tool, never from memory.
+ */
+function logistToolsPromptBlock(): string[] {
+  if (!config.LOGIST_MCP_URL.trim()) return [];
+  return [
+    '',
+    'ДОВІДКОВІ ІНСТРУМЕНТИ (першоджерела — не вигадуй ставки/курси/довідки з памʼяті):',
+    '- uktzed_lookup_code — офіційна митна довідка по 10-значному коду УКТ ЗЕД (мито, ПДВ,',
+    '  ліцензування, пільги за угодами). Коли код уже визначено — бери ставки саме звідси.',
+    '- uktzed_browse_classifier — навігація по класифікатору УКТ ЗЕД, щоб знайти код.',
+    '- dualuse_browse_classifier — перевірка, чи товар підпадає під подвійне використання',
+    '  (експортний контроль); node_id для заглиблення бери з поля links відповіді.',
+    '- get_exchange_rate — офіційний курс НБУ для перерахунку валюти контракту в гривню.',
+    '- pubchem_identify_substance — ідентифікація хімречовини за назвою/CAS (звірка «це той самий реагент»).',
+    'ВАЖЛИВО: правило дорадчості коду УКТ ЗЕД зберігається — ПРИЗНАЧЕННЯ коду товару давай',
+    'кількома кандидатами й проси підтвердити митного брокера; але ставки/курс/офіційну',
+    'довідку по ВЖЕ визначеному коду бери з інструмента, а не з памʼяті.',
+  ];
+}
+
 /**
  * System prompt for "Штурман" — the single import-logistics agent. Ukrainian
  * persona and domain (customs document reconciliation, package completeness,
@@ -84,6 +112,7 @@ export function buildSystemPrompt(workspace: {
     'як упакований і для чого призначений?»',
     '[після відповіді] «Ймовірні кандидати: 1) …— бо …; 2) …— бо …. Це попередні',
     'варіанти; остаточний код має підтвердити митний брокер.»',
+    ...logistToolsPromptBlock(),
   ].join('\n');
 }
 
@@ -117,6 +146,7 @@ export function buildNormalSystemPrompt(): string {
     '',
     'Не вигадуй фактів. Якщо не знаєш точної відповіді або дані залежать від конкретних',
     'документів, яких ти не бачиш — прямо про це скажи, замість того щоб додумувати.',
+    ...logistToolsPromptBlock(),
   ].join('\n');
 }
 
@@ -155,5 +185,6 @@ export function buildConsolidatedSystemPrompt(collection: { number: string }): s
     '',
     'Не вигадуй фактів. Якщо даних немає (маніфест не надано або питання потребує',
     'документів, яких ти не бачиш) — прямо про це скажи, а не додумуй відповідь.',
+    ...logistToolsPromptBlock(),
   ].join('\n');
 }

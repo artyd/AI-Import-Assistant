@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { ChatTool } from '../anthropic/client.js';
 import { query } from '../db/pool.js';
+import * as logist from '../services/logist/index.js';
 import { readStoredFile, contentHashOf } from '../services/storage.js';
 import { extractText } from '../services/extract/index.js';
 import { ocrDocument } from '../services/ocr/claudeOcr.js';
@@ -36,8 +37,8 @@ export interface ToolContext {
 
 /** Narrows to a shipment scope; throws if the tool was called without one. */
 function requireWorkspace(ctx: ToolContext): string {
-  if (!requireWorkspace(ctx)) throw new Error('Цей інструмент доступний лише в межах постачання.');
-  return requireWorkspace(ctx);
+  if (!ctx.workspaceId) throw new Error('Цей інструмент доступний лише в межах постачання.');
+  return ctx.workspaceId;
 }
 
 export interface ToolOutcome {
@@ -233,6 +234,106 @@ export const toolDefinitions: ChatTool[] = [
   },
 ];
 
+/**
+ * Customs/logistics reference tools backed by the internal `logist-mcp` service
+ * (УКТ ЗЕД довідка/класифікатор, подвійне використання, курс НБУ, PubChem). They
+ * are scope-less external lookups (no workspace/collection needed), advertised in
+ * every chat kind — but ONLY when LOGIST_MCP_URL is configured. Their results are
+ * first-source facts: the agent must prefer them over reasoning from memory for
+ * duty/VAT/rates, while HS-code SELECTION stays advisory (see the system prompt).
+ */
+export const logistToolDefinitions: ChatTool[] = [
+  {
+    name: 'uktzed_lookup_code',
+    description:
+      'Офіційна митна довідка по 10-значному коду УКТ ЗЕД (джерело: qdpro.com.ua, дані ' +
+      'ДФС/Мінфіну): опис товару, ставки ввізного мита (пільгова/повна), ПДВ, пільги за ' +
+      'торговими угодами (ЄС тощо), ліцензування, обмеження. Використовуй, щоб дати ТОЧНІ ' +
+      'ставки/вимоги по вже визначеному коду — не бери ставки з памʼяті.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        code: {
+          type: 'string',
+          description: '10-значний код УКТ ЗЕД, з пробілами або без (напр. "3004 32 00 00").',
+        },
+      },
+      required: ['code'],
+    },
+  },
+  {
+    name: 'uktzed_browse_classifier',
+    description:
+      'Навігація по ієрархії класифікатора УКТ ЗЕД (розділ → група → товарна позиція → ' +
+      'підпозиція), щоб знайти потрібний код. Виклич без коду — усі розділи; далі ' +
+      'заглиблюйся, передаючи код рівня з поля links попередньої відповіді.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        code: {
+          type: 'string',
+          description:
+            'Код рівня: порожньо — усі розділи; римська цифра (напр. "VI") — розділ; ' +
+            '2 цифри — група; 4+ цифри — товарна позиція.',
+        },
+      },
+    },
+  },
+  {
+    name: 'dualuse_browse_classifier',
+    description:
+      'Навігація по Єдиному списку товарів подвійного використання (експортний контроль). ' +
+      'Виклич без node_id — корінь дерева; далі заглиблюйся, передаючи node_id з поля links ' +
+      'попередньої відповіді (node_id — внутрішній ID вузла, НЕ код категорії). Кінцеві ' +
+      'категорії перелічують повʼязані коди УКТ ЗЕД — звір їх із кодом товару.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        node_id: {
+          type: 'string',
+          description: 'Внутрішній ID вузла з links попередньої відповіді; порожньо — корінь.',
+        },
+      },
+    },
+  },
+  {
+    name: 'get_exchange_rate',
+    description:
+      'Офіційний курс гривні НБУ до валюти на дату. Використовуй для перерахунку вартості з ' +
+      'валюти контракту в грн (митна вартість, порівняння пропозицій). Не бери курс з памʼяті.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        currency: { type: 'string', description: 'Код валюти ISO-4217 (напр. USD, EUR, CNY).' },
+        date: { type: 'string', description: 'Опційно, YYYYMMDD; порожньо — курс на сьогодні.' },
+      },
+      required: ['currency'],
+    },
+  },
+  {
+    name: 'pubchem_identify_substance',
+    description:
+      'Ідентифікація хімічної речовини за назвою, синонімом або CAS-номером через PubChem: ' +
+      'IUPAC-назва, молекулярна формула, маса, InChIKey, синоніми. Використовуй, щоб звірити, ' +
+      'чи дві торгові назви — це одна й та сама субстанція.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        identifier: {
+          type: 'string',
+          description: 'Назва, синонім або CAS-номер (напр. "aspirin" або "50-78-2").',
+        },
+      },
+      required: ['identifier'],
+    },
+  },
+];
+
+/** The logist tools when the service is configured, else none. */
+export function logistTools(): ChatTool[] {
+  return logist.logistEnabled() ? logistToolDefinitions : [];
+}
+
 interface FileRow {
   id: string;
   name: string;
@@ -280,8 +381,97 @@ export async function executeTool(
       return runCompareVersions(input, ctx);
     case 'run_consolidated_analysis':
       return runConsolidatedAnalysis(ctx);
+    case 'uktzed_lookup_code':
+      return runUktzedLookup(input);
+    case 'uktzed_browse_classifier':
+      return runUktzedBrowse(input);
+    case 'dualuse_browse_classifier':
+      return runDualuseBrowse(input);
+    case 'get_exchange_rate':
+      return runExchangeRate(input);
+    case 'pubchem_identify_substance':
+      return runPubchemIdentify(input);
     default:
       return { result: `Невідомий інструмент: ${name}`, summary: `Невідомий інструмент`, citations: [] };
+  }
+}
+
+// ── logist-mcp reference tools (scope-less external lookups) ──────────────────
+
+function logistFail(msg: string, summary: string): ToolOutcome {
+  return { result: msg, summary, citations: [] };
+}
+
+async function runUktzedLookup(input: unknown): Promise<ToolOutcome> {
+  const code = String((input as { code?: unknown })?.code ?? '').trim();
+  if (!code) return logistFail('Не вказано код УКТ ЗЕД.', 'УКТ ЗЕД: помилка');
+  try {
+    const r = await logist.uktzedLookup(code);
+    return {
+      result: `Митна довідка УКТ ЗЕД ${r.code} (джерело: qdpro.com.ua):\n${r.text}`,
+      summary: `УКТ ЗЕД ${r.code}: довідка`,
+      citations: [{ file: r.source, page: null }],
+    };
+  } catch (err) {
+    return logistFail(`Не вдалося отримати довідку: ${(err as Error).message}`, 'УКТ ЗЕД: помилка');
+  }
+}
+
+async function runUktzedBrowse(input: unknown): Promise<ToolOutcome> {
+  const code = String((input as { code?: unknown })?.code ?? '').trim();
+  try {
+    const r = await logist.uktzedBrowse(code);
+    const links = r.links.length
+      ? `\n\nДочірні рівні (код — опис):\n${r.links.map((l) => `- ${l.id} — ${l.label}`).join('\n')}`
+      : '';
+    return {
+      result: `${r.text}${links}`,
+      summary: `Класифікатор УКТ ЗЕД: ${r.links.length} рівнів`,
+      citations: [{ file: r.source, page: null }],
+    };
+  } catch (err) {
+    return logistFail(`Не вдалося відкрити класифікатор: ${(err as Error).message}`, 'Класифікатор: помилка');
+  }
+}
+
+async function runDualuseBrowse(input: unknown): Promise<ToolOutcome> {
+  const nodeId = String((input as { node_id?: unknown })?.node_id ?? '').trim();
+  try {
+    const r = await logist.dualuseBrowse(nodeId);
+    // Surface node_ids so the model can drill down (get_text alone loses them).
+    const links = r.links.length
+      ? `\n\nВузли для заглиблення (node_id — назва):\n${r.links.map((l) => `- ${l.id} — ${l.label}`).join('\n')}`
+      : '';
+    return {
+      result: `${r.text}${links}`,
+      summary: `Подвійне використання: ${r.links.length} вузлів`,
+      citations: [{ file: r.source, page: null }],
+    };
+  } catch (err) {
+    return logistFail(`Не вдалося відкрити список подвійного використання: ${(err as Error).message}`, 'Подвійне використання: помилка');
+  }
+}
+
+async function runExchangeRate(input: unknown): Promise<ToolOutcome> {
+  const currency = String((input as { currency?: unknown })?.currency ?? '').trim();
+  const date = String((input as { date?: unknown })?.date ?? '').trim();
+  if (!currency) return logistFail('Не вказано код валюти.', 'Курс НБУ: помилка');
+  try {
+    const r = await logist.exchangeRate(currency, date);
+    return { result: r.text, summary: `Курс НБУ: ${r.currency}`, citations: [] };
+  } catch (err) {
+    return logistFail(`Не вдалося отримати курс НБУ: ${(err as Error).message}`, 'Курс НБУ: помилка');
+  }
+}
+
+async function runPubchemIdentify(input: unknown): Promise<ToolOutcome> {
+  const identifier = String((input as { identifier?: unknown })?.identifier ?? '').trim();
+  if (!identifier) return logistFail('Не вказано назву/CAS речовини.', 'PubChem: помилка');
+  try {
+    const r = await logist.pubchemIdentify(identifier);
+    return { result: r.text, summary: `PubChem: ${identifier}`, citations: [] };
+  } catch (err) {
+    return logistFail(`Не вдалося ідентифікувати речовину: ${(err as Error).message}`, 'PubChem: помилка');
   }
 }
 

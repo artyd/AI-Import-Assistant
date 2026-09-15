@@ -5,3 +5,7 @@ mcp==1.9.4
 httpx>=0.27,<1.0
 beautifulsoup4>=4.12,<5.0
 pydantic>=2.6,<3.0
+# Starlette + Uvicorn power the plain-REST surface the TS backend calls. They are
+# transitive deps of mcp==1.9.4, but pinned explicitly here since we import them.
+starlette>=0.37,<1.0
+uvicorn>=0.29,<1.0

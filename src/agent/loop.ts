@@ -54,13 +54,11 @@ const MAX_ITERATIONS = 8;
 export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnResult> {
   const { workspaceId, collectionId, ownerId, system, history, userMessage, sse } = params;
   const tools = params.tools ?? toolDefinitions;
-  // Scope the tool context per chat kind: shipment (workspaceId) or consolidated
-  // (collectionId + ownerId). Global/tool-less turns leave it null.
-  const ctx: ToolContext | null = workspaceId
-    ? { workspaceId }
-    : collectionId
-      ? { collectionId, ownerId }
-      : null;
+  // One context shape covers every chat kind; each field is optional. Shipment
+  // tools narrow via requireWorkspace(ctx), consolidated via ctx.collectionId, and
+  // the logist reference tools need no scope at all — so a normal (workspace-less)
+  // turn can still call them. Handlers reject a mis-scoped call with a clear error.
+  const ctx: ToolContext = { workspaceId, collectionId, ownerId };
 
   const messages: ChatMessageParam[] = [
     ...history.map((m) => ({ role: m.role, content: m.content })),
@@ -99,11 +97,6 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
 
       let outcome;
       try {
-        if (!ctx) {
-          // Tool-less kinds advertise no tools, so we should never get here; guard
-          // in case the model somehow emits a tool_use without a workspace scope.
-          throw new Error('Інструменти недоступні в цьому режимі.');
-        }
         outcome = await executeTool(block.name, block.input, ctx);
       } catch (err) {
         outcome = {

@@ -39,9 +39,13 @@ from urllib.parse import quote
 
 import httpx
 from bs4 import BeautifulSoup
-from pydantic import BaseModel, Field, ConfigDict, field_validator
+from pydantic import BaseModel, Field, ConfigDict, field_validator, ValidationError
 
 from mcp.server.fastmcp import FastMCP
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from starlette.routing import Route
 
 mcp = FastMCP("logist_mcp")
 
@@ -56,8 +60,8 @@ REQUEST_TIMEOUT = 20.0
 BOILERPLATE_MARKER = "Головне меню"
 
 
-async def _fetch_clean_text(path: str) -> str:
-    """Забрати сторінку qdpro.com.ua і повернути очищений текст без меню/футера."""
+async def _fetch_soup(path: str) -> BeautifulSoup:
+    """Забрати сторінку qdpro.com.ua і повернути розпарсений BeautifulSoup."""
     url = f"{BASE_URL}/{path.lstrip('/')}"
     async with httpx.AsyncClient(
         headers=HTTP_HEADERS, timeout=REQUEST_TIMEOUT, follow_redirects=True
@@ -73,16 +77,67 @@ async def _fetch_clean_text(path: str) -> str:
             ) from e
         except httpx.TimeoutException as e:
             raise ValueError("Таймаут запиту до qdpro.com.ua, спробуйте ще раз") from e
+    return BeautifulSoup(resp.text, "html.parser")
 
-    soup = BeautifulSoup(resp.text, "html.parser")
+
+def _clean_text(soup: BeautifulSoup) -> str:
+    """Очистити soup від скриптів/меню/футера і повернути текст."""
     for tag in soup(["script", "style", "nav"]):
         tag.decompose()
     text = soup.get_text("\n", strip=True)
-
     cut_at = text.find(BOILERPLATE_MARKER)
     if cut_at != -1:
         text = text[:cut_at]
     return text.strip()
+
+
+async def _fetch_clean_text(path: str) -> str:
+    """Забрати сторінку qdpro.com.ua і повернути очищений текст без меню/футера."""
+    return _clean_text(await _fetch_soup(path))
+
+
+def _cap(text: str, limit: int) -> str:
+    """Обрізати надто довгий текст (сторінки qdpro тягнуть ~48КБ сайтового меню)."""
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + "\n…[обрізано]"
+
+
+def _extract_links(soup: BeautifulSoup, prefix: str) -> list[dict]:
+    """Витягти дочірні вузли з посилань <a href=".../{prefix}/{id}">.
+
+    ВАЖЛИВО для dualuse: навігація по дереву вимагає внутрішнього node_id, який
+    живе ЛИШЕ в href посилання (get_text його втрачає). Тут ми беремо id із
+    сегмента шляху після /{prefix}/ і повертаємо його разом з текстом-підписом,
+    щоб модель могла заглибитись наступним викликом.
+    """
+    pat = re.compile(rf"/{re.escape(prefix)}/([^/?#\"']+)")
+    out: list[dict] = []
+    seen: set = set()
+    for a in soup.find_all("a", href=True):
+        m = pat.search(a["href"])
+        if not m:
+            continue
+        node = m.group(1).strip()
+        label = a.get_text(" ", strip=True)
+        if not node:
+            continue
+        key = (node, label)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"id": node, "label": label})
+    return out[:400]
+
+
+def _clean_text_and_links(soup: BeautifulSoup, prefix: str, cap: int) -> tuple:
+    """Повернути (очищений+обрізаний текст, список дочірніх вузлів з node_id)."""
+    # Strip the site menu/footer first so its links don't pollute the child list.
+    for tag in soup(["script", "style", "nav"]):
+        tag.decompose()
+    links = _extract_links(soup, prefix)
+    text = _cap(_clean_text(soup), cap)
+    return text, links
 
 
 class LookupCodeInput(BaseModel):
@@ -267,30 +322,8 @@ class ExchangeRateInput(BaseModel):
 NBU_EXCHANGE_URL = "https://bank.gov.ua/NBUStatService/v1/statdirectory/exchange"
 
 
-@mcp.tool(
-    name="get_exchange_rate",
-    annotations={
-        "title": "Офіційний курс НБУ",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "idempotentHint": True,
-        "openWorldHint": True,
-    },
-)
-async def get_exchange_rate(params: ExchangeRateInput) -> str:
-    """Отримати офіційний курс гривні НБУ до заданої валюти.
-
-    Корисно для перерахунку вартості товару з валюти контракту (USD, EUR,
-    CNY, INR тощо) в гривню на конкретну дату — наприклад для оцінки митної
-    вартості або порівняння пропозицій постачальників з різних країн.
-
-    Args:
-        params (ExchangeRateInput): Код валюти (ISO-4217) і опціонально дата
-            у форматі YYYYMMDD (без дати — курс на сьогодні).
-
-    Returns:
-        str: Курс у форматі "1 XXX = YY.YYYY грн (станом на DD.MM.YYYY)".
-    """
+async def _nbu_rate(params: ExchangeRateInput) -> str:
+    """Живий запит офіційного курсу НБУ (спільна логіка тулу і REST-ендпоінта)."""
     query = {"json": "", "valcode": params.currency}
     if params.date:
         query["date"] = params.date
@@ -315,6 +348,33 @@ async def get_exchange_rate(params: ExchangeRateInput) -> str:
         f"1 {rate['cc']} ({rate['txt']}) = {rate['rate']} грн, "
         f"станом на {rate['exchangedate']} (джерело: НБУ)"
     )
+
+
+@mcp.tool(
+    name="get_exchange_rate",
+    annotations={
+        "title": "Офіційний курс НБУ",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
+async def get_exchange_rate(params: ExchangeRateInput) -> str:
+    """Отримати офіційний курс гривні НБУ до заданої валюти.
+
+    Корисно для перерахунку вартості товару з валюти контракту (USD, EUR,
+    CNY, INR тощо) в гривню на конкретну дату — наприклад для оцінки митної
+    вартості або порівняння пропозицій постачальників з різних країн.
+
+    Args:
+        params (ExchangeRateInput): Код валюти (ISO-4217) і опціонально дата
+            у форматі YYYYMMDD (без дати — курс на сьогодні).
+
+    Returns:
+        str: Курс у форматі "1 XXX = YY.YYYY грн (станом на DD.MM.YYYY)".
+    """
+    return await _nbu_rate(params)
 
 
 class SubstanceIdentifyInput(BaseModel):
@@ -367,6 +427,11 @@ async def pubchem_identify_substance(params: SubstanceIdentifyInput) -> str:
         str: Структурні дані речовини та до 10 відомих синонімів
             (джерело: PubChem, National Library of Medicine, США).
     """
+    return await _pubchem(params)
+
+
+async def _pubchem(params: SubstanceIdentifyInput) -> str:
+    """Живий запит PubChem (спільна логіка тулу і REST-ендпоінта)."""
     encoded = quote(params.identifier, safe="")
     async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
         try:
@@ -486,11 +551,131 @@ async def drlz_lookup_registration(params: DrlzLookupInput) -> str:
     return "\n".join(lines)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Plain-REST surface (Starlette). The TS backend (Штурман) calls these simple
+# JSON endpoints internally over the compose network — no MCP session handshake,
+# minimal TS deps (just fetch). The @mcp.tool definitions above still register the
+# same logic for stdio-MCP use (python logist_mcp.py, e.g. MCP Inspector). REST
+# handlers reuse the shared helpers so both paths stay in sync.
+#
+# Domain problems (bad input, upstream 404/timeout) return HTTP 400 with
+# {"error": "..."} so the caller gets a clean message; unexpected errors → 500.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _first_err(e: ValidationError) -> str:
+    try:
+        return e.errors()[0].get("msg", "Некоректні вхідні дані")
+    except Exception:
+        return "Некоректні вхідні дані"
+
+
+def _json_err(msg: str, status: int = 400) -> JSONResponse:
+    return JSONResponse({"error": msg}, status_code=status)
+
+
+async def _health(request: Request) -> JSONResponse:
+    return JSONResponse({"ok": True, "service": "logist_mcp"})
+
+
+async def _rest_uktzed_lookup(request: Request) -> JSONResponse:
+    try:
+        params = LookupCodeInput(code=request.query_params.get("code", ""))
+    except ValidationError as e:
+        return _json_err(_first_err(e))
+    try:
+        text = await _fetch_clean_text(f"goodinfo/{params.code}")
+    except ValueError as e:
+        return _json_err(str(e))
+    # The goodinfo page is ~48KB but is almost all SIGNAL (a tiny header, footer
+    # already trimmed): ввізне мито ~0.9K, пільги ~1.2K, ПДВ ~15.5K, ліцензування
+    # ~22.8K, наркотичні/прекурсори ~25K into the text. Cap generously at 30K so
+    # every decision-critical section survives; only the long tail of misc
+    # formalities is dropped.
+    return JSONResponse(
+        {"code": params.code, "text": _cap(text, 30000), "source": f"{BASE_URL}/goodinfo/{params.code}"}
+    )
+
+
+async def _rest_uktzed_browse(request: Request) -> JSONResponse:
+    try:
+        params = BrowseClassifierInput(code=request.query_params.get("code", ""))
+    except ValidationError as e:
+        return _json_err(_first_err(e))
+    path = "uktzed" if not params.code else f"uktzed/{params.code}"
+    try:
+        soup = await _fetch_soup(path)
+    except ValueError as e:
+        return _json_err(str(e))
+    text, links = _clean_text_and_links(soup, "uktzed", 4000)
+    return JSONResponse({"code": params.code, "text": text, "links": links, "source": f"{BASE_URL}/{path}"})
+
+
+async def _rest_dualuse(request: Request) -> JSONResponse:
+    try:
+        params = DualUseBrowseInput(node_id=request.query_params.get("node_id", ""))
+    except ValidationError as e:
+        return _json_err(_first_err(e))
+    path = "dualuse" if not params.node_id else f"dualuse/{params.node_id}"
+    try:
+        soup = await _fetch_soup(path)
+    except ValueError as e:
+        return _json_err(str(e))
+    text, links = _clean_text_and_links(soup, "dualuse", 4000)
+    return JSONResponse(
+        {"node_id": params.node_id, "text": text, "links": links, "source": f"{BASE_URL}/{path}"}
+    )
+
+
+async def _rest_rate(request: Request) -> JSONResponse:
+    try:
+        params = ExchangeRateInput(
+            currency=request.query_params.get("currency", ""),
+            date=request.query_params.get("date", ""),
+        )
+    except ValidationError as e:
+        return _json_err(_first_err(e))
+    try:
+        text = await _nbu_rate(params)
+    except ValueError as e:
+        return _json_err(str(e))
+    return JSONResponse({"currency": params.currency, "date": params.date, "text": text})
+
+
+async def _rest_pubchem(request: Request) -> JSONResponse:
+    try:
+        params = SubstanceIdentifyInput(identifier=request.query_params.get("identifier", ""))
+    except ValidationError as e:
+        return _json_err(_first_err(e))
+    try:
+        text = await _pubchem(params)
+    except ValueError as e:
+        return _json_err(str(e))
+    return JSONResponse({"identifier": params.identifier, "text": text})
+
+
+def build_rest_app() -> Starlette:
+    return Starlette(
+        routes=[
+            Route("/health", _health, methods=["GET"]),
+            Route("/rest/uktzed/lookup", _rest_uktzed_lookup, methods=["GET"]),
+            Route("/rest/uktzed/browse", _rest_uktzed_browse, methods=["GET"]),
+            Route("/rest/dualuse", _rest_dualuse, methods=["GET"]),
+            Route("/rest/rate", _rest_rate, methods=["GET"]),
+            Route("/rest/pubchem", _rest_pubchem, methods=["GET"]),
+        ]
+    )
+
+
 if __name__ == "__main__":
     if "--http" in sys.argv:
-        port = 8000
+        port = 8015
         if "--port" in sys.argv:
             port = int(sys.argv[sys.argv.index("--port") + 1])
-        mcp.run(transport="streamable_http", port=port)
+        import uvicorn
+
+        host = os.environ.get("FASTMCP_HOST", "0.0.0.0")
+        uvicorn.run(build_rest_app(), host=host, port=port)
     else:
+        # stdio MCP transport (MCP Inspector / native connector use).
         mcp.run()

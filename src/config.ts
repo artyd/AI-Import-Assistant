@@ -102,12 +102,12 @@ const envSchema = z.object({
   // agent always uses the built-in Anthropic key.
   BYOK_ENC_KEY: z.string().default(''),
 
-  // logist-mcp integration (Phase 1): base URL of the internal FastMCP service
-  // (docker-compose `logist-mcp`) that exposes the UKTZED / dual-use / NBU rate /
-  // PubChem / drug-register tools. Reachable on the Compose network only — NO
-  // host port and NO Caddy route. Empty (default) = integration disabled; the
-  // Phase-2 agent tools that call it become available once this is set (e.g.
-  // http://logist-mcp:8000).
+  // logist-mcp integration: base URL of the internal customs/logistics tool
+  // service (docker-compose `logist-mcp`, plain-REST) that exposes the UKTZED /
+  // dual-use / NBU rate / PubChem lookups. Reachable on the Compose network only
+  // — NO host port and NO Caddy route. Empty (default) = disabled; the agent
+  // tools that call it become available once this is set (e.g.
+  // http://logist-mcp:8015). Compose sets it by default.
   LOGIST_MCP_URL: z.string().default(''),
 });
 
