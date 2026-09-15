@@ -185,10 +185,15 @@ export function Chat({
   // clears when the cursor truly leaves the chat container.
   const dragDepth = useRef(0);
 
+  // Reset the thread ONLY when a different conversation is loaded (initialMessages
+  // changes) — NOT when conversationId flips undefined→id after the first answer
+  // of a brand-new chat (that would wipe the just-streamed messages). convRef is
+  // already kept in sync inside onDone, and is re-synced here on a real load.
   useEffect(() => {
     setItems(initialMessages.map((m) => ({ kind: "message" as const, ...m })));
     convRef.current = conversationId;
-  }, [initialMessages, conversationId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialMessages]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });

@@ -587,13 +587,13 @@ async def _rest_uktzed_lookup(request: Request) -> JSONResponse:
         text = await _fetch_clean_text(f"goodinfo/{params.code}")
     except ValueError as e:
         return _json_err(str(e))
-    # The goodinfo page is ~48KB but is almost all SIGNAL (a tiny header, footer
-    # already trimmed): ввізне мито ~0.9K, пільги ~1.2K, ПДВ ~15.5K, ліцензування
-    # ~22.8K, наркотичні/прекурсори ~25K into the text. Cap generously at 30K so
-    # every decision-critical section survives; only the long tail of misc
-    # formalities is dropped.
+    # Return the FULL page (safety-bounded). It is almost all SIGNAL and critical
+    # sections sit deep: ПДВ ~15.5K, ліцензування ~22.8K, ветеринарно-санітарний
+    # контроль (коди документів 0853/5514/5509) ~30.4K, заборони ~34.7K, and a
+    # transit/export copy past ~49K. The TS backend digests this in batches (its
+    # side owns the Anthropic key), so we must not truncate away whole comments.
     return JSONResponse(
-        {"code": params.code, "text": _cap(text, 30000), "source": f"{BASE_URL}/goodinfo/{params.code}"}
+        {"code": params.code, "text": _cap(text, 100000), "source": f"{BASE_URL}/goodinfo/{params.code}"}
     )
 
 

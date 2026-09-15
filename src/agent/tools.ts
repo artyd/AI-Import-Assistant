@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { ChatTool } from '../anthropic/client.js';
 import { query } from '../db/pool.js';
 import * as logist from '../services/logist/index.js';
+import { digestUktzed } from '../services/logist/uktzedDigest.js';
 import { readStoredFile, contentHashOf } from '../services/storage.js';
 import { extractText } from '../services/extract/index.js';
 import { ocrDocument } from '../services/ocr/claudeOcr.js';
@@ -407,8 +408,11 @@ async function runUktzedLookup(input: unknown): Promise<ToolOutcome> {
   if (!code) return logistFail('Не вказано код УКТ ЗЕД.', 'УКТ ЗЕД: помилка');
   try {
     const r = await logist.uktzedLookup(code);
+    // The full goodinfo page is large and its critical parts sit deep (ветеринарний
+    // контроль, заборони, ліцензування). Digest it in batches so nothing is lost.
+    const digest = await digestUktzed(r.code, r.text);
     return {
-      result: `Митна довідка УКТ ЗЕД ${r.code} (джерело: qdpro.com.ua):\n${r.text}`,
+      result: `Митна довідка УКТ ЗЕД ${r.code} (джерело: qdpro.com.ua):\n${digest}`,
       summary: `УКТ ЗЕД ${r.code}: довідка`,
       citations: [{ file: r.source, page: null }],
     };

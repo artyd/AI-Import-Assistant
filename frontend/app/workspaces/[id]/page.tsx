@@ -995,7 +995,13 @@ export default function WorkspacePage() {
             /* Звичайний / Постачання — агент-чат на всю висоту з долученням файлів
                (для обох типів файли йдуть у теки поточного постачання). */
             <Chat
-              key={`${chatKind}-${conversationId ?? "new"}-${chatSeq}`}
+              // NB: conversationId is intentionally NOT in the key. When a NEW
+              // chat gets its server id after the first answer, remounting here
+              // would reset the component to the (stale, empty) initialMessages
+              // and wipe the just-streamed thread. Remount only on kind change or
+              // an explicit new chat (chatSeq); loading another conversation flows
+              // in through initialMessages instead.
+              key={`${chatKind}-${chatSeq}`}
               postPath={endpoints.postPath}
               chatKind={chatKind}
               onChangeKind={setChatKind}
