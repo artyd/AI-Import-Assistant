@@ -215,7 +215,11 @@ export async function runAnalysis(input: AnalysisInput, ownerId?: string): Promi
         sourceChecked = true;
         for (const r of rows) {
           const raw = lookupCheck(checks, r.code);
-          if (raw) r.sourceCheck = toSourceCheck(raw, r.dutyRate);
+          if (!raw) continue;
+          r.sourceCheck = toSourceCheck(raw, r.dutyRate);
+          // qdpro is authoritative: if its duty rate diverges from the static
+          // table used in the calc, flag the position for the human to verify.
+          if (r.sourceCheck.dutyMismatch) r.needsReview = true;
         }
       }
     } catch {
