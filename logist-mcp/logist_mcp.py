@@ -676,6 +676,62 @@ async def _rest_dualuse(request: Request) -> JSONResponse:
     )
 
 
+_PCT_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*%")
+
+
+def _rate_after(text: str, label: str, window: int = 60) -> str:
+    """First percentage that follows `label` within `window` chars (else '')."""
+    i = text.find(label)
+    if i == -1:
+        return ""
+    m = _PCT_RE.search(text[i : i + window])
+    return f"{m.group(1).replace(',', '.')}%" if m else ""
+
+
+def _import_flags(text: str) -> dict:
+    """Deterministic restriction flags for the ІМПОРТ regime (keyword presence)."""
+    low = text.lower()
+    return {
+        "ban_rf": "заборон" in low and ("росій" in low or "426" in text),
+        "license": "ліценз" in low,
+        "vet_control": "ветеринар" in low,
+        "phyto": "фітосанітар" in low,
+        "dual_use": "подвійн" in low and "використанн" in low,
+        "narcotic": "наркотич" in low or "прекурсор" in low,
+    }
+
+
+async def _rest_uktzed_flags(request: Request) -> JSONResponse:
+    """Lightweight, DETERMINISTIC per-code enrichment for the consolidated-analysis
+    engine (no LLM): import-regime duty rates + restriction flags parsed straight
+    from the goodinfo ІМПОРТ tab. Fast enough to run per manifest line."""
+    try:
+        params = LookupCodeInput(code=request.query_params.get("code", ""))
+    except ValidationError as e:
+        return _json_err(_first_err(e))
+    try:
+        soup = await _fetch_soup(f"goodinfo/{params.code}")
+    except ValueError as e:
+        return _json_err(str(e))
+    common, tabs = _extract_goodinfo(soup)
+    imp = ""
+    for t in tabs:
+        if t["label"].strip().upper().startswith("ІМПОРТ"):
+            imp = t["text"]
+            break
+    if not imp:
+        imp = tabs[0]["text"] if tabs else common
+    return JSONResponse(
+        {
+            "code": params.code,
+            "duty_pref": _rate_after(imp, "Пільгова ставка"),
+            "duty_full": _rate_after(imp, "Повна ставка"),
+            "flags": _import_flags(imp),
+            "source": f"{BASE_URL}/goodinfo/{params.code}",
+        }
+    )
+
+
 async def _rest_rate(request: Request) -> JSONResponse:
     try:
         params = ExchangeRateInput(
@@ -708,6 +764,7 @@ def build_rest_app() -> Starlette:
         routes=[
             Route("/health", _health, methods=["GET"]),
             Route("/rest/uktzed/lookup", _rest_uktzed_lookup, methods=["GET"]),
+            Route("/rest/uktzed/flags", _rest_uktzed_flags, methods=["GET"]),
             Route("/rest/uktzed/browse", _rest_uktzed_browse, methods=["GET"]),
             Route("/rest/dualuse", _rest_dualuse, methods=["GET"]),
             Route("/rest/rate", _rest_rate, methods=["GET"]),

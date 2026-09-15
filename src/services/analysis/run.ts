@@ -3,6 +3,9 @@ import { parseWorkbook, parseCSV } from './sheets/parse.js';
 import type { SheetInput } from './sheets/selectActualSheet.js';
 import { normalize } from './engines/classify.js';
 import { enrichWithAi, type AiEnrichInputItem } from './ai.js';
+// Type-only (erased at build) so the enrichment module — which pulls in config —
+// is loaded lazily, only when the integration is actually on (see below).
+import type { SourceCheck } from './sourceCheck.js';
 
 /**
  * B-2 orchestration: turn a manifest (uploaded file / Google Sheets link / pasted
@@ -41,6 +44,10 @@ export interface AnalysisRow {
   eu: AnalysisCheck[];
   ua: AnalysisCheck[];
   needsReview: boolean;
+  // Live cross-check with the official source (qdpro via logist-mcp). null when the
+  // integration is off or the code couldn't be checked. Enrichment only — it never
+  // alters cif/duty/vat above.
+  sourceCheck?: SourceCheck | null;
 }
 
 export interface AnalysisTotals {
@@ -73,6 +80,8 @@ export interface AnalysisResult {
   hasHigh: boolean;
   /** true when AI enrichment was unavailable/failed (rows are deterministic-only). */
   aiDegraded: boolean;
+  /** true when live source cross-check (qdpro via logist-mcp) ran for ≥1 code. */
+  sourceChecked: boolean;
 }
 
 export type AnalysisInput =
@@ -189,8 +198,30 @@ export async function runAnalysis(input: AnalysisInput, ownerId?: string): Promi
       eu,
       ua,
       needsReview,
+      sourceCheck: null,
     };
   });
+
+  // Live source cross-check (enrichment only — never changes the numbers above).
+  // Best-effort: gated on LOGIST_MCP_URL, tolerates failures, one fetch per unique
+  // code. The env guard + dynamic import keep the config-loading logist module out
+  // of code paths (and tests) where the integration is off.
+  let sourceChecked = false;
+  if (process.env.LOGIST_MCP_URL && process.env.LOGIST_MCP_URL.trim()) {
+    try {
+      const { fetchImportChecks, lookupCheck, toSourceCheck } = await import('./sourceCheck.js');
+      const checks = await fetchImportChecks(rows.map((r) => r.code));
+      if (checks.size > 0) {
+        sourceChecked = true;
+        for (const r of rows) {
+          const raw = lookupCheck(checks, r.code);
+          if (raw) r.sourceCheck = toSourceCheck(raw, r.dutyRate);
+        }
+      }
+    } catch {
+      /* enrichment is optional — keep the full analysis */
+    }
+  }
 
   const s = det.calc.summary;
   const totals: AnalysisTotals = {
@@ -222,5 +253,6 @@ export async function runAnalysis(input: AnalysisInput, ownerId?: string): Promi
     warnings,
     hasHigh,
     aiDegraded: enrichment.degraded,
+    sourceChecked,
   };
 }

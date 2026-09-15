@@ -16,6 +16,7 @@ interface ChecksBlob {
   warnings: string[];
   hasHigh: boolean;
   aiDegraded: boolean;
+  sourceChecked?: boolean;
 }
 
 export interface ArchiveRecord {
@@ -45,6 +46,7 @@ export async function persistAnalysis(
     warnings: result.warnings,
     hasHigh: result.hasHigh,
     aiDegraded: result.aiDegraded,
+    sourceChecked: result.sourceChecked,
   };
 
   const client = await pool.connect();
@@ -168,5 +170,6 @@ export async function getAnalysisForOwner(
     warnings: row.checks?.warnings ?? [],
     hasHigh: row.checks?.hasHigh ?? false,
     aiDegraded: row.checks?.aiDegraded ?? false,
+    sourceChecked: row.checks?.sourceChecked ?? false,
   };
 }

@@ -57,6 +57,23 @@ export interface PubchemResult {
   text: string;
 }
 
+export interface UktzedFlags {
+  ban_rf: boolean;
+  license: boolean;
+  vet_control: boolean;
+  phyto: boolean;
+  dual_use: boolean;
+  narcotic: boolean;
+}
+
+export interface UktzedFlagsResult {
+  code: string;
+  duty_pref: string; // e.g. "0%" | "10%" | "" (unparsed)
+  duty_full: string;
+  flags: UktzedFlags;
+  source: string;
+}
+
 /**
  * GET a REST endpoint and return the parsed JSON. The service reports domain
  * problems (bad input, upstream 404/timeout) as `{ error }`; we surface that
@@ -120,4 +137,9 @@ export function exchangeRate(currency: string, date: string): Promise<RateResult
 
 export function pubchemIdentify(identifier: string): Promise<PubchemResult> {
   return logistGet<PubchemResult>('/rest/pubchem', { identifier });
+}
+
+/** Deterministic per-code enrichment (import duty rates + restriction flags). */
+export function uktzedFlags(code: string): Promise<UktzedFlagsResult> {
+  return logistGet<UktzedFlagsResult>('/rest/uktzed/flags', { code });
 }

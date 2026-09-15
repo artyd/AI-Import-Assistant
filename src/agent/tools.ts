@@ -885,10 +885,23 @@ async function runConsolidatedAnalysis(ctx: ToolContext): Promise<ToolOutcome> {
   const degradedNote = result.aiDegraded
     ? ' AI-перевірки недоступні — показано лише детермінований розрахунок.'
     : '';
+  // Live source cross-check (qdpro): summarise flagged positions + duty divergences.
+  let srcNote = '';
+  if (result.sourceChecked) {
+    const flagged = result.rows.filter((r) => {
+      const c = r.sourceCheck;
+      return c && (c.banRf || c.license || c.vetControl || c.phyto || c.dualUse || c.narcotic);
+    }).length;
+    const mismatches = result.rows.filter((r) => r.sourceCheck?.dutyMismatch).length;
+    srcNote =
+      ` Звірено з qdpro: ${flagged} позицій з обмеженнями/контролем` +
+      (mismatches ? `, ${mismatches} з розбіжністю ставки` : '') +
+      ' (деталі в картці аналізу).';
+  }
   const text =
     `Проаналізовано маніфест «${file.name}» (лист «${result.sheet}»): ${t.count} позицій. ` +
     `Митна вартість ${t.cif}, мито ${t.duty}, ПДВ ${t.vat}, до сплати ${t.payable}.` +
-    `${highNote}${degradedNote}${idNote}`;
+    `${highNote}${degradedNote}${srcNote}${idNote}`;
   return { result: text, summary: `Аналіз збірника: ${t.count} позицій`, citations: [] };
 }
 

@@ -7,7 +7,7 @@
 // aiDegraded, nctsList, needsReview) are surfaced as banners/highlights.
 
 import { downloadBlob } from "@/lib/api";
-import type { AnalysisCheck, AnalysisResult, AnalysisRow } from "@/lib/types";
+import type { AnalysisCheck, AnalysisResult, AnalysisRow, SourceCheck } from "@/lib/types";
 
 // Origin key → Ukrainian label + colour token (prototype lines 1227–1228).
 const ORIGIN_LABEL: Record<string, string> = {
@@ -112,6 +112,49 @@ function CheckList({ title, checks }: { title: string; checks: AnalysisCheck[] }
   );
 }
 
+// Live cross-check with qdpro (logist-mcp): restriction flags the static engine
+// can't surface, shown as compact chips under the code. Enrichment only.
+function SourceFlags({ sc }: { sc: SourceCheck }) {
+  const chips: { label: string; color: string }[] = [];
+  if (sc.banRf) chips.push({ label: "Заборона РФ", color: "var(--err)" });
+  if (sc.dualUse) chips.push({ label: "Подвійне викор.", color: "var(--err)" });
+  if (sc.narcotic) chips.push({ label: "Наркотич./прекурсор", color: "var(--err)" });
+  if (sc.license) chips.push({ label: "Ліцензія", color: "var(--warn)" });
+  if (sc.vetControl) chips.push({ label: "Ветконтроль", color: "var(--warn)" });
+  if (sc.phyto) chips.push({ label: "Фітоконтроль", color: "var(--warn)" });
+  if (sc.dutyMismatch && sc.dutyPref)
+    chips.push({ label: `qdpro: мито ${sc.dutyPref}`, color: "var(--warn)" });
+  if (chips.length === 0) {
+    return (
+      <div style={{ fontSize: 9.5, color: "var(--ok)", marginTop: 4 }}>
+        ✓ qdpro: без обмежень{sc.dutyPref ? ` · мито ${sc.dutyPref}` : ""}
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 4 }}>
+      {chips.map((c) => (
+        <span
+          key={c.label}
+          title={`Джерело: qdpro.com.ua (${sc.source})`}
+          style={{
+            fontSize: 9.5,
+            fontWeight: 600,
+            color: c.color,
+            border: `1px solid ${c.color}`,
+            borderRadius: 5,
+            padding: "0 5px",
+            lineHeight: "15px",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {c.label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function ManifestRow({ r }: { r: AnalysisRow }) {
   return (
     <div
@@ -154,6 +197,7 @@ function ManifestRow({ r }: { r: AnalysisRow }) {
         >
           {uctzed(r.code)}
         </div>
+        {r.sourceCheck ? <SourceFlags sc={r.sourceCheck} /> : null}
       </div>
       <div style={{ padding: "10px 11px", fontSize: 11.5, color: "var(--text)", fontVariantNumeric: "tabular-nums" }}>
         {fmt(r.qtyKg)} кг · {r.price} $/кг
@@ -274,6 +318,23 @@ export function AnalysisCard({ analysis }: { analysis: AnalysisResult }) {
           }}
         >
           AI-аналіз недоступний — показано детерміновані значення, перевірте вручну.
+        </div>
+      ) : null}
+
+      {/* Live source cross-check note (qdpro via logist-mcp) */}
+      {a.sourceChecked ? (
+        <div
+          style={{
+            padding: "8px 16px",
+            background: "var(--okBg)",
+            color: "var(--muted)",
+            fontSize: 11,
+            lineHeight: 1.4,
+            borderBottom: "1px solid var(--border)",
+          }}
+        >
+          Позиції звірено з офіційним джерелом (qdpro): під кодом показано реальні ставки та
+          обмеження/контроль. Розрахунок мита/ПДВ лишається за базовою таблицею.
         </div>
       ) : null}
 
