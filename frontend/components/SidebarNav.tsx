@@ -108,13 +108,13 @@ export function SidebarNav(props: Props) {
         </button>
         <button
           style={{ ...railBtn, background: "var(--surface)", border: "1px solid var(--border2)", color: "var(--accent)" }}
-          onClick={onNewChat}
+          onClick={() => {
+            onSetView("chat");
+            onNewChat();
+          }}
           title="Новий чат"
         >
           <LnPencil size={17} />
-        </button>
-        <button style={railBtn} onClick={() => { onSetView("chat"); onNewChat(); }} title="Новий чат">
-          <LnPencil size={18} />
         </button>
         <button style={railBtn} onClick={() => onSetView("news")} title="Новини">
           <LnList size={18} />
@@ -290,6 +290,8 @@ export function SidebarNav(props: Props) {
                 value={chatKind === "supply" ? current.id : activeCollectionId ?? ""}
                 onChange={(e) => {
                   const v = e.target.value;
+                  // Picking an entity from News/Map must return to the chat view.
+                  onSetView("chat");
                   if (chatKind === "supply") {
                     if (v !== current.id) onSelectShipment(v);
                   } else if (v) {
@@ -416,7 +418,11 @@ export function SidebarNav(props: Props) {
             return (
               <button
                 key={c.id}
-                onClick={() => onSelectConversation(c.id)}
+                onClick={() => {
+                  // From News/Map, opening a chat must switch back to the chat view.
+                  onSetView("chat");
+                  onSelectConversation(c.id);
+                }}
                 className="nav-row"
                 style={{
                   display: "flex",
