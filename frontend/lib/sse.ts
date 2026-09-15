@@ -115,9 +115,15 @@ export async function streamChat(
   if (buffer.trim()) dispatch(buffer);
 }
 
+export interface AnalyzeDone {
+  analysis: AnalysisResult;
+  conversationId?: string;
+  messageId?: string;
+}
+
 export interface AnalyzeHandlers {
   onProgress?: (e: { pct: number; step: string }) => void;
-  onDone?: (analysis: AnalysisResult) => void;
+  onDone?: (done: AnalyzeDone) => void;
   onError?: (message: string) => void;
 }
 
@@ -179,7 +185,7 @@ export async function streamAnalyze(
       return;
     }
     if (eventName === "progress") handlers.onProgress?.(data as { pct: number; step: string });
-    else if (eventName === "done") handlers.onDone?.((data as { analysis: AnalysisResult }).analysis);
+    else if (eventName === "done") handlers.onDone?.(data as AnalyzeDone);
     else if (eventName === "error")
       handlers.onError?.((data as { message?: string }).message || "Помилка аналізу.");
   };

@@ -11,6 +11,8 @@ import {
   getLatestAnalysisForCollection,
 } from '../services/analyses.js';
 import { buildConsolidatedReportXlsx } from '../services/analysis/export/xlsx.js';
+import { formatAnalysisMarkdown } from '../services/analysis/format.js';
+import { ensureConversationScoped, appendMessage } from '../services/conversations.js';
 import { SseStream } from '../sse/sse.js';
 import { exportXlsx as logistExportXlsx, logistEnabled } from '../services/logist/index.js';
 
@@ -25,6 +27,9 @@ const jsonBodySchema = z
   .object({
     sheetUrl: z.string().url().optional(),
     text: z.string().min(1).optional(),
+    // Optional: append the analysis answer to this existing consolidated
+    // conversation instead of creating a new one.
+    conversationId: z.string().uuid().optional(),
   })
   .refine((b) => Boolean(b.sheetUrl) !== Boolean(b.text), {
     message: 'Provide exactly one of sheetUrl or text.',
@@ -47,6 +52,7 @@ export async function analysisRoutes(app: FastifyInstance): Promise<void> {
       if (!col) return reply.code(404).send({ error: 'not_found' });
 
       let input: AnalysisInput;
+      let convIdIn: string | undefined;
       if (req.isMultipart()) {
         const part = await req.file();
         if (!part) return reply.code(400).send({ error: 'no_file' });
@@ -54,6 +60,10 @@ export async function analysisRoutes(app: FastifyInstance): Promise<void> {
           part.file.resume();
           return reply.code(415).send({ error: 'unsupported_type' });
         }
+        // conversationId travels as a form field (the FE appends it BEFORE the file).
+        const cf = (part.fields as Record<string, { value?: unknown } | undefined>)?.conversationId;
+        const cfv = cf && typeof cf.value === 'string' ? cf.value : undefined;
+        convIdIn = cfv && /^[0-9a-f-]{36}$/i.test(cfv) ? cfv : undefined;
         let buf: Buffer;
         try {
           buf = await part.toBuffer();
@@ -67,6 +77,7 @@ export async function analysisRoutes(app: FastifyInstance): Promise<void> {
         if (!parsed.success) {
           return reply.code(400).send({ error: 'invalid_request', issues: parsed.error.issues });
         }
+        convIdIn = parsed.data.conversationId;
         input = parsed.data.sheetUrl
           ? { kind: 'sheetUrl', url: parsed.data.sheetUrl }
           : { kind: 'text', text: parsed.data.text! };
@@ -74,14 +85,30 @@ export async function analysisRoutes(app: FastifyInstance): Promise<void> {
 
       // Stream real progress over SSE. Input is already fully read above (the
       // file buffer / JSON body), so it is safe to hijack the reply now. Events:
-      //   progress { pct, step } · done { analysis } · error { message }
+      //   progress { pct, step } · done { analysis, conversationId, messageId } · error
       const sse = new SseStream(req, reply);
       const heartbeat = setInterval(() => sse.ping(), 15_000);
       try {
         const result = await runAnalysis(input, req.user!.sub, (p) => sse.send('progress', p));
         await persistAnalysis(req.user!.sub, col.id, result);
+
+        // Post the result into the collection's conversation as a per-product chat
+        // answer (Markdown), so it reads like a normal reply and lands in history.
+        const seed = `Аналіз маніфесту «${result.sheet}»`;
+        const conversationId = await ensureConversationScoped(
+          { kind: 'consolidated', collectionId: col.id },
+          convIdIn,
+          seed,
+        );
+        await appendMessage(conversationId, 'user', seed);
+        const messageId = await appendMessage(
+          conversationId,
+          'assistant',
+          formatAnalysisMarkdown(result),
+        );
+
         sse.send('progress', { pct: 100, step: 'Готово' });
-        sse.send('done', { analysis: result });
+        sse.send('done', { analysis: result, conversationId, messageId });
       } catch (err) {
         req.log.error({ err }, 'consolidated analysis failed');
         sse.send('error', { message: (err as Error).message || 'Не вдалося виконати аналіз.' });

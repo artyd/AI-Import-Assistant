@@ -22,12 +22,20 @@ const SAMPLE_MANIFEST =
   "ПВХ-плівка\t3920431000\t2000\t2.1";
 
 export function AnalyzePanel({
-  collectionId,
+  resolveCollectionId,
+  conversationId,
   onResult,
   onOpenAiSettings,
 }: {
-  collectionId: string;
-  onResult: (result: AnalysisResult) => void;
+  // Resolve (or lazily CREATE) the collection to analyse into — returns its id,
+  // or null on failure. Lets the сборник be auto-created on first analysis.
+  resolveCollectionId: () => Promise<string | null>;
+  // Append the answer to this consolidated conversation (else a new one is made).
+  conversationId?: string;
+  onResult: (
+    result: AnalysisResult,
+    meta: { conversationId?: string; collectionId: string }
+  ) => void;
   onOpenAiSettings?: () => void;
 }) {
   const [text, setText] = useState("");
@@ -46,16 +54,27 @@ export function AnalyzePanel({
     setRunning(true);
     setError(null);
     setPct(0);
+    setStep("Готую збірник…");
+
+    const cid = await resolveCollectionId();
+    if (!cid) {
+      setError("Не вдалося створити/визначити збірник.");
+      setRunning(false);
+      return;
+    }
     setStep("Готую аналіз…");
 
-    const path = `/api/collections/${collectionId}/analyze`;
+    const path = `/api/collections/${cid}/analyze`;
     let body: Record<string, unknown> | FormData;
     if (file) {
       const form = new FormData();
+      // conversationId BEFORE the file so the server sees it in part.fields.
+      if (conversationId) form.append("conversationId", conversationId);
       form.append("files", file, file.name || "manifest");
       body = form;
     } else {
-      body = /^https?:\/\//i.test(trimmed) ? { sheetUrl: trimmed } : { text: trimmed };
+      const base = /^https?:\/\//i.test(trimmed) ? { sheetUrl: trimmed } : { text: trimmed };
+      body = conversationId ? { ...base, conversationId } : base;
     }
 
     let done = false;
@@ -65,9 +84,9 @@ export function AnalyzePanel({
           setPct(e.pct);
           setStep(e.step);
         },
-        onDone: (analysis) => {
+        onDone: (d) => {
           done = true;
-          onResult(analysis);
+          onResult(d.analysis, { conversationId: d.conversationId, collectionId: cid });
           setText("");
           setFile(null);
         },

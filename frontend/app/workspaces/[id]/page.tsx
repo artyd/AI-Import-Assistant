@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, downloadBlob } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useTheme } from "@/lib/theme";
 import { openEventsChannel } from "@/lib/sse";
@@ -106,6 +106,7 @@ export default function WorkspacePage() {
   // Consolidated-cargo analysis result (latest) + archive modal.
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [showIntake, setShowIntake] = useState(false);
+  const [showTable, setShowTable] = useState(false);
   const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
 
   // Shell UI state.
@@ -534,6 +535,56 @@ export default function WorkspacePage() {
     }
   }, [activeCollectionId, removeCollection]);
 
+  // Resolve the collection to analyse into — or AUTO-CREATE one (like a new
+  // shipment) so a manifest can be analysed without picking a сборник first.
+  const ensureCollectionForAnalysis = useCallback(async (): Promise<string | null> => {
+    if (activeCollectionId) return activeCollectionId;
+    try {
+      const { collection } = await api<{ collection: Collection }>(`/api/collections`, {
+        body: { status: "active" },
+      });
+      addCollection(collection); // prepends to the list + sets it active
+      return collection.id;
+    } catch {
+      return null;
+    }
+  }, [activeCollectionId, addCollection]);
+
+  // Load the conversation the analysis was posted into, so its per-product answer
+  // shows in the chat thread (and appears in the sidebar chat list).
+  const showAnalysisConversation = useCallback(async (cid: string, convId: string) => {
+    try {
+      const conv = await api<{ conversationId: string; messages: Message[] }>(
+        `/api/collections/${cid}/conversations/${convId}`
+      );
+      setConversationId(conv.conversationId);
+      setInitialMessages(conv.messages);
+      const list = await api<{ conversations: ConversationMeta[] }>(
+        `/api/collections/${cid}/conversations`
+      );
+      setConversations(list.conversations);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const onAnalysisResult = useCallback(
+    (r: AnalysisResult, meta: { conversationId?: string; collectionId: string }) => {
+      setAnalysis(r);
+      setShowIntake(false);
+      if (meta.conversationId) void showAnalysisConversation(meta.collectionId, meta.conversationId);
+    },
+    [showAnalysisConversation]
+  );
+
+  const exportAnalysis = useCallback(() => {
+    if (!analysis?.id) return;
+    void downloadBlob(
+      `/api/analyses/${analysis.id}/xlsx`,
+      `analysis-${analysis.sheet || "manifest"}.xlsx`
+    ).catch(() => alert("Не вдалося завантажити звіт."));
+  }, [analysis]);
+
   // ── Collection files (right panel Files tab for a Збірник) ──
   const refreshColFiles = useCallback(async () => {
     if (!activeCollectionId) return;
@@ -894,65 +945,70 @@ export default function WorkspacePage() {
             <NewsView />
           ) : view === "map" ? (
             <MapView />
-          ) : !endpoints ? (
-            <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
-              <div style={{ maxWidth: 440, textAlign: "center" }}>
-                <h2 style={{ margin: "0 0 8px", fontSize: 18, color: "var(--text)" }}>Збірний вантаж</h2>
-                <p style={{ margin: "0 0 16px", fontSize: 14, lineHeight: 1.5, color: "var(--muted)" }}>
-                  Оберіть збірник у полі вводу або створіть новий, щоб почати роботу та аналіз збірної партії.
-                </p>
-                <button className="btn btn-primary" onClick={newCollection}>
-                  Створити збірник
-                </button>
-              </div>
-            </div>
           ) : chatKind === "consolidated" ? (
-            /* Збірний: (1) картка аналізу, прив'язана до цього збірника, зверху;
-               (2) блок вводу маніфесту (файл/URL/таблиця) — коли аналізу ще нема
-               або натиснуто «Новий аналіз»; (3) чат обговорення, прив'язаний до
-               збірника (композер з вибором збірника). Жодних топ-барів. */
+            /* Збірний: тулбар (таблиця/експорт/новий аналіз) + опційна картка/ввід,
+               а знизу — чат обговорення, прив'язаний до збірника (відповідь аналізу
+               приходить у чат блоками по кожному продукту). Якщо збірник ще не
+               обрано — лише ввід, який АВТОМАТИЧНО створює збірник при аналізі. */
             <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
               {analysis ? (
-                <div
-                  style={{
-                    flex: "0 0 auto",
-                    maxHeight: "52%",
-                    overflowY: "auto",
-                    borderBottom: "1px solid var(--border)",
-                  }}
-                >
-                  <div style={{ padding: "16px 24px 20px", maxWidth: 960, margin: "0 auto" }}>
+                <>
+                  <div
+                    style={{
+                      flex: "none",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      flexWrap: "wrap",
+                      padding: "10px 20px",
+                      borderBottom: "1px solid var(--border)",
+                    }}
+                  >
+                    <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>
+                      Аналіз «{analysis.sheet}»
+                    </span>
+                    <span style={{ fontSize: 12, color: "var(--muted)" }}>
+                      до сплати {Math.round(analysis.totals.payable).toLocaleString("uk-UA")} $ ·{" "}
+                      {analysis.totals.count} поз.
+                    </span>
+                    <div style={{ flex: 1 }} />
+                    <button className="btn" onClick={() => setShowTable((v) => !v)}>
+                      {showTable ? "Сховати таблицю" : "Таблиця"}
+                    </button>
+                    {analysis.id ? (
+                      <button className="btn" onClick={exportAnalysis}>
+                        Експорт .xlsx
+                      </button>
+                    ) : null}
+                    <button className="btn" onClick={() => setShowIntake((v) => !v)}>
+                      {showIntake ? "Сховати ввід" : "Новий аналіз"}
+                    </button>
+                  </div>
+                  {showIntake || showTable ? (
                     <div
                       style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        gap: 12,
-                        marginBottom: 8,
+                        flex: "0 0 auto",
+                        maxHeight: "48%",
+                        overflowY: "auto",
+                        borderBottom: "1px solid var(--border)",
                       }}
                     >
-                      <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>
-                        Аналіз збірного вантажу
+                      <div style={{ padding: "14px 20px", maxWidth: 960, margin: "0 auto" }}>
+                        {showIntake ? (
+                          <div style={{ marginBottom: showTable ? 16 : 0 }}>
+                            <AnalyzePanel
+                              resolveCollectionId={ensureCollectionForAnalysis}
+                              conversationId={conversationId}
+                              onResult={onAnalysisResult}
+                              onOpenAiSettings={() => setAiSettingsOpen(true)}
+                            />
+                          </div>
+                        ) : null}
+                        {showTable ? <AnalysisCard analysis={analysis} /> : null}
                       </div>
-                      <button className="btn" onClick={() => setShowIntake((v) => !v)}>
-                        {showIntake ? "Сховати ввід" : "Новий аналіз"}
-                      </button>
                     </div>
-                    {showIntake ? (
-                      <div style={{ marginBottom: 16 }}>
-                        <AnalyzePanel
-                          collectionId={activeCollectionId!}
-                          onResult={(r) => {
-                            setAnalysis(r);
-                            setShowIntake(false);
-                          }}
-                          onOpenAiSettings={() => setAiSettingsOpen(true)}
-                        />
-                      </div>
-                    ) : null}
-                    <AnalysisCard analysis={analysis} />
-                  </div>
-                </div>
+                  ) : null}
+                </>
               ) : (
                 <div
                   style={{
@@ -965,32 +1021,56 @@ export default function WorkspacePage() {
                 >
                   <div style={{ width: "100%", maxWidth: 720 }}>
                     <AnalyzePanel
-                      collectionId={activeCollectionId!}
-                      onResult={(r) => {
-                        setAnalysis(r);
-                        setShowIntake(false);
-                      }}
+                      resolveCollectionId={ensureCollectionForAnalysis}
+                      conversationId={conversationId}
+                      onResult={onAnalysisResult}
                       onOpenAiSettings={() => setAiSettingsOpen(true)}
                     />
                   </div>
                 </div>
               )}
 
-              {/* Discussion chat — tied to this collection (composer has the
-                  сборник selector). Appears in the sidebar chat list, persists. */}
+              {/* Discussion chat — tied to this collection. The analysis answer
+                  lands here as per-product blocks; composer has the сборник selector. */}
               <div style={{ flex: 1, minHeight: 0 }}>
-                <Chat
-                  key={`consolidated-${activeCollectionId ?? "none"}-${chatSeq}`}
-                  postPath={endpoints.postPath}
-                  chatKind={chatKind}
-                  onChangeKind={setChatKind}
-                  selector={composerSelector}
-                  conversationId={conversationId}
-                  initialMessages={initialMessages}
-                  onConversationStarted={onConversationStarted}
-                  onLog={onLog}
-                  placeholder="Запитайте про аналіз збірника: коди, ставки, документи, походження…"
-                />
+                {endpoints ? (
+                  <Chat
+                    key={`consolidated-${activeCollectionId ?? "none"}-${chatSeq}`}
+                    postPath={endpoints.postPath}
+                    chatKind={chatKind}
+                    onChangeKind={setChatKind}
+                    selector={composerSelector}
+                    conversationId={conversationId}
+                    initialMessages={initialMessages}
+                    onConversationStarted={onConversationStarted}
+                    onLog={onLog}
+                    placeholder="Запитайте про аналіз збірника: коди, ставки, документи, походження…"
+                  />
+                ) : (
+                  <div
+                    style={{
+                      height: "100%",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      padding: 24,
+                      textAlign: "center",
+                    }}
+                  >
+                    <p style={{ fontSize: 13, color: "var(--muted)", maxWidth: 440, lineHeight: 1.5 }}>
+                      Завантажте маніфест або дайте посилання вище — збірник створиться
+                      автоматично, і тут з'явиться чат для обговорення аналізу.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : !endpoints ? (
+            <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+              <div style={{ maxWidth: 440, textAlign: "center", color: "var(--muted)" }}>
+                <p style={{ margin: 0, fontSize: 14, lineHeight: 1.5 }}>
+                  Оберіть постачання або збірник у сайдбарі, щоб почати роботу.
+                </p>
               </div>
             </div>
           ) : (
