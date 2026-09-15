@@ -41,6 +41,7 @@ function pctToNum(s: string | null | undefined): number | null {
 /** Fetch import checks for each unique valid (10-digit) code. code→raw result. */
 export async function fetchImportChecks(
   codes: (string | null)[],
+  onEach?: (done: number, total: number) => void,
 ): Promise<Map<string, logist.UktzedFlagsResult>> {
   const uniq = [
     ...new Set(codes.filter((c): c is string => !!c).map(normCode).filter((c) => c.length === 10)),
@@ -48,6 +49,7 @@ export async function fetchImportChecks(
 
   const out = new Map<string, logist.UktzedFlagsResult>();
   let next = 0;
+  let completed = 0;
   async function worker(): Promise<void> {
     while (next < uniq.length) {
       const code = uniq[next++]!;
@@ -56,6 +58,7 @@ export async function fetchImportChecks(
       } catch {
         /* per-code failure tolerated */
       }
+      onEach?.(++completed, uniq.length);
     }
   }
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, uniq.length) }, worker));

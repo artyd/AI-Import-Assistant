@@ -89,6 +89,13 @@ export type AnalysisInput =
   | { kind: 'sheetUrl'; url: string }
   | { kind: 'text'; text: string };
 
+/** Real-progress signal for the streaming analyze endpoint (0–100 + a comment). */
+export interface AnalysisProgress {
+  pct: number;
+  step: string;
+}
+export type ProgressFn = (p: AnalysisProgress) => void;
+
 const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100;
 
 /** Default shipment assumptions (CIF/USD → freight+insurance already in price). */
@@ -135,10 +142,25 @@ async function resolveSheets(input: AnalysisInput): Promise<{ sheets: SheetInput
  * @param ownerId  when set, the AI enrichment step routes through that user's
  *   BYOK provider (falling back to built-in Claude); omitted → always built-in.
  */
-export async function runAnalysis(input: AnalysisInput, ownerId?: string): Promise<AnalysisResult> {
+export async function runAnalysis(
+  input: AnalysisInput,
+  ownerId?: string,
+  onProgress?: ProgressFn,
+): Promise<AnalysisResult> {
+  const progress: ProgressFn = (p) => {
+    try {
+      onProgress?.(p);
+    } catch {
+      /* progress reporting must never break the analysis */
+    }
+  };
+
+  progress({ pct: 4, step: 'Отримую маніфест…' });
   const { sheets, source } = await resolveSheets(input);
 
+  progress({ pct: 14, step: 'Обираю актуальний лист…' });
   const det = analyzeDeterministic(sheets, DEFAULT_SHIPMENT, new Date());
+  progress({ pct: 30, step: `Розраховано CIF / мито / ПДВ по ${det.lines.length} позиціях…` });
 
   // AI enrichment input, pre-grounded by the deterministic engine + KB.
   const aiInput: AiEnrichInputItem[] = det.lines.map((l) => {
@@ -156,7 +178,10 @@ export async function runAnalysis(input: AnalysisInput, ownerId?: string): Promi
     };
   });
 
-  const enrichment = await enrichWithAi(aiInput, ownerId);
+  if (aiInput.length > 0) progress({ pct: 34, step: 'AI-перевірки позицій…' });
+  const enrichment = await enrichWithAi(aiInput, ownerId, (done, total) =>
+    progress({ pct: 34 + Math.round((32 * done) / total), step: `AI-перевірки позицій (${done}/${total})…` }),
+  );
 
   const rows: AnalysisRow[] = det.lines.map((l) => {
     const rec = l.originOptions.find((o) => o.recommended) ?? l.originOptions[0];
@@ -210,7 +235,10 @@ export async function runAnalysis(input: AnalysisInput, ownerId?: string): Promi
   if (process.env.LOGIST_MCP_URL && process.env.LOGIST_MCP_URL.trim()) {
     try {
       const { fetchImportChecks, lookupCheck, toSourceCheck } = await import('./sourceCheck.js');
-      const checks = await fetchImportChecks(rows.map((r) => r.code));
+      progress({ pct: 70, step: 'Звіряю коди з qdpro (першоджерело)…' });
+      const checks = await fetchImportChecks(rows.map((r) => r.code), (done, total) =>
+        progress({ pct: 70 + Math.round((24 * done) / total), step: `Звіряю коди з qdpro (${done}/${total})…` }),
+      );
       if (checks.size > 0) {
         sourceChecked = true;
         for (const r of rows) {
@@ -227,6 +255,7 @@ export async function runAnalysis(input: AnalysisInput, ownerId?: string): Promi
     }
   }
 
+  progress({ pct: 96, step: 'Формую результат…' });
   const s = det.calc.summary;
   const totals: AnalysisTotals = {
     cif: s.totalCustomsValue.value,

@@ -10,6 +10,7 @@ import {
   getAnalysisForOwner,
 } from '../services/analyses.js';
 import { buildConsolidatedReportXlsx } from '../services/analysis/export/xlsx.js';
+import { SseStream } from '../sse/sse.js';
 
 /**
  * B-2 consolidated analysis endpoints. `POST /api/collections/:id/analyze` runs
@@ -69,15 +70,23 @@ export async function analysisRoutes(app: FastifyInstance): Promise<void> {
           : { kind: 'text', text: parsed.data.text! };
       }
 
-      let result;
+      // Stream real progress over SSE. Input is already fully read above (the
+      // file buffer / JSON body), so it is safe to hijack the reply now. Events:
+      //   progress { pct, step } · done { analysis } · error { message }
+      const sse = new SseStream(req, reply);
+      const heartbeat = setInterval(() => sse.ping(), 15_000);
       try {
-        result = await runAnalysis(input, req.user!.sub);
+        const result = await runAnalysis(input, req.user!.sub, (p) => sse.send('progress', p));
+        await persistAnalysis(req.user!.sub, col.id, result);
+        sse.send('progress', { pct: 100, step: 'Готово' });
+        sse.send('done', { analysis: result });
       } catch (err) {
-        return reply.code(422).send({ error: 'analysis_failed', message: (err as Error).message });
+        req.log.error({ err }, 'consolidated analysis failed');
+        sse.send('error', { message: (err as Error).message || 'Не вдалося виконати аналіз.' });
+      } finally {
+        clearInterval(heartbeat);
+        sse.close();
       }
-
-      await persistAnalysis(req.user!.sub, col.id, result);
-      return reply.code(201).send({ analysis: result });
     },
   );
 

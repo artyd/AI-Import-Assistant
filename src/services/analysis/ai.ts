@@ -219,6 +219,7 @@ function chunk<T>(arr: T[], size: number): T[][] {
 export async function enrichWithAi(
   items: AiEnrichInputItem[],
   ownerId?: string,
+  onBatch?: (done: number, total: number) => void,
 ): Promise<AiEnrichment> {
   const byName = new Map<string, AiItem>();
   let criticalAlert = '';
@@ -229,7 +230,9 @@ export async function enrichWithAi(
     return { byName, criticalAlert, nctsList: [], degraded };
   }
 
-  for (const batch of chunk(items, BATCH_SIZE)) {
+  const batches = chunk(items, BATCH_SIZE);
+  let done = 0;
+  for (const batch of batches) {
     try {
       const system = buildSystemPrompt(buildTariffFacts(batch), buildRagContext(batch));
       const raw = await callModel(system, buildUserPrompt(batch), ownerId);
@@ -242,6 +245,7 @@ export async function enrichWithAi(
       // forces needsReview on any row without an AI item. Never crash.
       degraded = true;
     }
+    onBatch?.(++done, batches.length);
   }
 
   return { byName, criticalAlert, nctsList: [...nctsSet], degraded };

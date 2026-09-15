@@ -8,8 +8,8 @@
 // A single "Аналізувати" button POSTs to /api/collections/:id/analyze and calls
 // back with the returned AnalysisResult. A stepped loader runs while in flight.
 
-import { useEffect, useRef, useState } from "react";
-import { api, ApiError } from "@/lib/api";
+import { useRef, useState } from "react";
+import { streamAnalyze } from "@/lib/sse";
 import type { AnalysisResult } from "@/lib/types";
 import { LnSettings } from "./LineIcons";
 
@@ -20,14 +20,6 @@ const SAMPLE_MANIFEST =
   "Аскорбінова кислота\t2936270000\t800\t6.2\n" +
   "Желатин фармацевтичний\t3503001000\t1200\t4.8\n" +
   "ПВХ-плівка\t3920431000\t2000\t2.1";
-
-const LOADER_STEPS = [
-  "Читаю маніфест…",
-  "Обираю актуальний лист…",
-  "Рахую CIF / мито / ПДВ…",
-  "Визначаю походження…",
-  "Формую перевірки ЄС / UA…",
-];
 
 export function AnalyzePanel({
   collectionId,
@@ -41,17 +33,10 @@ export function AnalyzePanel({
   const [text, setText] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [running, setRunning] = useState(false);
-  const [step, setStep] = useState(0);
+  const [pct, setPct] = useState(0);
+  const [step, setStep] = useState("");
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-
-  // Cycle the stepped loader while a request is in flight.
-  useEffect(() => {
-    if (!running) return;
-    setStep(0);
-    const iv = setInterval(() => setStep((s) => Math.min(s + 1, LOADER_STEPS.length - 1)), 1400);
-    return () => clearInterval(iv);
-  }, [running]);
 
   const trimmed = text.trim();
   const canRun = !running && (file !== null || trimmed.length > 0);
@@ -60,35 +45,37 @@ export function AnalyzePanel({
     if (!canRun) return;
     setRunning(true);
     setError(null);
+    setPct(0);
+    setStep("Готую аналіз…");
+
+    const path = `/api/collections/${collectionId}/analyze`;
+    let body: Record<string, unknown> | FormData;
+    if (file) {
+      const form = new FormData();
+      form.append("files", file, file.name || "manifest");
+      body = form;
+    } else {
+      body = /^https?:\/\//i.test(trimmed) ? { sheetUrl: trimmed } : { text: trimmed };
+    }
+
+    let done = false;
     try {
-      let result: AnalysisResult;
-      if (file) {
-        const form = new FormData();
-        form.append("files", file, file.name || "manifest");
-        const res = await api<{ analysis: AnalysisResult }>(
-          `/api/collections/${collectionId}/analyze`,
-          { form }
-        );
-        result = res.analysis;
-      } else {
-        const isUrl = /^https?:\/\//i.test(trimmed);
-        const body = isUrl ? { sheetUrl: trimmed } : { text: trimmed };
-        const res = await api<{ analysis: AnalysisResult }>(
-          `/api/collections/${collectionId}/analyze`,
-          { body }
-        );
-        result = res.analysis;
-      }
-      onResult(result);
-      // Clear inputs on success so the panel is ready for the next run.
-      setText("");
-      setFile(null);
-    } catch (err) {
-      const msg =
-        err instanceof ApiError
-          ? err.message || "Не вдалося виконати аналіз."
-          : "Не вдалося виконати аналіз.";
-      setError(msg);
+      await streamAnalyze(path, body, {
+        onProgress: (e) => {
+          setPct(e.pct);
+          setStep(e.step);
+        },
+        onDone: (analysis) => {
+          done = true;
+          onResult(analysis);
+          setText("");
+          setFile(null);
+        },
+        onError: (message) => setError(message || "Не вдалося виконати аналіз."),
+      });
+      if (!done && !error) setError("Аналіз перервано. Спробуйте ще раз.");
+    } catch {
+      setError("Не вдалося виконати аналіз.");
     } finally {
       setRunning(false);
     }
@@ -128,6 +115,10 @@ export function AnalyzePanel({
       >
         Аналіз збірного вантажу
       </h1>
+      {running ? (
+        <Loader pct={pct} step={step} />
+      ) : (
+        <>
       <p
         style={{
           margin: "0 0 20px",
@@ -309,22 +300,6 @@ export function AnalyzePanel({
           </button>
         </div>
 
-        {running ? (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 9,
-              marginTop: 12,
-              fontSize: 12.5,
-              color: "var(--muted)",
-            }}
-          >
-            <Spinner />
-            <span>{LOADER_STEPS[step]}</span>
-          </div>
-        ) : null}
-
         {error ? (
           <div
             style={{
@@ -340,6 +315,75 @@ export function AnalyzePanel({
             {error}
           </div>
         ) : null}
+      </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function Loader({ pct, step }: { pct: number; step: string }) {
+  const clamped = Math.max(0, Math.min(100, Math.round(pct)));
+  return (
+    <div
+      data-anim
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        padding: "26px 8px 12px",
+        animation: "fadeUp .4s ease both",
+      }}
+    >
+      {/* Percentage — top */}
+      <div
+        style={{
+          fontSize: 48,
+          fontWeight: 800,
+          color: "var(--accent)",
+          fontVariantNumeric: "tabular-nums",
+          lineHeight: 1,
+        }}
+      >
+        {clamped}%
+      </div>
+      {/* Progress bar — middle */}
+      <div
+        style={{
+          width: "100%",
+          maxWidth: 440,
+          height: 8,
+          background: "var(--hover)",
+          borderRadius: 999,
+          overflow: "hidden",
+          marginTop: 20,
+        }}
+      >
+        <div
+          style={{
+            width: `${clamped}%`,
+            height: "100%",
+            background: "var(--accent)",
+            borderRadius: 999,
+            transition: "width .45s ease",
+          }}
+        />
+      </div>
+      {/* Current step comment — below the bar */}
+      <div
+        style={{
+          marginTop: 16,
+          fontSize: 13.5,
+          color: "var(--muted)",
+          textAlign: "center",
+          minHeight: 20,
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+        }}
+      >
+        <Spinner />
+        <span>{step}</span>
       </div>
     </div>
   );

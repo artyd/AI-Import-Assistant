@@ -7,6 +7,7 @@
 
 import { getToken } from "./api";
 import type {
+  AnalysisResult,
   DoneEvent,
   ErrorEvent as StreamErrorEvent,
   TokenEvent,
@@ -111,6 +112,89 @@ export async function streamChat(
     }
   }
   // Flush any trailing record.
+  if (buffer.trim()) dispatch(buffer);
+}
+
+export interface AnalyzeHandlers {
+  onProgress?: (e: { pct: number; step: string }) => void;
+  onDone?: (analysis: AnalysisResult) => void;
+  onError?: (message: string) => void;
+}
+
+/**
+ * POST a manifest (FormData with a file, or a JSON body { sheetUrl | text }) to
+ * the consolidated-analysis endpoint and dispatch its SSE progress stream. Emits
+ * `progress { pct, step }` while the engine runs, then `done { analysis }` or
+ * `error { message }`. Same fetch+ReadableStream approach as streamChat (the
+ * request can be multipart; the response is always text/event-stream).
+ */
+export async function streamAnalyze(
+  path: string,
+  body: Record<string, unknown> | FormData,
+  handlers: AnalyzeHandlers,
+  signal?: AbortSignal
+): Promise<void> {
+  const token = getToken();
+  const isForm = typeof FormData !== "undefined" && body instanceof FormData;
+  const res = await fetch(path, {
+    method: "POST",
+    headers: {
+      ...(isForm ? {} : { "Content-Type": "application/json" }),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      Accept: "text/event-stream",
+    },
+    body: isForm ? (body as FormData) : JSON.stringify(body),
+    signal,
+  });
+
+  if (!res.ok || !res.body) {
+    let message = `Помилка ${res.status}`;
+    try {
+      const j = await res.json();
+      message = j?.error || j?.message || message;
+    } catch {
+      /* ignore */
+    }
+    handlers.onError?.(message);
+    return;
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  const dispatch = (rawEvent: string) => {
+    let eventName = "message";
+    const dataLines: string[] = [];
+    for (const line of rawEvent.split("\n")) {
+      if (line.startsWith(":")) continue;
+      if (line.startsWith("event:")) eventName = line.slice(6).trim();
+      else if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
+    }
+    if (dataLines.length === 0) return;
+    let data: unknown;
+    try {
+      data = JSON.parse(dataLines.join("\n"));
+    } catch {
+      return;
+    }
+    if (eventName === "progress") handlers.onProgress?.(data as { pct: number; step: string });
+    else if (eventName === "done") handlers.onDone?.((data as { analysis: AnalysisResult }).analysis);
+    else if (eventName === "error")
+      handlers.onError?.((data as { message?: string }).message || "Помилка аналізу.");
+  };
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let sep: number;
+    while ((sep = buffer.indexOf("\n\n")) !== -1) {
+      const rawEvent = buffer.slice(0, sep);
+      buffer = buffer.slice(sep + 2);
+      dispatch(rawEvent);
+    }
+  }
   if (buffer.trim()) dispatch(buffer);
 }
 
