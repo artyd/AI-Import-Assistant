@@ -544,6 +544,24 @@ export default function WorkspacePage() {
     }
   }, [activeCollectionId, removeCollection]);
 
+  const renameActiveCollection = useCallback(async () => {
+    if (!activeCollectionId) return;
+    const cur = collections.find((c) => c.id === activeCollectionId);
+    const next = (window.prompt("Назва збірника", cur?.number ?? "") ?? "").trim();
+    if (!next || next === cur?.number) return;
+    try {
+      await api(`/api/collections/${activeCollectionId}`, {
+        method: "PATCH",
+        body: { number: next },
+      });
+      setCollections(
+        collections.map((c) => (c.id === activeCollectionId ? { ...c, number: next } : c))
+      );
+    } catch {
+      alert("Не вдалося перейменувати збірник.");
+    }
+  }, [activeCollectionId, collections, setCollections]);
+
   // Resolve the collection to analyse into — or AUTO-CREATE one (like a new
   // shipment) so a manifest can be analysed without picking a сборник first.
   const ensureCollectionForAnalysis = useCallback(
@@ -792,6 +810,19 @@ export default function WorkspacePage() {
     }
   }, [id, workspace, workspaces, router]);
 
+  const renameShipment = useCallback(async () => {
+    if (!workspace) return;
+    const next = (window.prompt("Номер постачання", workspace.number ?? "") ?? "").trim();
+    if (!next || next === workspace.number) return;
+    try {
+      await api(`/api/workspaces/${id}`, { method: "PATCH", body: { number: next } });
+      onPatch({ number: next });
+      setWorkspaces((ws) => ws.map((w) => (w.id === id ? { ...w, number: next } : w)));
+    } catch {
+      alert("Не вдалося перейменувати постачання.");
+    }
+  }, [id, workspace, onPatch]);
+
   const saveSupplier = useCallback(
     async (supplier: string) => {
       onPatch({ supplier: supplier || null });
@@ -959,9 +990,11 @@ export default function WorkspacePage() {
         onToggleCollapsed={() => setSidebarCollapsed((v) => !v)}
         onNewChat={newChat}
         onSelectShipment={selectShipment}
+        onRenameShipment={renameShipment}
         onDeleteShipment={deleteShipment}
         onSelectCollection={selectCollection}
         onNewCollection={newCollection}
+        onRenameActiveCollection={renameActiveCollection}
         onDeleteActiveCollection={deleteActiveCollection}
         onSelectConversation={loadConversation}
       />

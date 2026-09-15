@@ -28,9 +28,11 @@ interface Props {
   onToggleCollapsed: () => void;
   onNewChat: () => void;
   onSelectShipment: (id: string) => void;
+  onRenameShipment: () => void;
   onDeleteShipment: () => void;
   onSelectCollection: (id: string) => void;
   onNewCollection: () => void;
+  onRenameActiveCollection: () => void;
   onDeleteActiveCollection: () => void;
   onSelectConversation: (id: string) => void;
 }
@@ -67,9 +69,11 @@ export function SidebarNav(props: Props) {
     onToggleCollapsed,
     onNewChat,
     onSelectShipment,
+    onRenameShipment,
     onDeleteShipment,
     onSelectCollection,
     onNewCollection,
+    onRenameActiveCollection,
     onDeleteActiveCollection,
     onSelectConversation,
   } = props;
@@ -369,6 +373,26 @@ export function SidebarNav(props: Props) {
                 <LnFolderPlus size={16} />
               </button>
             )}
+            <button
+              onClick={chatKind === "supply" ? onRenameShipment : onRenameActiveCollection}
+              title={chatKind === "supply" ? "Перейменувати постачання" : "Перейменувати збірник"}
+              disabled={chatKind === "consolidated" && !activeCollectionId}
+              style={{
+                flex: "none",
+                width: 40,
+                height: 40,
+                borderRadius: 10,
+                background: "var(--surface)",
+                border: "1px solid var(--border)",
+                color: "var(--muted)",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <LnPencil size={15} />
+            </button>
             <button
               onClick={chatKind === "supply" ? onDeleteShipment : onDeleteActiveCollection}
               title={chatKind === "supply" ? "Видалити постачання" : "Видалити збірник"}
