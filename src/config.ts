@@ -77,11 +77,12 @@ const envSchema = z.object({
   REMINDERS_CRON: z.string().default('0 6 * * *'),
 
   // News ingest (worker cron): fetch public RSS/Atom feeds into news_items and
-  // purge anything older than NEWS_RETENTION_DAYS. Off by default — enable only
-  // where outbound network to the feed sources is available.
+  // purge anything older than NEWS_RETENTION_DAYS. ON by default — the worker in
+  // this deployment has outbound network to the feeds. Set NEWS_ENABLED=false to
+  // disable (e.g. a locked-down worker with no egress).
   NEWS_ENABLED: z
     .enum(['true', 'false'])
-    .default('false')
+    .default('true')
     .transform((v) => v === 'true'),
   NEWS_CRON: z.string().default('*/30 * * * *'),
   NEWS_RETENTION_DAYS: z.coerce.number().int().positive().default(14),

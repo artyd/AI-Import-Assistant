@@ -2,10 +2,11 @@ import { test, expect, type Page } from "@playwright/test";
 
 /**
  * Chat file intake — drag-and-drop and paste. The backend is fully mocked with
- * page.route, so these run standalone (no PW_BACKEND needed). Both gestures
- * funnel through the same ingest → upload → auto-classify path in Chat.tsx; we
- * assert the upload request fires and the classify bubble reports the folder
- * (which also exercises the Ukrainian folder-label mapping).
+ * page.route, so these run standalone (no PW_BACKEND needed). Both gestures STAGE
+ * the file as a chip above the composer (no upload yet); the actual upload →
+ * auto-classify only fires when the message is sent. We assert the chip appears,
+ * then that pressing send fires the upload and the classify bubble reports the
+ * folder (which also exercises the Ukrainian folder-label mapping).
  */
 const WSID = "ws-test";
 const WS = {
@@ -72,37 +73,38 @@ async function makeFileTransfer(page: Page, name: string, type: string) {
 }
 
 test.describe("Chat file intake", () => {
-  test("drag-and-drop uploads and auto-files the document", async ({ page }) => {
+  test("drag-and-drop stages the file, then send uploads and auto-files it", async ({ page }) => {
     await setupMocks(page);
     await page.goto(`/workspaces/${WSID}`);
 
     const chat = page.getByTestId("chat-root");
     await expect(chat).toBeVisible();
 
-    const uploadReq = page.waitForRequest(
-      (r) => r.url().endsWith(`/workspaces/${WSID}/files`) && r.method() === "POST"
-    );
-
     const dt = await makeFileTransfer(page, "invoice.pdf", "application/pdf");
     await chat.dispatchEvent("dragenter", { dataTransfer: dt });
     await chat.dispatchEvent("dragover", { dataTransfer: dt });
     await chat.dispatchEvent("drop", { dataTransfer: dt });
 
+    // Staged as a chip above the composer — NOT uploaded yet.
+    await expect(page.getByTestId("composer-pending")).toContainText("invoice.pdf");
+
+    // Sending fires the upload + auto-classify.
+    const uploadReq = page.waitForRequest(
+      (r) => r.url().endsWith(`/workspaces/${WSID}/files`) && r.method() === "POST"
+    );
+    await page.getByRole("button", { name: "Надіслати" }).click();
     await uploadReq;
+
     // Classify bubble reports the folder via the Ukrainian label.
     await expect(page.getByText(/Віднесено до «03 · Сертифікати»/)).toBeVisible();
   });
 
-  test("paste uploads and auto-files the document", async ({ page }) => {
+  test("paste stages the file, then send uploads and auto-files it", async ({ page }) => {
     await setupMocks(page);
     await page.goto(`/workspaces/${WSID}`);
 
     const input = page.getByTestId("chat-input");
     await expect(input).toBeVisible();
-
-    const uploadReq = page.waitForRequest(
-      (r) => r.url().endsWith(`/workspaces/${WSID}/files`) && r.method() === "POST"
-    );
 
     // ClipboardEvent.clipboardData is read-only and can't be set via Playwright's
     // dispatchEvent, so build a paste event in-page with a DataTransfer attached
@@ -118,7 +120,15 @@ test.describe("Chat file intake", () => {
       ["scan.png", "image/png"] as const
     );
 
+    // Staged as a chip — NOT uploaded yet.
+    await expect(page.getByTestId("composer-pending")).toContainText("scan.png");
+
+    const uploadReq = page.waitForRequest(
+      (r) => r.url().endsWith(`/workspaces/${WSID}/files`) && r.method() === "POST"
+    );
+    await page.getByRole("button", { name: "Надіслати" }).click();
     await uploadReq;
+
     await expect(page.getByText(/Віднесено до «03 · Сертифікати»/)).toBeVisible();
   });
 });

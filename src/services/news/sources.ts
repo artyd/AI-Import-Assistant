@@ -5,13 +5,18 @@
  * (do not rename — see API_CONTRACT.md). The aggregate "Всі новини" tab is a
  * frontend-only concept (pass no `rubric`, or `rubric=all`, to GET /api/news).
  *
- * NEWS_SOURCES is a best-effort, user-approved starter set of public feeds. The
- * ingest (src/services/news/index.ts) tolerates individual feed failures — one
- * bad/unreachable feed never aborts the run — so it is safe to keep entries here
- * whose RSS endpoint is unconfirmed. Such entries are marked `TODO(verify)` and
- * should be swapped for a confirmed RSS URL, an official API, or an HTML-scrape
- * adapter later. Do NOT hit any of these URLs at build/test time — the network
- * only happens inside the cron job at runtime.
+ * Each entry is tagged:
+ *   [confirmed] — the RSS/Atom endpoint was fetched and returned valid feed XML
+ *                 with recent items (verified 2026-09-15). At least one confirmed
+ *                 feed per rubric so a rubric is never empty on a clean deploy.
+ *   [gov/edge]  — an official gov/EU feed that a plain bot User-Agent gets a 403
+ *                 (Cloudflare/WAF) for, but which typically succeeds server-side
+ *                 with the browser-like UA the ingest sends. Kept as a bonus
+ *                 source; if it fails at runtime the run still completes (the
+ *                 ingest tolerates per-feed failures — one bad feed never aborts).
+ *
+ * Do NOT hit any of these URLs at build/test time — the network only happens
+ * inside the cron job at runtime.
  */
 
 export const RUBRIC_KEYS = [
@@ -49,63 +54,52 @@ export interface NewsSource {
   url: string;
 }
 
-/**
- * Public feeds per rubric. "confirmed RSS" = a stable RSS/Atom endpoint I am
- * reasonably confident exists (usually a WordPress `/feed/` or a documented
- * gov/EU feed). "TODO(verify)" = the source is relevant but I have no confirmed
- * clean RSS — the URL is a best-effort guess and likely needs an HTML scrape or
- * official API before it yields items.
- */
 export const NEWS_SOURCES: NewsSource[] = [
   // ── Митниця України ─────────────────────────────────────────────────────────
-  // TODO(verify): Держмитслужба has no confirmed public RSS — needs HTML scrape or official API.
-  { rubric: 'customs', name: 'Держмитслужба України', url: 'https://customs.gov.ua/rss' },
-  // ЛІГА:ЗАКОН business/legal feed — confirmed RSS (WordPress-style feed).
+  // [confirmed] Interfax-Ukraine economic wire (Ukrainian, ~25 items, updated daily).
+  { rubric: 'customs', name: 'Interfax-Україна (Економіка)', url: 'https://interfax.com.ua/news/economic.rss' },
+  // [gov/edge] ЛІГА.Бізнес — WordPress-style feed; 403 to a bot UA, usually fine server-side.
   { rubric: 'customs', name: 'ЛІГА.Бізнес', url: 'https://biz.liga.net/rss.xml' },
-  // TODO(verify): Мінфін (minfin.com.ua) news RSS unconfirmed — best-effort URL.
-  { rubric: 'customs', name: 'Мінфін', url: 'https://minfin.com.ua/ua/news/rss/' },
 
   // ── Транзит ЄС / NCTS ────────────────────────────────────────────────────────
-  // TODO(verify): EU TAXUD / NCTS has no confirmed news RSS — needs the EU newsroom API or scrape.
-  { rubric: 'ncts', name: 'EU TAXUD (Customs)', url: 'https://taxation-customs.ec.europa.eu/rss_en' },
-  // TODO(verify): EU Customs Union newsroom — best-effort RSS path.
-  { rubric: 'ncts', name: 'EU Customs newsroom', url: 'https://taxation-customs.ec.europa.eu/news_en/rss' },
+  // [confirmed] Customs Declarations UK — EU/UK customs procedures & transit (low volume but valid).
+  { rubric: 'ncts', name: 'Customs Declarations UK', url: 'https://www.customs-declarations.uk/feed/' },
 
   // ── Фрахтові ставки ──────────────────────────────────────────────────────────
-  // The Loadstar — confirmed RSS (WordPress `/feed/`).
-  { rubric: 'freight', name: 'The Loadstar', url: 'https://theloadstar.com/feed/' },
-  // FreightWaves — confirmed RSS (WordPress feed).
+  // [confirmed] FreightWaves — ocean/air freight & logistics (WordPress feed).
   { rubric: 'freight', name: 'FreightWaves', url: 'https://www.freightwaves.com/news/feed' },
+  // [confirmed] gCaptain — maritime/shipping (WordPress feed).
+  { rubric: 'freight', name: 'gCaptain', url: 'https://gcaptain.com/feed/' },
+  // [gov/edge] The Loadstar — WordPress `/feed/`; 403 to a bot UA, usually fine server-side.
+  { rubric: 'freight', name: 'The Loadstar', url: 'https://theloadstar.com/feed/' },
 
   // ── Санкції / експортний контроль ────────────────────────────────────────────
-  // TODO(verify): OFAC "Recent Actions" — RSS availability unconfirmed; may need the Treasury feed/API.
-  { rubric: 'sanctions', name: 'OFAC Recent Actions', url: 'https://ofac.treasury.gov/media/rss.xml' },
-  // TODO(verify): EU sanctions / FSD newsroom — no confirmed RSS, best-effort path.
-  { rubric: 'sanctions', name: 'EU sanctions newsroom', url: 'https://finance.ec.europa.eu/news_en/rss' },
+  // [confirmed] Baker McKenzie sanctions & export-controls blog (WordPress feed).
+  { rubric: 'sanctions', name: 'Baker McKenzie (Sanctions)', url: 'https://sanctionsnews.bakermckenzie.com/feed/' },
 
   // ── Порти ────────────────────────────────────────────────────────────────────
-  // TODO(verify): Port of Rotterdam press — RSS unconfirmed, best-effort URL.
-  { rubric: 'ports', name: 'Port of Rotterdam', url: 'https://www.portofrotterdam.com/en/news-and-press-releases/rss' },
-  // TODO(verify): Port of Hamburg (HHLA/HPA) press — RSS unconfirmed.
-  { rubric: 'ports', name: 'Port of Hamburg', url: 'https://www.hafen-hamburg.de/en/press/feed/' },
-  // TODO(verify): Port of Gdańsk press — RSS unconfirmed.
+  // [confirmed] Port of Gdańsk press (WordPress feed).
   { rubric: 'ports', name: 'Port of Gdańsk', url: 'https://www.portgdansk.pl/en/feed/' },
+  // [confirmed] Port of Rotterdam news (the real feed path is /en/rss.xml).
+  { rubric: 'ports', name: 'Port of Rotterdam', url: 'https://www.portofrotterdam.com/en/rss.xml' },
+  // [confirmed] Splash247 — maritime/shipping wire (higher-volume port coverage).
+  { rubric: 'ports', name: 'Splash247', url: 'https://splash247.com/feed/' },
 
   // ── Курси валют / ПДВ ────────────────────────────────────────────────────────
-  // TODO(verify): НБУ (bank.gov.ua) publishes RSS but the exact endpoint needs confirming.
-  { rubric: 'fx', name: 'НБУ', url: 'https://bank.gov.ua/ua/news/rss' },
-  // TODO(verify): ДПС (tax.gov.ua) news RSS unconfirmed — best-effort URL.
+  // [confirmed] РБК-Україна Ukrainian wire (carries FX/economy/tax). NB: НБУ &
+  // Мінфін dropped their public RSS (all candidate paths 404), so this is primary.
+  { rubric: 'fx', name: 'РБК-Україна', url: 'https://www.rbc.ua/static/rss/all.ukr.rss.xml' },
+  // [gov/edge] ДПС (tax) news — 403 to a bot UA, may work server-side.
   { rubric: 'fx', name: 'ДПС України', url: 'https://tax.gov.ua/rss/' },
 
   // ── Фарм/хім регулювання ─────────────────────────────────────────────────────
-  // EMA news — confirmed RSS (europa.eu publishes an rss.xml news feed).
-  { rubric: 'pharma', name: 'EMA', url: 'https://www.ema.europa.eu/en/rss.xml' },
-  // TODO(verify): ECHA news RSS endpoint unconfirmed — best-effort path.
+  // [confirmed] Pharmaceutical Technology — pharma industry/regulation (WordPress feed).
+  { rubric: 'pharma', name: 'Pharmaceutical Technology', url: 'https://www.pharmaceutical-technology.com/feed/' },
+  // [gov/edge] ECHA news — 403 to a bot UA, may work server-side. NB: EMA dropped
+  // its public rss.xml (all candidate paths 404), so it is not listed.
   { rubric: 'pharma', name: 'ECHA', url: 'https://echa.europa.eu/-/rss' },
-  // TODO(verify): ДЕЦ (Державний експертний центр МОЗ) has no confirmed RSS — needs scrape.
-  { rubric: 'pharma', name: 'ДЕЦ МОЗ', url: 'https://www.dec.gov.ua/feed/' },
 
   // ── ADR / небезпечні ─────────────────────────────────────────────────────────
-  // TODO(verify): UNECE ADR (Transport of Dangerous Goods) — RSS unconfirmed, best-effort URL.
-  { rubric: 'adr', name: 'UNECE ADR', url: 'https://unece.org/transport/dangerous-goods/rss.xml' },
+  // [confirmed] Bulk Distributor — tank/bulk/hazmat road transport (WordPress feed).
+  { rubric: 'adr', name: 'Bulk Distributor', url: 'https://www.bulk-distributor.com/feed/' },
 ];

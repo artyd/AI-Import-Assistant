@@ -102,6 +102,10 @@ services:
       CORS_ORIGIN: ${CORS_ORIGIN}
       STORAGE_DIR: /data/storage
       LOGIST_MCP_URL: ${LOGIST_MCP_URL:-http://logist-mcp:8000}
+      # News RSS ingest (worker cron). On by default; tune or disable via .env.
+      NEWS_ENABLED: ${NEWS_ENABLED:-true}
+      NEWS_CRON: ${NEWS_CRON:-*/30 * * * *}
+      NEWS_RETENTION_DAYS: ${NEWS_RETENTION_DAYS:-14}
     volumes:
       - storage_data:/data/storage
     depends_on:

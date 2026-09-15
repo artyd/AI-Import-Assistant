@@ -56,6 +56,12 @@ function isAccepted(file: File): boolean {
   return ACCEPT_EXT.some((ext) => lower.endsWith(ext));
 }
 
+// Stable identity for a staged file (dedupe + chip key + removal). Two <input>
+// picks of the same file on the same day collapse to one pending chip.
+function fileKey(f: File): string {
+  return `${f.name}:${f.size}:${f.lastModified}`;
+}
+
 // Normalize + filter dropped/pasted files down to the supported types. Returns a
 // plain File[] (no DataTransfer round-trip — that can silently drop filenames,
 // which the server's extension allow-list then rejects).
@@ -168,6 +174,9 @@ export function Chat({
   const [streaming, setStreaming] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  // Files chosen via paperclip/drag/paste are STAGED here (chips above the input)
+  // and only uploaded when the message is sent — never on pick. Cleared on send.
+  const [pending, setPending] = useState<File[]>([]);
   const convRef = useRef<string | undefined>(conversationId);
   const scrollRef = useRef<HTMLDivElement>(null);
   const streamTextRef = useRef("");
@@ -258,7 +267,14 @@ export function Chat({
       const files = acceptFiles(raw);
       if (files.length) {
         setNotice(null);
-        void handleFiles(files);
+        // STAGE, don't upload: the files become chips above the composer and are
+        // uploaded + classified only when the message is sent. Dedupe by identity
+        // so re-picking the same file doesn't add a second chip.
+        setPending((prev) => {
+          const seen = new Set(prev.map(fileKey));
+          const add = files.filter((f) => !seen.has(fileKey(f)));
+          return add.length ? [...prev, ...add] : prev;
+        });
       } else if (raw.length) {
         // Files arrived but none were a supported type — say so instead of
         // silently doing nothing.
@@ -267,8 +283,12 @@ export function Chat({
         );
       }
     },
-    [handleFiles, streaming]
+    [streaming, fileIntake]
   );
+
+  const removePending = useCallback((f: File) => {
+    setPending((prev) => prev.filter((x) => fileKey(x) !== fileKey(f)));
+  }, []);
 
   const onDrop = useCallback(
     (e: React.DragEvent) => {
@@ -399,7 +419,20 @@ export function Chat({
     }
   }, [streaming, postPath, onConversationStarted, onLog]);
 
-  const send = useCallback(() => runMessage(input), [runMessage, input]);
+  // On send: first upload + classify any staged files (they show as classify
+  // cards in the thread, exactly like the old inline flow), then stream the text
+  // message if there is one. Sending is allowed with files only, text only, or both.
+  const send = useCallback(async () => {
+    if (streaming) return;
+    const text = input;
+    const files = pending;
+    if (!text.trim() && files.length === 0) return;
+    if (files.length) {
+      setPending([]);
+      await handleFiles(files);
+    }
+    if (text.trim()) await runMessage(text);
+  }, [streaming, input, pending, handleFiles, runMessage]);
 
   return (
     <div
@@ -537,6 +570,8 @@ export function Chat({
               onChangeKind={onChangeKind}
               selector={selector}
               placeholder={placeholder}
+              pending={pending}
+              onRemovePending={removePending}
             />
             <div
               style={{
@@ -610,6 +645,8 @@ export function Chat({
                 onChangeKind={onChangeKind}
                 selector={selector}
                 placeholder={placeholder}
+                pending={pending}
+                onRemovePending={removePending}
               />
               <div
                 style={{
@@ -667,6 +704,8 @@ function Composer({
   onChangeKind,
   selector,
   placeholder,
+  pending,
+  onRemovePending,
 }: {
   input: string;
   setInput: (v: string) => void;
@@ -678,6 +717,8 @@ function Composer({
   onChangeKind: (k: ChatKind) => void;
   selector?: EntitySelector | null;
   placeholder?: string;
+  pending: File[];
+  onRemovePending: (f: File) => void;
 }) {
   return (
     <div
@@ -779,6 +820,69 @@ function Composer({
         )}
       </div>
 
+      {/* Staged files: chips shown ABOVE the input; uploaded only on send. */}
+      {pending.length > 0 && (
+        <div
+          data-testid="composer-pending"
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 6,
+            padding: "8px 10px",
+            borderBottom: "1px solid var(--border)",
+          }}
+        >
+          {pending.map((f) => (
+            <span
+              key={fileKey(f)}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                height: 28,
+                padding: "0 4px 0 9px",
+                background: "var(--hover)",
+                border: "1px solid var(--border)",
+                borderRadius: 8,
+                fontSize: 12,
+                color: "var(--text)",
+                maxWidth: 220,
+              }}
+            >
+              <span style={{ color: "var(--accent)", display: "flex", flex: "none" }}>
+                <IconFile size={13} />
+              </span>
+              <span className="ellipsis" style={{ maxWidth: 150 }}>
+                {f.name}
+              </span>
+              <button
+                onClick={() => onRemovePending(f)}
+                disabled={streaming}
+                aria-label="Прибрати файл"
+                title="Прибрати"
+                style={{
+                  flex: "none",
+                  width: 20,
+                  height: 20,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  border: "none",
+                  borderRadius: 6,
+                  background: "transparent",
+                  color: "var(--muted)",
+                  cursor: streaming ? "default" : "pointer",
+                  fontSize: 15,
+                  lineHeight: 1,
+                }}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
       {/* Bottom row: attach / textarea (Enter-send, Shift+Enter-newline) / send. */}
       <div style={{ display: "flex", alignItems: "flex-end", gap: 10, padding: "8px 8px 8px 15px" }}>
         {onAttach && (
@@ -834,7 +938,7 @@ function Composer({
         <button
           className="btn btn-primary"
           onClick={onSend}
-          disabled={streaming || !input.trim()}
+          disabled={streaming || (!input.trim() && pending.length === 0)}
           style={{ height: 40, width: 40, padding: 0, borderRadius: 11 }}
           aria-label="Надіслати"
         >

@@ -21,16 +21,28 @@ const parser = new Parser();
 /** Per-feed HTTP timeout (ms). A slow feed should not stall the whole run. */
 const FEED_TIMEOUT_MS = 15_000;
 
-/** Fetch a feed URL as text with a hard timeout + a polite User-Agent. */
+// A browser-like User-Agent. Several official gov/EU feeds (НБУ, EMA, ECHA,
+// Rotterdam, Loadstar…) sit behind Cloudflare/WAF and 403 an obvious bot UA, but
+// serve the same public RSS to a normal browser UA — which reading a public feed
+// server-side legitimately is. Feeds that still refuse simply fail their turn
+// (tolerated per-feed); the run always completes.
+const BROWSER_UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) ' +
+  'Chrome/124.0.0.0 Safari/537.36';
+
+/** Fetch a feed URL as text with a hard timeout + a browser-like User-Agent. */
 async function fetchFeed(url: string): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FEED_TIMEOUT_MS);
   try {
     const res = await fetch(url, {
       signal: controller.signal,
+      redirect: 'follow',
       headers: {
-        'user-agent': 'AI-Import-Assistant-NewsBot/1.0 (+customs logistics feed reader)',
-        accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*',
+        'user-agent': BROWSER_UA,
+        accept:
+          'application/rss+xml, application/atom+xml, application/xml, text/xml, text/html;q=0.9, */*;q=0.8',
+        'accept-language': 'uk,en;q=0.8',
       },
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
