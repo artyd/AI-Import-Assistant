@@ -518,10 +518,12 @@ export default function WorkspacePage() {
     [setActiveCollectionId]
   );
   const newCollection = useCallback(async () => {
+    // Like a new shipment — let the user name the сборник (optional).
+    const name = (window.prompt("Назва збірника (необов'язково)") ?? "").trim();
     try {
-      const { collection } = await api<{ collection: Collection }>(`/api/collections`, {
-        body: { status: "active" },
-      });
+      const body: { status: string; number?: string } = { status: "active" };
+      if (name) body.number = name;
+      const { collection } = await api<{ collection: Collection }>(`/api/collections`, { body });
       addCollection(collection); // prepends + sets it active
       setChatKind("consolidated");
     } catch {
@@ -544,18 +546,22 @@ export default function WorkspacePage() {
 
   // Resolve the collection to analyse into — or AUTO-CREATE one (like a new
   // shipment) so a manifest can be analysed without picking a сборник first.
-  const ensureCollectionForAnalysis = useCallback(async (): Promise<string | null> => {
-    if (activeCollectionId) return activeCollectionId;
-    try {
-      const { collection } = await api<{ collection: Collection }>(`/api/collections`, {
-        body: { status: "active" },
-      });
-      addCollection(collection); // prepends to the list + sets it active
-      return collection.id;
-    } catch {
-      return null;
-    }
-  }, [activeCollectionId, addCollection]);
+  const ensureCollectionForAnalysis = useCallback(
+    async (suggestedName?: string): Promise<string | null> => {
+      if (activeCollectionId) return activeCollectionId;
+      try {
+        const body: { status: string; number?: string } = { status: "active" };
+        const name = suggestedName?.trim();
+        if (name) body.number = name; // name the сборник after the manifest
+        const { collection } = await api<{ collection: Collection }>(`/api/collections`, { body });
+        addCollection(collection); // prepends to the list + sets it active
+        return collection.id;
+      } catch {
+        return null;
+      }
+    },
+    [activeCollectionId, addCollection]
+  );
 
   // Load the conversation the analysis was posted into, so its per-product answer
   // shows in the chat thread (and appears in the sidebar chat list).
@@ -959,6 +965,17 @@ export default function WorkspacePage() {
             theme={theme}
             onToggleTheme={toggleTheme}
             onSaveSupplier={saveSupplier}
+            // Full постачання header only for the supply chat; звичайний / Новини /
+            // Карта get a minimal bar with just the theme/title.
+            variant={view === "chat" && chatKind === "supply" ? "supply" : "minimal"}
+            title={
+              view === "news"
+                ? "Новини"
+                : view === "map"
+                  ? "Карта"
+                  : conversations.find((c) => c.id === conversationId)?.title?.trim() ||
+                    "Новий чат"
+            }
           />
         )}
         <div style={{ flex: 1, minHeight: 0 }}>

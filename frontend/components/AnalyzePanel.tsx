@@ -28,8 +28,9 @@ export function AnalyzePanel({
   onOpenAiSettings,
 }: {
   // Resolve (or lazily CREATE) the collection to analyse into — returns its id,
-  // or null on failure. Lets the сборник be auto-created on first analysis.
-  resolveCollectionId: () => Promise<string | null>;
+  // or null on failure. Lets the сборник be auto-created on first analysis, named
+  // after the manifest (suggestedName).
+  resolveCollectionId: (suggestedName?: string) => Promise<string | null>;
   // Append the answer to this consolidated conversation (else a new one is made).
   conversationId?: string;
   onResult: (
@@ -56,7 +57,13 @@ export function AnalyzePanel({
     setPct(0);
     setStep("Готую збірник…");
 
-    const cid = await resolveCollectionId();
+    // Name a freshly-created сборник after the manifest (file name / source).
+    const suggestedName = file
+      ? file.name.replace(/\.[^.]+$/, "").slice(0, 80)
+      : /^https?:\/\//i.test(trimmed)
+        ? "Google Sheets"
+        : "Вставлена таблиця";
+    const cid = await resolveCollectionId(suggestedName);
     if (!cid) {
       setError("Не вдалося створити/визначити збірник.");
       setRunning(false);
