@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { ChatTool } from '../anthropic/client.js';
 import { query } from '../db/pool.js';
 import * as logist from '../services/logist/index.js';
-import { digestUktzed } from '../services/logist/uktzedDigest.js';
+import { digestUktzedSections } from '../services/logist/uktzedDigest.js';
 import { readStoredFile, contentHashOf } from '../services/storage.js';
 import { extractText } from '../services/extract/index.js';
 import { ocrDocument } from '../services/ocr/claudeOcr.js';
@@ -408,11 +408,15 @@ async function runUktzedLookup(input: unknown): Promise<ToolOutcome> {
   if (!code) return logistFail('Не вказано код УКТ ЗЕД.', 'УКТ ЗЕД: помилка');
   try {
     const r = await logist.uktzedLookup(code);
-    // The full goodinfo page is large and its critical parts sit deep (ветеринарний
-    // контроль, заборони, ліцензування). Digest it in batches so nothing is lost.
-    const digest = await digestUktzed(r.code, r.text);
+    // The goodinfo page is large and split by customs regime (ІМПОРТ/ЕКСПОРТ/
+    // ТРАНЗИТ) with critical parts sitting deep (ветеринарний контроль, заборони,
+    // ліцензування). Digest each regime in batches so nothing is lost and each
+    // requirement is attributed to its regime. Legacy flat `text` maps to common.
+    const common = r.common ?? r.text ?? '';
+    const digest = await digestUktzedSections(r.code, common, r.tabs ?? []);
+    const body = digest || 'Довідку отримано, але вміст порожній — перевірте код.';
     return {
-      result: `Митна довідка УКТ ЗЕД ${r.code} (джерело: qdpro.com.ua):\n${digest}`,
+      result: `Митна довідка УКТ ЗЕД ${r.code} (джерело: qdpro.com.ua):\n${body}`,
       summary: `УКТ ЗЕД ${r.code}: довідка`,
       citations: [{ file: r.source, page: null }],
     };

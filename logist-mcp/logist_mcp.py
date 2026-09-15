@@ -130,6 +130,50 @@ def _extract_links(soup: BeautifulSoup, prefix: str) -> list[dict]:
     return out[:400]
 
 
+def _trim_footer(text: str) -> str:
+    """Cut the shared site menu/footer that follows the content on every page."""
+    cut = text.find(BOILERPLATE_MARKER)
+    if cut != -1:
+        text = text[:cut]
+    return text.strip()
+
+
+def _extract_goodinfo(soup: BeautifulSoup) -> tuple:
+    """Split a goodinfo page into (common, tabs).
+
+    The page carries the customs regime views as jQuery tabs in ONE document:
+    `#jquery_tab0` = ІМПОРТ, `#jquery_tab1` = ЕКСПОРТ, `#jquery_tab2` = ТРАНЗИТ
+    (labels come from the tab menu `<a href="#jquery_tabN">`). A flat get_text()
+    mashes all regimes together, so a requirement can't be attributed to import
+    vs export vs transit. Here we pull each tab's text SEPARATELY (labelled) and
+    return the remaining page (code description, tariff, shared notes) as `common`.
+    Falls back gracefully: a page without these tabs yields common = full text,
+    tabs = [].
+    """
+    for tag in soup(["script", "style", "nav"]):
+        tag.decompose()
+
+    labels: dict = {}
+    for a in soup.find_all("a", href=True):
+        m = re.match(r"#(jquery_tab\d+)$", a["href"].strip())
+        if m:
+            labels[m.group(1)] = a.get_text(" ", strip=True)
+
+    tabs: list = []
+    for i in range(8):
+        tid = f"jquery_tab{i}"
+        node = soup.find(id=tid)
+        if node is None:
+            continue
+        tabs.append({"label": labels.get(tid, tid), "text": _trim_footer(node.get_text("\n", strip=True))})
+
+    container = soup.find(id="jquery_tabs")
+    if container is not None:
+        container.decompose()
+    common = _trim_footer(soup.get_text("\n", strip=True))
+    return common, tabs
+
+
 def _clean_text_and_links(soup: BeautifulSoup, prefix: str, cap: int) -> tuple:
     """Повернути (очищений+обрізаний текст, список дочірніх вузлів з node_id)."""
     # Strip the site menu/footer first so its links don't pollute the child list.
@@ -584,16 +628,21 @@ async def _rest_uktzed_lookup(request: Request) -> JSONResponse:
     except ValidationError as e:
         return _json_err(_first_err(e))
     try:
-        text = await _fetch_clean_text(f"goodinfo/{params.code}")
+        soup = await _fetch_soup(f"goodinfo/{params.code}")
     except ValueError as e:
         return _json_err(str(e))
-    # Return the FULL page (safety-bounded). It is almost all SIGNAL and critical
-    # sections sit deep: ПДВ ~15.5K, ліцензування ~22.8K, ветеринарно-санітарний
-    # контроль (коди документів 0853/5514/5509) ~30.4K, заборони ~34.7K, and a
-    # transit/export copy past ~49K. The TS backend digests this in batches (its
-    # side owns the Anthropic key), so we must not truncate away whole comments.
+    # Split the page by customs regime (ІМПОРТ / ЕКСПОРТ / ТРАНЗИТ tabs) + a
+    # `common` header. Each section is returned in full (safety-bounded); the TS
+    # backend digests each one in batches (its side owns the Anthropic key), so no
+    # whole comment/regime is truncated away.
+    common, tabs = _extract_goodinfo(soup)
     return JSONResponse(
-        {"code": params.code, "text": _cap(text, 100000), "source": f"{BASE_URL}/goodinfo/{params.code}"}
+        {
+            "code": params.code,
+            "common": _cap(common, 40000),
+            "tabs": [{"label": t["label"], "text": _cap(t["text"], 40000)} for t in tabs],
+            "source": f"{BASE_URL}/goodinfo/{params.code}",
+        }
     )
 
 

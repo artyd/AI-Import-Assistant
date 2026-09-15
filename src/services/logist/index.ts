@@ -22,9 +22,19 @@ export interface LogistLink {
   label: string;
 }
 
+export interface UktzedTab {
+  label: string;
+  text: string;
+}
+
 export interface UktzedLookupResult {
   code: string;
-  text: string;
+  // Regime-split content: `common` = code description/tariff/shared notes; `tabs`
+  // = one entry per customs regime (ІМПОРТ / ЕКСПОРТ / ТРАНЗИТ). `text` is the
+  // legacy flat field kept for forward/back compatibility during a rolling deploy.
+  common?: string;
+  tabs?: UktzedTab[];
+  text?: string;
   source: string;
 }
 

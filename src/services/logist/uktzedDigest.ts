@@ -1,39 +1,42 @@
 import { anthropic, MODEL } from '../../anthropic/client.js';
+import type { UktzedTab } from './index.js';
 
 /**
- * Batched digest of a full УКТ ЗЕД goodinfo page.
+ * Batched, regime-aware digest of a full УКТ ЗЕД goodinfo page.
  *
- * The qdpro goodinfo page for one code is large (~50KB+) and its decision-critical
- * parts sit DEEP — ПДВ ~15K, ліцензування ~23K, ветеринарно-санітарний контроль
- * with document codes (0853/5514/5509) ~30K, заборони ~35K, plus a transit/export
- * copy past ~49K. Returning a head-truncated slice loses whole requirements, and
- * feeding the entire page to the model in ONE pass invites "lost in the middle"
- * skimming of exactly those deep sections.
+ * The qdpro goodinfo page splits its content into customs-regime tabs — ІМПОРТ /
+ * ЕКСПОРТ / ТРАНЗИТ — plus a shared header (code description, tariff, common
+ * notes). Each regime is large and its decision-critical parts sit deep (ПДВ,
+ * ліцензування, ветеринарно-санітарний контроль with document codes 0853/5514/
+ * 5509, заборони). Returning a head-truncated slice loses whole requirements, and
+ * feeding an entire section to the model in ONE pass invites "lost in the middle"
+ * skimming of exactly those deep parts.
  *
- * So we split the page into overlapping chunks and run a focused extraction over
- * each in parallel (same batching idea as the consolidated-analysis engine), then
- * concatenate the per-chunk digests in page order. Every section is fully attended
- * to, and the agent receives a compact, COMPLETE regulatory base instead of raw
- * HTML text. The Anthropic key stays server-side (this runs in the backend).
+ * So we digest EACH section (common + every regime tab) separately and, for a
+ * large section, split it into overlapping chunks extracted in parallel (same
+ * batching idea as the consolidated-analysis engine). The result is a compact,
+ * COMPLETE, regime-labelled base — the agent can attribute each requirement to
+ * import vs export vs transit. The Anthropic key stays server-side (backend).
  */
 
-// Pages at or below this size are already small enough to hand over verbatim — no
-// batching needed.
-const DIGEST_THRESHOLD = 14_000;
+// Sections at or below this size are handed over verbatim — no batching needed.
+const DIGEST_THRESHOLD = 12_000;
 // Chars per batch + a small overlap so a requirement straddling a boundary isn't
 // dropped by either neighbour.
 const CHUNK_CHARS = 12_000;
 const OVERLAP_CHARS = 400;
-// Safety bound on batches (a pathological page can't fan out unboundedly).
-const MAX_CHUNKS = 10;
-// Concurrent extraction calls.
-const CONCURRENCY = 4;
+// Safety bound on batches per section.
+const MAX_CHUNKS = 8;
+// Concurrency: sections in parallel × chunks in parallel, both bounded.
+const SECTION_CONCURRENCY = 3;
+const CHUNK_CONCURRENCY = 3;
 const CHUNK_MAX_TOKENS = 1500;
 
-const CHUNK_INSTRUCTION = (code: string): string =>
-  `Це фрагмент ОФІЦІЙНОЇ митної довідки по коду УКТ ЗЕД ${code} (джерело: qdpro.com.ua, дані ДФС/Мінфіну). ` +
-  'Витягни СТИСЛО, українською, маркованим списком УСЕ релевантне для імпорту в Україну, що є САМЕ В ЦЬОМУ фрагменті:\n' +
-  '- ставки ввізного мита (пільгова і повна), ПДВ, акциз;\n' +
+const chunkInstruction = (code: string, section: string): string =>
+  `Це фрагмент розділу «${section}» ОФІЦІЙНОЇ митної довідки по коду УКТ ЗЕД ${code} ` +
+  '(джерело: qdpro.com.ua, дані ДФС/Мінфіну). Витягни СТИСЛО, українською, маркованим ' +
+  'списком УСЕ релевантне, що є САМЕ В ЦЬОМУ фрагменті:\n' +
+  '- ставки мита (пільгова і повна), ПДВ, акциз;\n' +
   '- пільгові ставки за торговими угодами (ЄС, ЄАВТ, Канада, Британія/UK, ОАЕ тощо);\n' +
   '- ліцензування, дозволи, квоти;\n' +
   '- заборони (напр. заборона ввезення товарів походженням з РФ) та обмеження;\n' +
@@ -43,7 +46,7 @@ const CHUNK_INSTRUCTION = (code: string): string =>
   '- технічні регламенти, сертифікати відповідності;\n' +
   '- наркотичні засоби / прекурсори, товари подвійного використання;\n' +
   '- правові підстави (постанови КМУ, закони) і дати набрання чинності, якщо вказані.\n' +
-  'Пиши ДОСЛІВНО суть із фрагмента; нічого не додумуй і не узагальнюй понад текст. ' +
+  'Пиши ДОСЛІВНО суть із фрагмента; нічого не додумуй понад текст. ' +
   'Якщо у ЦЬОМУ фрагменті немає нічого релевантного — відповідай рівно одним символом: —';
 
 /** Split into overlapping char windows, preferring to cut on a newline near the edge. */
@@ -54,7 +57,6 @@ function splitChunks(text: string): string[] {
   while (start < text.length && chunks.length < MAX_CHUNKS) {
     let end = Math.min(start + CHUNK_CHARS, text.length);
     if (end < text.length) {
-      // Prefer a newline boundary in the last 800 chars of the window.
       const nl = text.lastIndexOf('\n', end);
       if (nl > start + CHUNK_CHARS - 800) end = nl;
     }
@@ -65,17 +67,16 @@ function splitChunks(text: string): string[] {
   return chunks;
 }
 
-async function summarizeChunk(code: string, chunk: string): Promise<string> {
+async function summarizeChunk(code: string, section: string, chunk: string): Promise<string> {
   const msg = await anthropic.messages.create({
     model: MODEL,
     max_tokens: CHUNK_MAX_TOKENS,
-    messages: [{ role: 'user', content: `${CHUNK_INSTRUCTION(code)}\n\n---\n${chunk}` }],
+    messages: [{ role: 'user', content: `${chunkInstruction(code, section)}\n\n---\n${chunk}` }],
   });
-  const out = msg.content
+  return msg.content
     .map((b) => (b.type === 'text' ? b.text : ''))
     .join('')
     .trim();
-  return out;
 }
 
 /** Run an async mapper with bounded concurrency, preserving input order. */
@@ -92,31 +93,45 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
   return results;
 }
 
-/**
- * Produce a compact, COMPLETE digest of the goodinfo page. Small pages pass
- * through unchanged; large pages are batched. If every batch fails, falls back to
- * a head slice so the tool still returns something useful.
- */
-export async function digestUktzed(code: string, text: string): Promise<string> {
-  if (text.length <= DIGEST_THRESHOLD) return text;
-
-  const chunks = splitChunks(text);
-  let parts: string[];
-  try {
-    parts = await mapLimit(chunks, CONCURRENCY, (c) =>
-      summarizeChunk(code, c).catch(() => ''),
-    );
-  } catch {
-    return text.slice(0, DIGEST_THRESHOLD);
-  }
-
+/** Digest ONE section (batched if large). Returns '' if it yields nothing. */
+async function digestSection(code: string, section: string, text: string): Promise<string> {
+  const t = text.trim();
+  if (!t) return '';
+  if (t.length <= DIGEST_THRESHOLD) return t;
+  const chunks = splitChunks(t);
+  const parts = await mapLimit(chunks, CHUNK_CONCURRENCY, (c) =>
+    summarizeChunk(code, section, c).catch(() => ''),
+  );
   const merged = parts.map((p) => p.trim()).filter((p) => p && p !== '—').join('\n');
-  if (!merged) return text.slice(0, DIGEST_THRESHOLD);
+  return merged || t.slice(0, DIGEST_THRESHOLD);
+}
 
-  const note =
-    chunks.length > 1
-      ? `Структурований підсумок з офіційної довідки (оброблено ${chunks.length} частин, ` +
-        'щоб не втратити жодного розділу — мито/ПДВ/пільги/ліцензування/заборони/контроль/регламенти):'
-      : 'Підсумок з офіційної довідки:';
-  return `${note}\n${merged}`;
+/**
+ * Produce a compact, COMPLETE, regime-labelled digest of a goodinfo page.
+ * `common` is the shared header; `tabs` are the per-regime views. If everything
+ * fails, returns '' and the caller falls back to a plain message.
+ */
+export async function digestUktzedSections(
+  code: string,
+  common: string,
+  tabs: UktzedTab[],
+): Promise<string> {
+  const sections: { label: string; text: string }[] = [];
+  if (common && common.trim()) {
+    sections.push({ label: 'ЗАГАЛЬНЕ (опис товару, тариф, спільні коментарі)', text: common });
+  }
+  for (const t of tabs) {
+    if (t && t.text && t.text.trim()) sections.push({ label: `РЕЖИМ: ${t.label}`, text: t.text });
+  }
+  if (sections.length === 0) return '';
+
+  const digested = await mapLimit(sections, SECTION_CONCURRENCY, async (s) => {
+    try {
+      const d = await digestSection(code, s.label, s.text);
+      return d ? `## ${s.label}\n${d}` : '';
+    } catch {
+      return '';
+    }
+  });
+  return digested.filter(Boolean).join('\n\n');
 }
