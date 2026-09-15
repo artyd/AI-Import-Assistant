@@ -102,6 +102,14 @@ interface Props {
   onConversationStarted: (id: string) => void;
   onLog: (entry: LogEntry) => void;
   placeholder?: string;
+  // Empty-state (new-chat) customisation. Defaults suit the supply/postачання chat.
+  emptyTitle?: string;
+  emptySubtitle?: React.ReactNode;
+  emptyStarters?: { text: string; icon: React.ReactNode }[];
+  emptyAction?: React.ReactNode;
+  // Fired after every assistant turn completes (used to refresh side state, e.g.
+  // reload the latest analysis when it was triggered from the consolidated chat).
+  onTurnComplete?: () => void;
   // File intake (paperclip auto-file flow) — supply only. When these are omitted
   // the composer's attach/drag/paste are disabled (normal has no files;
   // consolidated files are uploaded via the right-panel Files tab in this phase).
@@ -161,6 +169,11 @@ export function Chat({
   onConversationStarted,
   onLog,
   placeholder,
+  emptyTitle,
+  emptySubtitle,
+  emptyStarters,
+  emptyAction,
+  onTurnComplete,
   folders,
   onUploadAndClassify,
   onMoveFile,
@@ -456,6 +469,7 @@ export function Chat({
               convRef.current = e.conversationId;
               onConversationStarted(e.conversationId);
             }
+            onTurnComplete?.();
           },
           onError: (e) =>
             updateAssistant({
@@ -470,7 +484,7 @@ export function Chat({
     } finally {
       setStreaming(false);
     }
-  }, [streaming, postPath, onConversationStarted, onLog]);
+  }, [streaming, postPath, onConversationStarted, onLog, onTurnComplete]);
 
   // On send: first upload + classify any staged files (they show as classify
   // cards in the thread, exactly like the old inline flow), then stream the text
@@ -637,7 +651,7 @@ export function Chat({
                 color: "var(--text)",
               }}
             >
-              Чим допомогти по постачанню?
+              {emptyTitle ?? "Чим допомогти по постачанню?"}
             </h1>
             <p
               style={{
@@ -648,8 +662,12 @@ export function Chat({
                 textAlign: "center",
               }}
             >
-              Штурман проіндексує документи, звірить чернетки, простежить
-              комплектність пакета й підкаже код УКТ&nbsp;ЗЕД.
+              {emptySubtitle ?? (
+                <>
+                  Штурман проіндексує документи, звірить чернетки, простежить
+                  комплектність пакета й підкаже код УКТ&nbsp;ЗЕД.
+                </>
+              )}
             </p>
             {notice && <Notice text={notice} onClear={() => setNotice(null)} />}
             <Composer
@@ -678,7 +696,7 @@ export function Chat({
                 marginTop: 18,
               }}
             >
-              {STARTERS.map((s) => (
+              {(emptyStarters ?? STARTERS).map((s) => (
                 <button
                   key={s.text}
                   onClick={() => runMessage(s.text)}
@@ -702,6 +720,11 @@ export function Chat({
                 </button>
               ))}
             </div>
+            {emptyAction ? (
+              <div style={{ display: "flex", justifyContent: "center", marginTop: 14 }}>
+                {emptyAction}
+              </div>
+            ) : null}
           </div>
         </div>
       ) : (

@@ -66,6 +66,13 @@ async function mapLimit<T, R>(
   return results;
 }
 
+// Starter prompts for a NEW consolidated (Збірний) chat — analysis-oriented.
+const CONSOLIDATED_STARTERS: { text: string; icon: React.ReactNode }[] = [
+  { text: "Проаналізуй збірник за посиланням на Google Sheets", icon: <LnList size={15} /> },
+  { text: "Порахуй мито та ПДВ по позиціях", icon: <LnFolder size={15} /> },
+  { text: "Які документи потрібні для транзиту через ЄС?", icon: <LnUpload size={15} /> },
+];
+
 const REQ_LABEL: Record<string, string> = {
   contract: "Контракт",
   invoice: "Інвойс",
@@ -585,6 +592,20 @@ export default function WorkspacePage() {
     ).catch(() => alert("Не вдалося завантажити звіт."));
   }, [analysis]);
 
+  // After a consolidated chat turn (analysis may have been run from chat), pull the
+  // collection's latest analysis so the toolbar/table/export reflect it.
+  const reloadLatestAnalysis = useCallback(async () => {
+    if (!activeCollectionId) return;
+    try {
+      const r = await api<{ analysis: AnalysisResult | null }>(
+        `/api/collections/${activeCollectionId}/analysis/latest`
+      );
+      if (r.analysis) setAnalysis(r.analysis);
+    } catch {
+      /* ignore */
+    }
+  }, [activeCollectionId]);
+
   // ── Collection files (right panel Files tab for a Збірник) ──
   const refreshColFiles = useCallback(async () => {
     if (!activeCollectionId) return;
@@ -951,75 +972,53 @@ export default function WorkspacePage() {
                приходить у чат блоками по кожному продукту). Якщо збірник ще не
                обрано — лише ввід, який АВТОМАТИЧНО створює збірник при аналізі. */
             <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
+              {/* Toolbar — only when there is an analysis to act on. */}
               {analysis ? (
-                <>
-                  <div
-                    style={{
-                      flex: "none",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 10,
-                      flexWrap: "wrap",
-                      padding: "10px 20px",
-                      borderBottom: "1px solid var(--border)",
-                    }}
-                  >
-                    <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>
-                      Аналіз «{analysis.sheet}»
-                    </span>
-                    <span style={{ fontSize: 12, color: "var(--muted)" }}>
-                      до сплати {Math.round(analysis.totals.payable).toLocaleString("uk-UA")} $ ·{" "}
-                      {analysis.totals.count} поз.
-                    </span>
-                    <div style={{ flex: 1 }} />
-                    <button className="btn" onClick={() => setShowTable((v) => !v)}>
-                      {showTable ? "Сховати таблицю" : "Таблиця"}
-                    </button>
-                    {analysis.id ? (
-                      <button className="btn" onClick={exportAnalysis}>
-                        Експорт .xlsx
-                      </button>
-                    ) : null}
-                    <button className="btn" onClick={() => setShowIntake((v) => !v)}>
-                      {showIntake ? "Сховати ввід" : "Новий аналіз"}
-                    </button>
-                  </div>
-                  {showIntake || showTable ? (
-                    <div
-                      style={{
-                        flex: "0 0 auto",
-                        maxHeight: "48%",
-                        overflowY: "auto",
-                        borderBottom: "1px solid var(--border)",
-                      }}
-                    >
-                      <div style={{ padding: "14px 20px", maxWidth: 960, margin: "0 auto" }}>
-                        {showIntake ? (
-                          <div style={{ marginBottom: showTable ? 16 : 0 }}>
-                            <AnalyzePanel
-                              resolveCollectionId={ensureCollectionForAnalysis}
-                              conversationId={conversationId}
-                              onResult={onAnalysisResult}
-                              onOpenAiSettings={() => setAiSettingsOpen(true)}
-                            />
-                          </div>
-                        ) : null}
-                        {showTable ? <AnalysisCard analysis={analysis} /> : null}
-                      </div>
-                    </div>
-                  ) : null}
-                </>
-              ) : (
                 <div
                   style={{
-                    flex: "0 0 auto",
-                    padding: "20px 24px",
+                    flex: "none",
                     display: "flex",
-                    justifyContent: "center",
+                    alignItems: "center",
+                    gap: 10,
+                    flexWrap: "wrap",
+                    padding: "10px 20px",
                     borderBottom: "1px solid var(--border)",
                   }}
                 >
-                  <div style={{ width: "100%", maxWidth: 720 }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>
+                    Аналіз «{analysis.sheet}»
+                  </span>
+                  <span style={{ fontSize: 12, color: "var(--muted)" }}>
+                    до сплати {Math.round(analysis.totals.payable).toLocaleString("uk-UA")} $ ·{" "}
+                    {analysis.totals.count} поз.
+                  </span>
+                  <div style={{ flex: 1 }} />
+                  <button className="btn" onClick={() => setShowTable((v) => !v)}>
+                    {showTable ? "Сховати таблицю" : "Таблиця"}
+                  </button>
+                  {analysis.id ? (
+                    <button className="btn" onClick={exportAnalysis}>
+                      Експорт .xlsx
+                    </button>
+                  ) : null}
+                  <button className="btn" onClick={() => setShowIntake((v) => !v)}>
+                    {showIntake ? "Сховати ввід" : "Новий аналіз"}
+                  </button>
+                </div>
+              ) : null}
+
+              {/* On-demand manifest intake (file / URL / paste). Toggled by
+                  «Завантажити файл» in the welcome or «Новий аналіз» in the toolbar. */}
+              {showIntake ? (
+                <div
+                  style={{
+                    flex: "0 0 auto",
+                    maxHeight: "48%",
+                    overflowY: "auto",
+                    borderBottom: "1px solid var(--border)",
+                  }}
+                >
+                  <div style={{ padding: "14px 20px", maxWidth: 720, margin: "0 auto" }}>
                     <AnalyzePanel
                       resolveCollectionId={ensureCollectionForAnalysis}
                       conversationId={conversationId}
@@ -1028,10 +1027,27 @@ export default function WorkspacePage() {
                     />
                   </div>
                 </div>
-              )}
+              ) : null}
 
-              {/* Discussion chat — tied to this collection. The analysis answer
-                  lands here as per-product blocks; composer has the сборник selector. */}
+              {/* On-demand rich table (the analysis card). */}
+              {analysis && showTable ? (
+                <div
+                  style={{
+                    flex: "0 0 auto",
+                    maxHeight: "52%",
+                    overflowY: "auto",
+                    borderBottom: "1px solid var(--border)",
+                  }}
+                >
+                  <div style={{ padding: "14px 20px", maxWidth: 960, margin: "0 auto" }}>
+                    <AnalysisCard analysis={analysis} />
+                  </div>
+                </div>
+              ) : null}
+
+              {/* Discussion chat — tied to this collection. Analysis can be run
+                  straight from here (paste a Google Sheets link / table); the answer
+                  lands as per-product blocks. New chat = centered welcome. */}
               <div style={{ flex: 1, minHeight: 0 }}>
                 {endpoints ? (
                   <Chat
@@ -1044,23 +1060,43 @@ export default function WorkspacePage() {
                     initialMessages={initialMessages}
                     onConversationStarted={onConversationStarted}
                     onLog={onLog}
-                    placeholder="Запитайте про аналіз збірника: коди, ставки, документи, походження…"
+                    onTurnComplete={reloadLatestAnalysis}
+                    placeholder="Вставте посилання на Google Sheets / таблицю, або спитайте про збірник…"
+                    emptyTitle="Аналіз збірного вантажу"
+                    emptySubtitle={
+                      <>
+                        Вставте посилання на Google&nbsp;Sheets або таблицю-маніфест — і я
+                        проаналізую збірник: коди, CIF&nbsp;/&nbsp;мито&nbsp;/&nbsp;ПДВ,
+                        походження та документи для транзиту&nbsp;ЄС і розмитнення в Україні.
+                      </>
+                    }
+                    emptyStarters={CONSOLIDATED_STARTERS}
+                    emptyAction={
+                      <button className="btn" onClick={() => setShowIntake(true)}>
+                        <LnUpload size={15} /> Завантажити файл-маніфест
+                      </button>
+                    }
                   />
                 ) : (
+                  /* No сборник yet — centered intake that AUTO-CREATES one on analysis. */
                   <div
                     style={{
                       height: "100%",
+                      overflowY: "auto",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
                       padding: 24,
-                      textAlign: "center",
                     }}
                   >
-                    <p style={{ fontSize: 13, color: "var(--muted)", maxWidth: 440, lineHeight: 1.5 }}>
-                      Завантажте маніфест або дайте посилання вище — збірник створиться
-                      автоматично, і тут з'явиться чат для обговорення аналізу.
-                    </p>
+                    <div style={{ width: "100%", maxWidth: 720 }}>
+                      <AnalyzePanel
+                        resolveCollectionId={ensureCollectionForAnalysis}
+                        conversationId={conversationId}
+                        onResult={onAnalysisResult}
+                        onOpenAiSettings={() => setAiSettingsOpen(true)}
+                      />
+                    </div>
                   </div>
                 )}
               </div>
