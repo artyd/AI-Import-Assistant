@@ -188,23 +188,43 @@ export function buildReferenceMap(
     .map((s) => {
       const headerIdx = findDataHeader(s.rows);
       if (headerIdx < 0) return null;
-      const cols = mapColumns(s.rows[headerIdx] ?? []);
+      const header = s.rows[headerIdx] ?? [];
+      const cols = mapColumns(header);
       if (cols.ls < 0 || (cols.price < 0 && cols.code < 0)) return null;
+      // Price-snapshot columns headed by a date (e.g. «05,08,2026», «14.07.2026
+      // ЗАКУПКА») — these carry the freshest purchase price, unlike the often-empty
+      // «Прошлая цена закупки». Ordered so the newest date is tried first.
+      const datedPriceCols = header
+        .map((h, idx) => ({ idx, date: parseSheetDate(String(h ?? ''), currentDate) }))
+        .filter((x): x is { idx: number; date: Date } => x.date !== null)
+        .sort((a, b) => b.date.getTime() - a.date.getTime())
+        .map((x) => x.idx);
       const date = parseSheetDate(s.name, currentDate);
-      return { s, headerIdx, cols, dateMs: date ? date.getTime() : -Infinity };
+      return { s, headerIdx, cols, datedPriceCols, dateMs: date ? date.getTime() : -Infinity };
     })
     .filter((x): x is NonNullable<typeof x> => x !== null)
-    .sort((a, b) => b.dateMs - a.dateMs); // freshest first
+    .sort((a, b) => b.dateMs - a.dateMs); // freshest source first
+
+  // Freshest positive per-kg price for a row: newest dated column with a value,
+  // else the generic «Прошлая цена закупки». Guarded against non-price big numbers.
+  const rowPrice = (row: (string | number | null | undefined)[], src: (typeof ranked)[number]): number => {
+    for (const idx of src.datedPriceCols) {
+      const v = parseNumber(row[idx]);
+      if (v > 0 && v < 100000) return v;
+    }
+    return src.cols.price >= 0 ? parseNumber(row[src.cols.price]) : 0;
+  };
 
   const map = new Map<string, { price?: number; code?: string }>();
-  for (const { s, headerIdx, cols } of ranked) {
+  for (const src of ranked) {
+    const { s, headerIdx, cols } = src;
     for (let i = headerIdx + 1; i < s.rows.length; i++) {
       const row = s.rows[i] ?? [];
       const key = normalizeLs(row[cols.ls]);
       if (!key) continue;
       const cur = map.get(key) ?? {};
-      if (cur.price === undefined && cols.price >= 0) {
-        const p = parseNumber(row[cols.price]);
+      if (cur.price === undefined) {
+        const p = rowPrice(row, src);
         if (p > 0) cur.price = p;
       }
       if (cur.code === undefined && cols.code >= 0) {
