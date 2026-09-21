@@ -1079,12 +1079,9 @@ export default function WorkspacePage() {
                     {analysis.totals.count} поз.
                   </span>
                   <span style={{ fontSize: 12, color: "var(--muted)" }}>
-                    · доступно в «Архіві» → Excel / превью
+                    · звіт та експорт — у вкладці «Архів»; новий аналіз — прямо з чату (посилання / таблиця / 📎)
                   </span>
                   <div style={{ flex: 1 }} />
-                  <button className="btn" onClick={() => setShowIntake((v) => !v)}>
-                    {showIntake ? "Сховати ввід" : "Новий аналіз"}
-                  </button>
                 </div>
               ) : null}
 

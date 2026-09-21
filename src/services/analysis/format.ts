@@ -88,17 +88,15 @@ function overviewTable(rows: AnalysisRow[]): string {
   ].join('\n');
 }
 
-/** Second per-product table: one row per EU/UA check. */
-function checksTable(eu: AnalysisCheck[] | undefined, ua: AnalysisCheck[] | undefined): string {
-  const out: string[] = [];
-  for (const c of eu ?? []) {
-    out.push(`| 🇪🇺 Транзит ЄС | ${cell(c.item)}${c.note ? ` — ${cell(c.note)}` : ''} | ${mark(c.status)} |`);
-  }
-  for (const c of ua ?? []) {
-    out.push(`| 🇺🇦 Розмитнення UA | ${cell(c.item)}${c.note ? ` — ${cell(c.note)}` : ''} | ${mark(c.status)} |`);
-  }
-  if (out.length === 0) return '_Перевірок за цим напрямом немає._';
-  return ['| Напрям | Перевірка | Статус |', '|---|---|---|', ...out].join('\n');
+/** A single-direction checks table (Перевірка | Статус), or a "none" note. */
+function directionTable(title: string, list: AnalysisCheck[] | undefined): string {
+  const rows = (list ?? []).map(
+    (c) => `| ${cell(c.item)}${c.note ? ` — ${cell(c.note)}` : ''} | ${mark(c.status)} |`,
+  );
+  const body = rows.length
+    ? ['| Перевірка | Статус |', '|---|---|', ...rows].join('\n')
+    : '_немає перевірок за цим напрямом._';
+  return `**${title}**\n\n${body}`;
 }
 
 function productBlock(row: AnalysisRow, i: number, costData: boolean, fx: Fx): string {
@@ -141,7 +139,12 @@ function productBlock(row: AnalysisRow, i: number, costData: boolean, fx: Fx): s
   if (clarify) summaryRows.push(`| **Уточнити** | ${clarify} |`);
   const summary = [`| Параметр | Значення |`, `|---|---|`, ...summaryRows].join('\n');
 
-  return [`### ${i + 1}. ${row.name}${reviewBadge}`, summary, checksTable(row.eu, row.ua)].join('\n\n');
+  return [
+    `### ${i + 1}. ${row.name}${reviewBadge}`,
+    summary,
+    directionTable('🇪🇺 Транзит через ЄС', row.eu),
+    directionTable('🇺🇦 Імпорт в Україну', row.ua),
+  ].join('\n\n');
 }
 
 export function formatAnalysisMarkdown(r: AnalysisResult): string {

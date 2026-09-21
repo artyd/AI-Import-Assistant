@@ -137,8 +137,8 @@ export function buildConsolidatedReportXlsx(r: ConsolidatedAnalysis): Buffer {
     for (const c of l.eu) eu.push([l.name, c.item, c.status, c.note]);
     for (const c of l.ua) ua.push([l.name, c.item, c.status, c.note]);
   }
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(eu), 'Перевірки ЄС');
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ua), 'Розмитнення UA');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(eu), 'Транзит через ЄС');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ua), 'Імпорт в Україну');
 
   return XLSX.write(wb, { bookType: 'xlsx', type: 'buffer' }) as Buffer;
 }

@@ -919,31 +919,39 @@ def _build_analysis_xlsx(a: dict) -> bytes:
         wsm.write(rr, 10, flag_txt, cf)
         wsm.write(rr, 11, "ТАК" if r.get("needsReview") else "", cf)
 
-    # ── Sheet 3: Перевірки ЄС / UA ───────────────────────────────────────────
-    wsc = wb.add_worksheet("Перевірки")
-    wsc.hide_gridlines(2)
-    wsc.set_column("A:A", 30)
-    wsc.set_column("B:B", 12)
-    wsc.set_column("C:C", 70)
-    for c, h in enumerate(["Напрям", "Статус", "Перевірка"]):
-        wsc.write(0, c, h, fmt_hdr)
-    wsc.freeze_panes(1, 0)
-    row_i = 1
-    for i, r in enumerate(rows):
-        # One bold accent header row per product so the checks don't read as a
-        # single undifferentiated list ("каша") — groups them like the chat cards.
-        code = r.get("code")
-        code_txt = (f"{code} (запропоновано)" if r.get("codeSuggested") else code) if code else "код не визначено"
-        wsc.merge_range(row_i, 0, row_i, 2, f"{i + 1}. {r.get('name', '')}  ·  УКТЗЕД {code_txt}", fmt_group)
-        row_i += 1
-        for label, checks in (("🇪🇺 Транзит ЄС", r.get("eu") or []), ("🇺🇦 Розмитнення UA", r.get("ua") or [])):
+    # ── Sheets 3 & 4: EU transit / UA import — SEPARATE sheets ───────────────
+    def _checks_sheet(title: str, key: str) -> None:
+        ws2 = wb.add_worksheet(title)
+        ws2.hide_gridlines(2)
+        ws2.set_column("A:A", 32)
+        ws2.set_column("B:B", 12)
+        ws2.set_column("C:C", 80)
+        for c, h in enumerate(["Позиція", "Статус", "Перевірка"]):
+            ws2.write(0, c, h, fmt_hdr)
+        ws2.freeze_panes(1, 0)
+        ri = 1
+        for i, r in enumerate(rows):
+            checks = r.get(key) or []
+            code = r.get("code")
+            code_txt = (f"{code} (запропоновано)" if r.get("codeSuggested") else code) if code else "код не визначено"
+            ws2.merge_range(ri, 0, ri, 2, f"{i + 1}. {r.get('name', '')}  ·  УКТЗЕД {code_txt}", fmt_group)
+            ri += 1
+            if not checks:
+                ws2.write(ri, 0, "", fmt_cell)
+                ws2.write(ri, 1, "", fmt_cell)
+                ws2.write(ri, 2, "немає перевірок за цим напрямом", fmt_cell)
+                ri += 1
+                continue
             for ch in checks:
                 st = ch.get("status", "")
                 sfmt = fmt_bad if st == "red" else (fmt_warn if st == "yellow" else fmt_ok)
-                wsc.write(row_i, 0, label, fmt_cell)
-                wsc.write(row_i, 1, {"red": "🔴", "yellow": "🟡"}.get(st, "🟢"), sfmt)
-                wsc.write(row_i, 2, f"{ch.get('item', '')} {ch.get('note', '')}".strip(), fmt_cell)
-                row_i += 1
+                ws2.write(ri, 0, "", fmt_cell)
+                ws2.write(ri, 1, {"red": "🔴", "yellow": "🟡"}.get(st, "🟢"), sfmt)
+                ws2.write(ri, 2, f"{ch.get('item', '')} {ch.get('note', '')}".strip(), fmt_cell)
+                ri += 1
+
+    _checks_sheet("Транзит через ЄС", "eu")
+    _checks_sheet("Імпорт в Україну", "ua")
 
     wb.close()
     buf.seek(0)
