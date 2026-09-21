@@ -5,7 +5,7 @@
 // deleting a record via DELETE /api/analyses/archive/:id. Exposed both as an
 // embeddable list (ArchiveList — used in the Збірний working panel) and a modal.
 
-import { useCallback, useEffect, useState, type ReactNode, type MouseEvent as ReactMouseEvent } from "react";
+import { useCallback, useEffect, useState, type ReactNode, type MouseEvent as ReactMouseEvent, type CSSProperties } from "react";
 import { api, downloadBlob } from "@/lib/api";
 import type { ArchiveRecord } from "@/lib/types";
 import { IconSpinner } from "./icons";
@@ -147,43 +147,48 @@ function fmtDate(iso: string): string {
 }
 
 // Embeddable archive list (no overlay/header). Used in the working panel.
-// Icon-only action button revealed on card hover.
-function HoverAction({
+// A labelled action button on the flipped (back) side of a card.
+function BackButton({
   onClick,
-  title,
+  label,
   danger,
   children,
 }: {
   onClick: (e: ReactMouseEvent) => void;
-  title: string;
+  label: string;
   danger?: boolean;
   children: ReactNode;
 }) {
   return (
     <button
       onClick={onClick}
-      title={title}
       style={{
-        width: 30,
-        height: 30,
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        width: 200,
+        maxWidth: "80%",
+        padding: "9px 14px",
         border: "1px solid var(--border)",
         background: "var(--surface)",
         color: danger ? "var(--err)" : "var(--text)",
         cursor: "pointer",
-        borderRadius: 8,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        boxShadow: "var(--shadow)",
+        borderRadius: 10,
+        fontSize: 13,
+        fontWeight: 600,
       }}
     >
-      {children}
+      <span style={{ flex: "none", display: "flex" }}>{children}</span>
+      {label}
     </button>
   );
 }
 
-// One archive card: the report itself is visible (a clipped live preview); the
-// action bar (превью / завантажити / видалити) fades in on hover.
+const CARD_HEIGHT = 260;
+
+// One archive card. The FRONT shows the report itself (a clipped live preview);
+// on hover the card FLIPS (3D rotateY) to the BACK, which offers the three
+// actions — переглянути / завантажити Excel / видалити.
 function ArchiveCard({
   rec,
   onPreview,
@@ -210,125 +215,109 @@ function ArchiveCard({
     };
   }, [rec.analysisId]);
 
-  const canOpen = Boolean(rec.analysisId);
+  const faceBase: CSSProperties = {
+    position: "absolute",
+    inset: 0,
+    borderRadius: 14,
+    border: "1px solid var(--border)",
+    overflow: "hidden",
+    WebkitBackfaceVisibility: "hidden",
+    backfaceVisibility: "hidden",
+  };
 
   return (
     <div
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      onClick={() => canOpen && onPreview()}
-      style={{
-        position: "relative",
-        background: "var(--card)",
-        border: "1px solid var(--border)",
-        borderRadius: 14,
-        overflow: "hidden",
-        cursor: canOpen ? "pointer" : "default",
-      }}
+      style={{ height: CARD_HEIGHT, perspective: 1200 }}
     >
-      {/* Header strip */}
-      <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {rec.source} · лист «{rec.sheet}»
-          </div>
-          {rec.hasHigh ? (
-            <span style={{ flex: "none", fontSize: 10.5, fontWeight: 600, color: "var(--err)", background: "var(--errBg)", borderRadius: 6, padding: "3px 8px" }}>
-              ризик
-            </span>
-          ) : null}
-        </div>
-        <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 2, fontVariantNumeric: "tabular-nums" }}>
-          {rec.itemCount} позицій · до сплати {fmtPayable(rec.payable)} · {fmtDate(rec.createdAt)}
-        </div>
-      </div>
-
-      {/* The report itself — a clipped live preview with a fade at the bottom. */}
-      <div style={{ position: "relative", maxHeight: 240, overflow: "hidden" }}>
-        <div style={{ padding: "6px 14px 14px", fontSize: 12 }}>
-          {rec.analysisId ? (
-            failed ? (
-              <div style={{ color: "var(--err)", fontSize: 12, padding: "12px 0" }}>Не вдалося завантажити звіт.</div>
-            ) : md === null ? (
-              <div style={{ display: "grid", placeItems: "center", padding: 28 }}>
-                <IconSpinner size={18} />
-              </div>
-            ) : (
-              <Markdown>{md}</Markdown>
-            )
-          ) : (
-            <div style={{ color: "var(--muted)", fontSize: 12, padding: "12px 0", lineHeight: 1.5 }}>
-              Звіт цього запису недоступний (створено до оновлення). Доступне лише видалення.
-            </div>
-          )}
-        </div>
-        {/* bottom fade */}
-        <div
-          style={{
-            position: "absolute",
-            left: 0,
-            right: 0,
-            bottom: 0,
-            height: 48,
-            pointerEvents: "none",
-            background: "linear-gradient(to bottom, transparent, var(--card))",
-          }}
-        />
-      </div>
-
-      {/* Hover action bar (top-right). */}
       <div
         style={{
-          position: "absolute",
-          top: 8,
-          right: 8,
-          display: "flex",
-          gap: 6,
-          opacity: hover ? 1 : 0,
-          transform: hover ? "translateY(0)" : "translateY(-4px)",
-          transition: "opacity .15s ease, transform .15s ease",
-          pointerEvents: hover ? "auto" : "none",
+          position: "relative",
+          width: "100%",
+          height: "100%",
+          transition: "transform .5s",
+          transformStyle: "preserve-3d",
+          transform: hover ? "rotateY(180deg)" : "rotateY(0deg)",
         }}
       >
-        {rec.analysisId ? (
-          <HoverAction
-            title="Переглянути"
-            onClick={(e) => {
-              e.stopPropagation();
-              onPreview();
-            }}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-              <circle cx="12" cy="12" r="3" />
-            </svg>
-          </HoverAction>
-        ) : null}
-        {rec.analysisId ? (
-          <HoverAction
-            title="Завантажити Excel"
-            onClick={(e) => {
-              e.stopPropagation();
-              onDownload();
-            }}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
-            </svg>
-          </HoverAction>
-        ) : null}
-        <HoverAction
-          title="Видалити"
-          danger
-          onClick={(e) => {
-            e.stopPropagation();
-            onRemove();
+        {/* FRONT — the report itself */}
+        <div style={{ ...faceBase, background: "var(--card)", display: "flex", flexDirection: "column" }}>
+          <div style={{ flex: "none", padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {rec.source} · лист «{rec.sheet}»
+              </div>
+              {rec.hasHigh ? (
+                <span style={{ flex: "none", fontSize: 10.5, fontWeight: 600, color: "var(--err)", background: "var(--errBg)", borderRadius: 6, padding: "3px 8px" }}>
+                  ризик
+                </span>
+              ) : null}
+            </div>
+            <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 2, fontVariantNumeric: "tabular-nums" }}>
+              {rec.itemCount} позицій · до сплати {fmtPayable(rec.payable)} · {fmtDate(rec.createdAt)}
+            </div>
+          </div>
+          <div style={{ position: "relative", flex: 1, minHeight: 0, overflow: "hidden" }}>
+            <div style={{ padding: "6px 14px 14px", fontSize: 12 }}>
+              {rec.analysisId ? (
+                failed ? (
+                  <div style={{ color: "var(--err)", fontSize: 12, padding: "12px 0" }}>Не вдалося завантажити звіт.</div>
+                ) : md === null ? (
+                  <div style={{ display: "grid", placeItems: "center", padding: 28 }}>
+                    <IconSpinner size={18} />
+                  </div>
+                ) : (
+                  <Markdown>{md}</Markdown>
+                )
+              ) : (
+                <div style={{ color: "var(--muted)", fontSize: 12, padding: "12px 0", lineHeight: 1.5 }}>
+                  Звіт цього запису недоступний (створено до оновлення). Доступне лише видалення.
+                </div>
+              )}
+            </div>
+            <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 44, pointerEvents: "none", background: "linear-gradient(to bottom, transparent, var(--card))" }} />
+          </div>
+        </div>
+
+        {/* BACK — the action choice, revealed by the flip */}
+        <div
+          style={{
+            ...faceBase,
+            background: "var(--surface)",
+            transform: "rotateY(180deg)",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 10,
+            padding: 16,
           }}
         >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-          </svg>
-        </HoverAction>
+          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", marginBottom: 2 }}>
+            {rec.source} · лист «{rec.sheet}»
+          </div>
+          {rec.analysisId ? (
+            <BackButton label="Переглянути" onClick={(e) => { e.stopPropagation(); onPreview(); }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+            </BackButton>
+          ) : null}
+          {rec.analysisId ? (
+            <BackButton label="Завантажити Excel" onClick={(e) => { e.stopPropagation(); onDownload(); }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
+              </svg>
+            </BackButton>
+          ) : null}
+          <BackButton label="Видалити" danger onClick={(e) => { e.stopPropagation(); onRemove(); }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+            </svg>
+          </BackButton>
+        </div>
       </div>
     </div>
   );

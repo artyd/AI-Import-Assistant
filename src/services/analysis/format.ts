@@ -147,23 +147,32 @@ function productBlock(row: AnalysisRow, i: number, costData: boolean, fx: Fx): s
   ].join('\n\n');
 }
 
+/** «Джерело» line: what was loaded (link / file / pasted) + sheet + sheet date. */
+function sourceLine(r: AnalysisResult): string {
+  const src = r.source;
+  let what: string;
+  if (src === 'Google Sheets') what = 'посилання Google Sheets';
+  else if (src === 'Вставлена таблиця') what = 'вставлена таблиця';
+  else what = `файл «${src}»`;
+  const datePart = r.meta.date ? ` · дата ${r.meta.date}` : '';
+  return `_Джерело: ${what} · лист «${r.sheet}»${datePart}_`;
+}
+
 export function formatAnalysisMarkdown(r: AnalysisResult): string {
   const t = r.totals;
   const costData = r.costDataAvailable;
   const fx = r.fx ?? null;
-  const header: string[] = [`## Аналіз збірного вантажу — «${r.sheet}»`];
+  const header: string[] = [`## Аналіз збірного вантажу — «${r.sheet}»`, sourceLine(r)];
   if (costData) {
     header.push(
       `**Разом:** митна вартість (CIF) ${moneyFx(t.cif, fx)} · мито ${moneyFx(t.duty, fx)} · ПДВ ${moneyFx(t.vat, fx)} · **до сплати ${moneyFx(t.payable, fx)}** · позицій ${t.count}.`,
     );
-    if (fx) header.push(`_Курс НБУ: 1 ${fx.currency} = ${fx.rate.toLocaleString('uk-UA')} ₴${fx.date ? ` (${fx.date})` : ''}._`);
   } else {
     header.push(
       `**Класифікаційний аналіз** — у маніфесті немає вартісних даних (ціна/кількість), тому платежі не розраховуються. Показано коди та перевірки. Позицій: ${t.count}.`,
     );
   }
   if (r.criticalAlert) header.push(`> ⚠️ ${r.criticalAlert}`);
-  if (r.sourceChecked) header.push('_Коди, ставки та обмеження звірено з офіційним джерелом qdpro._');
   if (r.aiDegraded) header.push('_AI-перевірки були недоступні — показано детермінований розрахунок; позиції позначено «перевірити»._');
 
   const sections: string[] = [header.join('\n\n')];
