@@ -277,6 +277,9 @@ export interface AnalysisCheck {
 export interface AnalysisRow {
   name: string;
   code: string | null; // УКТ ЗЕД
+  codeSuggested?: boolean; // code proposed by the engine, not from the manifest
+  codeBasis?: string | null; // official HS description backing a suggested code
+  codeVerified?: boolean | null; // suggested code confirmed to exist in qdpro
   qtyKg: number;
   price: number;
   dutyRate: number | null;
@@ -336,6 +339,8 @@ export interface AnalysisResult {
   hasHigh: boolean;
   aiDegraded: boolean;
   sourceChecked?: boolean;
+  costDataAvailable?: boolean; // false ⇒ classification-only (no price/qty data)
+  fx?: { currency: string; rate: number; date: string } | null; // NBU rate → UAH
 }
 
 // ── Map (Карта постачань) ─────────────────────────────────────────────────────
@@ -390,10 +395,12 @@ export interface AiConfig {
 
 export interface ArchiveRecord {
   id: string;
+  collectionId: string | null;
+  analysisId: string | null; // full analysis for preview/xlsx; null once deleted
   source: string;
   sheet: string;
-  item_count: number;
+  itemCount: number;
   payable: number | string;
-  has_high: boolean;
-  created_at: string;
+  hasHigh: boolean;
+  createdAt: string;
 }

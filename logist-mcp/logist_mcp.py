@@ -367,8 +367,8 @@ class ExchangeRateInput(BaseModel):
 NBU_EXCHANGE_URL = "https://bank.gov.ua/NBUStatService/v1/statdirectory/exchange"
 
 
-async def _nbu_rate(params: ExchangeRateInput) -> str:
-    """Живий запит офіційного курсу НБУ (спільна логіка тулу і REST-ендпоінта)."""
+async def _nbu_fetch(params: ExchangeRateInput) -> dict:
+    """Живий запит офіційного курсу НБУ — повертає перший запис (cc/txt/rate/…)."""
     query = {"json": "", "valcode": params.currency}
     if params.date:
         query["date"] = params.date
@@ -388,11 +388,19 @@ async def _nbu_rate(params: ExchangeRateInput) -> str:
             f"Курс для {params.currency} не знайдено — перевірте код валюти "
             f"(ISO-4217, напр. USD/EUR/CNY) або дату"
         )
-    rate = data[0]
+    return data[0]
+
+
+def _nbu_format(rate: dict) -> str:
     return (
         f"1 {rate['cc']} ({rate['txt']}) = {rate['rate']} грн, "
         f"станом на {rate['exchangedate']} (джерело: НБУ)"
     )
+
+
+async def _nbu_rate(params: ExchangeRateInput) -> str:
+    """Живий запит офіційного курсу НБУ (спільна логіка тулу і REST-ендпоінта)."""
+    return _nbu_format(await _nbu_fetch(params))
 
 
 @mcp.tool(
@@ -742,10 +750,19 @@ async def _rest_rate(request: Request) -> JSONResponse:
     except ValidationError as e:
         return _json_err(_first_err(e))
     try:
-        text = await _nbu_rate(params)
+        rec = await _nbu_fetch(params)
     except ValueError as e:
         return _json_err(str(e))
-    return JSONResponse({"currency": params.currency, "date": params.date, "text": text})
+    try:
+        rate_num = float(rec.get("rate"))
+    except (TypeError, ValueError):
+        rate_num = None
+    return JSONResponse({
+        "currency": params.currency,
+        "date": params.date,
+        "text": _nbu_format(rec),
+        "rate": rate_num,
+    })
 
 
 async def _rest_pubchem(request: Request) -> JSONResponse:
@@ -805,6 +822,10 @@ def _build_analysis_xlsx(a: dict) -> bytes:
     fmt_warn = wb.add_format({"font_size": 9, "font_color": "#B45309"})
     fmt_bad = wb.add_format({"font_size": 9, "font_color": "#DC2626", "bold": True})
     fmt_ok = wb.add_format({"font_size": 9, "font_color": "#059669"})
+    fmt_group = wb.add_format({
+        "bold": True, "font_size": 10, "font_color": "#0F172A", "bg_color": "#EFF4FF",
+        "valign": "vcenter", "border": 1, "border_color": "#DBE4FF",
+    })
 
     # ── Sheet 1: Зведена ─────────────────────────────────────────────────────
     ws = wb.add_worksheet("Зведена")
@@ -815,16 +836,37 @@ def _build_analysis_xlsx(a: dict) -> bytes:
     ws.write("A2", f"Джерело: {a.get('source', '—')}  ·  Лист: {sheet_name}"
              + (f"  ·  {meta.get('date')}" if meta.get("date") else ""), fmt_sub)
 
-    tiles = [
-        ("Митна вартість (CIF)", _num(totals.get("cif")), fmt_tile_val),
-        ("Мито", _num(totals.get("duty")), fmt_tile_val),
-        ("ПДВ", _num(totals.get("vat")), fmt_tile_val),
-        ("До сплати", _num(totals.get("payable")), fmt_tile_val_hi),
-    ]
-    for i, (lbl, val, vfmt) in enumerate(tiles):
-        ws.write(4, i, lbl, fmt_tile_lbl)
-        ws.write(5, i, val, vfmt)
-    ws.write(7, 0, f"Позицій: {totals.get('count', len(rows))}", fmt_sub)
+    cost_data = a.get("costDataAvailable", True)
+    fx = a.get("fx") or None
+    fx_rate = None
+    if isinstance(fx, dict):
+        try:
+            fx_rate = float(fx.get("rate"))
+        except (TypeError, ValueError):
+            fx_rate = None
+    if cost_data:
+        tiles = [
+            ("Митна вартість (CIF)", _num(totals.get("cif")), fmt_tile_val),
+            ("Мито", _num(totals.get("duty")), fmt_tile_val),
+            ("ПДВ", _num(totals.get("vat")), fmt_tile_val),
+            ("До сплати", _num(totals.get("payable")), fmt_tile_val_hi),
+        ]
+        for i, (lbl, val, vfmt) in enumerate(tiles):
+            ws.write(4, i, lbl, fmt_tile_lbl)
+            ws.write(5, i, val, vfmt)
+        # Second row of tiles in UAH when the NBU rate is known.
+        if fx_rate and fx_rate > 0:
+            fmt_uah = wb.add_format({"bold": True, "font_size": 13, "font_color": "#0F172A", "num_format": "#,##0 ₴"})
+            for i, (_, val, _vf) in enumerate(tiles):
+                ws.write(6, i, val * fx_rate, fmt_uah)
+    else:
+        ws.write(4, 0, "Класифікаційний аналіз", fmt_bad)
+        ws.write(5, 0, "У маніфесті немає вартісних даних (ціна/кількість) — платежі не розраховано.", fmt_warn)
+    pos_line = f"Позицій: {totals.get('count', len(rows))}"
+    if fx_rate and fx_rate > 0:
+        pos_line += (f"   ·   Курс НБУ: 1 {fx.get('currency', '')} = {fx_rate:g} ₴"
+                     + (f" ({fx.get('date')})" if fx.get("date") else ""))
+    ws.write(7, 0, pos_line, fmt_sub)
     if a.get("criticalAlert"):
         ws.write(8, 0, a["criticalAlert"], fmt_bad)
     if a.get("aiDegraded"):
@@ -857,8 +899,15 @@ def _build_analysis_xlsx(a: dict) -> bytes:
         if sc.get("dutyMismatch") and sc.get("dutyPref"): flags.append(f"qdpro мито {sc['dutyPref']}")
         flag_txt = "; ".join(flags) if flags else ("✓ без обмежень" if sc else "")
         rr = i + 1
+        code = r.get("code")
+        if code and r.get("codeSuggested"):
+            v = r.get("codeVerified")
+            tag = "запропоновано, ✓ qdpro" if v is True else ("запропоновано, не підтв." if v is False else "запропоновано")
+            code_txt = f"{code} ({tag})"
+        else:
+            code_txt = code if code else "—"
         wsm.write(rr, 0, r.get("name", ""), cf)
-        wsm.write(rr, 1, r.get("code") or "—", cf)
+        wsm.write(rr, 1, code_txt, cf)
         wsm.write(rr, 2, _num(r.get("qtyKg")), cf)
         wsm.write(rr, 3, _num(r.get("price")), cf)
         wsm.write(rr, 4, _num(r.get("cif")), mf)
@@ -876,15 +925,22 @@ def _build_analysis_xlsx(a: dict) -> bytes:
     wsc.set_column("A:A", 30)
     wsc.set_column("B:B", 12)
     wsc.set_column("C:C", 70)
-    for c, h in enumerate(["Позиція / напрям", "Статус", "Коментар"]):
+    for c, h in enumerate(["Напрям", "Статус", "Перевірка"]):
         wsc.write(0, c, h, fmt_hdr)
+    wsc.freeze_panes(1, 0)
     row_i = 1
-    for r in rows:
-        for label, checks in (("ЄС / транзит", r.get("eu") or []), ("UA / розмитнення", r.get("ua") or [])):
+    for i, r in enumerate(rows):
+        # One bold accent header row per product so the checks don't read as a
+        # single undifferentiated list ("каша") — groups them like the chat cards.
+        code = r.get("code")
+        code_txt = (f"{code} (запропоновано)" if r.get("codeSuggested") else code) if code else "код не визначено"
+        wsc.merge_range(row_i, 0, row_i, 2, f"{i + 1}. {r.get('name', '')}  ·  УКТЗЕД {code_txt}", fmt_group)
+        row_i += 1
+        for label, checks in (("🇪🇺 Транзит ЄС", r.get("eu") or []), ("🇺🇦 Розмитнення UA", r.get("ua") or [])):
             for ch in checks:
                 st = ch.get("status", "")
                 sfmt = fmt_bad if st == "red" else (fmt_warn if st == "yellow" else fmt_ok)
-                wsc.write(row_i, 0, f"{r.get('name', '')} · {label}", fmt_cell)
+                wsc.write(row_i, 0, label, fmt_cell)
                 wsc.write(row_i, 1, {"red": "🔴", "yellow": "🟡"}.get(st, "🟢"), sfmt)
                 wsc.write(row_i, 2, f"{ch.get('item', '')} {ch.get('note', '')}".strip(), fmt_cell)
                 row_i += 1

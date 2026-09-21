@@ -96,7 +96,36 @@ export function parseNumber(v: unknown): number {
   return isFinite(n) ? n : 0;
 }
 
-const JUNK_RX = /^(итого|разом|усього|всего|total|сума|подсумок|примеч|коммент|note|№|nn?|поз)\b/i;
+// Anchored at start (^) so real product names that merely CONTAIN one of these
+// stems (e.g. «Окситетрациклин основание») are NOT dropped — only rows that BEGIN
+// like a total / note / logistics line are. NB: JS `\b` is ASCII-only, so it does
+// NOT work as a word boundary for Cyrillic — we rely on distinctive stems instead
+// («основн» matches «основной» but not «основание»; «готов» matches «готовность»).
+const JUNK_RX =
+  /^(итого|разом|усього|всього|всего|total|сума|подсумок|примеч|коммент|note|№|основн|готов|судов|отгруз|отправк|график|реквизит|оплат|доставк)/i;
+
+// Trailing free-form sales/logistics notes that get typed into the name cell.
+// Everything from the marker onward is stripped from the product name.
+const NAME_NOTE_RX =
+  /\s+(мы возили|кого возил|мониторинг|если хорош|подтвержд|одобрен|заказан|подписал|опасник|клиент|поставщик|local charges|include warehouse|don'?t\s+more|cpt-?|до спт|до\s+\S+\s+львов).*/i;
+
+/**
+ * Cleans a raw manifest name cell down to the product name: keeps only the first
+ * line (notes/CAS usually land on subsequent lines) and strips a trailing sales/
+ * logistics note. Falls back to the raw text if cleaning would empty it.
+ */
+export function cleanProductName(raw: unknown): string {
+  const firstLine = String(raw ?? '').split(/\r?\n/)[0] ?? '';
+  const cleaned = firstLine
+    .replace(NAME_NOTE_RX, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+    // Drop a dangling separator and/or a trailing lone preposition left by the cut
+    // (requires a leading separator so it can't eat into a real trailing word).
+    .replace(/[\s,\-–—]+(?:на|до|в|у|по|з|із|для|от|за|и|та)?[\s,\-–—]*$/i, '')
+    .trim();
+  return cleaned || String(raw ?? '').trim();
+}
 
 /** Чи це «сміттєвий» рядок (підсумки, нотатки, порожні). */
 export function isJunkRow(name: string): boolean {
@@ -104,6 +133,8 @@ export function isJunkRow(name: string): boolean {
   if (n.length < 2) return true;
   if (JUNK_RX.test(n)) return true;
   if (/^\d+([.,]\d+)?$/.test(n)) return true; // лише число
+  // Notes that carry only dates / no substance letters (e.g. «готовность… 20.09»).
+  if (!/[a-zа-яіїєґ]{3,}/i.test(n)) return true;
   return false;
 }
 
@@ -118,7 +149,7 @@ export function extractRows(meta: SheetMeta): { rows: RawLine[]; columns: Column
   const out: RawLine[] = [];
   for (let i = headerIdx + 1; i < rows.length; i++) {
     const r = rows[i] || [];
-    const name = String(r[columns.name] ?? '').trim();
+    const name = cleanProductName(r[columns.name]);
     if (!name || isJunkRow(name)) continue;
     const qtyKg = columns.qty >= 0 ? parseNumber(r[columns.qty]) : 0;
     const unitPrice = columns.price >= 0 ? parseNumber(r[columns.price]) : 0;

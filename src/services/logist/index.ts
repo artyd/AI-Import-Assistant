@@ -50,6 +50,8 @@ export interface RateResult {
   currency: string;
   date: string;
   text: string;
+  /** Numeric UAH per 1 unit of `currency` (null when NBU didn't return a number). */
+  rate?: number | null;
 }
 
 export interface PubchemResult {

@@ -397,6 +397,12 @@ CREATE TABLE IF NOT EXISTS archive_records (
 );
 CREATE INDEX IF NOT EXISTS idx_archive_records_owner ON archive_records(owner_id);
 
+-- Link each archive row to its full analysis so the "Архів" can offer preview +
+-- .xlsx download. SET NULL (not CASCADE) so the archive row survives when the
+-- analysis/collection is deleted — preview/download then degrade gracefully.
+ALTER TABLE archive_records
+  ADD COLUMN IF NOT EXISTS analysis_id UUID REFERENCES analyses(id) ON DELETE SET NULL;
+
 -- ── Phase C: News — live RSS ingest with retention ────────────────────────────
 -- NOT workspace-scoped: a single shared feed of Ukrainian import/customs-relevant
 -- news, ingested by the NEWS cron (src/queue/news.ts + worker) from public RSS/Atom

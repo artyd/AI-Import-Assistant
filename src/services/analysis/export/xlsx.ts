@@ -89,6 +89,20 @@ export function buildConsolidatedReportXlsx(r: ConsolidatedAnalysis): Buffer {
     ['До сплати', r.totals.payable],
     ['Позицій', r.totals.count],
   ];
+  if (r.fx && r.fx.rate > 0) {
+    const rate = r.fx.rate;
+    summary.push(
+      [],
+      [`Курс НБУ (1 ${r.fx.currency})`, `${rate} ₴${r.fx.date ? ` (${r.fx.date})` : ''}`],
+      ['Митна вартість, ₴', Math.round(r.totals.cif * rate)],
+      ['Мито, ₴', Math.round(r.totals.duty * rate)],
+      ['ПДВ, ₴', Math.round(r.totals.vat * rate)],
+      ['До сплати, ₴', Math.round(r.totals.payable * rate)],
+    );
+  }
+  if (!r.costDataAvailable) {
+    summary.push([], ['Класифікаційний аналіз', 'У маніфесті немає вартісних даних — платежі не розраховано.']);
+  }
   if (r.criticalAlert) summary.push([], ['Критичний фактор', r.criticalAlert]);
   const ws1 = XLSX.utils.aoa_to_sheet(summary);
   ws1['!cols'] = [{ wch: 22 }, { wch: 48 }];
@@ -97,7 +111,11 @@ export function buildConsolidatedReportXlsx(r: ConsolidatedAnalysis): Buffer {
   const head = ['Товар', 'УКТЗЕД', 'К-сть, кг', 'Ціна', 'Митна варт.', 'Ставка %', 'Мито', 'ПДВ', 'Походження', 'Категорія', 'Ризик', 'Перевірити'];
   const rows = r.rows.map((l) => [
     l.name,
-    l.code ?? '',
+    l.code
+      ? l.codeSuggested
+        ? `${l.code} (запропоновано${l.codeVerified === true ? ', ✓ qdpro' : l.codeVerified === false ? ', не підтв.' : ''})`
+        : l.code
+      : '',
     l.qtyKg,
     l.price,
     l.cif,

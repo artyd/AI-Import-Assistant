@@ -147,6 +147,17 @@ export async function analysisRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
+  // GET /api/analyses/:id/markdown — the analysis rendered as the same per-product
+  // Markdown shown in chat, for the Архів preview. Owner-scoped via its collection.
+  app.get<{ Params: { id: string } }>(
+    '/api/analyses/:id/markdown',
+    async (req, reply) => {
+      const analysis = await getAnalysisForOwner(req.user!.sub, req.params.id);
+      if (!analysis) return reply.code(404).send({ error: 'not_found' });
+      return reply.send({ markdown: formatAnalysisMarkdown(analysis) });
+    },
+  );
+
   // GET /api/analyses/:id/xlsx — rebuild the .xlsx from the stored analysis.
   app.get<{ Params: { id: string } }>(
     '/api/analyses/:id/xlsx',

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { api, ApiError, downloadBlob } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useTheme } from "@/lib/theme";
 import { openEventsChannel, streamAnalyze } from "@/lib/sse";
@@ -19,7 +19,6 @@ import type {
 } from "@/lib/types";
 import { Chat, type EntitySelector } from "@/components/Chat";
 import { AnalyzePanel } from "@/components/AnalyzePanel";
-import { AnalysisCard } from "@/components/AnalysisCard";
 import { ArchiveList } from "@/components/ArchiveModal";
 import { AiSettingsModal } from "@/components/AiSettingsModal";
 import { useAppStore } from "@/lib/store";
@@ -113,7 +112,6 @@ export default function WorkspacePage() {
   // Consolidated-cargo analysis result (latest) + archive modal.
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [showIntake, setShowIntake] = useState(false);
-  const [showTable, setShowTable] = useState(false);
   // Progress for a chat-triggered analysis (paperclip / pasted link) run directly
   // through the analyze endpoint so the EXACT per-product blocks land in the thread.
   const [analyzeProgress, setAnalyzeProgress] = useState<{ pct: number; step: string } | null>(null);
@@ -611,14 +609,6 @@ export default function WorkspacePage() {
     [showAnalysisConversation]
   );
 
-  const exportAnalysis = useCallback(() => {
-    if (!analysis?.id) return;
-    void downloadBlob(
-      `/api/analyses/${analysis.id}/xlsx`,
-      `analysis-${analysis.sheet || "manifest"}.xlsx`
-    ).catch(() => alert("Не вдалося завантажити звіт."));
-  }, [analysis]);
-
   // Chat-triggered analysis (paperclip file / pasted Google Sheets link): runs the
   // analyze endpoint DIRECTLY (not via the agent), which posts the exact per-product
   // Markdown into the conversation — so the answer isn't reformatted into a table.
@@ -1088,15 +1078,10 @@ export default function WorkspacePage() {
                     до сплати {Math.round(analysis.totals.payable).toLocaleString("uk-UA")} $ ·{" "}
                     {analysis.totals.count} поз.
                   </span>
+                  <span style={{ fontSize: 12, color: "var(--muted)" }}>
+                    · доступно в «Архіві» → Excel / превью
+                  </span>
                   <div style={{ flex: 1 }} />
-                  <button className="btn" onClick={() => setShowTable((v) => !v)}>
-                    {showTable ? "Сховати таблицю" : "Таблиця"}
-                  </button>
-                  {analysis.id ? (
-                    <button className="btn" onClick={exportAnalysis}>
-                      Експорт .xlsx
-                    </button>
-                  ) : null}
                   <button className="btn" onClick={() => setShowIntake((v) => !v)}>
                     {showIntake ? "Сховати ввід" : "Новий аналіз"}
                   </button>
@@ -1166,21 +1151,8 @@ export default function WorkspacePage() {
                 </div>
               ) : null}
 
-              {/* On-demand rich table (the analysis card). */}
-              {analysis && showTable ? (
-                <div
-                  style={{
-                    flex: "0 0 auto",
-                    maxHeight: "52%",
-                    overflowY: "auto",
-                    borderBottom: "1px solid var(--border)",
-                  }}
-                >
-                  <div style={{ padding: "14px 20px", maxWidth: 960, margin: "0 auto" }}>
-                    <AnalysisCard analysis={analysis} />
-                  </div>
-                </div>
-              ) : null}
+              {/* The rich structured analysis now lives in the «Архів» preview —
+                  the chat shows the per-product Markdown tables inline. */}
 
               {/* Main area: centered intake (when explicitly requested and no
                   analysis yet — single view, NO split), else the discussion chat

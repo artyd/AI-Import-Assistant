@@ -31,6 +31,15 @@ export interface AnalysisCheck {
 export interface AnalysisRow {
   name: string;
   code: string | null;
+  /** true when `code` was proposed by the engine (dict/HS-match/AI), not taken
+   *  verbatim from the manifest — so the UI can label it «запропоновано». */
+  codeSuggested: boolean;
+  /** Why this code was proposed (official HS description / AI reasoning) — shown
+   *  next to a suggested code, per the "advisory, with reasoning" grounding rule. */
+  codeBasis: string | null;
+  /** For a SUGGESTED code: true when qdpro (першоджерело) confirmed the code
+   *  exists. null when not applicable (firm code) or the check didn't run. */
+  codeVerified: boolean | null;
   qtyKg: number;
   price: number; // per-kg, in shipment currency
   dutyRate: number | null; // %
@@ -82,6 +91,14 @@ export interface AnalysisResult {
   aiDegraded: boolean;
   /** true when live source cross-check (qdpro via logist-mcp) ran for ≥1 code. */
   sourceChecked: boolean;
+  /** false when the manifest had no price/quantity data (customs value 0 across
+   *  all lines) — the analysis is then classification-only (codes + checks), and
+   *  the money figures must NOT be presented as a real cost calculation. */
+  costDataAvailable: boolean;
+  /** Official NBU rate (UAH per 1 unit of the shipment currency) so the money
+   *  figures can also be shown in гривні — customs value is declared in UAH. null
+   *  when the rate service is off or unavailable. */
+  fx: { currency: string; rate: number; date: string } | null;
 }
 
 export type AnalysisInput =
@@ -97,6 +114,12 @@ export interface AnalysisProgress {
 export type ProgressFn = (p: AnalysisProgress) => void;
 
 const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100;
+
+/** Digits-only УКТЗЕД code of a plausible length (HS-6 … 10-digit), else null. */
+function sanitizeCode(raw: string | null | undefined): string | null {
+  const d = String(raw ?? '').replace(/\D/g, '');
+  return [6, 8, 10].includes(d.length) ? d : null;
+}
 
 /** Default shipment assumptions (CIF/USD → freight+insurance already in price). */
 const DEFAULT_SHIPMENT = {
@@ -209,7 +232,16 @@ export async function runAnalysis(
 
     return {
       name: l.calc.name,
-      code: l.resolved.code.value,
+      // Prefer the resolver's code; when it found none, fall back to the AI's
+      // proposal so empty «—» codes get an advisory candidate (verified against
+      // qdpro below). AI codes are sanitised to plausible УКТЗЕД digit lengths.
+      code: l.resolved.code.value ?? sanitizeCode(ai?.suggestedUctzedCode),
+      // Suggested when the code did not come verbatim from the manifest cell.
+      codeSuggested: !(l.resolved.code.source === 'user' && l.resolved.code.value != null)
+        && (l.resolved.code.value ?? sanitizeCode(ai?.suggestedUctzedCode)) != null,
+      codeBasis: l.resolved.hsDescription
+        ?? (l.resolved.code.value == null ? (ai?.codeBasis?.trim() || null) : null),
+      codeVerified: null,
       qtyKg: l.calc.qtyKg,
       price: round2(l.calc.goodsValue.value / (l.calc.qtyKg || 1)),
       dutyRate: l.calc.dutyRatePercent?.value ?? null,
@@ -243,6 +275,8 @@ export async function runAnalysis(
         sourceChecked = true;
         for (const r of rows) {
           const raw = lookupCheck(checks, r.code);
+          // A suggested code is "verified" only if qdpro actually knows it.
+          if (r.codeSuggested) r.codeVerified = raw != null;
           if (!raw) continue;
           r.sourceCheck = toSourceCheck(raw, r.dutyRate);
           // qdpro is authoritative: if its duty rate diverges from the static
@@ -269,10 +303,35 @@ export async function runAnalysis(
     (r) => r.risk === 'Критичний' || r.eu.some((c) => c.status === 'red') || r.ua.some((c) => c.status === 'red'),
   );
 
-  const warnings = [...det.warnings];
+  // No customs value anywhere ⇒ the manifest carried no price/qty columns (or all
+  // zeros): this is a classification-only analysis, not a cost calculation.
+  const costDataAvailable = totals.cif > 0;
+
+  // Live NBU rate so the money can also be shown in гривні (customs value is
+  // declared in UAH). Best-effort: gated on LOGIST_MCP_URL, tolerates failure.
+  let fx: AnalysisResult['fx'] = null;
+  if (costDataAvailable && process.env.LOGIST_MCP_URL && process.env.LOGIST_MCP_URL.trim()) {
+    try {
+      progress({ pct: 94, step: 'Отримую курс НБУ…' });
+      const { exchangeRate } = await import('../logist/index.js');
+      const r = await exchangeRate(DEFAULT_SHIPMENT.currency, '');
+      if (r && typeof r.rate === 'number' && r.rate > 0) {
+        fx = { currency: DEFAULT_SHIPMENT.currency, rate: r.rate, date: r.date || '' };
+      }
+    } catch {
+      /* fx is optional — keep the analysis without UAH figures */
+    }
+  }
+
+  let warnings = [...det.warnings];
   if (enrichment.degraded) {
     warnings.unshift('AI-перевірки недоступні — показано лише детермінований розрахунок; позиції позначено «перевірити».');
   }
+  if (!costDataAvailable) {
+    warnings.unshift('У маніфесті не знайдено колонок ціни/кількості — розрахунок платежів неможливий. Показано класифікацію (коди + перевірки).');
+  }
+  // The NBU rate closes the "no UAH rate" gap — drop that deterministic warning.
+  if (fx) warnings = warnings.filter((w) => !/курс до uah/i.test(w));
 
   return {
     id: null,
@@ -287,5 +346,7 @@ export async function runAnalysis(
     hasHigh,
     aiDegraded: enrichment.degraded,
     sourceChecked,
+    costDataAvailable,
+    fx,
   };
 }

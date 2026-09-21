@@ -5,15 +5,135 @@
 // deleting a record via DELETE /api/analyses/archive/:id. Exposed both as an
 // embeddable list (ArchiveList — used in the Збірний working panel) and a modal.
 
-import { useCallback, useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { api, downloadBlob } from "@/lib/api";
 import type { ArchiveRecord } from "@/lib/types";
 import { IconSpinner } from "./icons";
+import { Markdown } from "./Markdown";
 
 function fmtPayable(p: number | string): string {
   const n = typeof p === "string" ? Number(p) : p;
   if (Number.isFinite(n)) return Math.round(n).toLocaleString("uk-UA") + " $";
   return String(p);
+}
+
+// Full-screen preview of a stored analysis, rendered from the same per-product
+// Markdown the chat shows (GET /api/analyses/:id/markdown).
+function AnalysisPreviewModal({
+  rec,
+  onClose,
+}: {
+  rec: ArchiveRecord;
+  onClose: () => void;
+}) {
+  const [md, setMd] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    if (!rec.analysisId) {
+      setError("Аналіз більше недоступний.");
+      return;
+    }
+    api<{ markdown: string }>(`/api/analyses/${rec.analysisId}/markdown`)
+      .then((r) => alive && setMd(r.markdown))
+      .catch(() => alive && setError("Не вдалося завантажити аналіз."));
+    return () => {
+      alive = false;
+    };
+  }, [rec.analysisId]);
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 90,
+        background: "rgba(10,10,14,.5)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: 900,
+          maxWidth: "100%",
+          maxHeight: "88vh",
+          display: "flex",
+          flexDirection: "column",
+          background: "var(--surface)",
+          border: "1px solid var(--border)",
+          borderRadius: 18,
+          boxShadow: "var(--shadow)",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            flex: "none",
+            display: "flex",
+            alignItems: "center",
+            gap: 11,
+            padding: "14px 18px",
+            borderBottom: "1px solid var(--border)",
+          }}
+        >
+          <span style={{ flex: 1, fontWeight: 600, fontSize: 15, color: "var(--text)" }}>
+            {rec.source} · лист «{rec.sheet}»
+          </span>
+          {rec.analysisId ? (
+            <button
+              className="btn"
+              onClick={() =>
+                void downloadBlob(
+                  `/api/analyses/${rec.analysisId}/xlsx`,
+                  `analysis-${rec.sheet || "manifest"}.xlsx`
+                ).catch(() => alert("Не вдалося завантажити звіт."))
+              }
+            >
+              Завантажити Excel
+            </button>
+          ) : null}
+          <button
+            onClick={onClose}
+            title="Закрити"
+            style={{
+              flex: "none",
+              width: 30,
+              height: 30,
+              border: "none",
+              background: "transparent",
+              color: "var(--muted)",
+              cursor: "pointer",
+              borderRadius: 8,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "16px 22px" }}>
+          {error ? (
+            <div style={{ padding: 24, textAlign: "center", color: "var(--err)", fontSize: 13 }}>{error}</div>
+          ) : md === null ? (
+            <div style={{ display: "grid", placeItems: "center", padding: 48 }}>
+              <IconSpinner size={22} />
+            </div>
+          ) : (
+            <Markdown>{md}</Markdown>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function fmtDate(iso: string): string {
@@ -31,6 +151,7 @@ export function ArchiveList() {
   const [records, setRecords] = useState<ArchiveRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<ArchiveRecord | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -50,7 +171,7 @@ export function ArchiveList() {
   }, [load]);
 
   const remove = async (rec: ArchiveRecord) => {
-    if (!window.confirm("Видалити запис з архіву?")) return;
+    if (!window.confirm("Видалити аналіз з архіву?")) return;
     const prev = records;
     setRecords((rs) => rs.filter((x) => x.id !== rec.id));
     try {
@@ -60,6 +181,47 @@ export function ArchiveList() {
       alert("Не вдалося видалити запис.");
     }
   };
+
+  const download = (rec: ArchiveRecord) => {
+    if (!rec.analysisId) return;
+    void downloadBlob(
+      `/api/analyses/${rec.analysisId}/xlsx`,
+      `analysis-${rec.sheet || "manifest"}.xlsx`
+    ).catch(() => alert("Не вдалося завантажити звіт."));
+  };
+
+  // Small square icon button used for the per-record actions.
+  const ActionBtn = ({
+    onClick,
+    title,
+    children,
+    danger,
+  }: {
+    onClick: () => void;
+    title: string;
+    children: ReactNode;
+    danger?: boolean;
+  }) => (
+    <button
+      onClick={onClick}
+      title={title}
+      style={{
+        flex: "none",
+        width: 30,
+        height: 30,
+        border: "none",
+        background: "transparent",
+        color: danger ? "var(--err)" : "var(--muted)",
+        cursor: "pointer",
+        borderRadius: 8,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      {children}
+    </button>
+  );
 
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "12px 14px 18px" }}>
@@ -111,10 +273,10 @@ export function ArchiveList() {
                   {rec.source} · лист «{rec.sheet}»
                 </div>
                 <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 2, fontVariantNumeric: "tabular-nums" }}>
-                  {rec.item_count} позицій · до сплати {fmtPayable(rec.payable)} · {fmtDate(rec.created_at)}
+                  {rec.itemCount} позицій · до сплати {fmtPayable(rec.payable)} · {fmtDate(rec.createdAt)}
                 </div>
               </div>
-              {rec.has_high ? (
+              {rec.hasHigh ? (
                 <span
                   style={{
                     flex: "none",
@@ -129,31 +291,31 @@ export function ArchiveList() {
                   ризик
                 </span>
               ) : null}
-              <button
-                onClick={() => remove(rec)}
-                title="Видалити"
-                style={{
-                  flex: "none",
-                  width: 30,
-                  height: 30,
-                  border: "none",
-                  background: "transparent",
-                  color: "var(--muted)",
-                  cursor: "pointer",
-                  borderRadius: 8,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
+              {rec.analysisId ? (
+                <ActionBtn onClick={() => setPreview(rec)} title="Превью">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                </ActionBtn>
+              ) : null}
+              {rec.analysisId ? (
+                <ActionBtn onClick={() => download(rec)} title="Завантажити Excel">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
+                  </svg>
+                </ActionBtn>
+              ) : null}
+              <ActionBtn onClick={() => remove(rec)} title="Видалити" danger>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                 </svg>
-              </button>
+              </ActionBtn>
             </div>
           ))}
         </div>
       )}
+      {preview ? <AnalysisPreviewModal rec={preview} onClose={() => setPreview(null)} /> : null}
     </div>
   );
 }

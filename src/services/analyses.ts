@@ -17,11 +17,15 @@ interface ChecksBlob {
   hasHigh: boolean;
   aiDegraded: boolean;
   sourceChecked?: boolean;
+  costDataAvailable?: boolean;
+  fx?: AnalysisResult['fx'];
 }
 
 export interface ArchiveRecord {
   id: string;
   collectionId: string | null;
+  /** The full analysis this record points to; null once the analysis is gone. */
+  analysisId: string | null;
   source: string;
   sheet: string;
   itemCount: number;
@@ -47,6 +51,8 @@ export async function persistAnalysis(
     hasHigh: result.hasHigh,
     aiDegraded: result.aiDegraded,
     sourceChecked: result.sourceChecked,
+    costDataAvailable: result.costDataAvailable,
+    fx: result.fx,
   };
 
   const client = await pool.connect();
@@ -71,9 +77,9 @@ export async function persistAnalysis(
     const analysisId = rows[0]!.id;
 
     await client.query(
-      `INSERT INTO archive_records (owner_id, collection_id, source, sheet, item_count, payable, has_high)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [ownerId, collectionId, result.source, result.sheet, result.totals.count, result.totals.payable, result.hasHigh],
+      `INSERT INTO archive_records (owner_id, collection_id, analysis_id, source, sheet, item_count, payable, has_high)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [ownerId, collectionId, analysisId, result.source, result.sheet, result.totals.count, result.totals.payable, result.hasHigh],
     );
 
     // FIFO cap: drop this owner's oldest archive rows beyond ARCHIVE_CAP.
@@ -101,6 +107,7 @@ export async function listArchive(ownerId: string): Promise<ArchiveRecord[]> {
   const { rows } = await query<{
     id: string;
     collection_id: string | null;
+    analysis_id: string | null;
     source: string;
     sheet: string;
     item_count: number;
@@ -108,13 +115,14 @@ export async function listArchive(ownerId: string): Promise<ArchiveRecord[]> {
     has_high: boolean;
     created_at: string;
   }>(
-    `SELECT id, collection_id, source, sheet, item_count, payable, has_high, created_at
+    `SELECT id, collection_id, analysis_id, source, sheet, item_count, payable, has_high, created_at
      FROM archive_records WHERE owner_id = $1 ORDER BY created_at DESC`,
     [ownerId],
   );
   return rows.map((r) => ({
     id: r.id,
     collectionId: r.collection_id,
+    analysisId: r.analysis_id,
     source: r.source,
     sheet: r.sheet,
     itemCount: r.item_count,
@@ -187,5 +195,8 @@ export async function getAnalysisForOwner(
     hasHigh: row.checks?.hasHigh ?? false,
     aiDegraded: row.checks?.aiDegraded ?? false,
     sourceChecked: row.checks?.sourceChecked ?? false,
+    // Default true for records saved before this flag existed (keep money shown).
+    costDataAvailable: row.checks?.costDataAvailable ?? true,
+    fx: row.checks?.fx ?? null,
   };
 }
