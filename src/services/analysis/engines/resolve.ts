@@ -29,6 +29,8 @@ export interface RawLine {
   unitPrice: number;
   aiSuggestedCode?: string | null;
   vatRegime?: VatRegime;
+  /** «ЛС» (облікова) картка товару — ключ для join цін/кодів між листами. */
+  lsCode?: string | null;
 }
 
 export interface ResolvedLine {

@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx';
 import type { SheetInput, SheetMeta } from './selectActualSheet.js';
-import { findDataHeader } from './selectActualSheet.js';
+import { findDataHeader, parseSheetDate } from './selectActualSheet.js';
 import type { RawLine } from '../engines/resolve.js';
 
 // ── Парсинг файлів ────────────────────────────────────────────────
@@ -62,20 +62,31 @@ export interface ColumnMap {
   qty: number;
   price: number;
   code: number;
+  /** «ЛС» / облікова картка — ключ для join між листами (-1 якщо немає). */
+  ls: number;
 }
 
 const RX = {
   name: /номенкл|наименован|назв|товар|product|item|опис|description/i,
   qty: /вага|маса|вес|нетто|нет\b|кільк|кол[-\s]*[вим]|\bкг\b|\bkg\b|\bqty\b|quantity|\bшт\b/i,
   price: /цін|цена|price|варт|закуп|\bсум|amount|\busd\b|\beur\b|\$/i,
-  code: /уктзед|тнвэд|hs[\s-]*code|\bhs\b|\bкод\b/i,
+  // NB: JS `\b` is ASCII-only, so «Код УКТ ЗЕД» never matched the old `\bкод\b`.
+  code: /укт\s*зед|тнвэ?д|hs[\s-]*code|\bhs\b|код\s*укт|^код\s*товар/i,
+  // «ЛС» first cell, or an accounting/номенклатурний код column.
+  ls: /^лс(?![а-яіїєґ])|обліков|номенклатурн(ий)?\s*код/i,
 };
 
 /** Мапа колонок за рядком заголовків. Повертає індекси (-1 якщо немає). */
 export function mapColumns(header: (string | number | null | undefined)[]): ColumnMap {
   const find = (rx: RegExp): number =>
     header.findIndex((c) => rx.test(String(c ?? '')));
-  return { name: find(RX.name), qty: find(RX.qty), price: find(RX.price), code: find(RX.code) };
+  return { name: find(RX.name), qty: find(RX.qty), price: find(RX.price), code: find(RX.code), ls: find(RX.ls) };
+}
+
+/** Normalises an «ЛС» card value to a join key (digits, no leading zeros). */
+export function normalizeLs(v: unknown): string | null {
+  const d = String(v ?? '').replace(/\D/g, '').replace(/^0+/, '');
+  return d.length >= 3 ? d : null;
 }
 
 /** Парсинг числа з форматів "1 234,56" / "1,234.56" / "12.5". */
@@ -153,8 +164,55 @@ export function extractRows(meta: SheetMeta): { rows: RawLine[]; columns: Column
     if (!name || isJunkRow(name)) continue;
     const qtyKg = columns.qty >= 0 ? parseNumber(r[columns.qty]) : 0;
     const unitPrice = columns.price >= 0 ? parseNumber(r[columns.price]) : 0;
+    // Skip planning/monitoring rows that carry no quantity — only when the sheet
+    // actually has a quantity column (otherwise we'd drop every row).
+    if (columns.qty >= 0 && qtyKg <= 0) continue;
     const codeRaw = columns.code >= 0 ? String(r[columns.code] ?? '').trim() : '';
-    out.push({ name, qtyKg, unitPrice, uctzedCode: codeRaw || null });
+    const lsCode = columns.ls >= 0 ? normalizeLs(r[columns.ls]) : null;
+    out.push({ name, qtyKg, unitPrice, uctzedCode: codeRaw || null, lsCode });
   }
   return { rows: out, columns };
+}
+
+/**
+ * Builds an «ЛС» → {price, code} reference map across ALL sheets that carry a ЛС
+ * column plus a price and/or УКТЗЕД column. Fresher sheets win (dated desc, undated
+ * last). Lets the analysis pull price/code for the current sheet's items by their
+ * ЛС card when that sheet itself lacks those columns (e.g. a «Готовність» tab).
+ */
+export function buildReferenceMap(
+  sheets: SheetInput[],
+  currentDate: Date,
+): Map<string, { price?: number; code?: string }> {
+  const ranked = sheets
+    .map((s) => {
+      const headerIdx = findDataHeader(s.rows);
+      if (headerIdx < 0) return null;
+      const cols = mapColumns(s.rows[headerIdx] ?? []);
+      if (cols.ls < 0 || (cols.price < 0 && cols.code < 0)) return null;
+      const date = parseSheetDate(s.name, currentDate);
+      return { s, headerIdx, cols, dateMs: date ? date.getTime() : -Infinity };
+    })
+    .filter((x): x is NonNullable<typeof x> => x !== null)
+    .sort((a, b) => b.dateMs - a.dateMs); // freshest first
+
+  const map = new Map<string, { price?: number; code?: string }>();
+  for (const { s, headerIdx, cols } of ranked) {
+    for (let i = headerIdx + 1; i < s.rows.length; i++) {
+      const row = s.rows[i] ?? [];
+      const key = normalizeLs(row[cols.ls]);
+      if (!key) continue;
+      const cur = map.get(key) ?? {};
+      if (cur.price === undefined && cols.price >= 0) {
+        const p = parseNumber(row[cols.price]);
+        if (p > 0) cur.price = p;
+      }
+      if (cur.code === undefined && cols.code >= 0) {
+        const c = String(row[cols.code] ?? '').replace(/\D/g, '');
+        if (c.length >= 6) cur.code = c;
+      }
+      if (cur.price !== undefined || cur.code !== undefined) map.set(key, cur);
+    }
+  }
+  return map;
 }

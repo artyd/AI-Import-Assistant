@@ -1,5 +1,5 @@
 import { selectActualSheet, type SheetInput } from '../sheets/selectActualSheet.js';
-import { extractRows, type ColumnMap } from '../sheets/parse.js';
+import { extractRows, buildReferenceMap, type ColumnMap } from '../sheets/parse.js';
 import { resolveLine, type ResolvedLine } from '../engines/resolve.js';
 import { calculatePayments } from '../engines/payment.js';
 import { buildOriginOptions, originKeyFromType, categoryChecks, type OriginProfile, type OriginPin, type OriginCheck } from '../engines/origin.js';
@@ -56,6 +56,31 @@ export function analyzeDeterministic(
     );
   }
 
+  // Hybrid enrichment: the chosen sheet gives the item LIST; when it lacks a price
+  // or УКТЗЕД column, pull those per item from other sheets by the «ЛС» card. This
+  // is enrichment only — it never ADDS items, so the count stays the current sheet's.
+  const joinWarnings: string[] = [];
+  if (columns.price < 0 || columns.code < 0) {
+    const ref = buildReferenceMap(sheets, currentDate);
+    let pricedFromRef = 0;
+    let codedFromRef = 0;
+    for (const r of rows) {
+      if (!r.lsCode) continue;
+      const hit = ref.get(r.lsCode);
+      if (!hit) continue;
+      if ((r.unitPrice ?? 0) <= 0 && hit.price) {
+        r.unitPrice = hit.price;
+        pricedFromRef++;
+      }
+      if (!r.uctzedCode && hit.code) {
+        r.uctzedCode = hit.code;
+        codedFromRef++;
+      }
+    }
+    if (pricedFromRef > 0) joinWarnings.push(`Ціни підтягнуто з листа закупки за кодом ЛС для ${pricedFromRef} позицій.`);
+    if (codedFromRef > 0) joinWarnings.push(`Коди УКТЗЕД підтягнуто з листа закупки за кодом ЛС для ${codedFromRef} позицій.`);
+  }
+
   const resolved = rows.map((r) => resolveLine({ ...r, vatRegime: defaultVatRegime }, tariff));
   const calc = calculatePayments({
     shipment,
@@ -86,7 +111,7 @@ export function analyzeDeterministic(
   });
 
   const warnings = Array.from(
-    new Set(lines.flatMap((l) => [...l.resolved.warnings, ...l.calc.warnings])),
+    new Set([...joinWarnings, ...lines.flatMap((l) => [...l.resolved.warnings, ...l.calc.warnings])]),
   );
 
   return {
