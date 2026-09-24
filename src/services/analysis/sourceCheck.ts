@@ -79,9 +79,13 @@ export function toSourceCheck(
   res: logist.UktzedFlagsResult,
   staticDutyRate: number | null,
 ): SourceCheck {
-  const prefNum = pctToNum(res.duty_pref);
+  // The divergence flag must compare like-for-like: the static calc uses the MFN
+  // (full) rate, so compare against qdpro's duty_full — NOT duty_pref. Comparing
+  // the preferential rate (e.g. EU-DCFTA 0%) against the MFN rate flagged a
+  // "mismatch" on every line that merely HAS a preference (analysis audit #7).
+  const fullNum = pctToNum(res.duty_full);
   const dutyMismatch =
-    prefNum !== null && staticDutyRate !== null && Math.abs(prefNum - staticDutyRate) > 0.001;
+    fullNum !== null && staticDutyRate !== null && Math.abs(fullNum - staticDutyRate) > 0.001;
   return {
     dutyPref: res.duty_pref || null,
     dutyFull: res.duty_full || null,

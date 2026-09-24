@@ -19,7 +19,6 @@ export const DOC_TYPE_TO_FOLDER: Record<string, string> = {
   contract: '01_Contract_Invoice_PackingList',
   invoice: '01_Contract_Invoice_PackingList',
   packing_list: '01_Contract_Invoice_PackingList',
-  purchase_order: '02_PO',
   // Both certificate doc_types route into the merged certificates folder.
   certificate_of_origin: '03_Certificates',
   quality_certificate: '03_Certificates',
@@ -64,7 +63,6 @@ const FILENAME_RULES: { type: string; patterns: string[] }[] = [
   { type: 'customs_declaration', patterns: ['customs', 'declaration', 'декларац', 'митн', 'таможен'] },
   { type: 'certificate_of_origin', patterns: ['certificate of origin', 'coo', 'походженн', 'происхожден', 'form a', 'eur.1', 'eur1'] },
   { type: 'quality_certificate', patterns: ['coa', 'certificate of analysis', 'analysis', 'аналіз', 'анализ', 'msds', 'sds', 'quality', 'якост', 'качеств'] },
-  { type: 'purchase_order', patterns: ['purchase order', 'order', 'po', 'замовленн', 'заказ'] },
   { type: 'invoice', patterns: ['invoice', 'inv', 'рахуно', 'счет', 'счёт', 'facture', 'факт'] },
   { type: 'packing_list', patterns: ['packing', 'plist', 'pack list', 'специфікац', 'пакувальн', 'упаковочн', 'pl'] },
   { type: 'contract', patterns: ['contract', 'контракт', 'договір', 'договор', 'agreement', 'угода'] },

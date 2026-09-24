@@ -1,5 +1,6 @@
 import type {
   ExtractedFields,
+  ExtractedLineItem,
   FieldConfidence,
   ConfidenceField,
 } from './extraction/extractFields.js';
@@ -64,6 +65,9 @@ export interface ReconcileDoc {
 // Weight may legitimately differ slightly between invoice and packing list
 // (rounding, net vs gross). Flag only when it exceeds this relative tolerance.
 const WEIGHT_TOLERANCE = 0.01; // 1%
+// Monetary values may differ by rounding across documents; flag only a gap
+// beyond this relative tolerance so a 1-cent difference isn't a red error.
+const VALUE_TOLERANCE = 0.005; // 0.5%
 // Above this many line items we do NOT reconcile row-by-row in the MVP; we fall
 // back to totals + an honest "not checked line-by-line" note (plan Q26-A).
 const LINE_ITEM_LIMIT = 5;
@@ -116,32 +120,15 @@ function cite(ref: DocRef, value: unknown): DiscrepancyCitation {
  */
 export function reconcile(docs: ReconcileDoc[]): Discrepancy[] {
   const invoice = pick(docs, 'invoice');
-  const po = pick(docs, 'purchase_order');
   const packing = pick(docs, 'packing_list');
   const contract = pick(docs, 'contract');
   const coo = pick(docs, 'certificate_of_origin');
 
   const out: Discrepancy[] = [];
 
-  // ── PO number should agree across invoice / PO / packing list. ─────────────
-  const poRefs: [DocRef, string][] = [];
-  for (const ref of [invoice, po, packing]) {
-    const v = ref?.fields.po_number;
-    if (ref && typeof v === 'string' && v.trim()) poRefs.push([ref, v.trim()]);
-  }
-  if (poRefs.length >= 2) {
-    const distinct = new Set(poRefs.map(([, v]) => v.toLowerCase()));
-    if (distinct.size > 1) {
-      out.push({
-        field: 'po_number',
-        expected: show(poRefs[0]![1]),
-        actual: poRefs.map(([r, v]) => `${r.doc_type}: ${v}`).join(' | '),
-        severity: 'error',
-        kind: 'confirmed',
-        citations: poRefs.map(([r, v]) => cite(r, v)),
-      });
-    }
-  }
+  // NB: these supplies have no separate purchase order — the CONTRACT is the
+  // commercial reference the invoice is checked against (value / currency /
+  // Incoterms).
 
   // ── Weight: invoice vs packing list, within tolerance. Prefer net↔net, then
   //    gross↔gross, then the legacy total. ───────────────────────────────────
@@ -168,37 +155,42 @@ export function reconcile(docs: ReconcileDoc[]): Discrepancy[] {
     });
   }
 
-  // ── Currency: invoice vs PO / contract, explicit (was silently skipped). ────
-  for (const other of [po, contract]) {
+  // ── Currency: invoice vs contract, explicit. ───────────────────────────────
+  {
     const cInv = strOf(invoice, 'currency');
-    const cOther = strOf(other, 'currency');
-    if (invoice && other && cInv && cOther && cInv.toUpperCase() !== cOther.toUpperCase()) {
+    const cC = strOf(contract, 'currency');
+    if (invoice && contract && cInv && cC && cInv.toUpperCase() !== cC.toUpperCase()) {
       out.push({
         field: 'currency',
-        expected: `${other.doc_type}: ${cOther}`,
+        expected: `contract: ${cC}`,
         actual: `invoice: ${cInv}`,
         severity: 'warning',
-        kind: kindFor(invoice, other, 'currency'),
-        citations: [cite(invoice, cInv), cite(other, cOther)],
+        kind: kindFor(invoice, contract, 'currency'),
+        citations: [cite(invoice, cInv), cite(contract, cC)],
       });
     }
   }
 
-  // ── Value: invoice vs PO, exact, only when currency matches. ────────────────
+  // ── Value: invoice vs contract, within tolerance, only when currency matches.
+  //    Fires only when the contract itself states a total value. ──────────────
   const vInv = numOf(invoice, 'total_value');
-  const vPo = numOf(po, 'total_value');
-  if (invoice && po && vInv !== null && vPo !== null) {
+  const vC = numOf(contract, 'total_value');
+  if (invoice && contract && vInv !== null && vC !== null) {
     const cInv = strOf(invoice, 'currency');
-    const cPo = strOf(po, 'currency');
-    const sameCurrency = !cInv || !cPo || cInv.toUpperCase() === cPo.toUpperCase();
-    if (sameCurrency && vInv !== vPo) {
+    const cC = strOf(contract, 'currency');
+    // Only compare amounts when BOTH currencies are known and equal — comparing
+    // 1000 USD vs 1000 EUR as "equal" (or flagging them) would be wrong.
+    const sameCurrency = !!cInv && !!cC && cInv.toUpperCase() === cC.toUpperCase();
+    const base = Math.abs(vC);
+    const rel = base > 0 ? Math.abs(vInv - vC) / base : vInv === vC ? 0 : 1;
+    if (sameCurrency && rel > VALUE_TOLERANCE) {
       out.push({
         field: 'total_value',
-        expected: `purchase_order: ${vPo} ${show(cPo)}`,
+        expected: `contract: ${vC} ${show(cC)}`,
         actual: `invoice: ${vInv} ${show(cInv)}`,
         severity: 'error',
-        kind: kindFor(invoice, po, 'total_value'),
-        citations: [cite(po, `${vPo} ${show(cPo)}`), cite(invoice, `${vInv} ${show(cInv)}`)],
+        kind: kindFor(invoice, contract, 'total_value'),
+        citations: [cite(contract, `${vC} ${show(cC)}`), cite(invoice, `${vInv} ${show(cInv)}`)],
       });
     }
   }
@@ -243,24 +235,24 @@ export function reconcile(docs: ReconcileDoc[]): Discrepancy[] {
     });
   }
 
-  // ── Incoterms should agree between the invoice and the purchase order. ──────
+  // ── Incoterms should agree between the invoice and the contract. ───────────
   const incInv = strOf(invoice, 'incoterm');
-  const incPo = strOf(po, 'incoterm');
-  if (invoice && po && incInv && incPo && incInv.toUpperCase() !== incPo.toUpperCase()) {
+  const incC = strOf(contract, 'incoterm');
+  if (invoice && contract && incInv && incC && incInv.toUpperCase() !== incC.toUpperCase()) {
     out.push({
       field: 'incoterm',
-      expected: `purchase_order: ${incPo}`,
+      expected: `contract: ${incC}`,
       actual: `invoice: ${incInv}`,
       severity: 'warning',
-      kind: kindFor(invoice, po, 'incoterm'),
-      citations: [cite(invoice, incInv), cite(po, incPo)],
+      kind: kindFor(invoice, contract, 'incoterm'),
+      citations: [cite(invoice, incInv), cite(contract, incC)],
     });
   }
 
-  // ── Parties cross-check: seller/buyer names between invoice and contract/PO.
+  // ── Parties cross-check: seller/buyer names between invoice and contract.
   //    Names are fuzzy, so these are always YELLOW (suspected), never asserted. ─
-  crossCheckParty(invoice, contract ?? po, 'seller', out);
-  crossCheckParty(invoice, contract ?? po, 'buyer', out);
+  crossCheckParty(invoice, contract, 'seller', out);
+  crossCheckParty(invoice, contract, 'buyer', out);
 
   // ── Manufacturer & registration number must be consistent across EVERY
   //    document that states them (labels, COA, invoice…). Catches e.g. labels
@@ -271,6 +263,43 @@ export function reconcile(docs: ReconcileDoc[]): Discrepancy[] {
   // ── Line items: reconcile per-row for small shipments; honest degradation for
   //    many-item invoices (plan Q12/Q26). ─────────────────────────────────────
   reconcileLineItems(invoice, packing, out);
+
+  // ── Transparency: never pretend we checked what we couldn't. Surface both
+  //    duplicate documents (only the first is reconciled) and missing
+  //    counterparts (whole cross-checks skipped) as explicit YELLOW notes. ────
+  for (const t of ['invoice', 'contract', 'packing_list'] as const) {
+    const n = docs.filter((d) => d.doc_type === t).length;
+    if (n > 1) {
+      out.push({
+        field: 'documents',
+        expected: 'один документ цього типу',
+        actual: `${t}: знайдено ${n} — звірено лише перший`,
+        severity: 'warning',
+        kind: 'suspected',
+        citations: [],
+      });
+    }
+  }
+  if (invoice && !contract) {
+    out.push({
+      field: 'documents',
+      expected: 'контракт для звірки ціни/валюти/Incoterms',
+      actual: 'Контракт відсутній — ціну/валюту/Incoterms не звірено',
+      severity: 'info',
+      kind: 'suspected',
+      citations: [],
+    });
+  }
+  if (invoice && !packing) {
+    out.push({
+      field: 'documents',
+      expected: 'пакувальний лист для звірки ваги/кількості',
+      actual: 'Пакувальний лист відсутній — вагу/кількість/позиції не звірено',
+      severity: 'info',
+      kind: 'suspected',
+      citations: [],
+    });
+  }
 
   return out;
 }
@@ -313,7 +342,10 @@ function compareWeight(
 }
 
 function normalizeHs(hs: string): string {
-  return hs.replace(/\D/g, '');
+  // Digits only, and drop leading zeros so a dropped-leading-zero read
+  // ("0102030000" vs "102030000") is not a false mismatch. Genuinely different
+  // codes stay different (differing length/digits).
+  return hs.replace(/\D/g, '').replace(/^0+/, '');
 }
 
 function normalizeName(name: string): string {
@@ -429,7 +461,7 @@ function reconcileLineItems(
     return;
   }
 
-  // Small shipment: at least reconcile the item count between the two docs.
+  // Small shipment: reconcile the item count between the two docs…
   if (invItems.length > 0 && plItems.length > 0 && invItems.length !== plItems.length) {
     out.push({
       field: 'line_items',
@@ -440,4 +472,65 @@ function reconcileLineItems(
       citations: [cite(invoice, `${invItems.length} позицій`), cite(packing, `${plItems.length} позицій`)],
     });
   }
+
+  // …AND compare matched rows field-by-field (quantity / amount / HS code) —
+  // the row COUNT agreeing does not mean the rows agree. Match by batch number
+  // when available, else by normalized description. Unmatched rows are left to
+  // the count check above.
+  const usedPl = new Set<number>();
+  for (const inv of invItems) {
+    const key = lineKey(inv);
+    if (!key) continue;
+    const j = plItems.findIndex((p, idx) => !usedPl.has(idx) && lineKey(p) === key);
+    if (j === -1) continue;
+    usedPl.add(j);
+    const pl = plItems[j]!;
+    const label = inv.description ?? inv.batch_no ?? key;
+
+    if (inv.quantity !== null && pl.quantity !== null && inv.quantity > 0) {
+      const rel = Math.abs(inv.quantity - pl.quantity) / inv.quantity;
+      if (rel > WEIGHT_TOLERANCE) {
+        out.push({
+          field: 'line_quantity',
+          expected: `invoice «${label}»: ${inv.quantity}`,
+          actual: `packing_list: ${pl.quantity}`,
+          severity: 'error',
+          kind: 'confirmed',
+          citations: [cite(invoice, inv.quantity), cite(packing, pl.quantity)],
+        });
+      }
+    }
+
+    if (inv.amount !== null && pl.amount !== null && inv.amount > 0) {
+      const rel = Math.abs(inv.amount - pl.amount) / inv.amount;
+      if (rel > VALUE_TOLERANCE) {
+        out.push({
+          field: 'line_amount',
+          expected: `invoice «${label}»: ${inv.amount}`,
+          actual: `packing_list: ${pl.amount}`,
+          severity: 'error',
+          kind: 'confirmed',
+          citations: [cite(invoice, inv.amount), cite(packing, pl.amount)],
+        });
+      }
+    }
+
+    if (inv.hs_code && pl.hs_code && normalizeHs(inv.hs_code) !== normalizeHs(pl.hs_code)) {
+      out.push({
+        field: 'line_hs_code',
+        expected: `invoice «${label}»: ${inv.hs_code}`,
+        actual: `packing_list: ${pl.hs_code}`,
+        severity: 'warning',
+        kind: 'confirmed',
+        citations: [cite(invoice, inv.hs_code), cite(packing, pl.hs_code)],
+      });
+    }
+  }
+}
+
+/** Row-matching key: prefer batch number, else normalized description. */
+function lineKey(it: ExtractedLineItem): string {
+  const b = it.batch_no ? it.batch_no.toLowerCase().replace(/[^a-z0-9а-яіїєґ]/gi, '') : '';
+  if (b) return b;
+  return it.description ? it.description.toLowerCase().replace(/[^a-z0-9а-яіїєґ]/gi, '') : '';
 }

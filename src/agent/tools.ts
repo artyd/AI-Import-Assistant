@@ -103,7 +103,7 @@ export const toolDefinitions: ChatTool[] = [
   {
     name: 'get_discrepancies',
     description:
-      'Повертає розрахований звіт розбіжностей між інвойсом, PO та пакувальним листом ' +
+      'Повертає розрахований звіт розбіжностей між контрактом, інвойсом та пакувальним листом ' +
       '(детермінована звірка структурованих полів). Використовуй для питань про ' +
       'невідповідності — не звіряй текст вручну.',
     input_schema: { type: 'object', properties: {} },
@@ -525,7 +525,7 @@ async function runDiscrepancies(ctx: ToolContext): Promise<ToolOutcome> {
   const findings = await computeDiscrepancies(requireWorkspace(ctx));
   if (findings.length === 0) {
     return {
-      result: 'Розбіжностей між інвойсом / PO / пакувальним листом не виявлено (за наявними даними).',
+      result: 'Розбіжностей між контрактом / інвойсом / пакувальним листом не виявлено (за наявними даними).',
       summary: 'Розбіжності: 0',
       citations: [],
     };

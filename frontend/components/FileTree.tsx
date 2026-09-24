@@ -76,7 +76,7 @@ export function FileTree({
         type="file"
         multiple
         hidden
-        accept=".pdf,.docx,.xlsx,.csv,.png,.jpg,.jpeg"
+        accept=".pdf,.docx,.doc,.xlsx,.xls,.csv,.png,.jpg,.jpeg,.zip"
         onChange={(e) => {
           if (e.target.files && e.target.files.length)
             onUpload(uploadTarget.current, e.target.files);

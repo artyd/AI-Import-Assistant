@@ -17,7 +17,7 @@ type FieldKind = "text" | "num";
 const KEY_FIELDS: { key: string; label: string; kind: FieldKind }[] = [
   { key: "doc_type", label: "Тип документа", kind: "text" },
   { key: "invoice_number", label: "№ інвойсу", kind: "text" },
-  { key: "po_number", label: "№ замовлення (PO)", kind: "text" },
+  { key: "po_number", label: "№ замовлення / ордера", kind: "text" },
   { key: "contract_number", label: "№ контракту", kind: "text" },
   { key: "total_value", label: "Сума", kind: "num" },
   { key: "currency", label: "Валюта", kind: "text" },

@@ -1,13 +1,22 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import type { NotificationItem } from "@/lib/types";
 import { IconBell } from "./icons";
 
+// Per-type badge (label + colour var). Unknown types render without a tag.
+const TYPE_TAG: Record<string, { label: string; color: string }> = {
+  reconcile_ready: { label: "Звірка", color: "var(--accent)" },
+  risk_alert: { label: "Ризик", color: "var(--err)" },
+  checklist_incomplete: { label: "Документи", color: "var(--warn)" },
+};
+
 export function NotificationsBell() {
   const { user } = useAuth();
+  const router = useRouter();
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -96,14 +105,54 @@ export function NotificationsBell() {
               Сповіщень немає.
             </div>
           ) : (
-            items.map((n) => (
-              <div key={n.id} style={{ padding: "8px 10px", borderRadius: 8, fontSize: 13 }}>
-                <div>{n.message}</div>
-                <div style={{ color: "var(--muted)", fontSize: 11, fontFamily: "var(--font-mono)", marginTop: 2 }}>
-                  {new Date(n.created_at).toLocaleString()}
+            items.map((n) => {
+              const tag = TYPE_TAG[n.type];
+              const clickable = !!n.workspace_id;
+              return (
+                <div
+                  key={n.id}
+                  onClick={
+                    clickable
+                      ? () => {
+                          setOpen(false);
+                          router.push(`/workspaces/${n.workspace_id}`);
+                        }
+                      : undefined
+                  }
+                  style={{
+                    padding: "8px 10px",
+                    borderRadius: 8,
+                    fontSize: 13,
+                    cursor: clickable ? "pointer" : "default",
+                  }}
+                  className={clickable ? "notif-row" : undefined}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    {tag && (
+                      <span
+                        style={{
+                          flex: "none",
+                          fontSize: 10,
+                          fontWeight: 700,
+                          color: tag.color,
+                          border: `1px solid ${tag.color}`,
+                          borderRadius: 5,
+                          padding: "1px 5px",
+                          textTransform: "uppercase",
+                          letterSpacing: 0.3,
+                        }}
+                      >
+                        {tag.label}
+                      </span>
+                    )}
+                    <span>{n.message}</span>
+                  </div>
+                  <div style={{ color: "var(--muted)", fontSize: 11, fontFamily: "var(--font-mono)", marginTop: 2 }}>
+                    {new Date(n.created_at).toLocaleString()}
+                  </div>
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       )}

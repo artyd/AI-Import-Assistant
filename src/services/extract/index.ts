@@ -61,19 +61,32 @@ async function extractPdf(data: Buffer): Promise<ExtractedPage[]> {
 }
 
 async function extractDocx(data: Buffer): Promise<ExtractedPage[]> {
-  const { value } = await mammoth.extractRawText({ buffer: data });
-  const text = value.trim();
-  return text ? [{ page: null, text }] : [];
+  try {
+    const { value } = await mammoth.extractRawText({ buffer: data });
+    const text = value.trim();
+    return text ? [{ page: null, text }] : [];
+  } catch {
+    // mammoth only reads OOXML .docx. A legacy binary .doc throws here — treat it
+    // as "no text" so it lands on the manual-entry flag instead of failing the
+    // whole indexing job (and burning its retries).
+    return [];
+  }
 }
 
 function extractSpreadsheet(data: Buffer): ExtractedPage[] {
-  const wb = XLSX.read(data, { type: 'buffer' });
-  const pages: ExtractedPage[] = [];
-  for (const sheetName of wb.SheetNames) {
-    const sheet = wb.Sheets[sheetName];
-    if (!sheet) continue;
-    const csv = XLSX.utils.sheet_to_csv(sheet).trim();
-    if (csv) pages.push({ page: null, text: `# ${sheetName}\n${csv}` });
+  try {
+    // xlsx auto-detects the workbook format, so this covers both .xlsx and the
+    // legacy binary .xls.
+    const wb = XLSX.read(data, { type: 'buffer' });
+    const pages: ExtractedPage[] = [];
+    for (const sheetName of wb.SheetNames) {
+      const sheet = wb.Sheets[sheetName];
+      if (!sheet) continue;
+      const csv = XLSX.utils.sheet_to_csv(sheet).trim();
+      if (csv) pages.push({ page: null, text: `# ${sheetName}\n${csv}` });
+    }
+    return pages;
+  } catch {
+    return [];
   }
-  return pages;
 }

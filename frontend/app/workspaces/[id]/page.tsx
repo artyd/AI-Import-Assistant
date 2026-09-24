@@ -303,30 +303,49 @@ export default function WorkspacePage() {
       fileList: FileList | File[],
       replacesFileId?: string
     ): Promise<FileItem[]> => {
-      const form = new FormData();
-      for (const f of Array.from(fileList)) form.append("files", f, f.name || "file");
+      // Large selections are split into sub-limit batches and POSTed
+      // sequentially, so a big drag-drop (or a folder of hundreds) never trips
+      // the server's per-request file cap and nothing is silently dropped. A
+      // .zip counts as one part here and is expanded server-side. Kept well
+      // under the backend MAX_UPLOAD_FILES.
+      const CLIENT_BATCH_SIZE = 40;
+      const all = Array.from(fileList);
       const sp = new URLSearchParams();
       if (folderId) sp.set("folderId", folderId);
+      // A version-replace targets a single existing file — only the very first
+      // chunk carries it.
       if (replacesFileId) sp.set("replacesFileId", replacesFileId);
       const qs = sp.toString() ? `?${sp.toString()}` : "";
+
+      const created: FileItem[] = [];
+      const rejected: { name: string; reason: string }[] = [];
       try {
-        const res = await api<{
-          files: FileItem[];
-          rejected?: { name: string; reason: string }[];
-        }>(`/api/workspaces/${id}/files${qs}`, { form });
-        setFiles((prev) => {
-          const known = new Set(prev.map((p) => p.id));
-          return [...prev, ...res.files.filter((f) => !known.has(f.id))];
-        });
-        if (res.rejected && res.rejected.length) {
-          alert("Відхилено:\n" + res.rejected.map((r) => `• ${r.name} — ${r.reason}`).join("\n"));
+        for (let i = 0; i < all.length; i += CLIENT_BATCH_SIZE) {
+          const chunk = all.slice(i, i + CLIENT_BATCH_SIZE);
+          const form = new FormData();
+          for (const f of chunk) form.append("files", f, f.name || "file");
+          // replacesFileId only applies to the first request.
+          const chunkQs = i === 0 ? qs : folderId ? `?folderId=${encodeURIComponent(folderId)}` : "";
+          const res = await api<{
+            files: FileItem[];
+            rejected?: { name: string; reason: string }[];
+          }>(`/api/workspaces/${id}/files${chunkQs}`, { form });
+          created.push(...res.files);
+          if (res.rejected) rejected.push(...res.rejected);
+          setFiles((prev) => {
+            const known = new Set(prev.map((p) => p.id));
+            return [...prev, ...res.files.filter((f) => !known.has(f.id))];
+          });
         }
-        return res.files;
+        if (rejected.length) {
+          alert("Відхилено:\n" + rejected.map((r) => `• ${r.name} — ${r.reason}`).join("\n"));
+        }
+        return created;
       } catch (err) {
         if (err instanceof ApiError && err.code === "no_valid_files")
-          alert("Жоден файл не підійшов (дозволені: pdf, docx, xlsx, csv, png, jpg).");
+          alert("Жоден файл не підійшов (дозволені: pdf, doc, docx, xls, xlsx, csv, png, jpg, zip).");
         else alert("Не вдалося завантажити файли.");
-        return [];
+        return created;
       }
     },
     [id]
@@ -986,7 +1005,7 @@ export default function WorkspacePage() {
         type="file"
         multiple
         hidden
-        accept=".pdf,.docx,.xlsx,.csv,.png,.jpg,.jpeg"
+        accept=".pdf,.docx,.doc,.xlsx,.xls,.csv,.png,.jpg,.jpeg,.zip"
         onChange={(e) => {
           if (e.target.files && e.target.files.length) uploadSmart(null, e.target.files);
           e.target.value = "";

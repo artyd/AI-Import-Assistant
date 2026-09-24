@@ -4,6 +4,7 @@ import {
   type ChatTool,
   type ChatContentBlockParam,
 } from '../../anthropic/client.js';
+import { runWithAnthropicLimit } from '../../anthropic/limiter.js';
 import { config } from '../../config.js';
 import type { FileType } from '../../domain/folders.js';
 
@@ -32,7 +33,6 @@ import type { FileType } from '../../domain/folders.js';
 
 export type DocType =
   | 'invoice'
-  | 'purchase_order'
   | 'packing_list'
   | 'contract'
   | 'certificate_of_origin'
@@ -43,7 +43,6 @@ export type DocType =
 
 const DOC_TYPES: readonly DocType[] = [
   'invoice',
-  'purchase_order',
   'packing_list',
   'contract',
   'certificate_of_origin',
@@ -168,7 +167,7 @@ const EXTRACTION_TOOL: ChatTool = {
           'Інакше — порожній масив.',
         items: { type: 'string', enum: DOC_TYPES as unknown as string[] },
       },
-      po_number: { type: 'string', description: 'Номер замовлення (PO), якщо є.' },
+      po_number: { type: 'string', description: 'Номер замовлення / ордера, якщо вказано в документі.' },
       invoice_number: { type: 'string', description: 'Номер інвойсу, якщо є.' },
       contract_number: {
         type: 'string',
@@ -274,9 +273,32 @@ function toStr(v: unknown): string | null {
   return s.length > 0 ? s : null;
 }
 
+/**
+ * Robust numeric parse for extracted values, which the model often returns as
+ * formatted strings ("1 234,56", "1,234.56", "€12.50"). The OLD version did a
+ * single `.replace(',', '.')` with no thousands handling, so "1.234,56" →
+ * "1.234.56" → NaN → null, and the whole total_value / weight / packages
+ * comparison in reconcile() was then silently SKIPPED (missed discrepancy).
+ *
+ * Same decimal-separator heuristic as the analysis path's parseNumber (last
+ * separator = decimal), but returns null on empty/unparseable so a present
+ * value that can't be read is skipped explicitly rather than coerced to 0.
+ */
 function toNum(v: unknown): number | null {
   if (v === null || v === undefined || v === '') return null;
-  const n = typeof v === 'number' ? v : Number(String(v).replace(/[^\d.,-]/g, '').replace(',', '.'));
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  let s = String(v).trim().replace(/\s/g, '').replace(/[^\d.,-]/g, '');
+  if (!s) return null;
+  const hasComma = s.includes(',');
+  const hasDot = s.includes('.');
+  if (hasComma && hasDot) {
+    // Whichever separator comes last is the decimal; the other is thousands.
+    if (s.lastIndexOf(',') > s.lastIndexOf('.')) s = s.replace(/\./g, '').replace(',', '.');
+    else s = s.replace(/,/g, '');
+  } else if (hasComma) {
+    s = s.replace(',', '.');
+  }
+  const n = parseFloat(s);
   return Number.isFinite(n) ? n : null;
 }
 
@@ -405,13 +427,15 @@ function imageMediaType(name: string): 'image/png' | 'image/jpeg' | 'image/gif' 
 
 /** Runs the forced-tool extraction over the given content blocks. */
 async function runExtraction(content: ChatContentBlockParam[]): Promise<ExtractedFields | null> {
-  const msg = await anthropic.messages.create({
-    model: MODEL,
-    max_tokens: 4096,
-    tools: [EXTRACTION_TOOL],
-    tool_choice: { type: 'tool', name: 'record_extraction' },
-    messages: [{ role: 'user', content }],
-  });
+  const msg = await runWithAnthropicLimit(() =>
+    anthropic.messages.create({
+      model: MODEL,
+      max_tokens: 4096,
+      tools: [EXTRACTION_TOOL],
+      tool_choice: { type: 'tool', name: 'record_extraction' },
+      messages: [{ role: 'user', content }],
+    }),
+  );
   const block = msg.content.find((b) => b.type === 'tool_use');
   if (!block || block.type !== 'tool_use') return null;
   return normalize(block.input as Record<string, unknown>);

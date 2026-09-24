@@ -57,7 +57,12 @@ async function buildServer() {
   await app.register(rateLimit, { global: false });
 
   await app.register(multipart, {
-    limits: { fileSize: config.MAX_UPLOAD_BYTES, files: 20 },
+    // fileSize accepts the larger of a normal file and a .zip; non-zip parts
+    // over MAX_UPLOAD_BYTES are rejected in the handler (see files route).
+    limits: {
+      fileSize: Math.max(config.MAX_UPLOAD_BYTES, config.MAX_ZIP_BYTES),
+      files: config.MAX_UPLOAD_FILES,
+    },
   });
 
   app.get('/health', async () => ({ status: 'ok' }));

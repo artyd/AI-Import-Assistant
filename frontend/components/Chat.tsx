@@ -17,7 +17,7 @@ import {
 } from "./icons";
 import { LnChevronDown } from "./LineIcons";
 
-const UPLOAD_ACCEPT = ".pdf,.docx,.xlsx,.csv,.png,.jpg,.jpeg";
+const UPLOAD_ACCEPT = ".pdf,.docx,.doc,.xlsx,.xls,.csv,.png,.jpg,.jpeg";
 const ACCEPT_EXT = UPLOAD_ACCEPT.split(",").map((s) => s.trim().toLowerCase());
 
 let pasteSeq = 0;

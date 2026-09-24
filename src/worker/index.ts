@@ -7,6 +7,12 @@ import { createRedis } from '../queue/connection.js';
 import { INDEX_QUEUE, type IndexJobData } from '../queue/index.js';
 import { REMINDERS_QUEUE, scheduleReminders, type ReminderJobData } from '../queue/reminders.js';
 import { NEWS_QUEUE, scheduleNews, type NewsJobData } from '../queue/news.js';
+import {
+  INGEST_RETRY_QUEUE,
+  scheduleIngestRetry,
+  type IngestRetryJobData,
+} from '../queue/ingestRetry.js';
+import { sweepStuckFiles } from '../services/ingestRetry.js';
 import { readStoredFile } from '../services/storage.js';
 import { extractText } from '../services/extract/index.js';
 import { ocrDocument } from '../services/ocr/claudeOcr.js';
@@ -19,6 +25,7 @@ import { classifyAndFile } from '../services/classify.js';
 import { getWorkspaceById } from '../services/workspaceAccess.js';
 import { refreshWorkspaceState } from '../services/status.js';
 import { computeRisks } from '../services/risks.js';
+import { maybeReconcileBatch } from '../services/reconcileBatch.js';
 import { insertNotification } from '../services/notifications.js';
 import { scanAndNotify } from '../services/reminders.js';
 import { ingestNews, purgeOldNews } from '../services/news/index.js';
@@ -39,6 +46,7 @@ interface FileJobRow {
   type: FileType;
   disk_path: string;
   folder_name: string | null;
+  batch_id: string | null;
 }
 
 async function setStatus(
@@ -58,7 +66,7 @@ async function setStatus(
 async function processJob(job: Job<IndexJobData>): Promise<void> {
   const { fileId } = job.data;
   const { rows } = await query<FileJobRow>(
-    `SELECT f.id, f.workspace_id, f.name, f.type, f.disk_path, fo.name AS folder_name
+    `SELECT f.id, f.workspace_id, f.name, f.type, f.disk_path, f.batch_id, fo.name AS folder_name
      FROM files f LEFT JOIN folders fo ON fo.id = f.folder_id
      WHERE f.id = $1`,
     [fileId],
@@ -207,6 +215,15 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
         console.error(`Extraction failed for file ${file.id}:`, (err as Error).message);
       }
     }
+
+    // This file is now terminal (ready). If it was the last of its upload batch,
+    // fire the deterministic auto-reconcile. Best-effort — never fail the job.
+    try {
+      await maybeReconcileBatch(file.batch_id);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(`Batch reconcile check failed for file ${file.id}:`, (err as Error).message);
+    }
   } catch (err) {
     const reason = (err as Error).message?.slice(0, 300) ?? 'unknown error';
     await setStatus(file.id, file.workspace_id, 'error', reason);
@@ -239,13 +256,29 @@ async function processNews(_job: Job<NewsJobData>): Promise<void> {
   );
 }
 
+/**
+ * Auto-retry sweep: re-queue files stuck in 'error' up to INGEST_MAX_RETRIES,
+ * then flag the persistent ones for manual entry. See services/ingestRetry.
+ */
+async function processIngestRetry(_job: Job<IngestRetryJobData>): Promise<void> {
+  const { requeued, flagged } = await sweepStuckFiles();
+  if (requeued > 0 || flagged > 0) {
+    // eslint-disable-next-line no-console
+    console.log(`Ingest retry sweep: re-queued ${requeued}, flagged ${flagged} for manual entry.`);
+  }
+}
+
 async function main(): Promise<void> {
   await runMigrations();
   await ensureQdrantCollection();
 
   const worker = new Worker<IndexJobData>(INDEX_QUEUE, processJob, {
     connection: createRedis(),
-    concurrency: 3,
+    concurrency: config.INDEX_CONCURRENCY,
+    // Coarse job-rate guard so a huge upload drains steadily. The finer control
+    // on external-AI fan-out is the Anthropic concurrency semaphore (see
+    // src/anthropic/limiter.ts) applied inside OCR + extraction.
+    limiter: { max: config.INDEX_RATE_MAX, duration: config.INDEX_RATE_DURATION_MS },
   });
 
   worker.on('failed', (job, err) => {
@@ -279,15 +312,32 @@ async function main(): Promise<void> {
     });
   }
 
+  // Auto-retry sweep (error files → re-queue / flag). Gated by INGEST_RETRY_ENABLED.
+  let ingestRetryWorker: Worker<IngestRetryJobData> | null = null;
+  if (config.INGEST_RETRY_ENABLED) {
+    await scheduleIngestRetry();
+    ingestRetryWorker = new Worker<IngestRetryJobData>(INGEST_RETRY_QUEUE, processIngestRetry, {
+      connection: createRedis(),
+    });
+    ingestRetryWorker.on('failed', (job, err) => {
+      // eslint-disable-next-line no-console
+      console.error(`Ingest retry job ${job?.id} failed:`, err.message);
+    });
+  }
+
   // eslint-disable-next-line no-console
   console.log(
-    `Indexing worker started (env=${config.NODE_ENV}, extraction=${config.EXTRACTION_ENABLED}, ocr=${config.OCR_ENABLED}, reminders=${config.REMINDERS_ENABLED}, news=${config.NEWS_ENABLED}).`,
+    `Indexing worker started (env=${config.NODE_ENV}, concurrency=${config.INDEX_CONCURRENCY}, ` +
+      `anthropicMaxConcurrency=${config.ANTHROPIC_MAX_CONCURRENCY}, extraction=${config.EXTRACTION_ENABLED}, ` +
+      `ocr=${config.OCR_ENABLED}, reminders=${config.REMINDERS_ENABLED}, news=${config.NEWS_ENABLED}, ` +
+      `ingestRetry=${config.INGEST_RETRY_ENABLED}).`,
   );
 
   const shutdown = async (): Promise<void> => {
     await worker.close();
     if (remindersWorker) await remindersWorker.close();
     if (newsWorker) await newsWorker.close();
+    if (ingestRetryWorker) await ingestRetryWorker.close();
     await pool.end();
     process.exit(0);
   };

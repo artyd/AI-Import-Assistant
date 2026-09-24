@@ -4,7 +4,7 @@ import { query } from '../db/pool.js';
  * Best-effort derivation of the incoming (buy-side) and outgoing (sell-side)
  * Incoterms from a workspace's stored document extractions. No LLM call — reads
  * `document_extractions`. Heuristic, user-editable in the shipment card:
- *   - incoming = the Incoterm on the invoice → else PO → else a contract → else any
+ *   - incoming = the Incoterm on the invoice → else the contract → else any
  *   - outgoing = a DIFFERENT Incoterm seen on another document (re-sale leg), else null
  * A single-Incoterm shipment yields incoterm_in only.
  */
@@ -44,7 +44,6 @@ export async function suggestIncoterms(workspaceId: string): Promise<IncotermSug
 
   const incoterm_in =
     byType.get('invoice') ??
-    byType.get('purchase_order') ??
     byType.get('contract') ??
     all[0]!;
 

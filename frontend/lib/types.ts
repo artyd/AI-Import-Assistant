@@ -84,6 +84,10 @@ export interface PartySuggestion {
   country: string | null;
   source_files: string[];
   confidence: number;
+  // Which extracted field the name came from (manufacturer / seller / buyer).
+  from_field?: "manufacturer" | "seller" | "buyer";
+  // Role not confirmed by the documents — UI shows "роль уточнюється".
+  uncertain_role?: boolean;
 }
 
 export interface ChecklistItem {
@@ -189,6 +193,43 @@ export interface FileItem {
   // Extraction outcome (plan Q29): 'unreadable' means the human must enter key
   // fields on the verification screen.
   extractionStatus?: "ok" | "unreadable" | "no_fields" | null;
+}
+
+// Read-progress for a shipment (or one upload batch). Mirrors the backend
+// GET /api/workspaces/:id/ingest-status response.
+export interface IngestStatus {
+  batchId: string | null;
+  total: number;
+  read: number;
+  pending: number;
+  counts: {
+    queued: number;
+    indexing: number;
+    ready: number;
+    error: number;
+    unreadable: number;
+  };
+  done: boolean;
+  problems: {
+    id: string;
+    name: string;
+    status: FileStatus;
+    extractionStatus?: "ok" | "unreadable" | "no_fields" | null;
+    errorReason?: string | null;
+    folderId: string | null;
+  }[];
+}
+
+// Cross-shipment problem file (GET /api/problem-files).
+export interface ProblemFile {
+  id: string;
+  name: string;
+  status: FileStatus;
+  extractionStatus?: "ok" | "unreadable" | "no_fields" | null;
+  errorReason?: string | null;
+  workspaceId: string;
+  workspaceNumber: string;
+  createdAt?: string;
 }
 
 export interface FileVersion {

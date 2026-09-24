@@ -69,7 +69,10 @@ export interface ColumnMap {
 const RX = {
   name: /номенкл|наименован|назв|товар|product|item|опис|description/i,
   qty: /вага|маса|вес|нетто|нет\b|кільк|кол[-\s]*[вим]|\bкг\b|\bkg\b|\bqty\b|quantity|\bшт\b/i,
-  price: /цін|цена|price|варт|закуп|\bсум|amount|\busd\b|\beur\b|\$/i,
+  // Unit price (per-kg / per-unit): the value that should be multiplied by qty.
+  priceUnit: /цін|цена|price|закуп|\busd\b|\beur\b|\$/i,
+  // Line total / amount: must NOT be picked as a unit price (it's already qty×price).
+  priceTotal: /\bсум|amount|варт/i,
   // NB: JS `\b` is ASCII-only, so «Код УКТ ЗЕД» never matched the old `\bкод\b`.
   code: /укт\s*зед|тнвэ?д|hs[\s-]*code|\bhs\b|код\s*укт|^код\s*товар/i,
   // «ЛС» first cell, or an accounting/номенклатурний код column.
@@ -80,7 +83,13 @@ const RX = {
 export function mapColumns(header: (string | number | null | undefined)[]): ColumnMap {
   const find = (rx: RegExp): number =>
     header.findIndex((c) => rx.test(String(c ?? '')));
-  return { name: find(RX.name), qty: find(RX.qty), price: find(RX.price), code: find(RX.code), ls: find(RX.ls) };
+  // Prefer a genuine unit-price column; only fall back to a «сума»/amount (line
+  // total) column when no unit-price column exists — otherwise a total column
+  // that happens to appear first would be multiplied by qty and blow up the
+  // customs value (see analysis audit #10).
+  const priceUnit = find(RX.priceUnit);
+  const price = priceUnit >= 0 ? priceUnit : find(RX.priceTotal);
+  return { name: find(RX.name), qty: find(RX.qty), price, code: find(RX.code), ls: find(RX.ls) };
 }
 
 /** Normalises an «ЛС» card value to a join key (digits, no leading zeros). */

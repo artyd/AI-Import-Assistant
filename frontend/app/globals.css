@@ -349,6 +349,11 @@ a {
   background: var(--hover) !important;
 }
 
+/* --- Notification / problem-file dropdown rows --- */
+.notif-row:hover {
+  background: var(--hover);
+}
+
 /* --- Chat composer (mock: accent border on focus-within) --- */
 .composer {
   transition: border-color var(--dur-short, 120ms) ease;
