@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { v4 as uuidv4 } from 'uuid';
+import { config } from '../config.js';
 import { query } from '../db/pool.js';
 import { authenticate } from '../auth/hook.js';
 import { getOwnedWorkspace } from '../services/workspaceAccess.js';
@@ -17,6 +18,7 @@ import { enqueueIndexJob } from '../queue/index.js';
 import { publishFileStatus } from '../events/fileStatus.js';
 import { deleteFileChunks } from '../services/qdrant.js';
 import { classifyAndFile, sortInbox } from '../services/classify.js';
+import { isZipUpload, unpackZip, ZipGuardError } from '../services/zip.js';
 
 /** MIME type for inline preview / download, derived from the stored file type. */
 function contentType(type: string, name: string): string {
@@ -87,39 +89,67 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
 
       const created: unknown[] = [];
       const rejected: { name: string; reason: string }[] = [];
+
+      // One ingest batch per upload request — groups these files for "X of Y"
+      // read-progress and the auto-reconcile-when-complete trigger. Created up
+      // front; its `total` is set from created.length after the loop, and an
+      // all-rejected request deletes the empty batch so no orphan rows accrue.
+      const { rows: batchRows } = await query<{ id: string }>(
+        `INSERT INTO ingest_batches (workspace_id, source) VALUES ($1, 'upload') RETURNING id`,
+        [ws.id],
+      );
+      const batchId = batchRows[0]!.id;
+
       // A single replacement target applies to the first accepted file only.
       let replaceConsumed = false;
       // Exact-content dedup within this upload batch (hash -> first name seen).
       const seenHashes = new Map<string, string>();
+      // Find-or-create cache for folders derived from zip paths (name -> id).
+      const folderCache = new Map<string, string>();
 
-      for await (const part of req.files()) {
-        const name = part.filename;
-        if (!isAllowedUpload(name)) {
-          rejected.push({ name, reason: 'unsupported_type' });
-          // Drain the stream so parsing can continue.
-          part.file.resume();
-          continue;
+      // Maps a zip entry's parent-dir name to a workspace folder (flat model:
+      // one folder per name, created on demand). Root-level entries fall back to
+      // the request's target folder.
+      const resolveEntryFolder = async (entryFolderName: string | null): Promise<string | null> => {
+        if (!entryFolderName) return folderId ?? null;
+        const cached = folderCache.get(entryFolderName);
+        if (cached) return cached;
+        const { rows } = await query<{ id: string }>(
+          'SELECT id FROM folders WHERE workspace_id = $1 AND name = $2 LIMIT 1',
+          [ws.id, entryFolderName],
+        );
+        let id = rows[0]?.id;
+        if (!id) {
+          const ins = await query<{ id: string }>(
+            `INSERT INTO folders (workspace_id, name, position)
+             VALUES ($1, $2, COALESCE((SELECT MAX(position) + 1 FROM folders WHERE workspace_id = $1), 0))
+             RETURNING id`,
+            [ws.id, entryFolderName],
+          );
+          id = ins.rows[0]!.id;
         }
-        let buf: Buffer;
-        try {
-          buf = await part.toBuffer();
-        } catch {
-          rejected.push({ name, reason: 'too_large' });
-          continue;
-        }
-        if (part.file.truncated) {
-          rejected.push({ name, reason: 'too_large' });
-          continue;
-        }
+        folderCache.set(entryFolderName, id);
+        return id;
+      };
 
-        // Exact-content dedup — only for fresh uploads, never for an explicit
-        // version-replace (which is a deliberate user action).
-        const hash = contentHashOf(buf);
+      // Persist one accepted file (dedup → store → insert → enqueue). Shared by
+      // the direct-upload path and each zip entry. `label` is what we show in
+      // rejections (the zip-relative path for entries), `allowReplace` gates the
+      // version-replace behaviour (never applied to zip entries).
+      const persist = async (
+        fileName: string,
+        fileBuf: Buffer,
+        targetFolderId: string | null,
+        label: string,
+        allowReplace: boolean,
+      ): Promise<void> => {
+        const hash = contentHashOf(fileBuf);
+        // Exact-content dedup — skip for an explicit version-replace (deliberate).
         if (!replacesFileId) {
           const inBatch = seenHashes.get(hash);
           if (inBatch) {
-            rejected.push({ name, reason: `duplicate_of:${inBatch}` });
-            continue;
+            rejected.push({ name: label, reason: `duplicate_of:${inBatch}` });
+            return;
           }
           const { rows: dup } = await query<{ name: string }>(
             `SELECT name FROM files
@@ -127,50 +157,141 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
             [ws.id, hash],
           );
           if (dup[0]) {
-            rejected.push({ name, reason: `duplicate_of:${dup[0].name}` });
-            continue;
+            rejected.push({ name: label, reason: `duplicate_of:${dup[0].name}` });
+            return;
           }
         }
 
         const fileId = uuidv4();
-        const type = inferFileType(name);
-        const diskPath = diskPathFor(ws.id, fileId, name);
-        await storeFile(ws.id, fileId, name, buf);
+        const type = inferFileType(fileName);
+        const diskPath = diskPathFor(ws.id, fileId, fileName);
+        await storeFile(ws.id, fileId, fileName, fileBuf);
 
-        // Versioning: if this upload replaces an existing file, chain it and
-        // demote the previous version from is_latest.
-        const applyReplace = replaced && !replaceConsumed;
+        const applyReplace = allowReplace && replaced && !replaceConsumed;
         const version = applyReplace ? replaced!.version + 1 : 1;
         const replacesId = applyReplace ? replaced!.id : null;
 
         await query(
-          `INSERT INTO files (id, workspace_id, folder_id, name, type, disk_path, size_bytes, status, version, replaces_file_id, is_latest, content_hash)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued', $8, $9, true, $10)`,
-          [fileId, ws.id, folderId ?? null, name, type, diskPath, buf.length, version, replacesId, hash],
+          `INSERT INTO files (id, workspace_id, folder_id, name, type, disk_path, size_bytes, status, version, replaces_file_id, is_latest, content_hash, batch_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued', $8, $9, true, $10, $11)`,
+          [fileId, ws.id, targetFolderId, fileName, type, diskPath, fileBuf.length, version, replacesId, hash, batchId],
         );
-        seenHashes.set(hash, name);
+        seenHashes.set(hash, label);
         if (applyReplace) {
           await query('UPDATE files SET is_latest = false WHERE id = $1', [replaced!.id]);
           replaceConsumed = true;
         }
 
         await enqueueIndexJob(fileId);
-        await publishFileStatus(ws.id, { fileId, status: 'queued', name });
+        await publishFileStatus(ws.id, { fileId, status: 'queued', name: fileName });
         created.push({
           id: fileId,
-          name,
+          name: fileName,
           type,
           status: 'queued',
-          folderId: folderId ?? null,
+          folderId: targetFolderId,
           version,
           replacesFileId: replacesId,
         });
+      };
+
+      // If the request exceeds the multipart `files` limit, @fastify/multipart
+      // throws from the async iterator mid-loop. Catch it so any files accepted
+      // before the limit are still saved + enqueued and the caller gets a
+      // partial-success summary, instead of a 500 that loses the whole batch.
+      // (The frontend sends large selections in sub-limit batches; this is the
+      // safety net for a batch that still slips over MAX_UPLOAD_FILES.)
+      let limitHit = false;
+      try {
+        for await (const part of req.files()) {
+          const name = part.filename;
+          const zip = isZipUpload(name);
+
+          // A .zip is a container, not a stored file type — it bypasses the
+          // normal allow-list and is unpacked below.
+          if (!zip && !isAllowedUpload(name)) {
+            rejected.push({ name, reason: 'unsupported_type' });
+            part.file.resume(); // drain so parsing can continue
+            continue;
+          }
+
+          let buf: Buffer;
+          try {
+            buf = await part.toBuffer();
+          } catch {
+            rejected.push({ name, reason: 'too_large' });
+            continue;
+          }
+          if (part.file.truncated) {
+            rejected.push({ name, reason: 'too_large' });
+            continue;
+          }
+
+          if (zip) {
+            // Unpack in memory (zip-bomb guarded) and persist each entry into a
+            // folder mirroring the archive's structure (flat model — see zip.ts).
+            let entries;
+            try {
+              entries = await unpackZip(buf);
+            } catch (e) {
+              rejected.push({
+                name,
+                reason: e instanceof ZipGuardError ? `zip_${e.reason}` : 'zip_invalid',
+              });
+              continue;
+            }
+            for (const entry of entries) {
+              if (!isAllowedUpload(entry.name)) {
+                rejected.push({ name: entry.path, reason: 'unsupported_type' });
+                continue;
+              }
+              if (entry.buffer.length > config.MAX_UPLOAD_BYTES) {
+                rejected.push({ name: entry.path, reason: 'too_large' });
+                continue;
+              }
+              const entryFolderId = await resolveEntryFolder(entry.folderName);
+              await persist(entry.name, entry.buffer, entryFolderId, entry.path, false);
+            }
+            continue;
+          }
+
+          // Direct (non-zip) upload. Multipart accepts up to MAX_ZIP_BYTES, so a
+          // large non-zip file must be rejected against the smaller doc limit here.
+          if (buf.length > config.MAX_UPLOAD_BYTES) {
+            rejected.push({ name, reason: 'too_large' });
+            continue;
+          }
+          await persist(name, buf, folderId ?? null, name, true);
+        }
+      } catch (err) {
+        // Too many files in one request: stop consuming, report the overflow,
+        // and fall through to the normal summary response for what we did save.
+        if ((err as { code?: string }).code === 'FST_FILES_LIMIT') {
+          limitHit = true;
+          rejected.push({
+            name: '(додаткові файли)',
+            reason: `too_many_files_per_request:${config.MAX_UPLOAD_FILES}`,
+          });
+        } else {
+          throw err;
+        }
+      }
+
+      // Finalise the batch: record how many files it actually holds, or drop it
+      // if nothing was accepted (all rejected/duplicate) so no empty batch lingers.
+      if (created.length > 0) {
+        await query('UPDATE ingest_batches SET total = $2 WHERE id = $1', [batchId, created.length]);
+      } else {
+        await query('DELETE FROM ingest_batches WHERE id = $1', [batchId]);
       }
 
       if (created.length === 0 && rejected.length > 0) {
         return reply.code(415).send({ error: 'no_valid_files', rejected });
       }
-      return reply.code(201).send({ files: created, rejected });
+      // 201 with a `limitHit` flag so the frontend can resend the overflow in a
+      // follow-up batch rather than treating the upload as fully done, plus the
+      // batchId so it can poll read-progress for this batch.
+      return reply.code(201).send({ files: created, rejected, limitHit, batchId });
     },
   );
 
@@ -312,10 +433,14 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       const file = rows[0];
       if (!file) return reply.code(404).send({ error: 'not_found' });
 
-      await query('UPDATE files SET status = $2, error_reason = NULL WHERE id = $1', [
-        file.id,
-        'queued',
-      ]);
+      // A manual reindex is a deliberate fresh attempt: reset the sweep counter
+      // and clear any 'unreadable' flag so the auto-retry budget starts over.
+      await query(
+        `UPDATE files SET status = 'queued', error_reason = NULL, index_attempts = 0,
+           extraction_status = CASE WHEN extraction_status = 'unreadable' THEN NULL ELSE extraction_status END
+         WHERE id = $1`,
+        [file.id],
+      );
       await enqueueIndexJob(file.id);
       await publishFileStatus(ws.id, { fileId: file.id, status: 'queued', name: file.name });
       return reply.send({ ok: true });
@@ -368,4 +493,102 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       return reply.send({ versions: rows });
     },
   );
+
+  // GET /api/workspaces/:id/ingest-status[?batchId=<uuid>] — read-progress for a
+  // shipment (or one upload batch): counts by status + the list of files that
+  // need attention (error / flagged unreadable). Backs the "прочитано X з Y"
+  // indicator and the per-shipment problem list. Poll this alongside the live
+  // `file_status` SSE stream.
+  app.get<{ Params: { id: string }; Querystring: { batchId?: string } }>(
+    '/api/workspaces/:id/ingest-status',
+    async (req, reply) => {
+      const ws = await getOwnedWorkspace(req.user!.sub, req.params.id);
+      if (!ws) return reply.code(404).send({ error: 'not_found' });
+      const batchId = req.query.batchId ?? null;
+
+      const params: unknown[] = [ws.id];
+      let batchFilter = '';
+      if (batchId) {
+        params.push(batchId);
+        batchFilter = ' AND batch_id = $2';
+      }
+
+      const { rows: agg } = await query<{
+        total: string;
+        queued: string;
+        indexing: string;
+        ready: string;
+        error: string;
+        unreadable: string;
+      }>(
+        `SELECT
+           COUNT(*)                                             AS total,
+           COUNT(*) FILTER (WHERE status = 'queued')            AS queued,
+           COUNT(*) FILTER (WHERE status = 'indexing')          AS indexing,
+           COUNT(*) FILTER (WHERE status = 'ready')             AS ready,
+           COUNT(*) FILTER (WHERE status = 'error')             AS error,
+           COUNT(*) FILTER (WHERE extraction_status = 'unreadable') AS unreadable
+         FROM files
+         WHERE workspace_id = $1 AND is_latest = true${batchFilter}`,
+        params,
+      );
+      const c = agg[0]!;
+      const n = (v: string): number => Number(v);
+      const total = n(c.total);
+      const ready = n(c.ready);
+      const pending = n(c.queued) + n(c.indexing);
+
+      const { rows: problems } = await query(
+        `SELECT id, name, status,
+                extraction_status AS "extractionStatus",
+                error_reason AS "errorReason",
+                folder_id AS "folderId"
+         FROM files
+         WHERE workspace_id = $1 AND is_latest = true${batchFilter}
+           AND (status = 'error' OR extraction_status = 'unreadable')
+         ORDER BY created_at`,
+        params,
+      );
+
+      return reply.send({
+        batchId,
+        total,
+        read: ready,
+        pending,
+        counts: {
+          queued: n(c.queued),
+          indexing: n(c.indexing),
+          ready,
+          error: n(c.error),
+          unreadable: n(c.unreadable),
+        },
+        // "Done reading" = nothing still queued/indexing (files may still be
+        // flagged for manual entry, but no further auto-reading is pending).
+        done: pending === 0,
+        problems,
+      });
+    },
+  );
+
+  // GET /api/problem-files — cross-shipment list of files that need a human:
+  // failed indexing or flagged unreadable, across every workspace the user owns.
+  // Backs the global "проблемні файли" screen.
+  app.get('/api/problem-files', async (req, reply) => {
+    const { rows } = await query(
+      `SELECT f.id, f.name, f.status,
+              f.extraction_status AS "extractionStatus",
+              f.error_reason AS "errorReason",
+              f.workspace_id AS "workspaceId",
+              w.number AS "workspaceNumber",
+              f.created_at AS "createdAt"
+       FROM files f
+       JOIN workspaces w ON w.id = f.workspace_id
+       WHERE w.owner_id = $1
+         AND f.is_latest = true
+         AND (f.status = 'error' OR f.extraction_status = 'unreadable')
+       ORDER BY f.created_at DESC`,
+      [req.user!.sub],
+    );
+    return reply.send({ files: rows });
+  });
 }

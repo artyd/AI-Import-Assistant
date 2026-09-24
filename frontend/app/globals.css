@@ -349,6 +349,11 @@ a {
   background: var(--hover) !important;
 }
 
+/* --- Notification / problem-file dropdown rows --- */
+.notif-row:hover {
+  background: var(--hover);
+}
+
 /* --- Chat composer (mock: accent border on focus-within) --- */
 .composer {
   transition: border-color var(--dur-short, 120ms) ease;
@@ -540,16 +545,11 @@ a {
   }
 }
 
-/* --- 3D icon treatment (Font Awesome solid glyphs) ---
-   A stacked drop-shadow gives the flat glyph a raised, extruded look. Shadows
-   sit under the glyph, so light icons on dark surfaces keep full contrast. */
+/* Icons are now flat minimalist 2D line glyphs (see components/icons.tsx →
+   LineIcons). The former "3D" drop-shadow treatment is removed; `.ico3d` is kept
+   as an inert no-op so any stray reference stays harmless. */
 .ico3d {
-  filter: drop-shadow(0 1px 0.4px rgba(0, 0, 0, 0.28))
-    drop-shadow(0 2px 2.5px rgba(0, 0, 0, 0.16));
-}
-/* The spinner rotates; keep its shadow radially symmetric so it doesn't wobble. */
-.ico3d.spin {
-  filter: drop-shadow(0 0 1.5px rgba(0, 0, 0, 0.3));
+  filter: none;
 }
 @media (prefers-reduced-motion: reduce) {
   .spin {

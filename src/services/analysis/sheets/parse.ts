@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx';
 import type { SheetInput, SheetMeta } from './selectActualSheet.js';
-import { findDataHeader } from './selectActualSheet.js';
+import { findDataHeader, parseSheetDate } from './selectActualSheet.js';
 import type { RawLine } from '../engines/resolve.js';
 
 // ── Парсинг файлів ────────────────────────────────────────────────
@@ -62,20 +62,40 @@ export interface ColumnMap {
   qty: number;
   price: number;
   code: number;
+  /** «ЛС» / облікова картка — ключ для join між листами (-1 якщо немає). */
+  ls: number;
 }
 
 const RX = {
   name: /номенкл|наименован|назв|товар|product|item|опис|description/i,
   qty: /вага|маса|вес|нетто|нет\b|кільк|кол[-\s]*[вим]|\bкг\b|\bkg\b|\bqty\b|quantity|\bшт\b/i,
-  price: /цін|цена|price|варт|закуп|\bсум|amount|\busd\b|\beur\b|\$/i,
-  code: /уктзед|тнвэд|hs[\s-]*code|\bhs\b|\bкод\b/i,
+  // Unit price (per-kg / per-unit): the value that should be multiplied by qty.
+  priceUnit: /цін|цена|price|закуп|\busd\b|\beur\b|\$/i,
+  // Line total / amount: must NOT be picked as a unit price (it's already qty×price).
+  priceTotal: /\bсум|amount|варт/i,
+  // NB: JS `\b` is ASCII-only, so «Код УКТ ЗЕД» never matched the old `\bкод\b`.
+  code: /укт\s*зед|тнвэ?д|hs[\s-]*code|\bhs\b|код\s*укт|^код\s*товар/i,
+  // «ЛС» first cell, or an accounting/номенклатурний код column.
+  ls: /^лс(?![а-яіїєґ])|обліков|номенклатурн(ий)?\s*код/i,
 };
 
 /** Мапа колонок за рядком заголовків. Повертає індекси (-1 якщо немає). */
 export function mapColumns(header: (string | number | null | undefined)[]): ColumnMap {
   const find = (rx: RegExp): number =>
     header.findIndex((c) => rx.test(String(c ?? '')));
-  return { name: find(RX.name), qty: find(RX.qty), price: find(RX.price), code: find(RX.code) };
+  // Prefer a genuine unit-price column; only fall back to a «сума»/amount (line
+  // total) column when no unit-price column exists — otherwise a total column
+  // that happens to appear first would be multiplied by qty and blow up the
+  // customs value (see analysis audit #10).
+  const priceUnit = find(RX.priceUnit);
+  const price = priceUnit >= 0 ? priceUnit : find(RX.priceTotal);
+  return { name: find(RX.name), qty: find(RX.qty), price, code: find(RX.code), ls: find(RX.ls) };
+}
+
+/** Normalises an «ЛС» card value to a join key (digits, no leading zeros). */
+export function normalizeLs(v: unknown): string | null {
+  const d = String(v ?? '').replace(/\D/g, '').replace(/^0+/, '');
+  return d.length >= 3 ? d : null;
 }
 
 /** Парсинг числа з форматів "1 234,56" / "1,234.56" / "12.5". */
@@ -96,7 +116,36 @@ export function parseNumber(v: unknown): number {
   return isFinite(n) ? n : 0;
 }
 
-const JUNK_RX = /^(итого|разом|усього|всего|total|сума|подсумок|примеч|коммент|note|№|nn?|поз)\b/i;
+// Anchored at start (^) so real product names that merely CONTAIN one of these
+// stems (e.g. «Окситетрациклин основание») are NOT dropped — only rows that BEGIN
+// like a total / note / logistics line are. NB: JS `\b` is ASCII-only, so it does
+// NOT work as a word boundary for Cyrillic — we rely on distinctive stems instead
+// («основн» matches «основной» but not «основание»; «готов» matches «готовность»).
+const JUNK_RX =
+  /^(итого|разом|усього|всього|всего|total|сума|подсумок|примеч|коммент|note|№|основн|готов|судов|отгруз|отправк|график|реквизит|оплат|доставк)/i;
+
+// Trailing free-form sales/logistics notes that get typed into the name cell.
+// Everything from the marker onward is stripped from the product name.
+const NAME_NOTE_RX =
+  /\s+(мы возили|кого возил|мониторинг|если хорош|подтвержд|одобрен|заказан|подписал|опасник|клиент|поставщик|local charges|include warehouse|don'?t\s+more|cpt-?|до спт|до\s+\S+\s+львов).*/i;
+
+/**
+ * Cleans a raw manifest name cell down to the product name: keeps only the first
+ * line (notes/CAS usually land on subsequent lines) and strips a trailing sales/
+ * logistics note. Falls back to the raw text if cleaning would empty it.
+ */
+export function cleanProductName(raw: unknown): string {
+  const firstLine = String(raw ?? '').split(/\r?\n/)[0] ?? '';
+  const cleaned = firstLine
+    .replace(NAME_NOTE_RX, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+    // Drop a dangling separator and/or a trailing lone preposition left by the cut
+    // (requires a leading separator so it can't eat into a real trailing word).
+    .replace(/[\s,\-–—]+(?:на|до|в|у|по|з|із|для|от|за|и|та)?[\s,\-–—]*$/i, '')
+    .trim();
+  return cleaned || String(raw ?? '').trim();
+}
 
 /** Чи це «сміттєвий» рядок (підсумки, нотатки, порожні). */
 export function isJunkRow(name: string): boolean {
@@ -104,6 +153,8 @@ export function isJunkRow(name: string): boolean {
   if (n.length < 2) return true;
   if (JUNK_RX.test(n)) return true;
   if (/^\d+([.,]\d+)?$/.test(n)) return true; // лише число
+  // Notes that carry only dates / no substance letters (e.g. «готовность… 20.09»).
+  if (!/[a-zа-яіїєґ]{3,}/i.test(n)) return true;
   return false;
 }
 
@@ -118,12 +169,79 @@ export function extractRows(meta: SheetMeta): { rows: RawLine[]; columns: Column
   const out: RawLine[] = [];
   for (let i = headerIdx + 1; i < rows.length; i++) {
     const r = rows[i] || [];
-    const name = String(r[columns.name] ?? '').trim();
+    const name = cleanProductName(r[columns.name]);
     if (!name || isJunkRow(name)) continue;
     const qtyKg = columns.qty >= 0 ? parseNumber(r[columns.qty]) : 0;
     const unitPrice = columns.price >= 0 ? parseNumber(r[columns.price]) : 0;
+    // Skip planning/monitoring rows that carry no quantity — only when the sheet
+    // actually has a quantity column (otherwise we'd drop every row).
+    if (columns.qty >= 0 && qtyKg <= 0) continue;
     const codeRaw = columns.code >= 0 ? String(r[columns.code] ?? '').trim() : '';
-    out.push({ name, qtyKg, unitPrice, uctzedCode: codeRaw || null });
+    const lsCode = columns.ls >= 0 ? normalizeLs(r[columns.ls]) : null;
+    out.push({ name, qtyKg, unitPrice, uctzedCode: codeRaw || null, lsCode });
   }
   return { rows: out, columns };
+}
+
+/**
+ * Builds an «ЛС» → {price, code} reference map across ALL sheets that carry a ЛС
+ * column plus a price and/or УКТЗЕД column. Fresher sheets win (dated desc, undated
+ * last). Lets the analysis pull price/code for the current sheet's items by their
+ * ЛС card when that sheet itself lacks those columns (e.g. a «Готовність» tab).
+ */
+export function buildReferenceMap(
+  sheets: SheetInput[],
+  currentDate: Date,
+): Map<string, { price?: number; code?: string }> {
+  const ranked = sheets
+    .map((s) => {
+      const headerIdx = findDataHeader(s.rows);
+      if (headerIdx < 0) return null;
+      const header = s.rows[headerIdx] ?? [];
+      const cols = mapColumns(header);
+      if (cols.ls < 0 || (cols.price < 0 && cols.code < 0)) return null;
+      // Price-snapshot columns headed by a date (e.g. «05,08,2026», «14.07.2026
+      // ЗАКУПКА») — these carry the freshest purchase price, unlike the often-empty
+      // «Прошлая цена закупки». Ordered so the newest date is tried first.
+      const datedPriceCols = header
+        .map((h, idx) => ({ idx, date: parseSheetDate(String(h ?? ''), currentDate) }))
+        .filter((x): x is { idx: number; date: Date } => x.date !== null)
+        .sort((a, b) => b.date.getTime() - a.date.getTime())
+        .map((x) => x.idx);
+      const date = parseSheetDate(s.name, currentDate);
+      return { s, headerIdx, cols, datedPriceCols, dateMs: date ? date.getTime() : -Infinity };
+    })
+    .filter((x): x is NonNullable<typeof x> => x !== null)
+    .sort((a, b) => b.dateMs - a.dateMs); // freshest source first
+
+  // Freshest positive per-kg price for a row: newest dated column with a value,
+  // else the generic «Прошлая цена закупки». Guarded against non-price big numbers.
+  const rowPrice = (row: (string | number | null | undefined)[], src: (typeof ranked)[number]): number => {
+    for (const idx of src.datedPriceCols) {
+      const v = parseNumber(row[idx]);
+      if (v > 0 && v < 100000) return v;
+    }
+    return src.cols.price >= 0 ? parseNumber(row[src.cols.price]) : 0;
+  };
+
+  const map = new Map<string, { price?: number; code?: string }>();
+  for (const src of ranked) {
+    const { s, headerIdx, cols } = src;
+    for (let i = headerIdx + 1; i < s.rows.length; i++) {
+      const row = s.rows[i] ?? [];
+      const key = normalizeLs(row[cols.ls]);
+      if (!key) continue;
+      const cur = map.get(key) ?? {};
+      if (cur.price === undefined) {
+        const p = rowPrice(row, src);
+        if (p > 0) cur.price = p;
+      }
+      if (cur.code === undefined && cols.code >= 0) {
+        const c = String(row[cols.code] ?? '').replace(/\D/g, '');
+        if (c.length >= 6) cur.code = c;
+      }
+      if (cur.price !== undefined || cur.code !== undefined) map.set(key, cur);
+    }
+  }
+  return map;
 }

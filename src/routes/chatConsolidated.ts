@@ -12,13 +12,17 @@ import {
 import { SseStream } from '../sse/sse.js';
 import { buildConsolidatedSystemPrompt } from '../agent/systemPrompt.js';
 import { runAgentTurn } from '../agent/loop.js';
-import { toolDefinitions } from '../agent/tools.js';
+import { toolDefinitions, logistTools } from '../agent/tools.js';
 import { chatRateLimitConfig } from './chatRateLimit.js';
 
-// Consolidated (Збірник) chats run with a single tool: the manifest analysis
-// engine. Shipment tools (checklist/discrepancies/…) are workspace-scoped and
+// Consolidated (Збірник) chats run with the manifest analysis engine plus the
+// customs/logistics reference tools (УКТ ЗЕД / dual-use / НБУ / PubChem, when
+// enabled). Shipment tools (checklist/discrepancies/…) are workspace-scoped and
 // intentionally excluded here.
-const consolidatedTools = toolDefinitions.filter((t) => t.name === 'run_consolidated_analysis');
+const analysisTool = toolDefinitions.filter((t) => t.name === 'run_consolidated_analysis');
+function consolidatedTools() {
+  return [...analysisTool, ...logistTools()];
+}
 
 const chatSchema = z.object({
   message: z.string().min(1),
@@ -69,7 +73,7 @@ export async function chatConsolidatedRoutes(app: FastifyInstance): Promise<void
           sse,
           collectionId: col.id,
           ownerId: req.user!.sub,
-          tools: consolidatedTools,
+          tools: consolidatedTools(),
         });
 
         const messageId = await appendMessage(

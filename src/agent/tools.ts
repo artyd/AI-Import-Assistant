@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import type { ChatTool } from '../anthropic/client.js';
 import { query } from '../db/pool.js';
+import * as logist from '../services/logist/index.js';
+import { digestUktzedSections } from '../services/logist/uktzedDigest.js';
 import { readStoredFile, contentHashOf } from '../services/storage.js';
 import { extractText } from '../services/extract/index.js';
 import { ocrDocument } from '../services/ocr/claudeOcr.js';
@@ -17,7 +19,8 @@ import { getMissingContext, upsertParties, type PartyInput } from '../services/p
 import { classifyAndFile, sortInbox } from '../services/classify.js';
 import { buildAndSaveReport } from '../services/report.js';
 import { compareFileVersions, previousVersionId } from '../services/versions.js';
-import { runAnalysis } from '../services/analysis/run.js';
+import { runAnalysis, type AnalysisInput } from '../services/analysis/run.js';
+import { formatAnalysisMarkdown } from '../services/analysis/format.js';
 import { persistAnalysis } from '../services/analyses.js';
 import type { Citation } from '../services/conversations.js';
 import type { FileType } from '../domain/folders.js';
@@ -36,8 +39,8 @@ export interface ToolContext {
 
 /** Narrows to a shipment scope; throws if the tool was called without one. */
 function requireWorkspace(ctx: ToolContext): string {
-  if (!requireWorkspace(ctx)) throw new Error('Цей інструмент доступний лише в межах постачання.');
-  return requireWorkspace(ctx);
+  if (!ctx.workspaceId) throw new Error('Цей інструмент доступний лише в межах постачання.');
+  return ctx.workspaceId;
 }
 
 export interface ToolOutcome {
@@ -100,7 +103,7 @@ export const toolDefinitions: ChatTool[] = [
   {
     name: 'get_discrepancies',
     description:
-      'Повертає розрахований звіт розбіжностей між інвойсом, PO та пакувальним листом ' +
+      'Повертає розрахований звіт розбіжностей між контрактом, інвойсом та пакувальним листом ' +
       '(детермінована звірка структурованих полів). Використовуй для питань про ' +
       'невідповідності — не звіряй текст вручну.',
     input_schema: { type: 'object', properties: {} },
@@ -224,14 +227,128 @@ export const toolDefinitions: ChatTool[] = [
   {
     name: 'run_consolidated_analysis',
     description:
-      'Запускає повний аналіз маніфесту поточного збірника: бере останній файл-маніфест ' +
-      '(xlsx/csv), рахує митну вартість (CIF), мито та ПДВ по кожній позиції, визначає ' +
-      'країну походження та перевірки ЄС/UA, оцінює ризики. Використовуй, коли користувач ' +
-      'просить проаналізувати збірник / порахувати платежі / перевірити позиції. Повертає ' +
-      'короткий підсумок і analysisId (за ним фронтенд підвантажує повний результат).',
-    input_schema: { type: 'object', properties: {} },
+      'Запускає повний аналіз маніфесту збірника: рахує митну вартість (CIF), мито та ПДВ ' +
+      'по кожній позиції, визначає походження, перевірки ЄС/UA та ризики, звіряє коди з qdpro. ' +
+      'ДЖЕРЕЛО маніфесту: якщо користувач дав посилання на Google Sheets — передай його у ' +
+      'source_url; якщо вставив таблицю рядками — передай у manifest_text; якщо нічого не ' +
+      'задано — береться останній завантажений файл-маніфест збірника. Використовуй, коли ' +
+      'користувач просить проаналізувати збірник / порахувати платежі / перевірити позиції. ' +
+      'Повертає готову відповідь по позиціях (презентуй її користувачу як є).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        source_url: {
+          type: 'string',
+          description: 'Публічне посилання на Google Sheets із маніфестом (необовʼязково).',
+        },
+        manifest_text: {
+          type: 'string',
+          description: 'Вставлена таблиця-маніфест рядками, TSV/CSV (необовʼязково).',
+        },
+      },
+    },
   },
 ];
+
+/**
+ * Customs/logistics reference tools backed by the internal `logist-mcp` service
+ * (УКТ ЗЕД довідка/класифікатор, подвійне використання, курс НБУ, PubChem). They
+ * are scope-less external lookups (no workspace/collection needed), advertised in
+ * every chat kind — but ONLY when LOGIST_MCP_URL is configured. Their results are
+ * first-source facts: the agent must prefer them over reasoning from memory for
+ * duty/VAT/rates, while HS-code SELECTION stays advisory (see the system prompt).
+ */
+export const logistToolDefinitions: ChatTool[] = [
+  {
+    name: 'uktzed_lookup_code',
+    description:
+      'Офіційна митна довідка по 10-значному коду УКТ ЗЕД (джерело: qdpro.com.ua, дані ' +
+      'ДФС/Мінфіну): опис товару, ставки ввізного мита (пільгова/повна), ПДВ, пільги за ' +
+      'торговими угодами (ЄС тощо), ліцензування, обмеження. Використовуй, щоб дати ТОЧНІ ' +
+      'ставки/вимоги по вже визначеному коду — не бери ставки з памʼяті.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        code: {
+          type: 'string',
+          description: '10-значний код УКТ ЗЕД, з пробілами або без (напр. "3004 32 00 00").',
+        },
+      },
+      required: ['code'],
+    },
+  },
+  {
+    name: 'uktzed_browse_classifier',
+    description:
+      'Навігація по ієрархії класифікатора УКТ ЗЕД (розділ → група → товарна позиція → ' +
+      'підпозиція), щоб знайти потрібний код. Виклич без коду — усі розділи; далі ' +
+      'заглиблюйся, передаючи код рівня з поля links попередньої відповіді.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        code: {
+          type: 'string',
+          description:
+            'Код рівня: порожньо — усі розділи; римська цифра (напр. "VI") — розділ; ' +
+            '2 цифри — група; 4+ цифри — товарна позиція.',
+        },
+      },
+    },
+  },
+  {
+    name: 'dualuse_browse_classifier',
+    description:
+      'Навігація по Єдиному списку товарів подвійного використання (експортний контроль). ' +
+      'Виклич без node_id — корінь дерева; далі заглиблюйся, передаючи node_id з поля links ' +
+      'попередньої відповіді (node_id — внутрішній ID вузла, НЕ код категорії). Кінцеві ' +
+      'категорії перелічують повʼязані коди УКТ ЗЕД — звір їх із кодом товару.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        node_id: {
+          type: 'string',
+          description: 'Внутрішній ID вузла з links попередньої відповіді; порожньо — корінь.',
+        },
+      },
+    },
+  },
+  {
+    name: 'get_exchange_rate',
+    description:
+      'Офіційний курс гривні НБУ до валюти на дату. Використовуй для перерахунку вартості з ' +
+      'валюти контракту в грн (митна вартість, порівняння пропозицій). Не бери курс з памʼяті.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        currency: { type: 'string', description: 'Код валюти ISO-4217 (напр. USD, EUR, CNY).' },
+        date: { type: 'string', description: 'Опційно, YYYYMMDD; порожньо — курс на сьогодні.' },
+      },
+      required: ['currency'],
+    },
+  },
+  {
+    name: 'pubchem_identify_substance',
+    description:
+      'Ідентифікація хімічної речовини за назвою, синонімом або CAS-номером через PubChem: ' +
+      'IUPAC-назва, молекулярна формула, маса, InChIKey, синоніми. Використовуй, щоб звірити, ' +
+      'чи дві торгові назви — це одна й та сама субстанція.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        identifier: {
+          type: 'string',
+          description: 'Назва, синонім або CAS-номер (напр. "aspirin" або "50-78-2").',
+        },
+      },
+      required: ['identifier'],
+    },
+  },
+];
+
+/** The logist tools when the service is configured, else none. */
+export function logistTools(): ChatTool[] {
+  return logist.logistEnabled() ? logistToolDefinitions : [];
+}
 
 interface FileRow {
   id: string;
@@ -279,9 +396,105 @@ export async function executeTool(
     case 'compare_document_versions':
       return runCompareVersions(input, ctx);
     case 'run_consolidated_analysis':
-      return runConsolidatedAnalysis(ctx);
+      return runConsolidatedAnalysis(input, ctx);
+    case 'uktzed_lookup_code':
+      return runUktzedLookup(input);
+    case 'uktzed_browse_classifier':
+      return runUktzedBrowse(input);
+    case 'dualuse_browse_classifier':
+      return runDualuseBrowse(input);
+    case 'get_exchange_rate':
+      return runExchangeRate(input);
+    case 'pubchem_identify_substance':
+      return runPubchemIdentify(input);
     default:
       return { result: `Невідомий інструмент: ${name}`, summary: `Невідомий інструмент`, citations: [] };
+  }
+}
+
+// ── logist-mcp reference tools (scope-less external lookups) ──────────────────
+
+function logistFail(msg: string, summary: string): ToolOutcome {
+  return { result: msg, summary, citations: [] };
+}
+
+async function runUktzedLookup(input: unknown): Promise<ToolOutcome> {
+  const code = String((input as { code?: unknown })?.code ?? '').trim();
+  if (!code) return logistFail('Не вказано код УКТ ЗЕД.', 'УКТ ЗЕД: помилка');
+  try {
+    const r = await logist.uktzedLookup(code);
+    // The goodinfo page is large and split by customs regime (ІМПОРТ/ЕКСПОРТ/
+    // ТРАНЗИТ) with critical parts sitting deep (ветеринарний контроль, заборони,
+    // ліцензування). Digest each regime in batches so nothing is lost and each
+    // requirement is attributed to its regime. Legacy flat `text` maps to common.
+    const common = r.common ?? r.text ?? '';
+    const digest = await digestUktzedSections(r.code, common, r.tabs ?? []);
+    const body = digest || 'Довідку отримано, але вміст порожній — перевірте код.';
+    return {
+      result: `Митна довідка УКТ ЗЕД ${r.code} (джерело: qdpro.com.ua):\n${body}`,
+      summary: `УКТ ЗЕД ${r.code}: довідка`,
+      citations: [{ file: r.source, page: null }],
+    };
+  } catch (err) {
+    return logistFail(`Не вдалося отримати довідку: ${(err as Error).message}`, 'УКТ ЗЕД: помилка');
+  }
+}
+
+async function runUktzedBrowse(input: unknown): Promise<ToolOutcome> {
+  const code = String((input as { code?: unknown })?.code ?? '').trim();
+  try {
+    const r = await logist.uktzedBrowse(code);
+    const links = r.links.length
+      ? `\n\nДочірні рівні (код — опис):\n${r.links.map((l) => `- ${l.id} — ${l.label}`).join('\n')}`
+      : '';
+    return {
+      result: `${r.text}${links}`,
+      summary: `Класифікатор УКТ ЗЕД: ${r.links.length} рівнів`,
+      citations: [{ file: r.source, page: null }],
+    };
+  } catch (err) {
+    return logistFail(`Не вдалося відкрити класифікатор: ${(err as Error).message}`, 'Класифікатор: помилка');
+  }
+}
+
+async function runDualuseBrowse(input: unknown): Promise<ToolOutcome> {
+  const nodeId = String((input as { node_id?: unknown })?.node_id ?? '').trim();
+  try {
+    const r = await logist.dualuseBrowse(nodeId);
+    // Surface node_ids so the model can drill down (get_text alone loses them).
+    const links = r.links.length
+      ? `\n\nВузли для заглиблення (node_id — назва):\n${r.links.map((l) => `- ${l.id} — ${l.label}`).join('\n')}`
+      : '';
+    return {
+      result: `${r.text}${links}`,
+      summary: `Подвійне використання: ${r.links.length} вузлів`,
+      citations: [{ file: r.source, page: null }],
+    };
+  } catch (err) {
+    return logistFail(`Не вдалося відкрити список подвійного використання: ${(err as Error).message}`, 'Подвійне використання: помилка');
+  }
+}
+
+async function runExchangeRate(input: unknown): Promise<ToolOutcome> {
+  const currency = String((input as { currency?: unknown })?.currency ?? '').trim();
+  const date = String((input as { date?: unknown })?.date ?? '').trim();
+  if (!currency) return logistFail('Не вказано код валюти.', 'Курс НБУ: помилка');
+  try {
+    const r = await logist.exchangeRate(currency, date);
+    return { result: r.text, summary: `Курс НБУ: ${r.currency}`, citations: [] };
+  } catch (err) {
+    return logistFail(`Не вдалося отримати курс НБУ: ${(err as Error).message}`, 'Курс НБУ: помилка');
+  }
+}
+
+async function runPubchemIdentify(input: unknown): Promise<ToolOutcome> {
+  const identifier = String((input as { identifier?: unknown })?.identifier ?? '').trim();
+  if (!identifier) return logistFail('Не вказано назву/CAS речовини.', 'PubChem: помилка');
+  try {
+    const r = await logist.pubchemIdentify(identifier);
+    return { result: r.text, summary: `PubChem: ${identifier}`, citations: [] };
+  } catch (err) {
+    return logistFail(`Не вдалося ідентифікувати речовину: ${(err as Error).message}`, 'PubChem: помилка');
   }
 }
 
@@ -312,7 +525,7 @@ async function runDiscrepancies(ctx: ToolContext): Promise<ToolOutcome> {
   const findings = await computeDiscrepancies(requireWorkspace(ctx));
   if (findings.length === 0) {
     return {
-      result: 'Розбіжностей між інвойсом / PO / пакувальним листом не виявлено (за наявними даними).',
+      result: 'Розбіжностей між контрактом / інвойсом / пакувальним листом не виявлено (за наявними даними).',
       summary: 'Розбіжності: 0',
       citations: [],
     };
@@ -638,60 +851,67 @@ async function runNormalizeShipmentFiles(ctx: ToolContext): Promise<ToolOutcome>
   };
 }
 
-async function runConsolidatedAnalysis(ctx: ToolContext): Promise<ToolOutcome> {
+async function runConsolidatedAnalysis(input: unknown, ctx: ToolContext): Promise<ToolOutcome> {
   if (!ctx.collectionId) {
     return { result: 'Аналіз доступний лише в межах збірника.', summary: 'Аналіз: помилка', citations: [] };
   }
-  // Latest manifest file (xlsx/csv) in this collection.
-  const { rows } = await query<{ id: string; name: string; type: string; disk_path: string }>(
-    `SELECT id, name, type, disk_path FROM files
-     WHERE collection_id = $1 AND is_latest = true AND type IN ('xlsx', 'csv')
-     ORDER BY created_at DESC LIMIT 1`,
-    [ctx.collectionId],
-  );
-  const file = rows[0];
-  if (!file) {
-    return {
-      result: 'У збірнику немає файлу-маніфесту (xlsx або csv). Додайте маніфест і повторіть аналіз.',
-      summary: 'Аналіз: немає маніфесту',
-      citations: [],
-    };
-  }
+  const sourceUrl = String((input as { source_url?: unknown })?.source_url ?? '').trim();
+  const manifestText = String((input as { manifest_text?: unknown })?.manifest_text ?? '').trim();
 
-  let buf: Buffer;
-  try {
-    buf = await readStoredFile(file.disk_path);
-  } catch {
-    return { result: `Не вдалося прочитати файл «${file.name}».`, summary: 'Аналіз: помилка читання', citations: [] };
+  // Source: an explicit Google Sheets link / pasted table, else the collection's
+  // latest uploaded manifest file.
+  let analysisInput: AnalysisInput;
+  if (sourceUrl) {
+    analysisInput = { kind: 'sheetUrl', url: sourceUrl };
+  } else if (manifestText) {
+    analysisInput = { kind: 'text', text: manifestText };
+  } else {
+    const { rows } = await query<{ id: string; name: string; type: string; disk_path: string }>(
+      `SELECT id, name, type, disk_path FROM files
+       WHERE collection_id = $1 AND is_latest = true AND type IN ('xlsx', 'csv')
+       ORDER BY created_at DESC LIMIT 1`,
+      [ctx.collectionId],
+    );
+    const file = rows[0];
+    if (!file) {
+      return {
+        result:
+          'Немає джерела для аналізу: дайте посилання на Google Sheets, вставте таблицю, ' +
+          'або завантажте файл-маніфест (xlsx/csv) у збірник.',
+        summary: 'Аналіз: немає маніфесту',
+        citations: [],
+      };
+    }
+    try {
+      const buf = await readStoredFile(file.disk_path);
+      analysisInput = { kind: 'file', buffer: buf, filename: file.name };
+    } catch {
+      return { result: `Не вдалося прочитати файл «${file.name}».`, summary: 'Аналіз: помилка читання', citations: [] };
+    }
   }
 
   let result;
   try {
-    result = await runAnalysis({ kind: 'file', buffer: buf, filename: file.name }, ctx.ownerId);
+    result = await runAnalysis(analysisInput, ctx.ownerId);
   } catch (err) {
     return { result: `Аналіз не вдався: ${(err as Error).message}`, summary: 'Аналіз: помилка', citations: [] };
   }
 
-  // Persist like the route (best-effort — still return the computed result on failure).
+  // Persist (best-effort — still return the computed result on failure).
   if (ctx.ownerId) {
     try {
       await persistAnalysis(ctx.ownerId, ctx.collectionId, result);
     } catch {
-      // Persistence failed — the analysis text is still useful this turn.
+      /* persistence failed — the analysis text is still useful this turn */
     }
   }
 
-  const t = result.totals;
-  const idNote = result.id ? ` (analysisId: ${result.id})` : '';
-  const highNote = result.hasHigh ? ' Є позиції підвищеного ризику.' : '';
-  const degradedNote = result.aiDegraded
-    ? ' AI-перевірки недоступні — показано лише детермінований розрахунок.'
-    : '';
-  const text =
-    `Проаналізовано маніфест «${file.name}» (лист «${result.sheet}»): ${t.count} позицій. ` +
-    `Митна вартість ${t.cif}, мито ${t.duty}, ПДВ ${t.vat}, до сплати ${t.payable}.` +
-    `${highNote}${degradedNote}${idNote}`;
-  return { result: text, summary: `Аналіз збірника: ${t.count} позицій`, citations: [] };
+  // Return the ready per-product answer; the agent presents it to the user as-is.
+  return {
+    result: formatAnalysisMarkdown(result),
+    summary: `Аналіз збірника: ${result.totals.count} позицій`,
+    citations: [],
+  };
 }
 
 async function runSearch(input: unknown, ctx: ToolContext): Promise<ToolOutcome> {

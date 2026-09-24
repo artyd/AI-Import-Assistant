@@ -84,6 +84,10 @@ export interface PartySuggestion {
   country: string | null;
   source_files: string[];
   confidence: number;
+  // Which extracted field the name came from (manufacturer / seller / buyer).
+  from_field?: "manufacturer" | "seller" | "buyer";
+  // Role not confirmed by the documents — UI shows "роль уточнюється".
+  uncertain_role?: boolean;
 }
 
 export interface ChecklistItem {
@@ -191,6 +195,43 @@ export interface FileItem {
   extractionStatus?: "ok" | "unreadable" | "no_fields" | null;
 }
 
+// Read-progress for a shipment (or one upload batch). Mirrors the backend
+// GET /api/workspaces/:id/ingest-status response.
+export interface IngestStatus {
+  batchId: string | null;
+  total: number;
+  read: number;
+  pending: number;
+  counts: {
+    queued: number;
+    indexing: number;
+    ready: number;
+    error: number;
+    unreadable: number;
+  };
+  done: boolean;
+  problems: {
+    id: string;
+    name: string;
+    status: FileStatus;
+    extractionStatus?: "ok" | "unreadable" | "no_fields" | null;
+    errorReason?: string | null;
+    folderId: string | null;
+  }[];
+}
+
+// Cross-shipment problem file (GET /api/problem-files).
+export interface ProblemFile {
+  id: string;
+  name: string;
+  status: FileStatus;
+  extractionStatus?: "ok" | "unreadable" | "no_fields" | null;
+  errorReason?: string | null;
+  workspaceId: string;
+  workspaceNumber: string;
+  createdAt?: string;
+}
+
 export interface FileVersion {
   id: string;
   name: string;
@@ -277,6 +318,9 @@ export interface AnalysisCheck {
 export interface AnalysisRow {
   name: string;
   code: string | null; // УКТ ЗЕД
+  codeSuggested?: boolean; // code proposed by the engine, not from the manifest
+  codeBasis?: string | null; // official HS description backing a suggested code
+  codeVerified?: boolean | null; // suggested code confirmed to exist in qdpro
   qtyKg: number;
   price: number;
   dutyRate: number | null;
@@ -290,6 +334,22 @@ export interface AnalysisRow {
   eu: AnalysisCheck[];
   ua: AnalysisCheck[];
   needsReview: boolean;
+  sourceCheck?: SourceCheck | null;
+}
+
+// Live cross-check with the official source (qdpro via logist-mcp). Enrichment
+// only — never alters the CIF/мито/ПДВ numbers above.
+export interface SourceCheck {
+  dutyPref: string | null;
+  dutyFull: string | null;
+  banRf: boolean;
+  license: boolean;
+  vetControl: boolean;
+  phyto: boolean;
+  dualUse: boolean;
+  narcotic: boolean;
+  dutyMismatch: boolean;
+  source: string;
 }
 
 export interface AnalysisMeta {
@@ -319,6 +379,9 @@ export interface AnalysisResult {
   warnings: string[];
   hasHigh: boolean;
   aiDegraded: boolean;
+  sourceChecked?: boolean;
+  costDataAvailable?: boolean; // false ⇒ classification-only (no price/qty data)
+  fx?: { currency: string; rate: number; date: string } | null; // NBU rate → UAH
 }
 
 // ── Map (Карта постачань) ─────────────────────────────────────────────────────
@@ -373,10 +436,12 @@ export interface AiConfig {
 
 export interface ArchiveRecord {
   id: string;
+  collectionId: string | null;
+  analysisId: string | null; // full analysis for preview/xlsx; null once deleted
   source: string;
   sheet: string;
-  item_count: number;
+  itemCount: number;
   payable: number | string;
-  has_high: boolean;
-  created_at: string;
+  hasHigh: boolean;
+  createdAt: string;
 }

@@ -17,7 +17,7 @@ import {
 } from "./icons";
 import { LnChevronDown } from "./LineIcons";
 
-const UPLOAD_ACCEPT = ".pdf,.docx,.xlsx,.csv,.png,.jpg,.jpeg";
+const UPLOAD_ACCEPT = ".pdf,.docx,.doc,.xlsx,.xls,.csv,.png,.jpg,.jpeg";
 const ACCEPT_EXT = UPLOAD_ACCEPT.split(",").map((s) => s.trim().toLowerCase());
 
 let pasteSeq = 0;
@@ -54,6 +54,12 @@ function normalizeDropped(file: File): File {
 function isAccepted(file: File): boolean {
   const lower = file.name.toLowerCase();
   return ACCEPT_EXT.some((ext) => lower.endsWith(ext));
+}
+
+// Stable identity for a staged file (dedupe + chip key + removal). Two <input>
+// picks of the same file on the same day collapse to one pending chip.
+function fileKey(f: File): string {
+  return `${f.name}:${f.size}:${f.lastModified}`;
 }
 
 // Normalize + filter dropped/pasted files down to the supported types. Returns a
@@ -96,6 +102,18 @@ interface Props {
   onConversationStarted: (id: string) => void;
   onLog: (entry: LogEntry) => void;
   placeholder?: string;
+  // Empty-state (new-chat) customisation. Defaults suit the supply/postачання chat.
+  emptyTitle?: string;
+  emptySubtitle?: React.ReactNode;
+  emptyStarters?: { text: string; icon: React.ReactNode }[];
+  emptyAction?: React.ReactNode;
+  // Fired after every assistant turn completes (used to refresh side state, e.g.
+  // reload the latest analysis when it was triggered from the consolidated chat).
+  onTurnComplete?: () => void;
+  // Consolidated: run the manifest analysis DIRECTLY (not via the agent) so the
+  // exact per-product answer lands in the thread. Triggered by the paperclip (a
+  // picked xlsx/csv) or by pasting a Google Sheets link into the composer.
+  onAnalyzeManifest?: (source: { file?: File; url?: string }) => void;
   // File intake (paperclip auto-file flow) — supply only. When these are omitted
   // the composer's attach/drag/paste are disabled (normal has no files;
   // consolidated files are uploaded via the right-panel Files tab in this phase).
@@ -155,6 +173,12 @@ export function Chat({
   onConversationStarted,
   onLog,
   placeholder,
+  emptyTitle,
+  emptySubtitle,
+  emptyStarters,
+  emptyAction,
+  onTurnComplete,
+  onAnalyzeManifest,
   folders,
   onUploadAndClassify,
   onMoveFile,
@@ -168,22 +192,79 @@ export function Chat({
   const [streaming, setStreaming] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  // Files chosen via paperclip/drag/paste are STAGED here (chips above the input)
+  // and only uploaded when the message is sent — never on pick. Cleared on send.
+  const [pending, setPending] = useState<File[]>([]);
+  // "Highlight-to-ask" (ChatGPT-style): a fragment selected from an assistant
+  // answer, staged as a quote chip above the composer to ask a follow-up about it.
+  const [quote, setQuote] = useState<string | null>(null);
+  // The floating "ask about this" button shown at the current selection.
+  const [sel, setSel] = useState<{ text: string; x: number; y: number } | null>(null);
   const convRef = useRef<string | undefined>(conversationId);
   const scrollRef = useRef<HTMLDivElement>(null);
   const streamTextRef = useRef("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const manifestInputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   // Drag events fire on every child; count enters/leaves so the overlay only
   // clears when the cursor truly leaves the chat container.
   const dragDepth = useRef(0);
 
+  // Reset the thread ONLY when a different conversation is loaded (initialMessages
+  // changes) — NOT when conversationId flips undefined→id after the first answer
+  // of a brand-new chat (that would wipe the just-streamed messages). convRef is
+  // already kept in sync inside onDone, and is re-synced here on a real load.
   useEffect(() => {
     setItems(initialMessages.map((m) => ({ kind: "message" as const, ...m })));
     convRef.current = conversationId;
-  }, [initialMessages, conversationId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialMessages]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [items, streaming]);
+
+  // Highlight-to-ask: after a mouse selection inside an assistant answer, show a
+  // small floating "ask about this" button anchored to the selection. Ignores
+  // selections outside assistant bubbles (user text, file cards, empty ranges).
+  const onThreadMouseUp = useCallback(() => {
+    const s = window.getSelection();
+    if (!s || s.isCollapsed) {
+      setSel(null);
+      return;
+    }
+    const text = s.toString().trim();
+    if (text.length < 2) {
+      setSel(null);
+      return;
+    }
+    const node = s.anchorNode;
+    const el = node instanceof Element ? node : node?.parentElement ?? null;
+    if (!el || !el.closest('[data-role="assistant"]')) {
+      setSel(null);
+      return;
+    }
+    const rect = s.getRangeAt(0).getBoundingClientRect();
+    setSel({ text, x: rect.left + rect.width / 2, y: rect.top });
+  }, []);
+
+  // Dismiss the floating button on scroll (its anchor would drift otherwise).
+  useEffect(() => {
+    if (!sel) return;
+    const el = scrollRef.current;
+    const hide = () => setSel(null);
+    el?.addEventListener("scroll", hide, { passive: true });
+    return () => el?.removeEventListener("scroll", hide);
+  }, [sel]);
+
+  const askAboutSelection = useCallback(() => {
+    if (!sel) return;
+    setQuote(sel.text);
+    setSel(null);
+    window.getSelection()?.removeAllRanges();
+    // Focus the composer so the user can type the follow-up straight away.
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, [sel]);
 
   const patchCard = useCallback(
     (cardId: string, patch: Partial<ClassifyCard>) =>
@@ -258,7 +339,14 @@ export function Chat({
       const files = acceptFiles(raw);
       if (files.length) {
         setNotice(null);
-        void handleFiles(files);
+        // STAGE, don't upload: the files become chips above the composer and are
+        // uploaded + classified only when the message is sent. Dedupe by identity
+        // so re-picking the same file doesn't add a second chip.
+        setPending((prev) => {
+          const seen = new Set(prev.map(fileKey));
+          const add = files.filter((f) => !seen.has(fileKey(f)));
+          return add.length ? [...prev, ...add] : prev;
+        });
       } else if (raw.length) {
         // Files arrived but none were a supported type — say so instead of
         // silently doing nothing.
@@ -267,8 +355,12 @@ export function Chat({
         );
       }
     },
-    [handleFiles, streaming]
+    [streaming, fileIntake]
   );
+
+  const removePending = useCallback((f: File) => {
+    setPending((prev) => prev.filter((x) => fileKey(x) !== fileKey(f)));
+  }, []);
 
   const onDrop = useCallback(
     (e: React.DragEvent) => {
@@ -383,6 +475,7 @@ export function Chat({
               convRef.current = e.conversationId;
               onConversationStarted(e.conversationId);
             }
+            onTurnComplete?.();
           },
           onError: (e) =>
             updateAssistant({
@@ -397,9 +490,50 @@ export function Chat({
     } finally {
       setStreaming(false);
     }
-  }, [streaming, postPath, onConversationStarted, onLog]);
+  }, [streaming, postPath, onConversationStarted, onLog, onTurnComplete]);
 
-  const send = useCallback(() => runMessage(input), [runMessage, input]);
+  // On send: first upload + classify any staged files (they show as classify
+  // cards in the thread, exactly like the old inline flow), then stream the text
+  // message if there is one. Sending is allowed with files only, text only, or both.
+  const send = useCallback(async () => {
+    if (streaming) return;
+    const text = input.trim();
+    const files = pending;
+    const q = quote;
+    if (!text && files.length === 0 && !q) return;
+
+    // Consolidated: a pasted Google Sheets link runs the analysis DIRECTLY (exact
+    // per-product blocks), not through the agent (which would reformat it).
+    if (onAnalyzeManifest && !q && files.length === 0) {
+      const m = text.match(/https?:\/\/docs\.google\.com\/spreadsheets\/\S+/i);
+      if (m) {
+        setInput("");
+        onAnalyzeManifest({ url: m[0] });
+        return;
+      }
+    }
+    if (files.length) {
+      setPending([]);
+      await handleFiles(files);
+    }
+    if (text || q) {
+      // When a fragment is quoted, prepend it as context so the agent answers
+      // about that exact excerpt. A quote with no question ⇒ "explain it".
+      const composed = q
+        ? `Стосовно цього фрагмента попередньої відповіді:\n«${q}»\n\n${text || "Поясни детальніше."}`
+        : input;
+      if (q) setQuote(null);
+      await runMessage(composed);
+    }
+  }, [streaming, input, pending, quote, handleFiles, runMessage, onAnalyzeManifest]);
+
+  // Which action the composer paperclip performs: manifest analyse (consolidated)
+  // or the supply auto-file staging flow.
+  const attachAction = onAnalyzeManifest
+    ? () => manifestInputRef.current?.click()
+    : fileIntake
+      ? () => fileInputRef.current?.click()
+      : undefined;
 
   return (
     <div
@@ -417,6 +551,37 @@ export function Chat({
         background: "var(--chat)",
       }}
     >
+      {sel && (
+        <button
+          // preventDefault on mousedown so clicking doesn't clear the selection
+          // before onClick reads it.
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={askAboutSelection}
+          style={{
+            position: "fixed",
+            left: sel.x,
+            top: Math.max(sel.y - 44, 8),
+            transform: "translateX(-50%)",
+            zIndex: 60,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            height: 32,
+            padding: "0 12px",
+            background: "var(--accent)",
+            color: "var(--accentTx)",
+            border: "none",
+            borderRadius: 16,
+            boxShadow: "0 6px 18px var(--accentSoft)",
+            fontSize: 12.5,
+            fontWeight: 600,
+            cursor: "pointer",
+            whiteSpace: "nowrap",
+          }}
+        >
+          <span style={{ fontWeight: 800, fontSize: 15, lineHeight: 1 }}>„“</span> Спитати про це
+        </button>
+      )}
       {dragging && (
         <div
           style={{
@@ -462,6 +627,20 @@ export function Chat({
           e.target.value = "";
         }}
       />
+      {/* Manifest picker (consolidated): a single xlsx/csv → analyse directly. */}
+      {onAnalyzeManifest && (
+        <input
+          ref={manifestInputRef}
+          type="file"
+          hidden
+          accept=".xlsx,.xls,.csv"
+          onChange={(e) => {
+            const f = e.target.files && e.target.files[0];
+            if (f) onAnalyzeManifest({ file: f });
+            e.target.value = "";
+          }}
+        />
+      )}
 
       {items.length === 0 ? (
         /* ── Onboarding / new chat — centered, like the AI-chat empty state ── */
@@ -511,7 +690,7 @@ export function Chat({
                 color: "var(--text)",
               }}
             >
-              Чим допомогти по постачанню?
+              {emptyTitle ?? "Чим допомогти по постачанню?"}
             </h1>
             <p
               style={{
@@ -522,21 +701,30 @@ export function Chat({
                 textAlign: "center",
               }}
             >
-              Штурман проіндексує документи, звірить чернетки, простежить
-              комплектність пакета й підкаже код УКТ&nbsp;ЗЕД.
+              {emptySubtitle ?? (
+                <>
+                  Штурман проіндексує документи, звірить чернетки, простежить
+                  комплектність пакета й підкаже код УКТ&nbsp;ЗЕД.
+                </>
+              )}
             </p>
             {notice && <Notice text={notice} onClear={() => setNotice(null)} />}
             <Composer
               input={input}
               setInput={setInput}
+              inputRef={inputRef}
               onPaste={onPaste}
               onSend={send}
-              onAttach={fileIntake ? () => fileInputRef.current?.click() : undefined}
+              onAttach={attachAction}
               streaming={streaming}
               chatKind={chatKind}
               onChangeKind={onChangeKind}
               selector={selector}
               placeholder={placeholder}
+              pending={pending}
+              onRemovePending={removePending}
+              quote={quote}
+              onClearQuote={() => setQuote(null)}
             />
             <div
               style={{
@@ -547,7 +735,7 @@ export function Chat({
                 marginTop: 18,
               }}
             >
-              {STARTERS.map((s) => (
+              {(emptyStarters ?? STARTERS).map((s) => (
                 <button
                   key={s.text}
                   onClick={() => runMessage(s.text)}
@@ -571,12 +759,21 @@ export function Chat({
                 </button>
               ))}
             </div>
+            {emptyAction ? (
+              <div style={{ display: "flex", justifyContent: "center", marginTop: 14 }}>
+                {emptyAction}
+              </div>
+            ) : null}
           </div>
         </div>
       ) : (
         /* ── Conversation thread ── */
         <>
-          <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "24px 0" }}>
+          <div
+            ref={scrollRef}
+            onMouseUp={onThreadMouseUp}
+            style={{ flex: 1, overflowY: "auto", padding: "24px 0" }}
+          >
             <div style={{ maxWidth: 760, margin: "0 auto", padding: "0 28px" }}>
               <DateSeparator />
               {items.map((it) =>
@@ -602,14 +799,19 @@ export function Chat({
               <Composer
                 input={input}
                 setInput={setInput}
+                inputRef={inputRef}
                 onPaste={onPaste}
                 onSend={send}
-                onAttach={fileIntake ? () => fileInputRef.current?.click() : undefined}
+                onAttach={attachAction}
                 streaming={streaming}
                 chatKind={chatKind}
                 onChangeKind={onChangeKind}
                 selector={selector}
                 placeholder={placeholder}
+                pending={pending}
+                onRemovePending={removePending}
+                quote={quote}
+                onClearQuote={() => setQuote(null)}
               />
               <div
                 style={{
@@ -659,6 +861,7 @@ function Notice({ text, onClear }: { text: string; onClear: () => void }) {
 function Composer({
   input,
   setInput,
+  inputRef,
   onPaste,
   onSend,
   onAttach,
@@ -667,9 +870,14 @@ function Composer({
   onChangeKind,
   selector,
   placeholder,
+  pending,
+  onRemovePending,
+  quote,
+  onClearQuote,
 }: {
   input: string;
   setInput: (v: string) => void;
+  inputRef?: React.Ref<HTMLTextAreaElement>;
   onPaste: (e: React.ClipboardEvent) => void;
   onSend: () => void;
   onAttach?: () => void;
@@ -678,6 +886,10 @@ function Composer({
   onChangeKind: (k: ChatKind) => void;
   selector?: EntitySelector | null;
   placeholder?: string;
+  pending: File[];
+  onRemovePending: (f: File) => void;
+  quote: string | null;
+  onClearQuote: () => void;
 }) {
   return (
     <div
@@ -779,6 +991,131 @@ function Composer({
         )}
       </div>
 
+      {/* Staged files: chips shown ABOVE the input; uploaded only on send. */}
+      {pending.length > 0 && (
+        <div
+          data-testid="composer-pending"
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 6,
+            padding: "8px 10px",
+            borderBottom: "1px solid var(--border)",
+          }}
+        >
+          {pending.map((f) => (
+            <span
+              key={fileKey(f)}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                height: 28,
+                padding: "0 4px 0 9px",
+                background: "var(--hover)",
+                border: "1px solid var(--border)",
+                borderRadius: 8,
+                fontSize: 12,
+                color: "var(--text)",
+                maxWidth: 220,
+              }}
+            >
+              <span style={{ color: "var(--accent)", display: "flex", flex: "none" }}>
+                <IconFile size={13} />
+              </span>
+              <span className="ellipsis" style={{ maxWidth: 150 }}>
+                {f.name}
+              </span>
+              <button
+                onClick={() => onRemovePending(f)}
+                disabled={streaming}
+                aria-label="Прибрати файл"
+                title="Прибрати"
+                style={{
+                  flex: "none",
+                  width: 20,
+                  height: 20,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  border: "none",
+                  borderRadius: 6,
+                  background: "transparent",
+                  color: "var(--muted)",
+                  cursor: streaming ? "default" : "pointer",
+                  fontSize: 15,
+                  lineHeight: 1,
+                }}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Quoted fragment (highlight-to-ask): shown above the input; sent as context. */}
+      {quote && (
+        <div
+          data-testid="composer-quote"
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 8,
+            padding: "8px 10px",
+            borderBottom: "1px solid var(--border)",
+          }}
+        >
+          <span
+            style={{
+              flex: "none",
+              alignSelf: "stretch",
+              width: 3,
+              borderRadius: 2,
+              background: "var(--accent)",
+            }}
+          />
+          <span
+            style={{
+              flex: 1,
+              minWidth: 0,
+              fontSize: 12.5,
+              lineHeight: 1.4,
+              color: "var(--muted)",
+              display: "-webkit-box",
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: "vertical",
+              overflow: "hidden",
+            }}
+            title={quote}
+          >
+            {quote}
+          </span>
+          <button
+            onClick={onClearQuote}
+            aria-label="Прибрати цитату"
+            title="Прибрати"
+            style={{
+              flex: "none",
+              width: 20,
+              height: 20,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              border: "none",
+              borderRadius: 6,
+              background: "transparent",
+              color: "var(--muted)",
+              cursor: "pointer",
+              fontSize: 15,
+              lineHeight: 1,
+            }}
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       {/* Bottom row: attach / textarea (Enter-send, Shift+Enter-newline) / send. */}
       <div style={{ display: "flex", alignItems: "flex-end", gap: 10, padding: "8px 8px 8px 15px" }}>
         {onAttach && (
@@ -807,6 +1144,7 @@ function Composer({
           </button>
         )}
         <textarea
+          ref={inputRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onPaste={onPaste}
@@ -816,7 +1154,11 @@ function Composer({
               onSend();
             }
           }}
-          placeholder={placeholder ?? "Спитайте Штурмана або перетягніть / вставте файли"}
+          placeholder={
+            quote
+              ? "Спитайте про виділений фрагмент…"
+              : placeholder ?? "Спитайте Штурмана або перетягніть / вставте файли"
+          }
           data-testid="chat-input"
           rows={1}
           style={{
@@ -834,7 +1176,7 @@ function Composer({
         <button
           className="btn btn-primary"
           onClick={onSend}
-          disabled={streaming || !input.trim()}
+          disabled={streaming || (!input.trim() && pending.length === 0 && !quote)}
           style={{ height: 40, width: 40, padding: 0, borderRadius: 11 }}
           aria-label="Надіслати"
         >
@@ -1020,7 +1362,8 @@ function AssistantBubble({
   return (
     <div style={{ display: "flex", gap: 14, margin: "18px 0 28px" }} data-anim>
       <AgentAvatar />
-      <div style={{ flex: 1, minWidth: 0 }}>
+      {/* data-role marks the selectable answer region for highlight-to-ask. */}
+      <div style={{ flex: 1, minWidth: 0 }} data-role="assistant">
         <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8 }}>
           Штурман
         </div>

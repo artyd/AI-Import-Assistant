@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useTheme } from "@/lib/theme";
-import { openEventsChannel } from "@/lib/sse";
+import { openEventsChannel, streamAnalyze } from "@/lib/sse";
 import type {
   AnalysisResult,
   ChecklistItem,
@@ -19,8 +19,7 @@ import type {
 } from "@/lib/types";
 import { Chat, type EntitySelector } from "@/components/Chat";
 import { AnalyzePanel } from "@/components/AnalyzePanel";
-import { AnalysisCard } from "@/components/AnalysisCard";
-import { ArchiveModal } from "@/components/ArchiveModal";
+import { ArchiveList } from "@/components/ArchiveModal";
 import { AiSettingsModal } from "@/components/AiSettingsModal";
 import { useAppStore } from "@/lib/store";
 import { resolveChatEndpoints } from "@/lib/chatContext";
@@ -66,6 +65,13 @@ async function mapLimit<T, R>(
   return results;
 }
 
+// Starter prompts for a NEW consolidated (Збірний) chat — analysis-oriented.
+const CONSOLIDATED_STARTERS: { text: string; icon: React.ReactNode }[] = [
+  { text: "Проаналізуй збірник за посиланням на Google Sheets", icon: <LnList size={15} /> },
+  { text: "Порахуй мито та ПДВ по позиціях", icon: <LnFolder size={15} /> },
+  { text: "Які документи потрібні для транзиту через ЄС?", icon: <LnUpload size={15} /> },
+];
+
 const REQ_LABEL: Record<string, string> = {
   contract: "Контракт",
   invoice: "Інвойс",
@@ -105,7 +111,10 @@ export default function WorkspacePage() {
 
   // Consolidated-cargo analysis result (latest) + archive modal.
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
-  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [showIntake, setShowIntake] = useState(false);
+  // Progress for a chat-triggered analysis (paperclip / pasted link) run directly
+  // through the analyze endpoint so the EXACT per-product blocks land in the thread.
+  const [analyzeProgress, setAnalyzeProgress] = useState<{ pct: number; step: string } | null>(null);
   const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
 
   // Shell UI state.
@@ -294,30 +303,49 @@ export default function WorkspacePage() {
       fileList: FileList | File[],
       replacesFileId?: string
     ): Promise<FileItem[]> => {
-      const form = new FormData();
-      for (const f of Array.from(fileList)) form.append("files", f, f.name || "file");
+      // Large selections are split into sub-limit batches and POSTed
+      // sequentially, so a big drag-drop (or a folder of hundreds) never trips
+      // the server's per-request file cap and nothing is silently dropped. A
+      // .zip counts as one part here and is expanded server-side. Kept well
+      // under the backend MAX_UPLOAD_FILES.
+      const CLIENT_BATCH_SIZE = 40;
+      const all = Array.from(fileList);
       const sp = new URLSearchParams();
       if (folderId) sp.set("folderId", folderId);
+      // A version-replace targets a single existing file — only the very first
+      // chunk carries it.
       if (replacesFileId) sp.set("replacesFileId", replacesFileId);
       const qs = sp.toString() ? `?${sp.toString()}` : "";
+
+      const created: FileItem[] = [];
+      const rejected: { name: string; reason: string }[] = [];
       try {
-        const res = await api<{
-          files: FileItem[];
-          rejected?: { name: string; reason: string }[];
-        }>(`/api/workspaces/${id}/files${qs}`, { form });
-        setFiles((prev) => {
-          const known = new Set(prev.map((p) => p.id));
-          return [...prev, ...res.files.filter((f) => !known.has(f.id))];
-        });
-        if (res.rejected && res.rejected.length) {
-          alert("Відхилено:\n" + res.rejected.map((r) => `• ${r.name} — ${r.reason}`).join("\n"));
+        for (let i = 0; i < all.length; i += CLIENT_BATCH_SIZE) {
+          const chunk = all.slice(i, i + CLIENT_BATCH_SIZE);
+          const form = new FormData();
+          for (const f of chunk) form.append("files", f, f.name || "file");
+          // replacesFileId only applies to the first request.
+          const chunkQs = i === 0 ? qs : folderId ? `?folderId=${encodeURIComponent(folderId)}` : "";
+          const res = await api<{
+            files: FileItem[];
+            rejected?: { name: string; reason: string }[];
+          }>(`/api/workspaces/${id}/files${chunkQs}`, { form });
+          created.push(...res.files);
+          if (res.rejected) rejected.push(...res.rejected);
+          setFiles((prev) => {
+            const known = new Set(prev.map((p) => p.id));
+            return [...prev, ...res.files.filter((f) => !known.has(f.id))];
+          });
         }
-        return res.files;
+        if (rejected.length) {
+          alert("Відхилено:\n" + rejected.map((r) => `• ${r.name} — ${r.reason}`).join("\n"));
+        }
+        return created;
       } catch (err) {
         if (err instanceof ApiError && err.code === "no_valid_files")
-          alert("Жоден файл не підійшов (дозволені: pdf, docx, xlsx, csv, png, jpg).");
+          alert("Жоден файл не підійшов (дозволені: pdf, doc, docx, xls, xlsx, csv, png, jpg, zip).");
         else alert("Не вдалося завантажити файли.");
-        return [];
+        return created;
       }
     },
     [id]
@@ -510,10 +538,12 @@ export default function WorkspacePage() {
     [setActiveCollectionId]
   );
   const newCollection = useCallback(async () => {
+    // Like a new shipment — let the user name the сборник (optional).
+    const name = (window.prompt("Назва збірника (необов'язково)") ?? "").trim();
     try {
-      const { collection } = await api<{ collection: Collection }>(`/api/collections`, {
-        body: { status: "active" },
-      });
+      const body: { status: string; number?: string } = { status: "active" };
+      if (name) body.number = name;
+      const { collection } = await api<{ collection: Collection }>(`/api/collections`, { body });
       addCollection(collection); // prepends + sets it active
       setChatKind("consolidated");
     } catch {
@@ -533,6 +563,127 @@ export default function WorkspacePage() {
       alert("Не вдалося видалити збірник.");
     }
   }, [activeCollectionId, removeCollection]);
+
+  const renameActiveCollection = useCallback(async () => {
+    if (!activeCollectionId) return;
+    const cur = collections.find((c) => c.id === activeCollectionId);
+    const next = (window.prompt("Назва збірника", cur?.number ?? "") ?? "").trim();
+    if (!next || next === cur?.number) return;
+    try {
+      await api(`/api/collections/${activeCollectionId}`, {
+        method: "PATCH",
+        body: { number: next },
+      });
+      setCollections(
+        collections.map((c) => (c.id === activeCollectionId ? { ...c, number: next } : c))
+      );
+    } catch {
+      alert("Не вдалося перейменувати збірник.");
+    }
+  }, [activeCollectionId, collections, setCollections]);
+
+  // Resolve the collection to analyse into — or AUTO-CREATE one (like a new
+  // shipment) so a manifest can be analysed without picking a сборник first.
+  const ensureCollectionForAnalysis = useCallback(
+    async (suggestedName?: string): Promise<string | null> => {
+      if (activeCollectionId) return activeCollectionId;
+      try {
+        const body: { status: string; number?: string } = { status: "active" };
+        const name = suggestedName?.trim();
+        if (name) body.number = name; // name the сборник after the manifest
+        const { collection } = await api<{ collection: Collection }>(`/api/collections`, { body });
+        addCollection(collection); // prepends to the list + sets it active
+        return collection.id;
+      } catch {
+        return null;
+      }
+    },
+    [activeCollectionId, addCollection]
+  );
+
+  // Load the conversation the analysis was posted into, so its per-product answer
+  // shows in the chat thread (and appears in the sidebar chat list).
+  const showAnalysisConversation = useCallback(async (cid: string, convId: string) => {
+    try {
+      const conv = await api<{ conversationId: string; messages: Message[] }>(
+        `/api/collections/${cid}/conversations/${convId}`
+      );
+      setConversationId(conv.conversationId);
+      setInitialMessages(conv.messages);
+      const list = await api<{ conversations: ConversationMeta[] }>(
+        `/api/collections/${cid}/conversations`
+      );
+      setConversations(list.conversations);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const onAnalysisResult = useCallback(
+    (r: AnalysisResult, meta: { conversationId?: string; collectionId: string }) => {
+      setAnalysis(r);
+      setShowIntake(false);
+      if (meta.conversationId) void showAnalysisConversation(meta.collectionId, meta.conversationId);
+    },
+    [showAnalysisConversation]
+  );
+
+  // Chat-triggered analysis (paperclip file / pasted Google Sheets link): runs the
+  // analyze endpoint DIRECTLY (not via the agent), which posts the exact per-product
+  // Markdown into the conversation — so the answer isn't reformatted into a table.
+  const analyzeManifest = useCallback(
+    async (source: { file?: File; url?: string }) => {
+      if (analyzeProgress) return; // one at a time
+      const suggestedName = source.file
+        ? source.file.name.replace(/\.[^.]+$/, "").slice(0, 80)
+        : "Google Sheets";
+      const cid = await ensureCollectionForAnalysis(suggestedName);
+      if (!cid) {
+        alert("Не вдалося визначити збірник.");
+        return;
+      }
+      const path = `/api/collections/${cid}/analyze`;
+      let body: Record<string, unknown> | FormData;
+      if (source.file) {
+        const form = new FormData();
+        if (conversationId) form.append("conversationId", conversationId);
+        form.append("files", source.file, source.file.name || "manifest");
+        body = form;
+      } else {
+        body = conversationId
+          ? { sheetUrl: source.url, conversationId }
+          : { sheetUrl: source.url };
+      }
+      setAnalyzeProgress({ pct: 0, step: "Готую аналіз…" });
+      await streamAnalyze(path, body, {
+        onProgress: (e) => setAnalyzeProgress(e),
+        onDone: (d) => {
+          setAnalyzeProgress(null);
+          setAnalysis(d.analysis);
+          if (d.conversationId) void showAnalysisConversation(cid, d.conversationId);
+        },
+        onError: (m) => {
+          setAnalyzeProgress(null);
+          alert(m || "Не вдалося виконати аналіз.");
+        },
+      });
+    },
+    [analyzeProgress, ensureCollectionForAnalysis, conversationId, showAnalysisConversation]
+  );
+
+  // After a consolidated chat turn (analysis may have been run from chat), pull the
+  // collection's latest analysis so the toolbar/table/export reflect it.
+  const reloadLatestAnalysis = useCallback(async () => {
+    if (!activeCollectionId) return;
+    try {
+      const r = await api<{ analysis: AnalysisResult | null }>(
+        `/api/collections/${activeCollectionId}/analysis/latest`
+      );
+      if (r.analysis) setAnalysis(r.analysis);
+    } catch {
+      /* ignore */
+    }
+  }, [activeCollectionId]);
 
   // ── Collection files (right panel Files tab for a Збірник) ──
   const refreshColFiles = useCallback(async () => {
@@ -569,9 +720,30 @@ export default function WorkspacePage() {
     };
   }, [chatKind, activeCollectionId]);
 
-  // Drop the shown analysis when switching collection / leaving consolidated.
+  // Load the collection's latest persisted analysis (so a сборник keeps its
+  // analysis instead of losing it on reload / switch). Cleared when leaving
+  // consolidated or with no collection selected.
   useEffect(() => {
+    setShowIntake(false);
+    if (chatKind !== "consolidated" || !activeCollectionId) {
+      setAnalysis(null);
+      return;
+    }
+    let cancelled = false;
     setAnalysis(null);
+    (async () => {
+      try {
+        const r = await api<{ analysis: AnalysisResult | null }>(
+          `/api/collections/${activeCollectionId}/analysis/latest`
+        );
+        if (!cancelled) setAnalysis(r.analysis);
+      } catch {
+        if (!cancelled) setAnalysis(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [activeCollectionId, chatKind]);
 
   const colUpload = useCallback(
@@ -674,6 +846,19 @@ export default function WorkspacePage() {
       alert("Не вдалося видалити постачання.");
     }
   }, [id, workspace, workspaces, router]);
+
+  const renameShipment = useCallback(async () => {
+    if (!workspace) return;
+    const next = (window.prompt("Номер постачання", workspace.number ?? "") ?? "").trim();
+    if (!next || next === workspace.number) return;
+    try {
+      await api(`/api/workspaces/${id}`, { method: "PATCH", body: { number: next } });
+      onPatch({ number: next });
+      setWorkspaces((ws) => ws.map((w) => (w.id === id ? { ...w, number: next } : w)));
+    } catch {
+      alert("Не вдалося перейменувати постачання.");
+    }
+  }, [id, workspace, onPatch]);
 
   const saveSupplier = useCallback(
     async (supplier: string) => {
@@ -820,7 +1005,7 @@ export default function WorkspacePage() {
         type="file"
         multiple
         hidden
-        accept=".pdf,.docx,.xlsx,.csv,.png,.jpg,.jpeg"
+        accept=".pdf,.docx,.doc,.xlsx,.xls,.csv,.png,.jpg,.jpeg,.zip"
         onChange={(e) => {
           if (e.target.files && e.target.files.length) uploadSmart(null, e.target.files);
           e.target.value = "";
@@ -841,106 +1026,267 @@ export default function WorkspacePage() {
         collapsed={sidebarCollapsed}
         onToggleCollapsed={() => setSidebarCollapsed((v) => !v)}
         onNewChat={newChat}
-        onOpenSearch={() => setPaletteOpen(true)}
         onSelectShipment={selectShipment}
+        onRenameShipment={renameShipment}
         onDeleteShipment={deleteShipment}
         onSelectCollection={selectCollection}
         onNewCollection={newCollection}
+        onRenameActiveCollection={renameActiveCollection}
         onDeleteActiveCollection={deleteActiveCollection}
         onSelectConversation={loadConversation}
       />
 
       <main style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, background: "var(--chat)" }}>
-        <TopBar
-          workspace={workspace}
-          steps={steps}
-          rightOpen={rightOpen}
-          onToggleRight={() => setRightOpen((v) => !v)}
-          onTogglePalette={() => setPaletteOpen((v) => !v)}
-          sound={sound}
-          onToggleSound={toggleSound}
-          onLock={lock}
-          theme={theme}
-          onToggleTheme={toggleTheme}
-          onSaveSupplier={saveSupplier}
-        />
+        {/* Supply-oriented top bar (number / completeness / supplier). Hidden in
+            the Збірний view — a сборник has no supply completeness, so it would
+            just be a misleading duplicate bar. */}
+        {!(view === "chat" && chatKind === "consolidated") && (
+          <TopBar
+            workspace={workspace}
+            steps={steps}
+            rightOpen={rightOpen}
+            onToggleRight={() => setRightOpen((v) => !v)}
+            onTogglePalette={() => setPaletteOpen((v) => !v)}
+            sound={sound}
+            onToggleSound={toggleSound}
+            onLock={lock}
+            theme={theme}
+            onToggleTheme={toggleTheme}
+            onSaveSupplier={saveSupplier}
+            // Full постачання header only for the supply chat; звичайний / Новини /
+            // Карта get a minimal bar with just the theme/title.
+            variant={view === "chat" && chatKind === "supply" ? "supply" : "minimal"}
+            title={
+              view === "news"
+                ? "Новини"
+                : view === "map"
+                  ? "Карта"
+                  : conversations.find((c) => c.id === conversationId)?.title?.trim() ||
+                    "Новий чат"
+            }
+          />
+        )}
         <div style={{ flex: 1, minHeight: 0 }}>
           {view === "news" ? (
             <NewsView />
           ) : view === "map" ? (
             <MapView />
+          ) : chatKind === "consolidated" ? (
+            /* Збірний: тулбар (таблиця/експорт/новий аналіз) + опційна картка/ввід,
+               а знизу — чат обговорення, прив'язаний до збірника (відповідь аналізу
+               приходить у чат блоками по кожному продукту). Якщо збірник ще не
+               обрано — лише ввід, який АВТОМАТИЧНО створює збірник при аналізі. */
+            <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
+              {/* Toolbar — only when there is an analysis to act on. */}
+              {analysis ? (
+                <div
+                  style={{
+                    flex: "none",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    flexWrap: "wrap",
+                    padding: "10px 20px",
+                    borderBottom: "1px solid var(--border)",
+                  }}
+                >
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>
+                    Аналіз «{analysis.sheet}»
+                  </span>
+                  <span style={{ fontSize: 12, color: "var(--muted)" }}>
+                    до сплати {Math.round(analysis.totals.payable).toLocaleString("uk-UA")} $ ·{" "}
+                    {analysis.totals.count} поз.
+                  </span>
+                  <span style={{ fontSize: 12, color: "var(--muted)" }}>
+                    · звіт та експорт — у вкладці «Архів»; новий аналіз — прямо з чату (посилання / таблиця / 📎)
+                  </span>
+                  <div style={{ flex: 1 }} />
+                </div>
+              ) : null}
+
+              {/* Chat-triggered analysis progress (paperclip / pasted link). */}
+              {analyzeProgress ? (
+                <div
+                  style={{
+                    flex: "none",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    padding: "9px 20px",
+                    borderBottom: "1px solid var(--border)",
+                  }}
+                >
+                  <IconSpinner size={15} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                      {analyzeProgress.step} · {analyzeProgress.pct}%
+                    </div>
+                    <div
+                      style={{
+                        height: 4,
+                        background: "var(--hover)",
+                        borderRadius: 999,
+                        marginTop: 4,
+                        overflow: "hidden",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: `${analyzeProgress.pct}%`,
+                          height: "100%",
+                          background: "var(--accent)",
+                          transition: "width .3s ease",
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {/* On-demand manifest intake ABOVE existing results (only when there
+                  is already an analysis — «Новий аналіз» toolbar toggle). Without an
+                  analysis the intake is shown CENTERED in the main area below instead
+                  of splitting the screen. */}
+              {analysis && showIntake ? (
+                <div
+                  style={{
+                    flex: "0 0 auto",
+                    maxHeight: "48%",
+                    overflowY: "auto",
+                    borderBottom: "1px solid var(--border)",
+                  }}
+                >
+                  <div style={{ padding: "14px 20px", maxWidth: 720, margin: "0 auto" }}>
+                    <AnalyzePanel
+                      resolveCollectionId={ensureCollectionForAnalysis}
+                      conversationId={conversationId}
+                      onResult={onAnalysisResult}
+                      onOpenAiSettings={() => setAiSettingsOpen(true)}
+                    />
+                  </div>
+                </div>
+              ) : null}
+
+              {/* The rich structured analysis now lives in the «Архів» preview —
+                  the chat shows the per-product Markdown tables inline. */}
+
+              {/* Main area: centered intake (when explicitly requested and no
+                  analysis yet — single view, NO split), else the discussion chat
+                  (analysis can be run straight from here — paste a link/table or
+                  attach a file via the paperclip; the answer lands as per-product
+                  blocks). New chat = centered welcome. */}
+              <div style={{ flex: 1, minHeight: 0 }}>
+                {!analysis && showIntake ? (
+                  <div
+                    style={{
+                      height: "100%",
+                      overflowY: "auto",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      padding: 24,
+                    }}
+                  >
+                    <div style={{ width: "100%", maxWidth: 720 }}>
+                      <AnalyzePanel
+                        resolveCollectionId={ensureCollectionForAnalysis}
+                        conversationId={conversationId}
+                        onResult={onAnalysisResult}
+                        onOpenAiSettings={() => setAiSettingsOpen(true)}
+                      />
+                    </div>
+                  </div>
+                ) : endpoints ? (
+                  <Chat
+                    key={`consolidated-${activeCollectionId ?? "none"}-${chatSeq}`}
+                    postPath={endpoints.postPath}
+                    chatKind={chatKind}
+                    onChangeKind={setChatKind}
+                    selector={composerSelector}
+                    conversationId={conversationId}
+                    initialMessages={initialMessages}
+                    onConversationStarted={onConversationStarted}
+                    onLog={onLog}
+                    onTurnComplete={reloadLatestAnalysis}
+                    onAnalyzeManifest={analyzeManifest}
+                    placeholder="Вставте посилання / таблицю, прикріпіть файл-маніфест 📎, або спитайте про збірник…"
+                    emptyTitle="Аналіз збірного вантажу"
+                    emptySubtitle={
+                      <>
+                        Вставте посилання на Google&nbsp;Sheets, таблицю-маніфест або
+                        прикріпіть файл (xlsx/csv) — і я проаналізую збірник: коди,
+                        CIF&nbsp;/&nbsp;мито&nbsp;/&nbsp;ПДВ, походження та документи.
+                      </>
+                    }
+                    emptyStarters={CONSOLIDATED_STARTERS}
+                  />
+                ) : (
+                  /* No сборник yet — centered intake that AUTO-CREATES one on analysis. */
+                  <div
+                    style={{
+                      height: "100%",
+                      overflowY: "auto",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      padding: 24,
+                    }}
+                  >
+                    <div style={{ width: "100%", maxWidth: 720 }}>
+                      <AnalyzePanel
+                        resolveCollectionId={ensureCollectionForAnalysis}
+                        conversationId={conversationId}
+                        onResult={onAnalysisResult}
+                        onOpenAiSettings={() => setAiSettingsOpen(true)}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
           ) : !endpoints ? (
             <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
-              <div style={{ maxWidth: 440, textAlign: "center" }}>
-                <h2 style={{ margin: "0 0 8px", fontSize: 18, color: "var(--text)" }}>Збірний вантаж</h2>
-                <p style={{ margin: "0 0 16px", fontSize: 14, lineHeight: 1.5, color: "var(--muted)" }}>
-                  Оберіть збірник у полі вводу або створіть новий, щоб почати роботу та аналіз збірної партії.
+              <div style={{ maxWidth: 440, textAlign: "center", color: "var(--muted)" }}>
+                <p style={{ margin: 0, fontSize: 14, lineHeight: 1.5 }}>
+                  Оберіть постачання або збірник у сайдбарі, щоб почати роботу.
                 </p>
-                <button className="btn btn-primary" onClick={newCollection}>
-                  Створити збірник
-                </button>
               </div>
             </div>
           ) : (
-            <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
-              {chatKind === "consolidated" && activeCollectionId && (
-                <div style={{ flex: "1 1 58%", overflowY: "auto", minHeight: 0 }}>
-                  <div style={{ padding: "20px 24px 10px" }}>
-                    <div style={{ maxWidth: 640, margin: "0 auto 14px", display: "flex", justifyContent: "flex-end" }}>
-                      <button className="btn" onClick={() => setArchiveOpen(true)}>
-                        <LnList size={15} /> Архів
-                      </button>
-                    </div>
-                    <AnalyzePanel
-                      collectionId={activeCollectionId}
-                      onResult={setAnalysis}
-                      onOpenAiSettings={() => setAiSettingsOpen(true)}
-                    />
-                    {analysis && (
-                      <div style={{ maxWidth: 900, margin: "20px auto 0" }}>
-                        <AnalysisCard analysis={analysis} />
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-              <div
-                style={{
-                  flex: chatKind === "consolidated" ? "1 1 42%" : "1 1 auto",
-                  minHeight: 0,
-                  borderTop: chatKind === "consolidated" ? "1px solid var(--border)" : undefined,
-                }}
-              >
-                <Chat
-                  key={`${chatKind}-${activeCollectionId ?? "ws"}-${conversationId ?? "new"}-${chatSeq}`}
-                  postPath={endpoints.postPath}
-                  chatKind={chatKind}
-                  onChangeKind={setChatKind}
-                  selector={composerSelector}
-                  conversationId={conversationId}
-                  initialMessages={initialMessages}
-                  onConversationStarted={onConversationStarted}
-                  onLog={onLog}
-                  placeholder={
-                    chatKind === "normal"
-                      ? "Запитайте про ЗЕД, митницю, документи або коди УКТ ЗЕД…"
-                      : chatKind === "consolidated"
-                        ? "Опишіть збірний вантаж або завантажте маніфест для аналізу…"
-                        : undefined
-                  }
-                  folders={chatKind === "supply" ? folders : undefined}
-                  onUploadAndClassify={chatKind === "supply" ? uploadAndClassify : undefined}
-                  onMoveFile={chatKind === "supply" ? moveFile : undefined}
-                />
-              </div>
-            </div>
+            /* Звичайний / Постачання — агент-чат на всю висоту з долученням файлів
+               (для обох типів файли йдуть у теки поточного постачання). */
+            <Chat
+              // NB: conversationId is intentionally NOT in the key. When a NEW
+              // chat gets its server id after the first answer, remounting here
+              // would reset the component to the (stale, empty) initialMessages
+              // and wipe the just-streamed thread. Remount only on kind change or
+              // an explicit new chat (chatSeq); loading another conversation flows
+              // in through initialMessages instead.
+              key={`${chatKind}-${chatSeq}`}
+              postPath={endpoints.postPath}
+              chatKind={chatKind}
+              onChangeKind={setChatKind}
+              selector={composerSelector}
+              conversationId={conversationId}
+              initialMessages={initialMessages}
+              onConversationStarted={onConversationStarted}
+              onLog={onLog}
+              placeholder={
+                chatKind === "normal"
+                  ? "Запитайте про ЗЕД, митницю, документи або коди УКТ ЗЕД…"
+                  : undefined
+              }
+              folders={folders}
+              onUploadAndClassify={uploadAndClassify}
+              onMoveFile={moveFile}
+            />
           )}
         </div>
       </main>
 
       {rightOpen && view === "chat" && chatKind === "supply" && (
         <RightPanel
-          tab={rightTab}
+          tab={rightTab === "archive" ? "files" : rightTab}
           onTab={setRightTab}
           onClose={() => setRightOpen(false)}
           badges={{ files: files.filter((f) => f.isLatest !== false).length, complete: missingCount }}
@@ -968,10 +1314,14 @@ export default function WorkspacePage() {
 
       {rightOpen && view === "chat" && chatKind === "consolidated" && activeCollectionId && (
         <RightPanel
-          tab={rightTab}
+          tab={rightTab === "archive" ? "archive" : "files"}
           onTab={setRightTab}
           onClose={() => setRightOpen(false)}
           badges={{ files: colFiles.length }}
+          tabs={[
+            { id: "files", label: "Файли" },
+            { id: "archive", label: "Архів" },
+          ]}
           files={
             <FilesTab
               workspaceNumber={null}
@@ -987,16 +1337,7 @@ export default function WorkspacePage() {
               onPreview={() => {}}
             />
           }
-          journal={
-            <div style={{ padding: 16, fontSize: 13, color: "var(--muted)", lineHeight: 1.5 }}>
-              Журнал для збірника зʼявиться разом із аналізом збірного вантажу.
-            </div>
-          }
-          complete={
-            <div style={{ padding: 16, fontSize: 13, color: "var(--muted)", lineHeight: 1.5 }}>
-              Комплектність пакета для збірника — незабаром.
-            </div>
-          }
+          archive={<ArchiveList />}
         />
       )}
 
@@ -1015,7 +1356,6 @@ export default function WorkspacePage() {
       {previewFile && (
         <FilePreviewModal workspaceId={id} file={previewFile} onClose={() => setPreviewFile(null)} />
       )}
-      {archiveOpen && <ArchiveModal onClose={() => setArchiveOpen(false)} />}
       {aiSettingsOpen && <AiSettingsModal onClose={() => setAiSettingsOpen(false)} />}
     </div>
   );

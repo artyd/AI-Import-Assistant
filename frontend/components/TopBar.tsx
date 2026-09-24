@@ -49,6 +49,11 @@ interface Props {
   theme: "light" | "dark";
   onToggleTheme: () => void;
   onSaveSupplier: (supplier: string) => void;
+  // "supply" = the full постачання header (number / supplier / status / steps +
+  // work-panel toggle). "minimal" = just the chat/view title + global controls —
+  // used by the звичайний chat, Новини and Карта, which have no постачання context.
+  variant?: "supply" | "minimal";
+  title?: string;
 }
 
 export function TopBar({
@@ -63,6 +68,8 @@ export function TopBar({
   theme,
   onToggleTheme,
   onSaveSupplier,
+  variant = "supply",
+  title,
 }: Props) {
   const pill = statusColors(workspace.status);
   const [editing, setEditing] = useState(false);
@@ -110,6 +117,21 @@ export function TopBar({
         background: "var(--chat)",
       }}
     >
+      {variant === "minimal" ? (
+        <span
+          style={{
+            fontWeight: 600,
+            fontSize: 15,
+            color: "var(--text)",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            maxWidth: "60%",
+          }}
+        >
+          {title || "Чат"}
+        </span>
+      ) : (
       <div style={{ display: "flex", alignItems: "center", gap: 11, minWidth: 0 }}>
         <span style={{ flex: "none", width: 9, height: 9, borderRadius: "50%", background: pill.fg }} />
         <span
@@ -235,6 +257,7 @@ export function TopBar({
           </div>
         )}
       </div>
+      )}
 
       <div style={{ flex: 1 }} />
 
@@ -270,28 +293,30 @@ export function TopBar({
         </span>
       </button>
 
-      <button
-        onClick={onToggleRight}
-        title="Робоча панель"
-        style={{
-          flex: "none",
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 8,
-          height: 36,
-          padding: "0 12px",
-          borderRadius: 10,
-          background: rightOpen ? "var(--accentSoft)" : "transparent",
-          border: `1px solid ${rightOpen ? "transparent" : "var(--border)"}`,
-          color: rightOpen ? "var(--accent)" : "var(--muted)",
-          cursor: "pointer",
-          fontSize: 13,
-          fontWeight: 500,
-        }}
-      >
-        <LnPanelRight size={17} />
-        Панель
-      </button>
+      {variant === "supply" && (
+        <button
+          onClick={onToggleRight}
+          title="Робоча панель"
+          style={{
+            flex: "none",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            height: 36,
+            padding: "0 12px",
+            borderRadius: 10,
+            background: rightOpen ? "var(--accentSoft)" : "transparent",
+            border: `1px solid ${rightOpen ? "transparent" : "var(--border)"}`,
+            color: rightOpen ? "var(--accent)" : "var(--muted)",
+            cursor: "pointer",
+            fontSize: 13,
+            fontWeight: 500,
+          }}
+        >
+          <LnPanelRight size={17} />
+          Панель
+        </button>
+      )}
 
       <button style={iconBtn} onClick={onToggleTheme} title="Тема оформлення" aria-label="Тема оформлення">
         {theme === "dark" ? <LnSun size={17} /> : <LnMoon size={16} />}

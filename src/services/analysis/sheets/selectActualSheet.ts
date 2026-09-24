@@ -78,6 +78,30 @@ export function selectActualSheet(sheetsArr: SheetInput[], currentDate: Date): S
   const withTable = meta.filter((m) => m.hasTable);
   const pool = withTable.length > 0 ? withTable : meta;
 
+  // Priority 0 — a sheet explicitly NAMED as the current/final/readiness list wins
+  // over dated tabs: in these workbooks the dated tabs are historical snapshots,
+  // while a «Готовність вантажів»/«Фінальний лист»/«Актуальний» tab is the live one.
+  const NAME_PRIORITY: { rx: RegExp; rank: number }[] = [
+    { rx: /готовн|остаточн/i, rank: 0 },
+    { rx: /фінал|финал|\bfinal\b/i, rank: 1 },
+    { rx: /актуальн|актуал|закупівл|закупк/i, rank: 2 },
+  ];
+  const named = pool
+    .map((m) => {
+      const hit = NAME_PRIORITY.find((k) => k.rx.test(m.name));
+      return hit ? { m, rank: hit.rank } : null;
+    })
+    .filter((x): x is { m: SheetMeta; rank: number } => x !== null)
+    .sort((a, b) => a.rank - b.rank);
+  if (named.length > 0) {
+    const sel = named[0]!.m;
+    return {
+      selected: sel,
+      reason: `Обрано лист "${sel.name}" як фінальний/актуальний за назвою (датовані листи — це історичні версії)`,
+      ignored: meta.filter((m) => m !== sel).map((m) => m.name),
+    };
+  }
+
   const dated = pool.filter((m) => m.parsedDate !== null);
   const undated = pool.filter((m) => m.parsedDate === null);
 

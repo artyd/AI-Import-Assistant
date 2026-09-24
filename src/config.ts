@@ -38,9 +38,59 @@ const envSchema = z.object({
   // File storage
   STORAGE_DIR: z.string().default('./storage'),
   MAX_UPLOAD_BYTES: z.coerce.number().int().positive().default(25 * 1024 * 1024),
+  // Max files accepted in a SINGLE multipart upload request. The frontend sends
+  // large selections in batches, so this caps ONE request, not the whole
+  // shipment. Raised from the old hardcoded 20 so a big drag-and-drop batch is
+  // not silently rejected mid-request (see server.ts multipart limits).
+  MAX_UPLOAD_FILES: z.coerce.number().int().positive().default(100),
+  // A .zip may be much larger than a single document, so it gets its own,
+  // higher size ceiling. The multipart layer accepts up to max(this,
+  // MAX_UPLOAD_BYTES); non-zip parts above MAX_UPLOAD_BYTES are still rejected
+  // in-handler. Zip-bomb guards below bound what the archive may expand to.
+  MAX_ZIP_BYTES: z.coerce.number().int().positive().default(200 * 1024 * 1024),
+  MAX_ZIP_ENTRIES: z.coerce.number().int().positive().default(2000),
+  // Bounds peak memory: unpackZip materialises every entry's bytes in RAM at
+  // once, so this cap is effectively the max heap a single zip upload can use.
+  // Kept generous for real supply packages (~tens of MB) but well below an
+  // OOM-inducing gigabyte.
+  MAX_ZIP_UNCOMPRESSED_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(300 * 1024 * 1024),
 
   // Model / embeddings
   ANTHROPIC_MODEL: z.string().default('claude-opus-4-8'),
+  // Anthropic SDK resilience (shared client). The SDK auto-retries 408/409/429/
+  // 5xx + connection errors with exponential backoff and honours Retry-After;
+  // the default of 2 is too low for a burst of indexing jobs that each make
+  // several vision/extraction calls. Timeout is in milliseconds.
+  ANTHROPIC_MAX_RETRIES: z.coerce.number().int().nonnegative().default(5),
+  ANTHROPIC_TIMEOUT_MS: z.coerce.number().int().positive().default(600_000),
+  // Global cap on concurrent Anthropic calls across the whole process. The
+  // indexing worker fans out OCR + field-extraction + classification per file;
+  // without a cap a burst of jobs can pile dozens of simultaneous vision calls
+  // onto Anthropic and trip rate limits. Conservative by default (tune up once
+  // real limits are known — see file-ingestion-batching plan).
+  ANTHROPIC_MAX_CONCURRENCY: z.coerce.number().int().positive().default(4),
+
+  // Indexing worker throughput.
+  INDEX_CONCURRENCY: z.coerce.number().int().positive().default(3),
+  // BullMQ job rate limit: at most INDEX_RATE_MAX index jobs start per
+  // INDEX_RATE_DURATION_MS. A coarse second guard on top of the Anthropic
+  // concurrency cap so a 500-file dump drains steadily instead of stampeding.
+  INDEX_RATE_MAX: z.coerce.number().int().positive().default(20),
+  INDEX_RATE_DURATION_MS: z.coerce.number().int().positive().default(10_000),
+
+  // Auto-retry sweep (worker cron): re-queue files stuck in 'error' up to
+  // INGEST_MAX_RETRIES times over minutes, then flag them for manual key-field
+  // entry (extraction_status='unreadable') so nothing is ever silently lost.
+  INGEST_RETRY_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
+  INGEST_RETRY_CRON: z.string().default('*/5 * * * *'),
+  INGEST_MAX_RETRIES: z.coerce.number().int().nonnegative().default(3),
   EMBEDDING_PROVIDER: z.enum(['voyage', 'openai']).default('voyage'),
   EMBEDDING_MODEL: z.string().default('voyage-3'),
 
@@ -64,6 +114,11 @@ const envSchema = z.object({
   // Model used for OCR transcription. Defaults to the chat model; a cheaper
   // vision-capable model (e.g. claude-haiku-4-5) can be set to cut cost.
   OCR_MODEL: z.string().default('claude-opus-4-8'),
+  // Max output tokens for one OCR pass. Raised from the old hardcoded 8000 so a
+  // long multi-page scan (e.g. a 10+ page contract) isn't transcribed only
+  // partway. 16000 is the safe non-streaming ceiling (above that the SDK can hit
+  // HTTP timeouts); very long docs beyond this still truncate — see OCR notes.
+  OCR_MAX_TOKENS: z.coerce.number().int().positive().default(16000),
 
   // Structured document extraction (worker) + daily reminders (worker cron).
   EXTRACTION_ENABLED: z
@@ -77,11 +132,12 @@ const envSchema = z.object({
   REMINDERS_CRON: z.string().default('0 6 * * *'),
 
   // News ingest (worker cron): fetch public RSS/Atom feeds into news_items and
-  // purge anything older than NEWS_RETENTION_DAYS. Off by default — enable only
-  // where outbound network to the feed sources is available.
+  // purge anything older than NEWS_RETENTION_DAYS. ON by default — the worker in
+  // this deployment has outbound network to the feeds. Set NEWS_ENABLED=false to
+  // disable (e.g. a locked-down worker with no egress).
   NEWS_ENABLED: z
     .enum(['true', 'false'])
-    .default('false')
+    .default('true')
     .transform((v) => v === 'true'),
   NEWS_CRON: z.string().default('*/30 * * * *'),
   NEWS_RETENTION_DAYS: z.coerce.number().int().positive().default(14),
@@ -100,6 +156,14 @@ const envSchema = z.object({
   // BYOK is scoped to the consolidated-analysis AI step only; the main Штурман
   // agent always uses the built-in Anthropic key.
   BYOK_ENC_KEY: z.string().default(''),
+
+  // logist-mcp integration: base URL of the internal customs/logistics tool
+  // service (docker-compose `logist-mcp`, plain-REST) that exposes the UKTZED /
+  // dual-use / NBU rate / PubChem lookups. Reachable on the Compose network only
+  // — NO host port and NO Caddy route. Empty (default) = disabled; the agent
+  // tools that call it become available once this is set (e.g.
+  // http://logist-mcp:8015). Compose sets it by default.
+  LOGIST_MCP_URL: z.string().default(''),
 });
 
 export type AppConfig = z.infer<typeof envSchema>;

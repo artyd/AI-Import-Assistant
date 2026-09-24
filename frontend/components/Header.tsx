@@ -5,6 +5,7 @@ import { useAuth } from "@/lib/auth";
 import type { Workspace } from "@/lib/types";
 import { IconMoon, IconSun, IconLogout } from "./icons";
 import { NotificationsBell } from "./NotificationsBell";
+import { ProblemFilesButton } from "./ProblemFilesButton";
 
 const STATUS_LABEL: Record<Workspace["status"], string> = {
   active: "Активна",
@@ -149,6 +150,7 @@ export function Header({ workspace }: { workspace?: Workspace | null }) {
 
       <div style={{ flex: 1 }} />
 
+      {user && <ProblemFilesButton />}
       {user && <NotificationsBell />}
       {user && (
         <span

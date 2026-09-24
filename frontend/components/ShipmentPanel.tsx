@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { api, ApiError, downloadBlob } from "@/lib/api";
 import type {
@@ -27,11 +27,13 @@ import { VerificationModal } from "./VerificationModal";
 import { IconDownload, IconSpinner } from "./icons";
 import { LnCheck, LnExport } from "./LineIcons";
 
-// Three fixed party slots. "Через кого" (intermediary) is optional.
+// Three fixed party slots, in the deal's own terms:
+//   Хто (виробник) → Через кого (посередник, напр. Prime UK) → Кому (одержувач).
+// "Через кого" exists only in a trilateral deal.
 const PARTY_SLOTS: { role: PartyRole; label: string; hint: string; optional?: boolean }[] = [
-  { role: "sender", label: "Від кого", hint: "Постачальник / відправник" },
-  { role: "intermediary", label: "Через кого", hint: "Посередник / агент", optional: true },
-  { role: "recipient", label: "Кому", hint: "Одержувач / покупець" },
+  { role: "sender", label: "Хто (виробник)", hint: "Виробник / первинний постачальник" },
+  { role: "intermediary", label: "Через кого", hint: "Посередник / трейдер (напр. Prime UK)", optional: true },
+  { role: "recipient", label: "Кому", hint: "Кінцевий одержувач / імпортер" },
 ];
 
 const countryOptions = COUNTRIES.map((c: Country) => ({ value: c.uk, label: c.uk }));
@@ -91,6 +93,11 @@ export function ShipmentPanel({
   const [suggestedContractType, setSuggestedContractType] = useState<
     "bilateral" | "trilateral" | null
   >(null);
+  // Honest explanation of the bilateral/trilateral decision (or why undetermined).
+  const [contractTypeReason, setContractTypeReason] = useState<string | null>(null);
+  // Guards the one-time auto-fill on open so we don't overwrite user edits.
+  const autoFilledRef = useRef(false);
+  const [partiesLoaded, setPartiesLoaded] = useState(false);
 
   // Intake form (local, seeded from workspace).
   const [form, setForm] = useState({
@@ -119,10 +126,13 @@ export function ShipmentPanel({
     api<{ users: UserLite[] }>("/api/users")
       .then((r) => setUsers(r.users))
       .catch(() => setUsers([]));
+    setPartiesLoaded(false);
+    autoFilledRef.current = false;
     api<{ parties: Party[] }>(`/api/workspaces/${workspaceId}/parties`)
       // Normalise any legacy role labels into the three fixed slots on load.
       .then((r) => setParties(r.parties.map((p) => ({ ...p, role: canonRole(p.role) }))))
-      .catch(() => setParties([]));
+      .catch(() => setParties([]))
+      .finally(() => setPartiesLoaded(true));
     // Proactively surface current/upcoming problems on open.
     api<{ risks: Risk[] }>(`/api/workspaces/${workspaceId}/risks`)
       .then((r) => setRisks(r.risks))
@@ -213,17 +223,31 @@ export function ShipmentPanel({
       });
     });
 
-  // Autofill parties + Incoterms from document extractions (suggestions,
-  // user-editable). Places at most one company into each of the three slots.
-  const autofillParties = () =>
-    run("suggest", async () => {
-      const res = await api<{
-        suggestions: PartySuggestion[];
-        suggested_contract_type: "bilateral" | "trilateral" | null;
-        suggested_incoterm_in: string | null;
-        suggested_incoterm_out: string | null;
-      }>(`/api/workspaces/${workspaceId}/parties/suggest`, { method: "POST", body: {} });
+  interface SuggestResponse {
+    suggestions: PartySuggestion[];
+    suggested_contract_type: "bilateral" | "trilateral" | null;
+    contract_type_reason?: string;
+    suggested_incoterm_in: string | null;
+    suggested_incoterm_out: string | null;
+  }
+
+  const fetchSuggestions = useCallback(
+    () =>
+      api<SuggestResponse>(`/api/workspaces/${workspaceId}/parties/suggest`, {
+        method: "POST",
+        body: {},
+      }),
+    [workspaceId]
+  );
+
+  // Applies deterministic suggestions to the three slots WITHOUT overwriting a
+  // slot the user already filled. Each auto-filled slot keeps its provenance
+  // (which documents + which field it came from, and whether the role is
+  // unconfirmed) so the UI can show it precisely — no guessing presented as fact.
+  const applyPartySuggestions = useCallback(
+    (res: SuggestResponse, opts: { silent?: boolean } = {}) => {
       setSuggestedContractType(res.suggested_contract_type);
+      setContractTypeReason(res.contract_type_reason ?? null);
 
       setParties((cur) => {
         const next = [...cur];
@@ -236,7 +260,12 @@ export function ShipmentPanel({
             role,
             company_name: pick.company_name,
             country: pick.country,
-            contact_info: { source: "auto", source_files: pick.source_files },
+            contact_info: {
+              source: "auto",
+              source_files: pick.source_files,
+              from_field: pick.from_field,
+              uncertain_role: pick.uncertain_role,
+            },
           };
           if (idx >= 0) next[idx] = party;
           else next.push(party);
@@ -244,7 +273,11 @@ export function ShipmentPanel({
         return next;
       });
 
-      // Apply Incoterm suggestions into the intake form (user can still edit).
+      // Pre-fill the contract type ONLY when the user hasn't chosen one — the
+      // decision is deterministic (viробник vs продавець), never a headcount.
+      if (res.suggested_contract_type) {
+        setForm((f) => (f.contract_type ? f : { ...f, contract_type: res.suggested_contract_type! }));
+      }
       if (res.suggested_incoterm_in || res.suggested_incoterm_out) {
         setForm((f) => ({
           ...f,
@@ -253,17 +286,34 @@ export function ShipmentPanel({
         }));
       }
 
-      setResult({
-        kind: "text",
-        title: "Автозаповнення з документів",
-        body: res.suggestions.length
-          ? `Знайдено сторін: ${res.suggestions.length}.` +
-            (res.suggested_incoterm_in ? ` Incoterms (вх.): ${res.suggested_incoterm_in}.` : "") +
-            (res.suggested_incoterm_out ? ` Incoterms (вих.): ${res.suggested_incoterm_out}.` : "") +
-            " Перевірте та збережіть."
-          : "Сторін у документах не виявлено.",
-      });
+      if (!opts.silent) {
+        setResult({
+          kind: "text",
+          title: "Автозаповнення з документів",
+          body: res.suggestions.length
+            ? `Знайдено сторін: ${res.suggestions.length}. ${res.contract_type_reason ?? ""} Перевірте та збережіть.`
+            : "Сторін у документах не виявлено.",
+        });
+      }
+    },
+    []
+  );
+
+  const autofillParties = () =>
+    run("suggest", async () => {
+      applyPartySuggestions(await fetchSuggestions());
     });
+
+  // Auto-fill the sidebar from the uploaded documents as soon as it opens, when
+  // no parties are stored yet. Runs once per workspace; never overwrites edits.
+  useEffect(() => {
+    if (!partiesLoaded || autoFilledRef.current) return;
+    autoFilledRef.current = true;
+    if (parties.length > 0) return;
+    fetchSuggestions()
+      .then((res) => applyPartySuggestions(res, { silent: true }))
+      .catch(() => {});
+  }, [partiesLoaded, parties.length, fetchSuggestions, applyPartySuggestions]);
 
   const duplicate = () =>
     run("duplicate", async () => {
@@ -384,6 +434,21 @@ export function ShipmentPanel({
             <option value="bilateral">Двосторонній</option>
             <option value="trilateral">Тристоронній</option>
           </select>
+          {contractTypeReason && (
+            <div
+              style={{
+                fontSize: 12,
+                color: suggestedContractType ? "var(--muted)" : "var(--warn)",
+                background: "var(--hover)",
+                borderRadius: 8,
+                padding: "6px 8px",
+                lineHeight: 1.4,
+              }}
+            >
+              {suggestedContractType ? "🔎 " : "⚠️ "}
+              {contractTypeReason}
+            </div>
+          )}
           {suggestedContractType && suggestedContractType !== form.contract_type && (
             <div style={{ fontSize: 12, color: "var(--muted)" }}>
               Запропоновано за документами:{" "}
@@ -534,6 +599,23 @@ export function ShipmentPanel({
                   onSearch={countrySearch}
                   placeholder="Країна"
                 />
+                {/* Provenance — точечно: where the auto value came from, or that
+                    the role is unconfirmed, or that nothing was found. No guessing. */}
+                {p?.contact_info?.uncertain_role === true && (
+                  <div style={{ fontSize: 11, color: "var(--warn)" }}>
+                    ⚠️ роль уточнюється — у документах є продавець, але виробник не підтверджений
+                  </div>
+                )}
+                {Array.isArray(p?.contact_info?.source_files) && p!.contact_info!.source_files!.length > 0 && (
+                  <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.4 }}>
+                    з документів: {(p!.contact_info!.source_files as string[]).join(", ")}
+                  </div>
+                )}
+                {!filled && !slot.optional && (
+                  <div style={{ fontSize: 11, color: "var(--muted)", fontStyle: "italic" }}>
+                    не знайдено в документах — заповніть вручну
+                  </div>
+                )}
                 <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--muted)" }}>
                   <input type="checkbox" checked={!!p?.is_internal} onChange={(e) => setSlotParty(slot.role, { is_internal: e.target.checked })} />
                   Наша компанія (AGroup95 / PrimeForce)
@@ -552,7 +634,7 @@ export function ShipmentPanel({
             );
           })}
           <button className="btn" onClick={autofillParties} disabled={busy === "suggest"}>
-            {busy === "suggest" ? <IconSpinner size={15} /> : null} Автозаповнення з документів
+            {busy === "suggest" ? <IconSpinner size={15} /> : null} Оновити з документів
           </button>
           <button className="btn btn-primary" onClick={saveParties} disabled={busy === "parties"}>
             Зберегти сторони

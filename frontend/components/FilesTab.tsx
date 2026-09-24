@@ -5,6 +5,7 @@ import type { FileItem, Folder } from "@/lib/types";
 import { toUiStatus } from "@/lib/types";
 import { folderLabel } from "@/lib/folderLabels";
 import { FileTree } from "./FileTree";
+import { IngestProgress } from "./IngestProgress";
 import {
   LnFile,
   LnFileDoc,
@@ -18,7 +19,7 @@ import {
   LnUpload,
 } from "./LineIcons";
 
-const UPLOAD_ACCEPT = ".pdf,.docx,.xlsx,.csv,.png,.jpg,.jpeg";
+const UPLOAD_ACCEPT = ".pdf,.docx,.doc,.xlsx,.xls,.csv,.png,.jpg,.jpeg,.zip";
 
 interface Props {
   workspaceNumber: string | null;
@@ -171,6 +172,8 @@ export function FilesTab(props: Props) {
           </button>
         </div>
       </div>
+
+      <IngestProgress files={files} onReindex={props.onReindex} />
 
       <div
         onDragOver={(e) => {

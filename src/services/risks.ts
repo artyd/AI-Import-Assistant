@@ -36,14 +36,37 @@ const DEADLINE_SOON_DAYS = 14;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function daysUntil(dateStr: string, now: number): number | null {
-  const t = Date.parse(dateStr);
-  if (Number.isNaN(t)) return null;
+  const t = parseFlexibleDate(dateStr);
+  if (t === null) return null;
   return Math.round((t - now) / DAY_MS);
+}
+
+/**
+ * Parses a date from the free-form strings extraction returns. `Date.parse`
+ * alone silently fails on the DD.MM.YYYY / DD/MM/YYYY formats that dominate
+ * UA/EU shipping documents → an actually-expired certificate or passed deadline
+ * would produce NO risk at all. Try the day-first formats explicitly first, then
+ * fall back to native parsing (ISO etc.).
+ */
+function parseFlexibleDate(dateStr: string): number | null {
+  const s = dateStr.trim();
+  const m = /^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{2,4})$/.exec(s);
+  if (m) {
+    const day = Number(m[1]);
+    const month = Number(m[2]);
+    let year = Number(m[3]);
+    if (year < 100) year += 2000;
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      const t = Date.UTC(year, month - 1, day);
+      if (!Number.isNaN(t)) return t;
+    }
+  }
+  const native = Date.parse(s);
+  return Number.isNaN(native) ? null : native;
 }
 
 const DOC_LABELS: Record<string, string> = {
   invoice: 'Інвойс',
-  purchase_order: 'Замовлення (PO)',
   packing_list: 'Пакувальний лист',
   contract: 'Контракт',
   certificate_of_origin: 'Сертифікат походження',

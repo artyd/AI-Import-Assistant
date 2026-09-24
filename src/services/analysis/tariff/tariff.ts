@@ -61,12 +61,15 @@ export function parseTariffRows(rows: (string | number | null | undefined)[][]):
     if (code.length < 4) continue;
     const dutyRaw = cols.duty >= 0 ? String(r[cols.duty] ?? '').trim() : '';
     const dutyPercent = dutyRaw && !/безмит|вільн|free|-|–/i.test(dutyRaw) ? parseNumber(dutyRaw) : dutyRaw ? 0 : null;
-    const vatVal = cols.vat >= 0 ? parseNumber(r[cols.vat]) : NaN;
+    // parseNumber returns 0 for an empty/garbage cell (never NaN), so an EMPTY
+    // VAT cell must be detected BEFORE parsing — otherwise it silently becomes a
+    // 0% (zero-rated) VAT regime. Only derive a regime from a non-empty cell.
+    const vatRaw = cols.vat >= 0 ? String(r[cols.vat] ?? '').trim() : '';
     out.push({
       code: code.slice(0, 10),
       description: cols.desc >= 0 ? String(r[cols.desc] ?? '').trim() || undefined : undefined,
       dutyPercent: dutyPercent == null || isNaN(dutyPercent) ? null : dutyPercent,
-      vatRegime: cols.vat >= 0 && !isNaN(vatVal) ? vatFromPercent(vatVal) : null,
+      vatRegime: vatRaw ? vatFromPercent(parseNumber(vatRaw)) : null,
     });
   }
   return out;
@@ -83,7 +86,12 @@ export function buildTariffTable(entries: TariffEntry[]): TariffTable {
       const d = String(code ?? '').replace(/\D/g, '');
       if (!d) return null;
       if (map.has(d)) return map.get(d)!;
-      for (const len of [10, 8, 6, 4, 2]) {
+      // Prefix fallback is FLOORED at HS-6. Matching at 4 or 2 digits would
+      // return an arbitrary code from the same heading/chapter (e.g. a motor's
+      // rate for a microchip) and present it as authoritative — a confidently
+      // wrong duty/VAT. Below HS-6 we return nothing and let the caller treat the
+      // code as not found rather than guess a rate.
+      for (const len of [10, 8, 6]) {
         const hit = [...map.keys()].find((k) => k.length >= len && k.slice(0, len) === d.slice(0, len) && d.length >= len);
         if (hit) return map.get(hit)!;
       }

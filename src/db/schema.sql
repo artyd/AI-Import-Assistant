@@ -219,7 +219,7 @@ ALTER TABLE workspaces ADD CONSTRAINT workspaces_status_check
 -- NULL = wildcard). Seeded once; refine/extend later. Guarded so re-runs no-op.
 INSERT INTO checklist_templates (product_category, incoterm, transport_mode, required_document_types)
 SELECT NULL, NULL, NULL, ARRAY[
-  'invoice', 'packing_list', 'purchase_order', 'certificate_of_origin',
+  'invoice', 'packing_list', 'certificate_of_origin',
   'quality_certificate', 'customs_declaration', 'transport'
 ]
 WHERE NOT EXISTS (SELECT 1 FROM checklist_templates);
@@ -248,6 +248,13 @@ INSERT INTO checklist_templates (product_category, incoterm, transport_mode, con
                                  required_document_types)
 SELECT NULL, NULL, NULL, 'trilateral', ARRAY['intermediary_agreement']
 WHERE NOT EXISTS (SELECT 1 FROM checklist_templates WHERE contract_type = 'trilateral');
+
+-- Purchase order removed from the required document package: these supplies are
+-- governed by the contract, not a separate PO. Strip it from any already-seeded
+-- template rows (idempotent — a no-op once none contain it).
+UPDATE checklist_templates
+SET required_document_types = array_remove(required_document_types, 'purchase_order')
+WHERE 'purchase_order' = ANY(required_document_types);
 
 -- ── Phase 6: local mirror of the State Register of Medicinal Products ─────────
 -- Reference table (NOT workspace-scoped): a local copy of the Ukrainian drug
@@ -397,6 +404,12 @@ CREATE TABLE IF NOT EXISTS archive_records (
 );
 CREATE INDEX IF NOT EXISTS idx_archive_records_owner ON archive_records(owner_id);
 
+-- Link each archive row to its full analysis so the "Архів" can offer preview +
+-- .xlsx download. SET NULL (not CASCADE) so the archive row survives when the
+-- analysis/collection is deleted — preview/download then degrade gracefully.
+ALTER TABLE archive_records
+  ADD COLUMN IF NOT EXISTS analysis_id UUID REFERENCES analyses(id) ON DELETE SET NULL;
+
 -- ── Phase C: News — live RSS ingest with retention ────────────────────────────
 -- NOT workspace-scoped: a single shared feed of Ukrainian import/customs-relevant
 -- news, ingested by the NEWS cron (src/queue/news.ts + worker) from public RSS/Atom
@@ -470,3 +483,31 @@ INSERT INTO routes (id, from_code, to_code, mode, risk, waypoints) VALUES
   ('sea-shanghai-rotterdam', 'CNSHA', 'NLRTM', 'sea', 'high',
      '[[31.23,121.47],[1.26,103.82],[30.02,32.55],[51.95,4.14]]'::jsonb)
 ON CONFLICT (id) DO NOTHING;
+
+-- ── File-ingestion batching / resilience (file-ingestion-batching plan) ──────
+-- An upload "batch" groups the files that arrived together (one drag-drop /
+-- multipart request, or one unpacked zip). It backs the "X of Y read" progress
+-- and the auto-reconcile-when-complete trigger. One shipment upload split into
+-- several sub-limit requests produces several batches — progress is per batch.
+CREATE TABLE IF NOT EXISTS ingest_batches (
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id   UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  total          INTEGER NOT NULL DEFAULT 0,
+  source         TEXT NOT NULL DEFAULT 'upload'
+                 CHECK (source IN ('upload', 'zip')),
+  -- Set once the batch's files are all in a terminal state and the deterministic
+  -- reconciliation has run (Phase 4), so it fires exactly once per batch.
+  reconcile_done BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_ingest_batches_workspace ON ingest_batches(workspace_id);
+
+-- Link each file to its upload batch (nullable: pre-existing files have none).
+ALTER TABLE files ADD COLUMN IF NOT EXISTS batch_id UUID
+  REFERENCES ingest_batches(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_files_batch ON files(batch_id);
+
+-- Coarse re-read counter managed by the auto-retry sweep (NOT the per-job BullMQ
+-- attempts). After INGEST_MAX_RETRIES sweeps a still-'error' file is flagged
+-- extraction_status='unreadable' for manual key-field entry — never lost.
+ALTER TABLE files ADD COLUMN IF NOT EXISTS index_attempts INTEGER NOT NULL DEFAULT 0;

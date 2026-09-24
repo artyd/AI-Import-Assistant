@@ -5,9 +5,11 @@
  * then to 7 (the two certificate folders merged into 03_Certificates); existing
  * workspaces are migrated by `db/migrateFolderSkeleton.ts` then `db/migrateCertMerge.ts`.
  */
+// NB: the former '02_PO' folder was removed — these supplies are governed by the
+// contract, not a separate purchase order. Existing workspaces keep any 02_PO
+// folder they already have (harmless); new ones are not seeded with it.
 export const FOLDER_SKELETON = [
   '01_Contract_Invoice_PackingList',
-  '02_PO',
   '03_Certificates',
   '04_Customs',
   '05_Transport',

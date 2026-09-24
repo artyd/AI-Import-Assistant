@@ -13,3 +13,7 @@ storage/
 .agents/
 .claude/skills/
 skills-lock.json
+
+# Python bytecode (logist-mcp)
+__pycache__/
+*.pyc

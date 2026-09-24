@@ -1,4 +1,5 @@
 import { anthropic, type ChatContentBlockParam } from '../../anthropic/client.js';
+import { runWithAnthropicLimit } from '../../anthropic/limiter.js';
 import { config } from '../../config.js';
 import type { FileType } from '../../domain/folders.js';
 import type { ExtractedPage } from '../extract/index.js';
@@ -58,11 +59,13 @@ export async function ocrDocument(
     return [];
   }
 
-  const msg = await anthropic.messages.create({
-    model: config.OCR_MODEL,
-    max_tokens: 8000,
-    messages: [{ role: 'user', content: [media, { type: 'text', text: PROMPT }] }],
-  });
+  const msg = await runWithAnthropicLimit(() =>
+    anthropic.messages.create({
+      model: config.OCR_MODEL,
+      max_tokens: config.OCR_MAX_TOKENS,
+      messages: [{ role: 'user', content: [media, { type: 'text', text: PROMPT }] }],
+    }),
+  );
 
   const text = msg.content
     .filter((b): b is Extract<typeof b, { type: 'text' }> => b.type === 'text')

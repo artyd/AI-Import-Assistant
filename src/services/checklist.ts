@@ -25,7 +25,6 @@ export interface ChecklistItem {
 // three; extraction is what promotes them to "verified".
 const FOLDER_CATEGORIES: Record<string, string[]> = {
   '01_Contract_Invoice_PackingList': ['contract', 'invoice', 'packing_list'],
-  '02_PO': ['purchase_order'],
   // Merged certificate folder covers both certificate categories.
   '03_Certificates': ['certificate_of_origin', 'quality_certificate'],
   '04_Customs': ['customs_declaration'],

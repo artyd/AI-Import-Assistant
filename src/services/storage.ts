@@ -5,11 +5,16 @@ import { config } from '../config.js';
 import type { FileType } from '../domain/folders.js';
 
 /**
- * Allow-list of accepted upload extensions (brief: pdf, docx, xlsx, csv, png,
- * jpg). Everything else — including executables — is rejected before anything
- * touches disk.
+ * Allow-list of accepted upload extensions. Everything else — including
+ * executables — is rejected before anything touches disk.
+ *
+ * Legacy Office formats are included so a supply package's invoice/PL that
+ * arrives as old `.doc`/`.xls` is NOT silently dropped (the user's #1 rule:
+ * nothing lost). `.xls` is read natively by the xlsx lib; `.doc` (OLE binary)
+ * can't be parsed by mammoth, so it falls through to the "unreadable → manual
+ * key-field entry" flag rather than being rejected at the door.
  */
-const ALLOWED_EXT = new Set(['pdf', 'docx', 'xlsx', 'csv', 'png', 'jpg', 'jpeg']);
+const ALLOWED_EXT = new Set(['pdf', 'docx', 'doc', 'xlsx', 'xls', 'csv', 'png', 'jpg', 'jpeg']);
 
 export function extensionOf(name: string): string {
   const dot = name.lastIndexOf('.');
