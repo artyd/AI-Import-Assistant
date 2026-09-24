@@ -99,26 +99,40 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
 
     const chunks = chunkPages(pages);
 
-    // Replace any prior vectors for this file (safe on re-index).
-    await deleteFileChunks(file.id);
-
-    if (chunks.length > 0) {
-      const { vectors, provider } = await embedForIndex(chunks.map((c) => c.text));
-      const payloads: ChunkPayload[] = chunks.map((c) => ({
-        workspace_id: file.workspace_id,
-        file_id: file.id,
-        file_name: file.name,
-        folder: file.folder_name,
-        chunk_index: c.index,
-        page: c.page,
-        text: c.text,
-        provider: provider.id,
-      }));
-      await upsertChunks(vectors, payloads, provider.collectionName);
+    // Vector indexing for semantic search (search_documents) is BEST-EFFORT: it
+    // powers only the agent's semantic search, NOT reading / field extraction /
+    // reconciliation. If the embedding provider is unavailable (e.g. Voyage rate
+    // limits without a billing method), we log and carry on so the file still
+    // becomes "ready" and gets its deterministic structured extraction below.
+    // The file simply isn't semantically searchable until a later re-index.
+    try {
+      // Replace any prior vectors for this file (safe on re-index).
+      await deleteFileChunks(file.id);
+      if (chunks.length > 0) {
+        const { vectors, provider } = await embedForIndex(chunks.map((c) => c.text));
+        const payloads: ChunkPayload[] = chunks.map((c) => ({
+          workspace_id: file.workspace_id,
+          file_id: file.id,
+          file_name: file.name,
+          folder: file.folder_name,
+          chunk_index: c.index,
+          page: c.page,
+          text: c.text,
+          provider: provider.id,
+        }));
+        await upsertChunks(vectors, payloads, provider.collectionName);
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(
+        `Embedding/indexing failed for file ${file.id} (${file.name}) — file still ` +
+          `readable & reconcilable, just not semantically searchable yet: ${(err as Error).message}`,
+      );
     }
 
-    // Files with no recoverable text (e.g. a blank or un-OCR-able image) are
-    // still "ready" — there is simply nothing to index for them.
+    // Files with no recoverable text (e.g. a blank or un-OCR-able image) — or
+    // whose embedding failed above — are still "ready": reading + extraction do
+    // not depend on the vector index.
     await setStatus(file.id, file.workspace_id, 'ready');
 
     // Structured extraction (best-effort): populate document_extractions so the
