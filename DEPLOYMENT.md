@@ -164,11 +164,13 @@ tunes how long to wait for indexing. Exit code is non-zero if any check fails.
 - **Logs:** `docker compose logs -f backend worker frontend`
 - **Scale indexing throughput:** `docker compose up -d --scale worker=3`
 - **Redeploy after code changes:** `docker compose up -d --build backend worker frontend`
-- **Auto-deploy (CI):** `.github/workflows/deploy.yml` SSHes into this server on
-  every push to `main`, runs `git reset --hard origin/main`, and rebuilds the
-  stack. It stays inert until you configure it — run **`bash scripts/setup-deploy.sh`**
-  once (generates a deploy key, stores the `DEPLOY_*` GitHub secrets, and sets the
-  `DEPLOY_ENABLED=true` repo variable that arms the workflow).
+- **Auto-deploy (CI):** on every push to `main` the **CI** workflow
+  (`.github/workflows/ci.yml`, typecheck + build + test) runs; only when it passes
+  does **`.github/workflows/deploy.yml`** fire (via `workflow_run`) — it SSHes into
+  this server, runs `git reset --hard origin/main`, and rebuilds the stack. So a
+  red build is never deployed. Deploy stays inert until you configure it — run
+  **`bash scripts/setup-deploy.sh`** once (generates a deploy key, stores the
+  `DEPLOY_*` GitHub secrets, and sets the `DEPLOY_ENABLED=true` repo variable).
 - **Backups:** persist the named volumes `postgres_data`, `qdrant_data`, and
   `storage_data` (raw files). `redis_data` is a transient job queue.
 - **Rotate secrets:** edit `.env`, then `docker compose up -d`.
