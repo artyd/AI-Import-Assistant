@@ -39,7 +39,12 @@ export interface AgentTurnResult {
   toolCalls: ToolCallRecord[];
 }
 
-const MAX_ITERATIONS = 8;
+const MAX_ITERATIONS = 14;
+// Generous completion budget. The old 4096 truncated long answers (consolidated
+// per-line tables, reports, multi-doc write-ups) — especially with adaptive
+// thinking, whose tokens also count against this. 12k leaves ample room for the
+// visible answer after thinking.
+const MAX_TOKENS = 12000;
 
 /**
  * Single-agent, hybrid-retrieval tool-use loop. One Claude conversation with the
@@ -69,10 +74,14 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
   const citations: Citation[] = [];
   const toolCalls: ToolCallRecord[] = [];
 
+  // True when we run out of iterations while the model still wants to call tools —
+  // we then force one final tool-less answer so the user never gets a blank turn.
+  let toolsStillPending = false;
+
   for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
     const stream = anthropic.messages.stream({
       model: MODEL,
-      max_tokens: 4096,
+      max_tokens: MAX_TOKENS,
       thinking: { type: 'adaptive' },
       system,
       messages,
@@ -118,6 +127,24 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
     }
 
     messages.push({ role: 'user', content: toolResults });
+    if (iteration === MAX_ITERATIONS - 1) toolsStillPending = true;
+  }
+
+  // Iterations exhausted mid-tool-use: make one final call WITHOUT tools so the
+  // model must synthesize a closing answer instead of leaving the turn empty.
+  if (toolsStillPending) {
+    const stream = anthropic.messages.stream({
+      model: MODEL,
+      max_tokens: MAX_TOKENS,
+      thinking: { type: 'adaptive' },
+      system,
+      messages,
+    });
+    stream.on('text', (delta: string) => {
+      text += delta;
+      sse.send('token', { text: delta });
+    });
+    await stream.finalMessage();
   }
 
   return { text, citations: dedupe(citations), toolCalls };

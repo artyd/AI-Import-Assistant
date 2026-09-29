@@ -85,10 +85,14 @@ export function ShipmentPanel({
   workspaceId,
   workspace,
   onPatch,
+  refreshKey = 0,
 }: {
   workspaceId: string;
   workspace: Workspace;
   onPatch: (partial: Partial<Workspace>) => void;
+  // Bumped by the parent to force a re-load after the workspace changed out-of-band
+  // (agent turn, survey intake) so the panel never shows stale data.
+  refreshKey?: number;
 }) {
   const router = useRouter();
   const [users, setUsers] = useState<UserLite[]>([]);
@@ -132,7 +136,10 @@ export function ShipmentPanel({
       origin_country: workspace.origin_country ?? "",
       destination_country: workspace.destination_country ?? "",
     });
-  }, [workspace.id]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Re-seed on refreshKey too, so a survey/agent-driven intake change is
+    // reflected (may discard an unsaved in-progress edit — acceptable: the panel
+    // must show the latest saved server state).
+  }, [workspace.id, refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     api<{ users: UserLite[] }>("/api/users")
@@ -153,7 +160,7 @@ export function ShipmentPanel({
     api<{ items: ChecklistItem[]; status: string }>(`/api/workspaces/${workspaceId}/checklist`)
       .then((r) => setChecklist(r.items))
       .catch(() => setChecklist(null));
-  }, [workspaceId]);
+  }, [workspaceId, refreshKey]);
 
   const reloadRisks = () =>
     run("risks", async () => {

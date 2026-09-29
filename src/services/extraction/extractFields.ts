@@ -430,7 +430,11 @@ async function runExtraction(content: ChatContentBlockParam[]): Promise<Extracte
   const msg = await runWithAnthropicLimit(() =>
     anthropic.messages.create({
       model: MODEL,
-      max_tokens: 4096,
+      // 4096 truncated the tool-call JSON on many-line packing lists/invoices,
+      // dropping or under-counting line_items. 16k fits large tables.
+      max_tokens: 16000,
+      // Deterministic extraction — low temperature reduces field variance.
+      temperature: 0,
       tools: [EXTRACTION_TOOL],
       tool_choice: { type: 'tool', name: 'record_extraction' },
       messages: [{ role: 'user', content }],
