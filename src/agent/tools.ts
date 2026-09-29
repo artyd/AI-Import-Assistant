@@ -8,7 +8,7 @@ import { extractText } from '../services/extract/index.js';
 import { ocrDocument } from '../services/ocr/claudeOcr.js';
 import { enqueueIndexJob } from '../queue/index.js';
 import { publishFileStatus } from '../events/fileStatus.js';
-import { searchWorkspace } from '../services/qdrant.js';
+import { searchWorkspace, countWorkspaceChunks } from '../services/qdrant.js';
 import { getWorkspaceById } from '../services/workspaceAccess.js';
 import { buildSupplierInstruction } from '../services/supplierInstruction.js';
 import { computeDiscrepancies } from '../services/discrepancies.js';
@@ -73,24 +73,27 @@ export const toolDefinitions: ChatTool[] = [
     name: 'read_file',
     description:
       'Читає повний або частковий вміст конкретного файлу постачання. ' +
-      'Використовуй, коли потрібне точне формулювання пункту, конкретна цифра чи назва файлу відома.',
+      'Використовуй, коли потрібне точне формулювання пункту, конкретна цифра чи назва файлу відома. ' +
+      'ВАЖЛИВО: якщо відповідь закінчується позначкою «…[обрізано]», це НЕ весь файл — ' +
+      'дочитай наступні сторінки/символи, викликавши read_file ще раз із параметром range.',
     input_schema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: 'Назва файлу (напр. "invoice_draft_v2.pdf").' },
+        path: { type: 'string', description: 'Назва файлу (напр. "invoice_draft_v2.pdf"). Достатньо приблизної назви — шукається і за частковим збігом.' },
+        file_id: { type: 'string', description: 'Необовʼязково: точний ID файлу (з list_files) — надійніше за назву.' },
         range: {
           type: 'string',
-          description: 'Необовʼязково: діапазон сторінок "1-2" (для PDF) або символів "0-2000".',
+          description: 'Необовʼязково: діапазон сторінок "1-5" (для PDF) або символів "0-50000". Використовуй, щоб дочитати обрізаний файл.',
         },
       },
-      required: ['path'],
     },
   },
   {
     name: 'list_files',
     description:
-      'Повертає дерево файлів поточного постачання (теки, файли, статус індексації). ' +
-      'Використовуй, щоб зорієнтуватися, які документи взагалі є.',
+      'Повертає дерево файлів поточного постачання: тека, назва, ID файлу, тип документа ' +
+      '(інвойс/пакувальний/контракт/…), статус індексації та чи є файл у семантичному пошуку. ' +
+      'Використовуй, щоб зорієнтуватися, які документи є, і взяти ID/назву для read_file.',
     input_schema: { type: 'object', properties: {} },
   },
   {
@@ -396,6 +399,7 @@ interface FileRow {
   disk_path: string;
   status: string;
   folder_name: string | null;
+  doc_type?: string | null;
 }
 
 export async function executeTool(
@@ -1101,30 +1105,74 @@ async function runSearch(input: unknown, ctx: ToolContext): Promise<ToolOutcome>
   const q = String((input as { query?: unknown })?.query ?? '').trim();
   if (!q) return { result: 'Порожній запит.', summary: 'Пошук: порожній запит', citations: [] };
 
-  const hits = await searchWorkspace(requireWorkspace(ctx), q, 6);
+  const wsId = requireWorkspace(ctx);
+  const hits = await searchWorkspace(wsId, q); // default top-K 24, diversified per doc
+  const totalChunks = await countWorkspaceChunks(wsId).catch(() => 0);
+
   if (hits.length === 0) {
-    return { result: 'Нічого не знайдено серед проіндексованих документів.', summary: 'Пошук: 0 результатів', citations: [] };
+    // Distinguish a BLIND index (files exist but none vectorised — e.g. an
+    // embedding outage) from genuinely-nothing, so the agent falls back to
+    // list_files + read_file instead of concluding "no data".
+    const { rows } = await query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM files WHERE workspace_id = $1 AND is_latest = true`,
+      [wsId],
+    );
+    const fileCount = rows[0]?.n ?? 0;
+    if (fileCount > 0 && totalChunks === 0) {
+      return {
+        result:
+          `Семантичний індекс порожній (${fileCount} файл(ів) ще не проіндексовано векторно). ` +
+          'Це НЕ означає, що даних немає — виклич list_files і прочитай потрібний файл через read_file.',
+        summary: 'Пошук: індекс порожній',
+        citations: [],
+      };
+    }
+    return {
+      result:
+        'Нічого не знайдено серед проіндексованих документів. Якщо очікуєш ці дані — ' +
+        'виклич list_files і прочитай відповідний файл через read_file.',
+      summary: 'Пошук: 0 результатів',
+      citations: [],
+    };
   }
 
   const citations = dedupeCitations(hits.map((h) => ({ file: h.file, page: h.page })));
   const result = hits
     .map((h, i) => {
       const loc = h.page ? `, стор. ${h.page}` : '';
-      return `[${i + 1}] ${h.file}${loc}\n${h.text}`;
+      const fold = h.folder ? ` (${h.folder})` : '';
+      return `[${i + 1}] ${h.file}${loc}${fold}\n${h.text}`;
     })
     .join('\n\n');
-  const files = [...new Set(hits.map((h) => h.file))].join(', ');
-  return { result, summary: `Знайдено ${hits.length} фрагм. у: ${files}`, citations };
+  const files = [...new Set(hits.map((h) => h.file))];
+  // Tell the agent this is a partial top-matches view, not the whole corpus.
+  const scale =
+    totalChunks > hits.length
+      ? `\n\n(Показано ${hits.length} з ~${totalChunks} фрагментів — це топ-збіги, не повний перегляд. ` +
+        'За потреби прочитай файл повністю через read_file.)'
+      : '';
+  return {
+    result: result + scale,
+    summary: `Знайдено ${hits.length} фрагм. у: ${files.join(', ')}`,
+    citations,
+  };
 }
 
 async function runReadFile(input: unknown, ctx: ToolContext): Promise<ToolOutcome> {
   const path = String((input as { path?: unknown })?.path ?? '').trim();
+  const fileId = String((input as { file_id?: unknown })?.file_id ?? '').trim();
   const range = (input as { range?: unknown })?.range;
-  if (!path) return { result: 'Не вказано файл.', summary: 'Читання: не вказано файл', citations: [] };
+  if (!path && !fileId) {
+    return { result: 'Не вказано файл (path або file_id).', summary: 'Читання: не вказано файл', citations: [] };
+  }
 
-  const file = await findFile(requireWorkspace(ctx), path);
+  const file = await findFile(requireWorkspace(ctx), path, fileId);
   if (!file) {
-    return { result: `Файл "${path}" не знайдено в постачанні.`, summary: `Файл не знайдено: ${path}`, citations: [] };
+    return {
+      result: `Файл "${path || fileId}" не знайдено в постачанні. Виклич list_files, щоб побачити точні назви/ID.`,
+      summary: `Файл не знайдено: ${path || fileId}`,
+      citations: [],
+    };
   }
 
   const buf = await readStoredFile(file.disk_path);
@@ -1158,9 +1206,17 @@ async function runReadFile(input: unknown, ctx: ToolContext): Promise<ToolOutcom
     text = text.slice(from, to);
   }
 
-  const MAX = 12000;
-  const truncated = text.length > MAX;
-  if (truncated) text = `${text.slice(0, MAX)}\n…[обрізано]`;
+  // Raised from 12000: the agent used to see only ~4-5 pages of any file and stop.
+  const MAX = 50000;
+  const fullLen = text.length;
+  const truncated = fullLen > MAX;
+  if (truncated) {
+    const pageCount = pages.filter((p) => p.page !== null).length;
+    const hint = pageCount
+      ? ` Показано перші ~${MAX} символів із ${fullLen} (${pageCount} стор.). Щоб дочитати, виклич read_file з range (напр. "6-12" за сторінками).`
+      : ` Показано перші ${MAX} із ${fullLen} символів. Щоб дочитати, виклич read_file з range="${MAX}-${Math.min(fullLen, MAX * 2)}".`;
+    text = `${text.slice(0, MAX)}\n…[обрізано —${hint}]`;
+  }
 
   const citations = dedupeCitations(pages.map((p) => ({ file: file.name, page: p.page })));
   return {
@@ -1183,7 +1239,10 @@ async function runListFiles(ctx: ToolContext): Promise<ToolOutcome> {
   const lines: string[] = [];
   for (const [folder, group] of byFolder) {
     lines.push(`${folder}:`);
-    for (const f of group) lines.push(`  - ${f.name} [${statusLabel(f.status)}]`);
+    for (const f of group) {
+      const dt = f.doc_type ? `, тип: ${f.doc_type}` : '';
+      lines.push(`  - ${f.name} [${statusLabel(f.status)}${dt}] (id: ${f.id})`);
+    }
   }
   return { result: lines.join('\n'), summary: `Список файлів: ${files.length}`, citations: [] };
 }
@@ -1198,9 +1257,25 @@ function statusLabel(status: string): string {
         : 'у черзі';
 }
 
-async function findFile(workspaceId: string, path: string): Promise<FileRow | null> {
+async function findFile(
+  workspaceId: string,
+  path: string,
+  fileId?: string,
+): Promise<FileRow | null> {
+  // 1) Exact id (most reliable, from list_files).
+  if (fileId) {
+    const { rows } = await query<FileRow>(
+      `SELECT f.id, f.name, f.type, f.disk_path, f.status, fo.name AS folder_name
+       FROM files f LEFT JOIN folders fo ON fo.id = f.folder_id
+       WHERE f.workspace_id = $1 AND f.id = $2 LIMIT 1`,
+      [workspaceId, fileId],
+    );
+    if (rows[0]) return rows[0];
+  }
+  if (!path) return null;
   const name = path.split(/[/\\]/).pop() ?? path;
-  const { rows } = await query<FileRow>(
+  // 2) Exact (case-insensitive) name.
+  const exact = await query<FileRow>(
     `SELECT f.id, f.name, f.type, f.disk_path, f.status, fo.name AS folder_name
      FROM files f LEFT JOIN folders fo ON fo.id = f.folder_id
      WHERE f.workspace_id = $1 AND lower(f.name) = lower($2)
@@ -1208,13 +1283,29 @@ async function findFile(workspaceId: string, path: string): Promise<FileRow | nu
      LIMIT 1`,
     [workspaceId, name],
   );
-  return rows[0] ?? null;
+  if (exact.rows[0]) return exact.rows[0];
+  // 3) Fuzzy: name contains the query (or vice-versa) — tolerate an approximate name.
+  const fuzzy = await query<FileRow>(
+    `SELECT f.id, f.name, f.type, f.disk_path, f.status, fo.name AS folder_name
+     FROM files f LEFT JOIN folders fo ON fo.id = f.folder_id
+     WHERE f.workspace_id = $1 AND f.is_latest = true AND lower(f.name) LIKE '%' || lower($2) || '%'
+     ORDER BY length(f.name) ASC, f.created_at DESC
+     LIMIT 1`,
+    [workspaceId, name],
+  );
+  return fuzzy.rows[0] ?? null;
 }
 
 async function listFiles(workspaceId: string): Promise<FileRow[]> {
   const { rows } = await query<FileRow>(
-    `SELECT f.id, f.name, f.type, f.disk_path, f.status, fo.name AS folder_name
-     FROM files f LEFT JOIN folders fo ON fo.id = f.folder_id
+    `SELECT f.id, f.name, f.type, f.disk_path, f.status, fo.name AS folder_name,
+            de.extracted_fields->>'doc_type' AS doc_type
+     FROM files f
+     LEFT JOIN folders fo ON fo.id = f.folder_id
+     LEFT JOIN LATERAL (
+       SELECT extracted_fields FROM document_extractions
+       WHERE file_id = f.id ORDER BY extracted_at DESC LIMIT 1
+     ) de ON true
      WHERE f.workspace_id = $1
      ORDER BY fo.position NULLS LAST, f.created_at`,
     [workspaceId],

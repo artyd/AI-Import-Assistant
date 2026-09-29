@@ -18,8 +18,8 @@ import { extractText } from '../services/extract/index.js';
 import { ocrDocument } from '../services/ocr/claudeOcr.js';
 import { chunkPages } from '../services/extract/chunk.js';
 import {
-  extractDocumentFields,
-  extractDocumentFieldsFromDocument,
+  extractDocumentFieldsWithMeta,
+  extractDocumentFieldsFromDocumentWithMeta,
   type ExtractedFields,
 } from '../services/extraction/extractFields.js';
 import { classifyAndFile } from '../services/classify.js';
@@ -173,11 +173,12 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
         // image itself); fall back to the text path if vision is unavailable or
         // the type is text-based. For a scan with no recovered text, vision can
         // still read the image directly — so we attempt it even when pages == 0.
-        let fields =
+        let meta =
           file.type === 'pdf' || file.type === 'image'
-            ? await extractDocumentFieldsFromDocument(buf, file.type, file.name)
-            : null;
-        if (!fields && pages.length > 0) fields = await extractDocumentFields(fullText);
+            ? await extractDocumentFieldsFromDocumentWithMeta(buf, file.type, file.name)
+            : { fields: null as ExtractedFields | null, truncated: false };
+        if (!meta.fields && pages.length > 0) meta = await extractDocumentFieldsWithMeta(fullText);
+        const fields = meta.fields;
 
         if (fields && extractionIsSubstantive(fields)) {
           await query(
@@ -185,7 +186,17 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
              VALUES ($1, $2, $3::jsonb, $4)`,
             [file.id, file.workspace_id, JSON.stringify(fields), MODEL],
           );
-          await query('UPDATE files SET extraction_status = $2 WHERE id = $1', [file.id, 'ok']);
+          // 'partial' when the extraction JSON was truncated by the output cap:
+          // fields are present but line_items are under-counted — don't trust as
+          // a clean 'ok' (reconciliation/totals may be incomplete).
+          await query('UPDATE files SET extraction_status = $2 WHERE id = $1', [
+            file.id,
+            meta.truncated ? 'partial' : 'ok',
+          ]);
+          if (meta.truncated) {
+            // eslint-disable-next-line no-console
+            console.warn(`Extraction TRUNCATED (max_tokens) for file ${file.id} (${file.name}); stored as partial.`);
+          }
         } else if (pages.length === 0) {
           // Honest unreadable status (plan Q29): the document could not be read.
           // Insert a flagged placeholder extraction so the verification screen

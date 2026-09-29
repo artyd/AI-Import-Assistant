@@ -127,6 +127,8 @@ export function buildSystemPrompt(workspace: {
   contract_type_source?: 'sidebar' | 'survey' | 'auto' | null;
   contract_type_confidence?: number | null;
   survey_status?: string | null;
+  /** Compact per-document key-field digest (durable context; see documentsDigest.ts). */
+  documentsDigest?: string;
 }): string {
   return [
     'Ти — «Штурман», ШІ-асистент для фахівців з імпорту та митного оформлення.',
@@ -211,7 +213,25 @@ export function buildSystemPrompt(workspace: {
     ...userPortraitBlock(),
     ...logistToolsPromptBlock(),
     ...contractModeBlock(workspace),
+    ...documentsDigestBlock(workspace.documentsDigest),
   ].join('\n');
+}
+
+/**
+ * Durable per-document context: the shipment's already-extracted key fields, so the
+ * agent knows what documents exist and their headline data every turn without a tool
+ * call. It is a MEMORY AID, not a source of truth — for verdicts the agent still
+ * calls the deterministic tools (they read the same extractions in full).
+ */
+function documentsDigestBlock(digest?: string): string[] {
+  if (!digest || !digest.trim()) return [];
+  return [
+    '',
+    'ДОКУМЕНТИ ПОСТАЧАННЯ (витяг ключових полів — довідково, оновлюється автоматично):',
+    digest,
+    'Це стислий огляд для памʼяті. Для точних формулювань/цифр читай файл (read_file),',
+    'а для комплектності/розбіжностей — виклич відповідний детермінований інструмент.',
+  ];
 }
 
 /**

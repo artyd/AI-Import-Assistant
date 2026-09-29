@@ -9,6 +9,7 @@ import {
 } from '../services/conversations.js';
 import { SseStream } from '../sse/sse.js';
 import { buildSystemPrompt } from '../agent/systemPrompt.js';
+import { buildDocumentsDigest } from '../services/documentsDigest.js';
 import { runAgentTurn } from '../agent/loop.js';
 import { toolDefinitions, logistTools } from '../agent/tools.js';
 import { chatRateLimitConfig } from './chatRateLimit.js';
@@ -44,6 +45,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         const conversationId = await ensureConversation(ws.id, incomingConvId, message);
         const history = await getConversationHistory(conversationId);
         await appendMessage(conversationId, 'user', message);
+        const documentsDigest = await buildDocumentsDigest(ws.id).catch(() => '');
 
         const result = await runAgentTurn({
           workspaceId: ws.id,
@@ -54,6 +56,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
             contract_type_source: ws.contract_type_source,
             contract_type_confidence: ws.contract_type_confidence,
             survey_status: ws.survey_status,
+            documentsDigest,
           }),
           history,
           userMessage: message,
@@ -62,20 +65,28 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           tools: [...toolDefinitions, ...logistTools()],
         });
 
+        // Persist the turn (partial text too, on error) with its replay blocks so
+        // the next turn remembers what was read/extracted.
         const messageId = await appendMessage(
           conversationId,
           'assistant',
           result.text,
           result.citations,
           result.toolCalls,
+          result.turnBlocks,
         );
 
-        sse.send('done', {
-          message: result.text,
-          citations: result.citations,
-          conversationId,
-          messageId,
-        });
+        if (result.error) {
+          req.log.error({ err: result.error }, 'chat turn errored (partial persisted)');
+          sse.send('error', { message: 'Відповідь перервалася. Спробуйте ще раз.' });
+        } else {
+          sse.send('done', {
+            message: result.text,
+            citations: result.citations,
+            conversationId,
+            messageId,
+          });
+        }
       } catch (err) {
         req.log.error({ err }, 'chat turn failed');
         sse.send('error', { message: 'Не вдалося обробити запит. Спробуйте ще раз.' });

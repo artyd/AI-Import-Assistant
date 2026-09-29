@@ -20,11 +20,26 @@ export function chunkPages(pages: ExtractedPage[]): Chunk[] {
   const chunks: Chunk[] = [];
   let index = 0;
   for (const { page, text } of pages) {
-    for (const piece of splitText(text)) {
-      chunks.push({ index: index++, page, text: piece });
-    }
+    const pieces = splitText(text);
+    // Carry the page's first line (usually a table/section header) into
+    // continuation chunks, so search hits from a split wide table keep their
+    // column labels instead of returning header-less data rows.
+    const header = pageHeader(text);
+    pieces.forEach((piece, i) => {
+      const withHeader = i > 0 && header && !piece.startsWith(header) ? `${header}\n${piece}` : piece;
+      chunks.push({ index: index++, page, text: withHeader });
+    });
   }
   return chunks;
+}
+
+/** First non-empty line of a page, if it's short enough to be a header. */
+function pageHeader(text: string): string | null {
+  for (const line of text.split('\n')) {
+    const t = line.trim();
+    if (t) return t.length <= 120 ? t : null;
+  }
+  return null;
 }
 
 function splitText(text: string): string[] {

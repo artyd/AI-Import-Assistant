@@ -218,8 +218,8 @@ const EXTRACTION_TOOL: ChatTool = {
             description: { type: 'string', description: 'Найменування товару/позиції.' },
             quantity: { type: 'number', description: 'Кількість.' },
             unit: { type: 'string', description: 'Одиниця виміру (kg, pcs, шт тощо).' },
-            unit_price: { type: 'string', description: 'Ціна за одиницю.' },
-            amount: { type: 'string', description: 'Сума по позиції.' },
+            unit_price: { type: 'number', description: 'Ціна за одиницю.' },
+            amount: { type: 'number', description: 'Сума по позиції.' },
             hs_code: { type: 'string', description: 'Код УКТ ЗЕД по позиції, якщо є.' },
             batch_no: { type: 'string', description: 'Номер партії/лоту, якщо є.' },
           },
@@ -425,14 +425,25 @@ function imageMediaType(name: string): 'image/png' | 'image/jpeg' | 'image/gif' 
   return 'image/jpeg';
 }
 
+/**
+ * Extraction result plus whether the model's tool-call JSON was truncated by the
+ * output-token cap (`stop_reason === 'max_tokens'`) — a truncated extraction has
+ * dropped/under-counted line_items and must NOT be trusted as complete.
+ */
+export interface ExtractionResult {
+  fields: ExtractedFields | null;
+  truncated: boolean;
+}
+
 /** Runs the forced-tool extraction over the given content blocks. */
-async function runExtraction(content: ChatContentBlockParam[]): Promise<ExtractedFields | null> {
+async function runExtraction(content: ChatContentBlockParam[]): Promise<ExtractionResult> {
   const msg = await runWithAnthropicLimit(() =>
     anthropic.messages.create({
       model: MODEL,
-      // 4096 truncated the tool-call JSON on many-line packing lists/invoices,
-      // dropping or under-counting line_items. 16k fits large tables.
-      max_tokens: 16000,
+      // Large packing lists/manifests carry hundreds of line_items; 16k truncated
+      // the tool JSON mid-array. 32k fits far larger tables; truncation is still
+      // detected below via stop_reason and surfaced (never silently marked ok).
+      max_tokens: 32000,
       // Deterministic extraction — low temperature reduces field variance.
       temperature: 0,
       tools: [EXTRACTION_TOOL],
@@ -440,9 +451,16 @@ async function runExtraction(content: ChatContentBlockParam[]): Promise<Extracte
       messages: [{ role: 'user', content }],
     }),
   );
+  const truncated = msg.stop_reason === 'max_tokens';
   const block = msg.content.find((b) => b.type === 'tool_use');
-  if (!block || block.type !== 'tool_use') return null;
-  return normalize(block.input as Record<string, unknown>);
+  if (!block || block.type !== 'tool_use') return { fields: null, truncated };
+  return { fields: normalize(block.input as Record<string, unknown>), truncated };
+}
+
+/** Text path with truncation metadata (used by the indexing worker). */
+export async function extractDocumentFieldsWithMeta(text: string): Promise<ExtractionResult> {
+  const clipped = text.slice(0, MAX_INPUT_CHARS);
+  return runExtraction([{ type: 'text', text: `${INSTRUCTION}\n\n${clipped}` }]);
 }
 
 /**
@@ -451,8 +469,31 @@ async function runExtraction(content: ChatContentBlockParam[]): Promise<Extracte
  * Used for docx/xlsx/csv/md and as a fallback for the vision path.
  */
 export async function extractDocumentFields(text: string): Promise<ExtractedFields | null> {
-  const clipped = text.slice(0, MAX_INPUT_CHARS);
-  return runExtraction([{ type: 'text', text: `${INSTRUCTION}\n\n${clipped}` }]);
+  return (await extractDocumentFieldsWithMeta(text)).fields;
+}
+
+/** Vision path with truncation metadata (used by the indexing worker). */
+export async function extractDocumentFieldsFromDocumentWithMeta(
+  buf: Buffer,
+  type: FileType,
+  name: string,
+): Promise<ExtractionResult> {
+  let media: ChatContentBlockParam;
+  if (type === 'pdf') {
+    if (buf.length > PDF_MAX_BYTES) return { fields: null, truncated: false };
+    media = {
+      type: 'document',
+      source: { type: 'base64', media_type: 'application/pdf', data: buf.toString('base64') },
+    };
+  } else if (type === 'image') {
+    media = {
+      type: 'image',
+      source: { type: 'base64', media_type: imageMediaType(name), data: buf.toString('base64') },
+    };
+  } else {
+    return { fields: null, truncated: false };
+  }
+  return runExtraction([media, { type: 'text', text: INSTRUCTION }]);
 }
 
 /**
@@ -465,20 +506,5 @@ export async function extractDocumentFieldsFromDocument(
   type: FileType,
   name: string,
 ): Promise<ExtractedFields | null> {
-  let media: ChatContentBlockParam;
-  if (type === 'pdf') {
-    if (buf.length > PDF_MAX_BYTES) return null;
-    media = {
-      type: 'document',
-      source: { type: 'base64', media_type: 'application/pdf', data: buf.toString('base64') },
-    };
-  } else if (type === 'image') {
-    media = {
-      type: 'image',
-      source: { type: 'base64', media_type: imageMediaType(name), data: buf.toString('base64') },
-    };
-  } else {
-    return null;
-  }
-  return runExtraction([media, { type: 'text', text: INSTRUCTION }]);
+  return (await extractDocumentFieldsFromDocumentWithMeta(buf, type, name)).fields;
 }

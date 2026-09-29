@@ -82,14 +82,20 @@ export async function chatConsolidatedRoutes(app: FastifyInstance): Promise<void
           result.text,
           result.citations,
           result.toolCalls,
+          result.turnBlocks,
         );
 
-        sse.send('done', {
-          message: result.text,
-          citations: result.citations,
-          conversationId,
-          messageId,
-        });
+        if (result.error) {
+          req.log.error({ err: result.error }, 'consolidated chat turn errored (partial persisted)');
+          sse.send('error', { message: 'Відповідь перервалася. Спробуйте ще раз.' });
+        } else {
+          sse.send('done', {
+            message: result.text,
+            citations: result.citations,
+            conversationId,
+            messageId,
+          });
+        }
       } catch (err) {
         req.log.error({ err }, 'consolidated chat turn failed');
         sse.send('error', { message: 'Не вдалося обробити запит. Спробуйте ще раз.' });
