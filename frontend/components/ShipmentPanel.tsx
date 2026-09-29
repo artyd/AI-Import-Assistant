@@ -65,6 +65,16 @@ const CHECK_CLS: Record<ChecklistItem["status"], string> = {
   missing: "var(--err)",
 };
 
+const CONTRACT_TYPE_LABEL: Record<"bilateral" | "trilateral", string> = {
+  bilateral: "двосторонній",
+  trilateral: "тристоронній",
+};
+// Confidence badge for the doc-derived contract-mode verdict: green ≥0.8,
+// amber 0.5–0.8, grey <0.5 (mirrors the audit's proposed thresholds).
+const contractConfColor = (c: number) =>
+  c >= 0.8 ? "var(--ok)" : c >= 0.5 ? "var(--warn)" : "var(--muted)";
+const contractConfLabel = (c: number) => (c >= 0.8 ? "висока" : c >= 0.5 ? "середня" : "низька");
+
 type Result =
   | { kind: "checklist"; items: ChecklistItem[]; status: string }
   | { kind: "discrepancies"; items: Discrepancy[] }
@@ -95,6 +105,8 @@ export function ShipmentPanel({
   >(null);
   // Honest explanation of the bilateral/trilateral decision (or why undetermined).
   const [contractTypeReason, setContractTypeReason] = useState<string | null>(null);
+  // 0..1 confidence of the doc-derived verdict (drives the sidebar badge).
+  const [suggestedConfidence, setSuggestedConfidence] = useState<number | null>(null);
   // Guards the one-time auto-fill on open so we don't overwrite user edits.
   const autoFilledRef = useRef(false);
   const [partiesLoaded, setPartiesLoaded] = useState(false);
@@ -227,6 +239,7 @@ export function ShipmentPanel({
     suggestions: PartySuggestion[];
     suggested_contract_type: "bilateral" | "trilateral" | null;
     contract_type_reason?: string;
+    contract_type_confidence?: number;
     suggested_incoterm_in: string | null;
     suggested_incoterm_out: string | null;
   }
@@ -248,6 +261,9 @@ export function ShipmentPanel({
     (res: SuggestResponse, opts: { silent?: boolean } = {}) => {
       setSuggestedContractType(res.suggested_contract_type);
       setContractTypeReason(res.contract_type_reason ?? null);
+      setSuggestedConfidence(
+        typeof res.contract_type_confidence === "number" ? res.contract_type_confidence : null,
+      );
 
       setParties((cur) => {
         const next = [...cur];
@@ -430,10 +446,46 @@ export function ShipmentPanel({
             value={form.contract_type}
             onChange={(e) => setForm((f) => ({ ...f, contract_type: e.target.value }))}
           >
-            <option value="">—</option>
-            <option value="bilateral">Двосторонній</option>
-            <option value="trilateral">Тристоронній</option>
+            <option value="">Авто (визначити за документами)</option>
+            <option value="bilateral">Двосторонній (2 сторони)</option>
+            <option value="trilateral">Тристоронній (3 сторони)</option>
           </select>
+          {/* Provenance / confidence for the current mode. A human choice
+              (sidebar/survey) is a LOCK — auto-detection won't overwrite it;
+              "Авто" shows the doc-derived confidence badge instead. */}
+          {(() => {
+            const manual =
+              workspace.contract_type_source === "sidebar" ||
+              workspace.contract_type_source === "survey";
+            if (manual && form.contract_type) {
+              return (
+                <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.4 }}>
+                  🔒 Встановлено вручну — автовизначення не змінюватиме.
+                </div>
+              );
+            }
+            if (suggestedConfidence != null && suggestedContractType) {
+              const pct = Math.round(suggestedConfidence * 100);
+              return (
+                <div style={{ fontSize: 12, color: "var(--muted)", display: "flex", alignItems: "center", gap: 6 }}>
+                  <span
+                    style={{
+                      display: "inline-block",
+                      padding: "1px 8px",
+                      borderRadius: 999,
+                      fontWeight: 600,
+                      color: contractConfColor(suggestedConfidence),
+                      border: `1px solid ${contractConfColor(suggestedConfidence)}`,
+                      background: "var(--hover)",
+                    }}
+                  >
+                    Авто · {contractConfLabel(suggestedConfidence)} впевненість ({pct}%)
+                  </span>
+                </div>
+              );
+            }
+            return null;
+          })()}
           {contractTypeReason && (
             <div
               style={{
@@ -451,8 +503,7 @@ export function ShipmentPanel({
           )}
           {suggestedContractType && suggestedContractType !== form.contract_type && (
             <div style={{ fontSize: 12, color: "var(--muted)" }}>
-              Запропоновано за документами:{" "}
-              {suggestedContractType === "trilateral" ? "тристоронній" : "двосторонній"}{" "}
+              Запропоновано за документами: {CONTRACT_TYPE_LABEL[suggestedContractType]}{" "}
               <button
                 type="button"
                 className="btn"

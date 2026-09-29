@@ -1,6 +1,7 @@
 import { query } from '../db/pool.js';
 import type { ExtractedFields } from './extraction/extractFields.js';
 import { reconcile, type ReconcileDoc } from './reconcile.js';
+import { getWorkspaceById } from './workspaceAccess.js';
 
 /**
  * Workspace-scoped cross-document reconciliation. Reads the latest structured
@@ -46,5 +47,12 @@ export async function computeDiscrepancies(workspaceId: string): Promise<
     fields: r.fields,
   }));
 
-  return reconcile(docs);
+  // Pass the shipment's contract mode + Incoterms so trilateral (3-party) gets
+  // the two-leg checks; bilateral/unknown keeps the single-invoice behaviour.
+  const ws = await getWorkspaceById(workspaceId);
+  return reconcile(docs, {
+    contractMode: ws?.contract_type ?? null,
+    incotermIn: ws?.incoterm_in ?? ws?.incoterm ?? null,
+    incotermOut: ws?.incoterm_out ?? null,
+  });
 }

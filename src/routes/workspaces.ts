@@ -21,6 +21,29 @@ function defaultNumber(): string {
   return `${year}-${seq}`;
 }
 
+/**
+ * A manual `contract_type` edit (sidebar / intake) is an override: stamp
+ * provenance so auto-detection never silently overwrites the human choice.
+ * Setting it to null ("Auto" in the UI) clears the lock so auto-detection may
+ * repopulate it. No-op when the request didn't touch contract_type. Mutates the
+ * caller's `sets`/`vals` (same $N convention as the surrounding UPDATE builder,
+ * where $1 is the workspace id).
+ */
+function stampContractTypeOverride(
+  contractType: 'bilateral' | 'trilateral' | null | undefined,
+  sets: string[],
+  vals: unknown[],
+): void {
+  if (contractType === undefined) return;
+  const manual = contractType !== null;
+  sets.push(`contract_type_source = $${vals.length + 1}`);
+  vals.push(manual ? 'sidebar' : null);
+  sets.push(`contract_type_confidence = $${vals.length + 1}`);
+  vals.push(null); // a human choice carries no numeric confidence
+  sets.push(`contract_type_reason = $${vals.length + 1}`);
+  vals.push(manual ? 'Встановлено вручну.' : null);
+}
+
 export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('preHandler', authenticate);
 
@@ -93,6 +116,11 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         origin_country: ws.origin_country,
         destination_country: ws.destination_country,
         responsible_user_id: ws.responsible_user_id,
+        contract_type_source: ws.contract_type_source,
+        contract_type_confidence: ws.contract_type_confidence,
+        contract_type_reason: ws.contract_type_reason,
+        survey_status: ws.survey_status,
+        survey_answers: ws.survey_answers,
       },
       folders,
     });
@@ -132,8 +160,9 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
           `INSERT INTO workspaces
              (owner_id, number, supplier, status, contract_type, intake_complete,
               product_category, incoterm, incoterm_in, incoterm_out, transport_mode,
-              origin_country, destination_country)
-           VALUES ($1, $2, $3, 'draft', $4, $5, $6, $7, $8, $9, $10, $11, $12)
+              origin_country, destination_country,
+              contract_type_source, contract_type_confidence, contract_type_reason)
+           VALUES ($1, $2, $3, 'draft', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
            RETURNING id`,
           [
             req.user!.sub,
@@ -148,6 +177,11 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
             src.transport_mode,
             src.origin_country,
             src.destination_country,
+            // Carry the contract-mode provenance so the clone keeps its override
+            // lock; survey state is intentionally NOT copied (fresh shipment).
+            src.contract_type_source,
+            src.contract_type_confidence,
+            src.contract_type_reason,
           ],
         );
         const newId = rows[0].id as string;
@@ -225,6 +259,8 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       sets.push(`${key} = $${vals.length + 1}`);
       vals.push(value);
     }
+    // A manual contract_type edit locks provenance against auto-detection.
+    stampContractTypeOverride(parsed.data.contract_type, sets, vals);
     if (sets.length > 0) {
       await query(`UPDATE workspaces SET ${sets.join(', ')} WHERE id = $1`, vals);
     }
@@ -292,6 +328,8 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       sets.push(`${key} = $${vals.length + 1}`);
       vals.push(value);
     }
+    // A manual contract_type edit locks provenance against auto-detection.
+    stampContractTypeOverride(parsed.data.contract_type, sets, vals);
     if (sets.length > 0) {
       await query(`UPDATE workspaces SET ${sets.join(', ')} WHERE id = $1`, vals);
     }
@@ -318,5 +356,40 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       return reply.send({ workspace: { ...updated, status: state.status }, checklist: state.checklist });
     }
     return reply.send({ workspace: updated });
+  });
+
+  // PATCH /api/workspaces/:id/survey — persist the shipment-survey state (answers
+  // JSONB + status) for resumability. User data — never auto-mutated. Does NOT
+  // touch contract_type: the mode is set through the chat (set_contract_mode) so
+  // its provenance lock stays authoritative.
+  const surveySchema = z.object({
+    answers: z.record(z.object({ question: z.string(), answer: z.string() })).optional(),
+    status: z.enum(['not_started', 'in_progress', 'completed', 'skipped']).optional(),
+  });
+  app.patch<{ Params: { id: string } }>('/api/workspaces/:id/survey', async (req, reply) => {
+    const ws = await getOwnedWorkspace(req.user!.sub, req.params.id);
+    if (!ws) return reply.code(404).send({ error: 'not_found' });
+    const parsed = surveySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'invalid_request', issues: parsed.error.issues });
+    }
+    const sets: string[] = [];
+    const vals: unknown[] = [ws.id];
+    if (parsed.data.answers !== undefined) {
+      sets.push(`survey_answers = $${vals.length + 1}::jsonb`);
+      vals.push(JSON.stringify(parsed.data.answers));
+    }
+    if (parsed.data.status !== undefined) {
+      sets.push(`survey_status = $${vals.length + 1}`);
+      vals.push(parsed.data.status);
+    }
+    if (sets.length > 0) {
+      await query(`UPDATE workspaces SET ${sets.join(', ')} WHERE id = $1`, vals);
+    }
+    const updated = (await getOwnedWorkspace(req.user!.sub, req.params.id))!;
+    return reply.send({
+      survey_status: updated.survey_status,
+      survey_answers: updated.survey_answers,
+    });
   });
 }

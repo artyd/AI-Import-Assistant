@@ -18,6 +18,7 @@ import type {
   Workspace,
 } from "@/lib/types";
 import { Chat, type EntitySelector } from "@/components/Chat";
+import type { SurveyAnswers, SurveyStatus } from "@/lib/surveyQuestions";
 import { AnalyzePanel } from "@/components/AnalyzePanel";
 import { ArchiveList } from "@/components/ArchiveModal";
 import { AiSettingsModal } from "@/components/AiSettingsModal";
@@ -160,6 +161,14 @@ export default function WorkspacePage() {
     }
   }, []);
 
+  // Responsive: on a narrow viewport the sidebar + the 344px right panel would
+  // squeeze the chat column to zero width. Start with the right panel collapsed
+  // there so the chat is usable. Runs once after mount (not during SSR/initial
+  // render) to avoid a hydration mismatch; desktop keeps the panel open.
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.innerWidth < 1024) setRightOpen(false);
+  }, []);
+
   // Load workspace, folders, files, workspaces list, and latest conversation.
   useEffect(() => {
     if (!user) return;
@@ -290,6 +299,20 @@ export default function WorkspacePage() {
   const onPatch = useCallback(
     (partial: Partial<Workspace>) => setWorkspace((w) => (w ? { ...w, ...partial } : w)),
     []
+  );
+
+  // Persist shipment-survey state (answers + status) so it survives reloads.
+  // Non-blocking: failure just means the survey can't resume, not that answers
+  // are lost (they still flow to the agent as the submitted chat message).
+  const persistSurvey = useCallback(
+    (state: { answers?: SurveyAnswers; status: SurveyStatus }) => {
+      onPatch({
+        survey_status: state.status,
+        ...(state.answers ? { survey_answers: state.answers } : {}),
+      });
+      void api(`/api/workspaces/${id}/survey`, { method: "PATCH", body: state }).catch(() => {});
+    },
+    [id, onPatch]
   );
 
   const refreshFiles = useCallback(async () => {
@@ -1279,6 +1302,9 @@ export default function WorkspacePage() {
               folders={folders}
               onUploadAndClassify={uploadAndClassify}
               onMoveFile={moveFile}
+              onSurveyPersist={chatKind === "supply" ? persistSurvey : undefined}
+              initialSurveyStatus={workspace.survey_status ?? null}
+              initialSurveyAnswers={(workspace.survey_answers as SurveyAnswers | null) ?? null}
             />
           )}
         </div>

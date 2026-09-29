@@ -47,7 +47,14 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
 
         const result = await runAgentTurn({
           workspaceId: ws.id,
-          system: buildSystemPrompt({ number: ws.number, supplier: ws.supplier }),
+          system: buildSystemPrompt({
+            number: ws.number,
+            supplier: ws.supplier,
+            contract_type: ws.contract_type,
+            contract_type_source: ws.contract_type_source,
+            contract_type_confidence: ws.contract_type_confidence,
+            survey_status: ws.survey_status,
+          }),
           history,
           userMessage: message,
           sse,

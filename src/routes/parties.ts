@@ -51,6 +51,7 @@ export async function partiesRoutes(app: FastifyInstance): Promise<void> {
         suggestions: analysis.suggestions,
         suggested_contract_type: analysis.contract_type,
         contract_type_reason: analysis.contract_type_reason,
+        contract_type_confidence: analysis.contract_type_confidence,
         suggested_incoterm_in: incoterms.incoterm_in,
         suggested_incoterm_out: incoterms.incoterm_out,
       });

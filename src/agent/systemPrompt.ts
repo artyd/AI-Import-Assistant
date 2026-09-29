@@ -60,16 +60,74 @@ function logistToolsPromptBlock(): string[] {
 }
 
 /**
+ * Per-shipment contract-structure block (2-party vs 3-party). Appended AFTER the
+ * static prompt + portrait/logist blocks so the cacheable rules prefix stays
+ * frozen — only this trailing block varies per shipment. Summarises the current
+ * mode + provenance and steers the agent to the get_contract_mode/set_contract_mode
+ * tools and the manual-override precedence.
+ */
+function contractModeBlock(ws: {
+  contract_type?: 'bilateral' | 'trilateral' | null;
+  contract_type_source?: 'sidebar' | 'survey' | 'auto' | null;
+  contract_type_confidence?: number | null;
+  survey_status?: string | null;
+}): string[] {
+  const modeUk =
+    ws.contract_type === 'bilateral'
+      ? 'двосторонній (2 сторони: постачальник → AGroup95)'
+      : ws.contract_type === 'trilateral'
+        ? 'тристоронній (3 сторони: постачальник → PrimeForce → AGroup95)'
+        : 'не визначено';
+  const srcUk =
+    ws.contract_type_source === 'sidebar' || ws.contract_type_source === 'survey'
+      ? 'встановлено вручну (НЕ перезаписуй автоматично)'
+      : ws.contract_type_source === 'auto'
+        ? 'автовизначено з документів'
+        : 'не задано';
+  const conf =
+    typeof ws.contract_type_confidence === 'number'
+      ? ` (впевненість ${Math.round(ws.contract_type_confidence * 100)}%)`
+      : '';
+  const survey =
+    ws.survey_status && ws.survey_status !== 'not_started' ? ` Опитування: ${ws.survey_status}.` : '';
+  return [
+    '',
+    'СТРУКТУРА КОНТРАКТУ (2 vs 3 сторони):',
+    `Поточний режим: ${modeUk}; джерело: ${srcUk}${conf}.${survey}`,
+    '- Двосторонній: постачальник продає напряму AGroup95. Тристоронній: PrimeForce купує в',
+    '  постачальника і перепродає AGroup95 — два комерційні плечі, зазвичай два набори',
+    '  документів (постачальник→Prime і Prime→AG95) з різними цінами (націнка).',
+    '- Якщо режим НЕ визначено або він потрібен для аналізу — спершу виклич get_contract_mode',
+    '  (рахує режим за документами: виробник vs продавець в інвойсі, з впевненістю). НЕ',
+    '  визначай режим «на око».',
+    '- Зберігай режим через set_contract_mode: source="survey", коли КОРИСТУВАЧ підтвердив',
+    '  його в розмові (перезаписує будь-що); source="auto" — щоб зафіксувати автовисновок',
+    '  (НЕ перезаписує значення, встановлене вручну).',
+    '- Пріоритет: ручний вибір (сайдбар/опитування) > підтвердження користувача > автовизначення.',
+    '  Ніколи не перезаписуй ручний вибір автоматично.',
+    '- Якщо режим НЕ визначено, впевненість автовизначення низька, або get_missing_context',
+    '  повертає незадані параметри — ЗАПРОПОНУЙ користувачу пройти коротке опитування про',
+    '  постачання (кнопка «Опитування» біля поля вводу або команда «опитування»). Воно збере',
+    '  структуру контракту, сторони, Incoterms, транспорт і форму товару за кілька кліків.',
+  ];
+}
+
+/**
  * System prompt for "Штурман" — the single import-logistics agent. Ukrainian
  * persona and domain (customs document reconciliation, package completeness,
  * УКТ ЗЕД codes). Encodes the Phase-4 GROUNDING CONTRACT (hard rules 1–4): gather
  * context before domain actions, prefer deterministic tools over free reasoning,
- * keep HS codes advisory, never fabricate on empty data. Kept frozen (only
- * number/supplier interpolated) so the rules prefix stays cacheable.
+ * keep HS codes advisory, never fabricate on empty data. The rules prefix is kept
+ * frozen (only number/supplier interpolated) so it stays cacheable; per-shipment
+ * contract-mode state is appended as a trailing block (see contractModeBlock).
  */
 export function buildSystemPrompt(workspace: {
   number: string;
   supplier: string;
+  contract_type?: 'bilateral' | 'trilateral' | null;
+  contract_type_source?: 'sidebar' | 'survey' | 'auto' | null;
+  contract_type_confidence?: number | null;
+  survey_status?: string | null;
 }): string {
   return [
     'Ти — «Штурман», ШІ-асистент для фахівців з імпорту та митного оформлення.',
@@ -147,6 +205,7 @@ export function buildSystemPrompt(workspace: {
     'варіанти; остаточний код має підтвердити митний брокер.»',
     ...userPortraitBlock(),
     ...logistToolsPromptBlock(),
+    ...contractModeBlock(workspace),
   ].join('\n');
 }
 

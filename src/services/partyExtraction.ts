@@ -41,6 +41,10 @@ export interface PartiesAnalysis {
   // Human-readable, honest explanation of the contract_type decision (or why it
   // could not be made). Surfaced in the completeness tab.
   contract_type_reason: string;
+  // 0..1 confidence in the contract_type verdict. The decision rests on reading
+  // BOTH the manufacturer and the invoice seller, so it is the weakest-link
+  // corroboration of the two; 0 whenever contract_type could not be decided.
+  contract_type_confidence: number;
 }
 
 interface ExtractionRow {
@@ -192,8 +196,12 @@ export function decideParties(
 
   let contract_type: 'bilateral' | 'trilateral' | null = null;
   let contract_type_reason: string;
+  // Only non-zero once contract_type is decided (needs BOTH M and S). Weakest
+  // link of the two, so a single-doc corroboration can't inflate the verdict.
+  let contract_type_confidence = 0;
 
   if (M && S) {
+    contract_type_confidence = Math.min(conf(M), conf(S));
     if (sameEntity(M.name, S.name)) {
       // Maker sells directly → bilateral; one upstream party (sender = Хто).
       push('sender', M, 'manufacturer');
@@ -228,5 +236,5 @@ export function decideParties(
   }
 
   suggestions.sort((a, b) => b.confidence - a.confidence);
-  return { suggestions, contract_type, contract_type_reason };
+  return { suggestions, contract_type, contract_type_reason, contract_type_confidence };
 }

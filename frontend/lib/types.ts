@@ -31,6 +31,15 @@ export interface Workspace {
   origin_country?: string | null;
   destination_country?: string | null;
   responsible_user_id?: string | null;
+  // Contract-mode provenance (server-managed, read-only). `contract_type_source`
+  // is the override lock: "sidebar"/"survey" = human-set (auto won't overwrite),
+  // "auto" = inferred, null = never set. Confidence 0..1 only meaningful for "auto".
+  contract_type_source?: "sidebar" | "survey" | "auto" | null;
+  contract_type_confidence?: number | null;
+  contract_type_reason?: string | null;
+  // Interactive shipment survey state.
+  survey_status?: "not_started" | "in_progress" | "completed" | "skipped";
+  survey_answers?: Record<string, unknown> | null;
 }
 
 // ── ШТУРМАН prototype port · Phase A: collections + chat kinds ────────────────

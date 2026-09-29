@@ -36,6 +36,15 @@ export interface WorkspaceRow {
   origin_country: string | null;
   destination_country: string | null;
   responsible_user_id: string | null;
+  // Contract-mode provenance (phase 1). `contract_type_source` is the override
+  // lock: 'sidebar'/'survey' = human-set (auto must not overwrite), 'auto' =
+  // inferred, null = never set. Confidence is only meaningful when source='auto'.
+  contract_type_source: 'sidebar' | 'survey' | 'auto' | null;
+  contract_type_confidence: number | null;
+  contract_type_reason: string | null;
+  // Interactive shipment survey state.
+  survey_answers: Record<string, unknown> | null;
+  survey_status: 'not_started' | 'in_progress' | 'completed' | 'skipped';
 }
 
 /**

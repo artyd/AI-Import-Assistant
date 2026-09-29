@@ -4,6 +4,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatKind, Citation, Folder, Message } from "@/lib/types";
 import { streamChat } from "@/lib/sse";
 import { folderLabel } from "@/lib/folderLabels";
+import {
+  SURVEY_QUESTIONS,
+  type SurveyAnswers,
+  type SurveyOption,
+  type SurveyQuestion,
+  type SurveyStatus,
+} from "@/lib/surveyQuestions";
 import { Markdown } from "./Markdown";
 import type { LogEntry } from "./AgentLog";
 import {
@@ -120,6 +127,12 @@ interface Props {
   folders?: Folder[];
   onUploadAndClassify?: (files: File[]) => Promise<UploadClassifyOutcome[]>;
   onMoveFile?: (fileId: string, folderId: string) => Promise<void>;
+  // Shipment survey (supply only). When provided, the "Опитування" button shows
+  // and survey state is persisted so it survives reloads. initialSurvey* seed a
+  // resume: the survey restarts at the first still-unanswered question.
+  onSurveyPersist?: (state: { answers?: SurveyAnswers; status: SurveyStatus }) => void;
+  initialSurveyStatus?: SurveyStatus | null;
+  initialSurveyAnswers?: SurveyAnswers | null;
 }
 
 // Local-only chat items for the paperclip flow. These are NOT persisted to the
@@ -142,7 +155,25 @@ interface ClassifyCard {
   folderName?: string;
 }
 
-type ChatItem = ({ kind: "message" } & Message) | ClassifyCard;
+// A single survey question rendered as an interactive card in the thread. Local
+// only (like ClassifyCard) — the collected answers are submitted to the agent as
+// one normal chat message when the survey completes; on reload the cards vanish
+// but the agent-persisted context remains.
+interface QuestionCard {
+  kind: "question";
+  id: string;
+  qIndex: number; // index into SURVEY_QUESTIONS
+  total: number;
+  answered: boolean;
+  answerLabel?: string; // chosen option label (or free text) once answered
+}
+
+type ChatItem = ({ kind: "message" } & Message) | ClassifyCard | QuestionCard;
+
+// Typed command that starts the survey (supply chat only). A dedicated button
+// lands in Phase 5; a typed command works today.
+const SURVEY_TRIGGER_RX =
+  /^\/?(опитування|опрос|survey|почни опитування|пройти опитування|start survey)$/i;
 
 let cardSeq = 0;
 
@@ -182,6 +213,9 @@ export function Chat({
   folders,
   onUploadAndClassify,
   onMoveFile,
+  onSurveyPersist,
+  initialSurveyStatus,
+  initialSurveyAnswers,
 }: Props) {
   // File intake is only wired when the host supplies the workspace file handlers.
   const fileIntake = !!(onUploadAndClassify && onMoveFile && folders);
@@ -492,6 +526,113 @@ export function Chat({
     }
   }, [streaming, postPath, onConversationStarted, onLog, onTurnComplete]);
 
+  // ── Shipment survey (client-driven question cards) ──────────────────────────
+  // Answers are collected locally and submitted as ONE chat message at the end,
+  // so the agent persists everything in a single turn (cheaper than a turn per
+  // question) while still honouring "answer = normal chat message". State (answers
+  // + status) is also persisted to the workspace via onSurveyPersist for resume.
+  const surveyAnswersRef = useRef<{ id: string; question: string; answer: string }[]>([]);
+
+  const answersRecord = useCallback(
+    (): SurveyAnswers =>
+      Object.fromEntries(
+        surveyAnswersRef.current.map((a) => [a.id, { question: a.question, answer: a.answer }])
+      ),
+    []
+  );
+
+  const submitSurvey = useCallback(() => {
+    const answers = surveyAnswersRef.current;
+    if (answers.length === 0) return;
+    const record = answersRecord();
+    const lines = answers.map((a) => `• ${a.question}\n  → ${a.answer}`).join("\n");
+    const msg =
+      "Це мої відповіді на опитування про постачання. Онови контекст постачання за ними " +
+      '(структуру контракту — через set_contract_mode із source="survey"; інші параметри — ' +
+      "через save_workspace_context), потім коротко підсумуй, що збережено і що варто уточнити:\n\n" +
+      lines;
+    surveyAnswersRef.current = [];
+    onSurveyPersist?.({ answers: record, status: "completed" });
+    void runMessage(msg);
+  }, [runMessage, onSurveyPersist, answersRecord]);
+
+  const startSurvey = useCallback(() => {
+    if (streaming) return;
+    // Resume: seed prior answers and jump to the first still-unanswered question.
+    const seed = initialSurveyAnswers ?? {};
+    const firstUnanswered = SURVEY_QUESTIONS.findIndex((q) => !seed[q.id]);
+    const startIndex = firstUnanswered < 0 ? 0 : firstUnanswered;
+    surveyAnswersRef.current =
+      startIndex === 0
+        ? []
+        : SURVEY_QUESTIONS.filter((q) => seed[q.id]).map((q) => ({
+            id: q.id,
+            question: q.question,
+            answer: seed[q.id]!.answer,
+          }));
+    setItems((m) => [
+      ...m,
+      {
+        kind: "question",
+        id: `q-${Date.now()}-${startIndex}`,
+        qIndex: startIndex,
+        total: SURVEY_QUESTIONS.length,
+        answered: false,
+      },
+    ]);
+    onSurveyPersist?.({ status: "in_progress" });
+  }, [streaming, initialSurveyAnswers, onSurveyPersist]);
+
+  const answerQuestion = useCallback(
+    (card: QuestionCard, answer: SurveyOption) => {
+      const q = SURVEY_QUESTIONS[card.qIndex];
+      if (!q) return;
+      surveyAnswersRef.current = [
+        ...surveyAnswersRef.current.filter((a) => a.id !== q.id),
+        { id: q.id, question: q.question, answer: answer.label },
+      ];
+      const nextIndex = card.qIndex + 1;
+      const last = nextIndex >= SURVEY_QUESTIONS.length;
+      setItems((m) => {
+        const marked = m.map((it) =>
+          it.kind === "question" && it.id === card.id
+            ? { ...it, answered: true, answerLabel: answer.label }
+            : it
+        );
+        return last
+          ? marked
+          : [
+              ...marked,
+              {
+                kind: "question" as const,
+                id: `q-${Date.now()}-${nextIndex}`,
+                qIndex: nextIndex,
+                total: SURVEY_QUESTIONS.length,
+                answered: false,
+              },
+            ];
+      });
+      if (last) submitSurvey();
+      else onSurveyPersist?.({ answers: answersRecord(), status: "in_progress" });
+    },
+    [submitSurvey, onSurveyPersist, answersRecord]
+  );
+
+  const skipSurvey = useCallback(
+    (card: QuestionCard) => {
+      surveyAnswersRef.current = [];
+      setItems((m) =>
+        m.map((it) =>
+          it.kind === "question" && it.id === card.id
+            ? { ...it, answered: true, answerLabel: "— опитування пропущено —" }
+            : it
+        )
+      );
+      onSurveyPersist?.({ status: "skipped" });
+    },
+    [onSurveyPersist]
+  );
+
   // On send: first upload + classify any staged files (they show as classify
   // cards in the thread, exactly like the old inline flow), then stream the text
   // message if there is one. Sending is allowed with files only, text only, or both.
@@ -501,6 +642,14 @@ export function Chat({
     const files = pending;
     const q = quote;
     if (!text && files.length === 0 && !q) return;
+
+    // Client-driven survey: a typed command starts it (supply chat only). A
+    // dedicated button lands in Phase 5.
+    if (chatKind === "supply" && !q && files.length === 0 && SURVEY_TRIGGER_RX.test(text)) {
+      setInput("");
+      startSurvey();
+      return;
+    }
 
     // Consolidated: a pasted Google Sheets link runs the analysis DIRECTLY (exact
     // per-product blocks), not through the agent (which would reformat it).
@@ -525,7 +674,7 @@ export function Chat({
       if (q) setQuote(null);
       await runMessage(composed);
     }
-  }, [streaming, input, pending, quote, handleFiles, runMessage, onAnalyzeManifest]);
+  }, [streaming, input, pending, quote, handleFiles, runMessage, onAnalyzeManifest, chatKind, startSurvey]);
 
   // Which action the composer paperclip performs: manifest analyse (consolidated)
   // or the supply auto-file staging flow.
@@ -716,6 +865,7 @@ export function Chat({
               onPaste={onPaste}
               onSend={send}
               onAttach={attachAction}
+              onStartSurvey={chatKind === "supply" ? startSurvey : undefined}
               streaming={streaming}
               chatKind={chatKind}
               onChangeKind={onChangeKind}
@@ -779,6 +929,8 @@ export function Chat({
               {items.map((it) =>
                 it.kind === "classify" ? (
                   <ClassifyBubble key={it.id} card={it} folders={folders ?? []} onPick={pickFolder} />
+                ) : it.kind === "question" ? (
+                  <QuestionBubble key={it.id} card={it} onAnswer={answerQuestion} onSkip={skipSurvey} />
                 ) : it.role === "user" ? (
                   <UserBubble key={it.id} text={it.content} />
                 ) : (
@@ -803,6 +955,7 @@ export function Chat({
                 onPaste={onPaste}
                 onSend={send}
                 onAttach={attachAction}
+                onStartSurvey={chatKind === "supply" ? startSurvey : undefined}
                 streaming={streaming}
                 chatKind={chatKind}
                 onChangeKind={onChangeKind}
@@ -865,6 +1018,7 @@ function Composer({
   onPaste,
   onSend,
   onAttach,
+  onStartSurvey,
   streaming,
   chatKind,
   onChangeKind,
@@ -881,6 +1035,7 @@ function Composer({
   onPaste: (e: React.ClipboardEvent) => void;
   onSend: () => void;
   onAttach?: () => void;
+  onStartSurvey?: () => void;
   streaming: boolean;
   chatKind: ChatKind;
   onChangeKind: (k: ChatKind) => void;
@@ -1143,6 +1298,32 @@ function Composer({
             <IconAttach size={21} />
           </button>
         )}
+        {onStartSurvey && (
+          <button
+            title="Опитування про постачання"
+            aria-label="Опитування про постачання"
+            data-testid="chat-survey"
+            onClick={onStartSurvey}
+            disabled={streaming}
+            style={{
+              flex: "none",
+              height: 40,
+              alignSelf: "center",
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "0 12px",
+              borderRadius: 10,
+              border: "1px solid var(--border2)",
+              background: "transparent",
+              color: "var(--muted)",
+              fontSize: 13,
+              cursor: streaming ? "default" : "pointer",
+            }}
+          >
+            <span style={{ fontSize: 15, lineHeight: 1 }}>?</span> Опитування
+          </button>
+        )}
         <textarea
           ref={inputRef}
           value={input}
@@ -1346,6 +1527,118 @@ function ClassifyBubble({
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function QuestionBubble({
+  card,
+  onAnswer,
+  onSkip,
+}: {
+  card: QuestionCard;
+  onAnswer: (card: QuestionCard, answer: SurveyOption) => void;
+  onSkip: (card: QuestionCard) => void;
+}) {
+  const q: SurveyQuestion | undefined = SURVEY_QUESTIONS[card.qIndex];
+  const [otherOpen, setOtherOpen] = useState(false);
+  const [otherText, setOtherText] = useState("");
+  if (!q) return null;
+
+  const optBtn = { height: 30, padding: "0 12px", fontSize: 13 } as const;
+  const submitOther = () => {
+    const t = otherText.trim();
+    if (t) onAnswer(card, { value: "other", label: t });
+  };
+
+  return (
+    <div style={{ margin: "18px 0" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <span
+          style={{
+            width: 26,
+            height: 26,
+            borderRadius: 8,
+            background: "var(--accent)",
+            color: "var(--accentTx)",
+            display: "grid",
+            placeItems: "center",
+            fontSize: 14,
+          }}
+        >
+          ?
+        </span>
+        <span style={{ fontWeight: 600 }}>
+          Опитування про постачання · Питання {card.qIndex + 1} з {card.total}
+        </span>
+      </div>
+      <div style={{ paddingLeft: 34 }}>
+        <div style={{ marginBottom: 10, lineHeight: 1.45 }}>{q.question}</div>
+        {card.answered ? (
+          <div
+            style={{
+              color: "var(--muted)",
+              fontSize: 14,
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            <IconCheck size={14} /> {card.answerLabel}
+          </div>
+        ) : (
+          <>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {q.options.map((o) => (
+                <button key={o.value} className="btn" style={optBtn} onClick={() => onAnswer(card, o)}>
+                  {o.label}
+                </button>
+              ))}
+              {q.allowOther !== false && (
+                <button className="btn" style={optBtn} onClick={() => setOtherOpen((v) => !v)}>
+                  Інше…
+                </button>
+              )}
+            </div>
+            {otherOpen && (
+              <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                <input
+                  className="input"
+                  value={otherText}
+                  onChange={(e) => setOtherText(e.target.value)}
+                  placeholder="Ваш варіант…"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      submitOther();
+                    }
+                  }}
+                />
+                <button className="btn" disabled={!otherText.trim()} onClick={submitOther}>
+                  Надіслати
+                </button>
+              </div>
+            )}
+            <div style={{ marginTop: 10 }}>
+              <button
+                type="button"
+                onClick={() => onSkip(card)}
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: "var(--muted)",
+                  fontSize: 12,
+                  cursor: "pointer",
+                  padding: 0,
+                  textDecoration: "underline",
+                }}
+              >
+                Пропустити опитування
+              </button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
