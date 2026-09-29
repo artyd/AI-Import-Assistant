@@ -511,3 +511,28 @@ CREATE INDEX IF NOT EXISTS idx_files_batch ON files(batch_id);
 -- attempts). After INGEST_MAX_RETRIES sweeps a still-'error' file is flagged
 -- extraction_status='unreadable' for manual key-field entry — never lost.
 ALTER TABLE files ADD COLUMN IF NOT EXISTS index_attempts INTEGER NOT NULL DEFAULT 0;
+
+-- ── Contract-mode provenance + shipment survey (contract-mode phase 1) ────────
+-- The 2-party (bilateral) / 3-party (trilateral) mode already lives in
+-- workspaces.contract_type. These columns record WHERE that value came from so
+-- auto-detection never silently overwrites a human choice:
+--   contract_type_source     — 'sidebar'/'survey' = set by a human (LOCKED: auto
+--                              detection must NOT overwrite); 'auto' = inferred by
+--                              partyExtraction; NULL = never set (auto may fill).
+--   contract_type_confidence — 0..1, only meaningful when source='auto'.
+--   contract_type_reason     — persisted human-readable explanation (previously
+--                              computed per-request in /suggest and thrown away).
+-- The lock is enforced in the app layer (routes/tools), NOT the DB, mirroring the
+-- file `folder_id IS NULL` auto-file guard.
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS contract_type_source TEXT
+  CHECK (contract_type_source IN ('sidebar', 'survey', 'auto'));
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS contract_type_confidence REAL;
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS contract_type_reason TEXT;
+
+-- Interactive shipment survey (Claude-style question cards). Answers are stored as
+-- a JSONB blob keyed by question id ({ q1: {...}, ... }); survey_status drives the
+-- skippable/resumable flow. Answers also sync to the scalar intake columns above
+-- via the normal save path, so the sidebar and survey stay consistent.
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS survey_answers JSONB;
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS survey_status TEXT NOT NULL DEFAULT 'not_started'
+  CHECK (survey_status IN ('not_started', 'in_progress', 'completed', 'skipped'));

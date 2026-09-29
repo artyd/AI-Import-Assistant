@@ -113,16 +113,45 @@ function cite(ref: DocRef, value: unknown): DiscrepancyCitation {
   return { file_id: ref.file_id, file_name: ref.file_name, doc_type: ref.doc_type, value: show(value) };
 }
 
+/** Optional shipment context that switches on the trilateral (3-party) checks. */
+export interface ReconcileOptions {
+  /** Contract structure. 'trilateral' enables the two-leg invoice checks below. */
+  contractMode?: 'bilateral' | 'trilateral' | null;
+  /** Buy-side (Постачальник→Prime) Incoterm — checked against the inbound leg. */
+  incotermIn?: string | null;
+  /** Sell-side (Prime→AGroup95) Incoterm (outbound leg is checked vs the contract). */
+  incotermOut?: string | null;
+}
+
 /**
  * Deterministic cross-document reconciliation over already-extracted fields.
  * Pure: no I/O, no DB, no network. Same findings the workspace-scoped
  * `computeDiscrepancies` returns, but on caller-supplied documents.
+ *
+ * Bilateral (default) keeps the single-invoice logic. Trilateral (3-party) adds
+ * two-leg handling: it treats two invoices as EXPECTED (not a duplicate), checks
+ * the OUTBOUND leg (Prime→AGroup95) against the contract, treats the value gap
+ * between legs as expected markup, and verifies physical goods + intermediary
+ * orientation across the legs. See `reconcileTrilateral`.
  */
-export function reconcile(docs: ReconcileDoc[]): Discrepancy[] {
-  const invoice = pick(docs, 'invoice');
+export function reconcile(docs: ReconcileDoc[], opts: ReconcileOptions = {}): Discrepancy[] {
+  const trilateral = opts.contractMode === 'trilateral';
   const packing = pick(docs, 'packing_list');
   const contract = pick(docs, 'contract');
   const coo = pick(docs, 'certificate_of_origin');
+
+  // Invoice selection. Bilateral: the single invoice. Trilateral: the OUTBOUND
+  // leg (Prime→AGroup95) is what the contract / value / Incoterms are checked
+  // against; the inbound leg (Supplier→Prime) legitimately differs in price and
+  // is reconciled separately (markup + physical consistency).
+  const invoiceRefs = docs.filter((d) => d.doc_type === 'invoice').map(toRef);
+  const outbound = trilateral
+    ? invoiceRefs.find((i) => classifyInvoiceLeg(i) === 'outbound') ?? null
+    : null;
+  const inbound = trilateral
+    ? invoiceRefs.find((i) => classifyInvoiceLeg(i) === 'inbound') ?? null
+    : null;
+  const invoice = trilateral ? outbound ?? pick(docs, 'invoice') : pick(docs, 'invoice');
 
   const out: Discrepancy[] = [];
 
@@ -264,12 +293,21 @@ export function reconcile(docs: ReconcileDoc[]): Discrepancy[] {
   //    many-item invoices (plan Q12/Q26). ─────────────────────────────────────
   reconcileLineItems(invoice, packing, out);
 
+  // ── Trilateral (3-party): two invoice legs, markup direction, physical
+  //    consistency across legs, intermediary orientation, inbound Incoterm. ────
+  if (trilateral) {
+    reconcileTrilateral(invoiceRefs, outbound, inbound, opts, out);
+  }
+
   // ── Transparency: never pretend we checked what we couldn't. Surface both
   //    duplicate documents (only the first is reconciled) and missing
   //    counterparts (whole cross-checks skipped) as explicit YELLOW notes. ────
   for (const t of ['invoice', 'contract', 'packing_list'] as const) {
     const n = docs.filter((d) => d.doc_type === t).length;
-    if (n > 1) {
+    // Trilateral legitimately has TWO invoices (inbound + outbound) — warn only
+    // on 3+; bilateral warns on 2+ as before.
+    const threshold = t === 'invoice' && trilateral ? 2 : 1;
+    if (n > threshold) {
       out.push({
         field: 'documents',
         expected: 'один документ цього типу',
@@ -383,6 +421,150 @@ function crossCheckParty(
 
 function toRef(d: ReconcileDoc): DocRef {
   return { file_id: d.file_id, file_name: d.file_name, doc_type: d.doc_type ?? 'other', fields: d.fields };
+}
+
+// Internal companies (mirror services/parties.ts INTERNAL_COMPANIES). Used to
+// orient the two invoice legs of a trilateral deal from the seller/buyer names.
+const IMPORTER_RX = /agroup|а\s*груп|а\s*group|group\s*95|груп\s*95/i; // AGroup95 (final importer)
+const INTERMEDIARY_RX = /prime\s*force|primeforce|прайм\s*?форс/i; // PrimeForce (intermediary)
+
+function nameMatches(name: string | null, rx: RegExp): boolean {
+  return !!name && rx.test(name);
+}
+
+/**
+ * Which leg an invoice belongs to in a trilateral deal, from its seller/buyer:
+ *   outbound (Prime→AGroup95) — buyer is the importer, or seller is the intermediary
+ *   inbound  (Supplier→Prime) — buyer is the intermediary
+ * `unknown` when the names don't identify a leg (never guessed).
+ */
+function classifyInvoiceLeg(ref: DocRef): 'outbound' | 'inbound' | 'unknown' {
+  const seller = strOf(ref, 'seller');
+  const buyer = strOf(ref, 'buyer');
+  if (nameMatches(buyer, IMPORTER_RX) || nameMatches(seller, INTERMEDIARY_RX)) return 'outbound';
+  if (nameMatches(buyer, INTERMEDIARY_RX)) return 'inbound';
+  return 'unknown';
+}
+
+/**
+ * Trilateral-only checks. All honest: the value gap between legs is surfaced as
+ * expected markup (INFO), not a mismatch; a missing second leg or an unconfirmed
+ * intermediary is a YELLOW "please verify", never a silent skip.
+ */
+function reconcileTrilateral(
+  invoices: DocRef[],
+  outbound: DocRef | null,
+  inbound: DocRef | null,
+  opts: ReconcileOptions,
+  out: Discrepancy[],
+): void {
+  // Leg presence: a 3-party deal normally has TWO invoice sets.
+  if (invoices.length < 2) {
+    out.push({
+      field: 'documents',
+      expected: 'два набори інвойсів (Постачальник→Prime і Prime→AGroup95)',
+      actual:
+        invoices.length === 1
+          ? 'знайдено лише один інвойс — для тристороннього постачання очікується два плеча'
+          : 'інвойси відсутні',
+      severity: 'info',
+      kind: 'suspected',
+      citations: invoices.map((i) => cite(i, i.doc_type)),
+    });
+  }
+
+  // Markup direction: inbound (Supplier→Prime) should not exceed outbound
+  // (Prime→AGroup95). This REPLACES treating the two invoice values as a
+  // mismatch — the difference is expected markup, surfaced as INFO.
+  if (outbound && inbound) {
+    const vIn = numOf(inbound, 'total_value');
+    const vOut = numOf(outbound, 'total_value');
+    const cIn = strOf(inbound, 'currency');
+    const cOut = strOf(outbound, 'currency');
+    const sameCurrency = !!cIn && !!cOut && cIn.toUpperCase() === cOut.toUpperCase();
+    if (vIn !== null && vOut !== null && sameCurrency) {
+      if (vIn > vOut) {
+        out.push({
+          field: 'markup',
+          expected: 'націнка ≥ 0 (вхідний ≤ вихідний)',
+          actual: `вхідний інвойс (${vIn} ${cIn}) більший за вихідний (${vOut} ${cOut}) — відʼємна націнка`,
+          severity: 'warning',
+          kind: kindFor(inbound, outbound, 'total_value'),
+          citations: [cite(inbound, `${vIn} ${show(cIn)}`), cite(outbound, `${vOut} ${show(cOut)}`)],
+        });
+      } else {
+        const pct = vOut > 0 ? Math.round(((vOut - vIn) / vOut) * 100) : 0;
+        out.push({
+          field: 'markup',
+          expected: 'очікувана націнка посередника',
+          actual: `вхідний ${vIn} → вихідний ${vOut} ${cOut} (націнка ~${pct}%) — норма для тристороннього`,
+          severity: 'info',
+          kind: 'suspected',
+          citations: [cite(inbound, `${vIn} ${show(cIn)}`), cite(outbound, `${vOut} ${show(cOut)}`)],
+        });
+      }
+    }
+
+    // Physical goods must be identical across the two legs (same cargo).
+    for (const f of ['net_weight_kg', 'gross_weight_kg'] as const) {
+      const a = numOf(inbound, f);
+      const b = numOf(outbound, f);
+      if (a !== null && b !== null && a > 0 && Math.abs(a - b) / a > WEIGHT_TOLERANCE) {
+        out.push({
+          field: f,
+          expected: `вхідний інвойс: ${a}`,
+          actual: `вихідний інвойс: ${b}`,
+          severity: 'error',
+          kind: kindFor(inbound, outbound, f),
+          citations: [cite(inbound, a), cite(outbound, b)],
+        });
+      }
+    }
+    const pIn = numOf(inbound, 'packages_count');
+    const pOut = numOf(outbound, 'packages_count');
+    if (pIn !== null && pOut !== null && pIn !== pOut) {
+      out.push({
+        field: 'packages_count',
+        expected: `вхідний інвойс: ${pIn}`,
+        actual: `вихідний інвойс: ${pOut}`,
+        severity: 'error',
+        kind: kindFor(inbound, outbound, 'packages_count'),
+        citations: [cite(inbound, pIn), cite(outbound, pOut)],
+      });
+    }
+  }
+
+  // Intermediary orientation: PrimeForce should be the outbound SELLER and/or the
+  // inbound BUYER. Emit ONE honest note only when it can't be confirmed anywhere.
+  const intermediaryConfirmed =
+    (!!outbound && nameMatches(strOf(outbound, 'seller'), INTERMEDIARY_RX)) ||
+    (!!inbound && nameMatches(strOf(inbound, 'buyer'), INTERMEDIARY_RX));
+  if (invoices.length >= 1 && !intermediaryConfirmed) {
+    out.push({
+      field: 'intermediary',
+      expected: 'посередник (PrimeForce) як продавець вихідного / покупець вхідного інвойсу',
+      actual: 'посередника не підтверджено в інвойсах — перевірте сторони',
+      severity: 'warning',
+      kind: 'suspected',
+      citations: [],
+    });
+  }
+
+  // Inbound leg Incoterm vs the buy-side workspace Incoterm (the outbound leg is
+  // already covered by the invoice↔contract Incoterm check).
+  if (inbound && opts.incotermIn) {
+    const inc = strOf(inbound, 'incoterm');
+    if (inc && inc.toUpperCase() !== opts.incotermIn.toUpperCase()) {
+      out.push({
+        field: 'incoterm',
+        expected: `вхідне плече: ${opts.incotermIn}`,
+        actual: `вхідний інвойс: ${inc}`,
+        severity: 'warning',
+        kind: 'suspected',
+        citations: [cite(inbound, inc)],
+      });
+    }
+  }
 }
 
 /** Every document that states `field`, paired with its value. */

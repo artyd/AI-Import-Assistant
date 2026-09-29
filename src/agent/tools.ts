@@ -16,6 +16,7 @@ import { computeRegistryChecks } from '../services/drugRegistry.js';
 import { computeRisks } from '../services/risks.js';
 import { refreshWorkspaceState } from '../services/status.js';
 import { getMissingContext, upsertParties, type PartyInput } from '../services/parties.js';
+import { analyzeParties } from '../services/partyExtraction.js';
 import { classifyAndFile, sortInbox } from '../services/classify.js';
 import { buildAndSaveReport } from '../services/report.js';
 import { compareFileVersions, previousVersionId } from '../services/versions.js';
@@ -176,6 +177,44 @@ export const toolDefinitions: ChatTool[] = [
           },
         },
       },
+    },
+  },
+  {
+    name: 'get_contract_mode',
+    description:
+      'Визначає структуру контракту постачання за завантаженими документами: ' +
+      'двосторонній (2 сторони: постачальник→AGroup95) чи тристоронній (3 сторони: ' +
+      'постачальник→PrimeForce→AGroup95). Рішення детерміноване (виробник vs продавець в ' +
+      'інвойсі). Повертає авто-висновок, впевненість (0..1), пояснення, а також поточне ' +
+      'збережене значення та його джерело (ручне/авто). НЕ змінює даних. Виклич перед ' +
+      'аналізом, щоб знати режим — перевірки для 2- і 3-сторонніх постачань різні.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'set_contract_mode',
+    description:
+      'Зберігає структуру контракту постачання. source="survey" — коли КОРИСТУВАЧ підтвердив ' +
+      'режим у розмові (перезаписує будь-яке значення, зокрема автоматичне). source="auto" — ' +
+      'коли фіксуєш автоматичний висновок: режим і впевненість беруться з детермінованого ' +
+      'аналізу документів (твій contract_type ігнорується), і воно НЕ перезаписує значення, ' +
+      'встановлене вручну. Спершу виклич get_contract_mode.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        source: {
+          type: 'string',
+          enum: ['auto', 'survey'],
+          description: 'auto=автовисновок з документів; survey=підтверджено користувачем.',
+        },
+        contract_type: {
+          type: 'string',
+          enum: ['bilateral', 'trilateral'],
+          description:
+            'Режим. Обовʼязковий для source="survey". Для source="auto" ігнорується — ' +
+            'береться з аналізу документів.',
+        },
+      },
+      required: ['source'],
     },
   },
   {
@@ -385,6 +424,10 @@ export async function executeTool(
       return runMissingContext(ctx);
     case 'save_workspace_context':
       return runSaveContext(input, ctx);
+    case 'get_contract_mode':
+      return runGetContractMode(ctx);
+    case 'set_contract_mode':
+      return runSetContractMode(input, ctx);
     case 'classify_and_file':
       return runClassifyAndFile(input, ctx);
     case 'sort_inbox':
@@ -672,6 +715,18 @@ async function runSaveContext(input: unknown, ctx: ToolContext): Promise<ToolOut
     sets.push(`${key} = $${vals.length + 1}`);
     vals.push(value);
   }
+  // A contract_type gathered from the user in conversation is a human-confirmed
+  // value → stamp provenance so auto-detection (set_contract_mode source="auto")
+  // won't overwrite it. The dedicated set_contract_mode tool is preferred for the
+  // mode; this keeps the invariant when the agent bundles it into intake context.
+  if (parsed.data.contract_type !== undefined) {
+    sets.push(`contract_type_source = $${vals.length + 1}`);
+    vals.push('survey');
+    sets.push(`contract_type_confidence = $${vals.length + 1}`);
+    vals.push(null);
+    sets.push(`contract_type_reason = $${vals.length + 1}`);
+    vals.push('Зібрано в розмові з користувачем.');
+  }
   if (sets.length > 0) {
     await query(`UPDATE workspaces SET ${sets.join(', ')} WHERE id = $1`, vals);
   }
@@ -683,7 +738,25 @@ async function runSaveContext(input: unknown, ctx: ToolContext): Promise<ToolOut
   }
 
   // Recompute intake_complete and refresh derived state.
-  const merged = (await getWorkspaceById(requireWorkspace(ctx)))!;
+  await refreshAfterWorkspaceWrite(ws.id);
+  const finalWs = (await getWorkspaceById(ws.id))!;
+  const missing = await getMissingContext(finalWs);
+  return {
+    result:
+      'Контекст збережено.' +
+      (missing.length ? ` Ще бракує: ${missing.join(', ')}.` : ' Усі параметри задані.'),
+    summary: 'Збережено контекст постачання',
+    citations: [],
+  };
+}
+
+/**
+ * Recompute intake_complete from the required-five fields and refresh the derived
+ * status/checklist. Single source of the completeness formula for the agent-side
+ * writes (save_workspace_context, set_contract_mode) so it can't drift.
+ */
+async function refreshAfterWorkspaceWrite(wsId: string): Promise<void> {
+  const merged = (await getWorkspaceById(wsId))!;
   const complete = Boolean(
     merged.contract_type &&
       merged.product_category &&
@@ -692,17 +765,127 @@ async function runSaveContext(input: unknown, ctx: ToolContext): Promise<ToolOut
       merged.origin_country,
   );
   if (complete !== merged.intake_complete) {
-    await query('UPDATE workspaces SET intake_complete = $2 WHERE id = $1', [ws.id, complete]);
+    await query('UPDATE workspaces SET intake_complete = $2 WHERE id = $1', [wsId, complete]);
   }
-  const finalWs = (await getWorkspaceById(requireWorkspace(ctx)))!;
+  const finalWs = (await getWorkspaceById(wsId))!;
   if (finalWs.intake_complete) await refreshWorkspaceState(finalWs);
+}
 
-  const missing = await getMissingContext(finalWs);
+// Ukrainian labels for the two contract structures, used in tool output.
+const CONTRACT_MODE_UK: Record<'bilateral' | 'trilateral', string> = {
+  bilateral: 'двосторонній (2 сторони: постачальник → AGroup95)',
+  trilateral: 'тристоронній (3 сторони: постачальник → PrimeForce → AGroup95)',
+};
+
+async function runGetContractMode(ctx: ToolContext): Promise<ToolOutcome> {
+  const wsId = requireWorkspace(ctx);
+  const ws = await getWorkspaceById(wsId);
+  if (!ws) return { result: 'Постачання не знайдено.', summary: 'Режим: помилка', citations: [] };
+
+  const analysis = await analyzeParties(wsId);
+  const manual = ws.contract_type_source === 'sidebar' || ws.contract_type_source === 'survey';
+
+  const storedLine = ws.contract_type
+    ? `Збережено: ${CONTRACT_MODE_UK[ws.contract_type]} — джерело: ${
+        manual
+          ? 'встановлено вручну (не перезаписувати автоматично)'
+          : ws.contract_type_source === 'auto'
+            ? 'автовизначено'
+            : 'невідоме'
+      }.`
+    : 'Збережено: режим ще не задано.';
+
+  const autoLine = analysis.contract_type
+    ? `За документами: ${CONTRACT_MODE_UK[analysis.contract_type]} — впевненість ${Math.round(
+        analysis.contract_type_confidence * 100,
+      )}%. ${analysis.contract_type_reason}`
+    : `За документами визначити не вдалося: ${analysis.contract_type_reason}`;
+
+  const hint = manual
+    ? 'Значення встановлене вручну — set_contract_mode source="auto" його не змінить. Щоб ' +
+      'змінити, потрібне підтвердження користувача (source="survey").'
+    : analysis.contract_type
+      ? 'Щоб зафіксувати авто-висновок, виклич set_contract_mode source="auto".'
+      : 'Даних недостатньо — уточни в користувача або запусти опитування.';
+
   return {
-    result:
-      'Контекст збережено.' +
-      (missing.length ? ` Ще бракує: ${missing.join(', ')}.` : ' Усі параметри задані.'),
-    summary: 'Збережено контекст постачання',
+    result: `${storedLine}\n${autoLine}\n${hint}`,
+    summary: `Режим: ${ws.contract_type ?? 'не задано'}`,
+    citations: [],
+  };
+}
+
+const setContractModeSchema = z.object({
+  source: z.enum(['auto', 'survey']),
+  contract_type: z.enum(['bilateral', 'trilateral']).optional(),
+});
+
+async function runSetContractMode(input: unknown, ctx: ToolContext): Promise<ToolOutcome> {
+  const parsed = setContractModeSchema.safeParse(input ?? {});
+  if (!parsed.success) {
+    return { result: 'Некоректні дані для set_contract_mode.', summary: 'Режим: помилка', citations: [] };
+  }
+  const wsId = requireWorkspace(ctx);
+  const ws = await getWorkspaceById(wsId);
+  if (!ws) return { result: 'Постачання не знайдено.', summary: 'Режим: помилка', citations: [] };
+
+  if (parsed.data.source === 'auto') {
+    // Auto path re-derives the verdict deterministically — the model's
+    // contract_type is ignored to prevent persisting a hallucinated mode.
+    const analysis = await analyzeParties(wsId);
+    if (!analysis.contract_type) {
+      return {
+        result: `Автовизначення неможливе: ${analysis.contract_type_reason} Уточни в користувача або запусти опитування.`,
+        summary: 'Режим: не визначено',
+        citations: [],
+      };
+    }
+    // Honor the manual-override lock — never overwrite a human-set value.
+    if (ws.contract_type_source === 'sidebar' || ws.contract_type_source === 'survey') {
+      return {
+        result:
+          `Режим уже встановлено вручну (${ws.contract_type ? CONTRACT_MODE_UK[ws.contract_type] : '—'}). ` +
+          'Автовизначення не перезаписує ручне значення. За документами: ' +
+          `${CONTRACT_MODE_UK[analysis.contract_type]} (впевненість ${Math.round(
+            analysis.contract_type_confidence * 100,
+          )}%).`,
+        summary: 'Режим: залишено ручне значення',
+        citations: [],
+      };
+    }
+    await query(
+      `UPDATE workspaces SET contract_type = $2, contract_type_source = 'auto',
+         contract_type_confidence = $3, contract_type_reason = $4 WHERE id = $1`,
+      [wsId, analysis.contract_type, analysis.contract_type_confidence, analysis.contract_type_reason],
+    );
+    await refreshAfterWorkspaceWrite(wsId);
+    return {
+      result:
+        `Збережено режим (авто): ${CONTRACT_MODE_UK[analysis.contract_type]}, впевненість ` +
+        `${Math.round(analysis.contract_type_confidence * 100)}%. ${analysis.contract_type_reason}`,
+      summary: `Режим (авто): ${analysis.contract_type}`,
+      citations: [],
+    };
+  }
+
+  // source === 'survey' — user-confirmed; wins over any prior value (incl. auto/manual).
+  const ct = parsed.data.contract_type;
+  if (!ct) {
+    return {
+      result: 'Для source="survey" вкажи contract_type (bilateral|trilateral) — те, що підтвердив користувач.',
+      summary: 'Режим: бракує contract_type',
+      citations: [],
+    };
+  }
+  await query(
+    `UPDATE workspaces SET contract_type = $2, contract_type_source = 'survey',
+       contract_type_confidence = NULL, contract_type_reason = $3 WHERE id = $1`,
+    [wsId, ct, 'Підтверджено користувачем у розмові.'],
+  );
+  await refreshAfterWorkspaceWrite(wsId);
+  return {
+    result: `Збережено режим (підтверджено користувачем): ${CONTRACT_MODE_UK[ct]}.`,
+    summary: `Режим (survey): ${ct}`,
     citations: [],
   };
 }

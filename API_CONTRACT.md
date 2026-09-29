@@ -84,7 +84,9 @@ Response `200`:
                  "contract_type","intake_complete","product_category",
                  "incoterm","incoterm_in","incoterm_out",
                  "transport_mode","origin_country","destination_country",
-                 "responsible_user_id" },
+                 "responsible_user_id",
+                 "contract_type_source","contract_type_confidence","contract_type_reason",
+                 "survey_status","survey_answers" },
   "folders": [ { "id","name","position" } ]
 }
 ```
@@ -100,6 +102,11 @@ incoming (buy-side) Incoterm and `incoterm_out` the outgoing (sell-side) one; th
 Sets intake/contract fields. When `intake_complete` is true, the checklist is
 (re)computed and the derived status refreshed. `400 invalid_user` if
 `responsible_user_id` doesn't exist.
+Setting `contract_type` here (or via `/intake`) is treated as a **manual override**:
+the server stamps `contract_type_source="sidebar"` (and clears `contract_type_confidence`)
+so auto-detection never overwrites it. Setting `contract_type` to `null` ("Auto")
+clears the lock so auto-detection may repopulate it. These provenance columns are
+read-only in the API (server-managed) — they are returned by `GET`, not accepted here.
 Response `200`: `{ "workspace": {…}, "checklist"?: [ {…} ] }` (checklist present when intake complete).
 
 ### `PATCH /api/workspaces/:id/status`  (auth)
@@ -120,6 +127,14 @@ Clones a shipment's context (intake scalars + a fresh folder skeleton + parties)
 does **not** copy files, conversations, extractions, checklist items, or artifacts.
 The copy's `number` is `"<src>-копія"` and `status` is `draft`.
 Request: `{}`. Response `201`: `{ "workspace": {…} }`.
+
+### `PATCH /api/workspaces/:id/survey`  (auth)
+Persists the shipment-survey state for resumability. User data — never
+auto-mutated. Does **not** touch `contract_type` (the mode is set through the chat
+via `set_contract_mode`, so its provenance lock stays authoritative).
+Request (all optional): `{ "answers"?: { "<questionId>": { "question": string, "answer": string } },
+"status"?: "not_started"|"in_progress"|"completed"|"skipped" }`.
+Response `200`: `{ "survey_status", "survey_answers" }`.
 
 ---
 
@@ -188,6 +203,8 @@ LLM call — reuses `document_extractions`). **Read-only**: does not write anyth
 Request: `{}`. Response `200`: `{ "suggestions": [ { "role":"sender"|"intermediary"|"recipient",
 "company_name","country","source_files":string[], "confidence":number } ],
 "suggested_contract_type": "bilateral"|"trilateral"|null,
+"contract_type_reason": string, "contract_type_confidence": number (0..1; 0 when
+the mode could not be decided),
 "suggested_incoterm_in": string|null, "suggested_incoterm_out": string|null }`.
 
 ---
