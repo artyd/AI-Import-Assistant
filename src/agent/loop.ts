@@ -21,7 +21,8 @@ export interface AgentTurnParams {
   collectionId?: string;
   ownerId?: string;
   system: string;
-  history: { role: 'user' | 'assistant'; content: string }[];
+  /** Prior turns as replay-ready Anthropic message params (may include tool blocks). */
+  history: ChatMessageParam[];
   userMessage: string;
   sse: SseStream;
   /**
@@ -37,6 +38,25 @@ export interface AgentTurnResult {
   text: string;
   citations: Citation[];
   toolCalls: ToolCallRecord[];
+  /** This turn's full content blocks (assistant tool_use/text + tool_result msgs),
+   *  for lossless replay next turn. Empty when the turn errored mid-way. */
+  turnBlocks: ChatMessageParam[];
+  /** Set when the model/stream errored — caller persists partial text + surfaces it. */
+  error?: string;
+}
+
+/** Drop thinking blocks before persisting/replaying — required only for the live
+ *  turn, and replaying them across turns risks signature errors. */
+function sanitizeBlocks(msgs: ChatMessageParam[]): ChatMessageParam[] {
+  return msgs.map((m) => {
+    if (m.role === 'assistant' && Array.isArray(m.content)) {
+      const content = m.content.filter(
+        (b) => b.type !== 'thinking' && b.type !== 'redacted_thinking',
+      );
+      return { role: 'assistant', content };
+    }
+    return m;
+  });
 }
 
 const MAX_ITERATIONS = 14;
@@ -65,89 +85,99 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
   // turn can still call them. Handlers reject a mis-scoped call with a clear error.
   const ctx: ToolContext = { workspaceId, collectionId, ownerId };
 
+  // History is already replay-ready message params (may carry prior tool blocks).
   const messages: ChatMessageParam[] = [
-    ...history.map((m) => ({ role: m.role, content: m.content })),
+    ...history,
     { role: 'user' as const, content: userMessage },
   ];
+  const seedLen = messages.length; // everything appended past this = THIS turn
 
   let text = '';
   const citations: Citation[] = [];
   const toolCalls: ToolCallRecord[] = [];
-
-  // True when we run out of iterations while the model still wants to call tools —
-  // we then force one final tool-less answer so the user never gets a blank turn.
   let toolsStillPending = false;
+  let error: string | undefined;
 
-  for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
-    const stream = anthropic.messages.stream({
-      model: MODEL,
-      max_tokens: MAX_TOKENS,
-      thinking: { type: 'adaptive' },
-      system,
-      messages,
-      tools,
-    });
+  try {
+    for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
+      const stream = anthropic.messages.stream({
+        model: MODEL,
+        max_tokens: MAX_TOKENS,
+        thinking: { type: 'adaptive' },
+        system,
+        messages,
+        tools,
+      });
 
-    stream.on('text', (delta: string) => {
-      text += delta;
-      sse.send('token', { text: delta });
-    });
+      stream.on('text', (delta: string) => {
+        text += delta;
+        sse.send('token', { text: delta });
+      });
 
-    const msg = await stream.finalMessage();
-    // Preserve the full assistant content (incl. thinking + tool_use blocks).
-    messages.push({ role: 'assistant', content: msg.content });
+      const msg = await stream.finalMessage();
+      // Preserve the full assistant content (incl. thinking + tool_use blocks).
+      messages.push({ role: 'assistant', content: msg.content });
 
-    if (msg.stop_reason !== 'tool_use') break;
+      if (msg.stop_reason !== 'tool_use') break;
 
-    const toolResults: ChatContentBlockParam[] = [];
-    for (const block of msg.content) {
-      if (block.type !== 'tool_use') continue;
-      sse.send('tool_call', { tool: block.name, input: block.input });
+      const toolResults: ChatContentBlockParam[] = [];
+      for (const block of msg.content) {
+        if (block.type !== 'tool_use') continue;
+        sse.send('tool_call', { tool: block.name, input: block.input });
 
-      let outcome;
-      try {
-        outcome = await executeTool(block.name, block.input, ctx);
-      } catch (err) {
-        outcome = {
-          result: `Помилка інструмента: ${(err as Error).message}`,
-          summary: `Помилка: ${block.name}`,
-          citations: [] as Citation[],
-        };
+        let outcome;
+        try {
+          outcome = await executeTool(block.name, block.input, ctx);
+        } catch (err) {
+          outcome = {
+            result: `Помилка інструмента: ${(err as Error).message}`,
+            summary: `Помилка: ${block.name}`,
+            citations: [] as Citation[],
+          };
+        }
+
+        toolCalls.push({ tool: block.name, input: block.input, summary: outcome.summary });
+        citations.push(...outcome.citations);
+        sse.send('tool_result', { tool: block.name, summary: outcome.summary });
+
+        toolResults.push({
+          type: 'tool_result',
+          tool_use_id: block.id,
+          content: outcome.result,
+        });
       }
 
-      toolCalls.push({ tool: block.name, input: block.input, summary: outcome.summary });
-      citations.push(...outcome.citations);
-      sse.send('tool_result', { tool: block.name, summary: outcome.summary });
-
-      toolResults.push({
-        type: 'tool_result',
-        tool_use_id: block.id,
-        content: outcome.result,
-      });
+      messages.push({ role: 'user', content: toolResults });
+      if (iteration === MAX_ITERATIONS - 1) toolsStillPending = true;
     }
 
-    messages.push({ role: 'user', content: toolResults });
-    if (iteration === MAX_ITERATIONS - 1) toolsStillPending = true;
+    // Iterations exhausted mid-tool-use: make one final call WITHOUT tools so the
+    // model must synthesize a closing answer instead of leaving the turn empty.
+    if (toolsStillPending) {
+      const stream = anthropic.messages.stream({
+        model: MODEL,
+        max_tokens: MAX_TOKENS,
+        thinking: { type: 'adaptive' },
+        system,
+        messages,
+      });
+      stream.on('text', (delta: string) => {
+        text += delta;
+        sse.send('token', { text: delta });
+      });
+      const msg = await stream.finalMessage();
+      messages.push({ role: 'assistant', content: msg.content });
+    }
+  } catch (err) {
+    // Stream/model failure: keep whatever text streamed so the caller can persist a
+    // partial answer (survives reload) instead of losing it.
+    error = (err as Error).message;
   }
 
-  // Iterations exhausted mid-tool-use: make one final call WITHOUT tools so the
-  // model must synthesize a closing answer instead of leaving the turn empty.
-  if (toolsStillPending) {
-    const stream = anthropic.messages.stream({
-      model: MODEL,
-      max_tokens: MAX_TOKENS,
-      thinking: { type: 'adaptive' },
-      system,
-      messages,
-    });
-    stream.on('text', (delta: string) => {
-      text += delta;
-      sse.send('token', { text: delta });
-    });
-    await stream.finalMessage();
-  }
-
-  return { text, citations: dedupe(citations), toolCalls };
+  // Only persist replay blocks for a clean turn — a mid-turn error can leave an
+  // unpaired tool_use/tool_result, which would be invalid to replay.
+  const turnBlocks = error ? [] : sanitizeBlocks(messages.slice(seedLen));
+  return { text, citations: dedupe(citations), toolCalls, turnBlocks, error };
 }
 
 function dedupe(citations: Citation[]): Citation[] {

@@ -1,4 +1,5 @@
 import { query } from '../db/pool.js';
+import type { ChatMessageParam } from '../anthropic/client.js';
 
 export interface Citation {
   file: string;
@@ -108,11 +109,22 @@ export async function appendMessage(
   content: string,
   citations: Citation[] = [],
   toolCalls: ToolCallRecord[] = [],
+  // Full Anthropic content blocks of this turn (assistant tool_use/text + the
+  // following tool_result user messages), so the agent replays what it actually
+  // read/extracted on prior turns — not just its final text. Null → text-only.
+  blocks: ChatMessageParam[] | null = null,
 ): Promise<string> {
   const { rows } = await query<{ id: string }>(
-    `INSERT INTO messages (conversation_id, role, content, citations, tool_calls)
-     VALUES ($1, $2, $3, $4::jsonb, $5::jsonb) RETURNING id`,
-    [conversationId, role, content, JSON.stringify(citations), JSON.stringify(toolCalls)],
+    `INSERT INTO messages (conversation_id, role, content, citations, tool_calls, blocks)
+     VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb) RETURNING id`,
+    [
+      conversationId,
+      role,
+      content,
+      JSON.stringify(citations),
+      JSON.stringify(toolCalls),
+      blocks && blocks.length > 0 ? JSON.stringify(blocks) : null,
+    ],
   );
   await query('UPDATE conversations SET updated_at = now() WHERE id = $1', [conversationId]);
   return rows[0]!.id;
@@ -200,13 +212,60 @@ export async function getConversationMessagesByOwner(
   return getConversationMessagesByScope('normal', ownerId, conversationId);
 }
 
-/** Prior turns as Anthropic message params (text-only history). */
+// Windowing budget for replayed history. Prior turns' full content blocks (incl.
+// tool_result document text) are replayed so the agent remembers what it read;
+// this caps how much, keeping room for the system prompt, the current turn's
+// tool results, and the output. ~400k chars ≈ ~100k tokens.
+const HISTORY_CHAR_BUDGET = 400_000;
+
+function approxSize(msgs: ChatMessageParam[]): number {
+  try {
+    return JSON.stringify(msgs).length;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Prior turns as Anthropic message params, LOSSLESS where possible: an assistant
+ * row that stored `blocks` (its full tool_use/text + tool_result sequence) replays
+ * verbatim, so the agent sees the document text/search hits it read on earlier
+ * turns — not just its own prose. Legacy rows (no blocks) replay as plain text.
+ * Windowed from the most recent turn by a char budget so long chats can't overflow
+ * the context window (oldest whole turns are dropped first).
+ */
 export async function getConversationHistory(
   conversationId: string,
-): Promise<{ role: 'user' | 'assistant'; content: string }[]> {
-  const { rows } = await query<{ role: 'user' | 'assistant'; content: string }>(
-    'SELECT role, content FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC',
+): Promise<ChatMessageParam[]> {
+  const { rows } = await query<{
+    role: 'user' | 'assistant';
+    content: string;
+    blocks: ChatMessageParam[] | null;
+  }>(
+    'SELECT role, content, blocks FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC',
     [conversationId],
   );
-  return rows.filter((r) => r.content.trim().length > 0);
+
+  // One group per DB row; each group is a self-contained, replay-valid unit
+  // (a user text turn, or an assistant turn's full block sequence).
+  const groups: ChatMessageParam[][] = [];
+  for (const r of rows) {
+    if (r.role === 'assistant' && Array.isArray(r.blocks) && r.blocks.length > 0) {
+      groups.push(r.blocks);
+    } else if (r.content && r.content.trim().length > 0) {
+      groups.push([{ role: r.role, content: r.content }]);
+    }
+  }
+
+  // Keep the most recent groups within the char budget (never split a group, so
+  // tool_use/tool_result pairing stays valid). Always keep at least the last one.
+  const kept: ChatMessageParam[][] = [];
+  let size = 0;
+  for (let i = groups.length - 1; i >= 0; i--) {
+    const s = approxSize(groups[i]!);
+    if (kept.length > 0 && size + s > HISTORY_CHAR_BUDGET) break;
+    kept.unshift(groups[i]!);
+    size += s;
+  }
+  return kept.flat();
 }

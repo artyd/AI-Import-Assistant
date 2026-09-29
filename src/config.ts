@@ -118,7 +118,7 @@ const envSchema = z.object({
   // long multi-page scan (e.g. a 10+ page contract) isn't transcribed only
   // partway. 16000 is the safe non-streaming ceiling (above that the SDK can hit
   // HTTP timeouts); very long docs beyond this still truncate — see OCR notes.
-  OCR_MAX_TOKENS: z.coerce.number().int().positive().default(16000),
+  OCR_MAX_TOKENS: z.coerce.number().int().positive().default(32000),
 
   // Structured document extraction (worker) + daily reminders (worker cron).
   EXTRACTION_ENABLED: z

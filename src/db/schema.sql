@@ -536,3 +536,19 @@ ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS contract_type_reason TEXT;
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS survey_answers JSONB;
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS survey_status TEXT NOT NULL DEFAULT 'not_started'
   CHECK (survey_status IN ('not_started', 'in_progress', 'completed', 'skipped'));
+
+-- ── Analysis/context fixes: 'partial' extraction status + conversation blocks ──
+
+-- Widen extraction_status with 'partial' — a file whose structured extraction was
+-- TRUNCATED by the output-token cap (stop_reason='max_tokens'): fields are present
+-- but incomplete (line_items under-counted), so it must not be treated as a clean
+-- 'ok'. Drop+add is re-runnable; the inline CHECK above is auto-named.
+ALTER TABLE files DROP CONSTRAINT IF EXISTS files_extraction_status_check;
+ALTER TABLE files ADD CONSTRAINT files_extraction_status_check
+  CHECK (extraction_status IN ('ok', 'unreadable', 'no_fields', 'partial'));
+
+-- Lossless conversation memory: store the full Anthropic content blocks of each
+-- turn (assistant tool_use/text + the following tool_result user message) so the
+-- agent replays what it actually read/extracted on prior turns, not just its text
+-- answers. NULL for legacy rows (they replay as plain text). See conversations.ts.
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS blocks JSONB;

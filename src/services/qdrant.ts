@@ -97,10 +97,38 @@ export interface SearchHit {
  * the fallback provider during a primary outage. A provider that is down at query
  * time is skipped (degrade, not fail) rather than aborting the whole search.
  */
+/**
+ * Round-robin the top hits across their source documents so one large document
+ * (many chunks) can't occupy every slot and starve the invoice/packing/certs of a
+ * multi-doc shipment. Preserves score order within each doc and overall.
+ */
+function diversifyByDocument(hits: SearchHit[], limit: number, perFileCap: number): SearchHit[] {
+  const sorted = [...hits].sort((a, b) => b.score - a.score);
+  const byFile = new Map<string, SearchHit[]>();
+  for (const h of sorted) {
+    const key = h.fileId ?? h.file;
+    const arr = byFile.get(key);
+    if (arr) arr.push(h);
+    else byFile.set(key, [h]);
+  }
+  const out: SearchHit[] = [];
+  for (let round = 0; round < perFileCap && out.length < limit; round++) {
+    for (const arr of byFile.values()) {
+      if (round < arr.length) {
+        out.push(arr[round]!);
+        if (out.length >= limit) break;
+      }
+    }
+  }
+  return out.sort((a, b) => b.score - a.score);
+}
+
 export async function searchWorkspace(
   workspaceId: string,
   query: string,
-  limit = 6,
+  // Raised from 6: a shipment is 40-80 chunks across invoice/packing/contract/certs;
+  // 6 gave <10% recall and let one big doc dominate. Diversified below.
+  limit = 24,
 ): Promise<SearchHit[]> {
   const filter = { must: [{ key: 'workspace_id', match: { value: workspaceId } }] };
   const hits: SearchHit[] = [];
@@ -111,7 +139,8 @@ export async function searchWorkspace(
       if (!vector) continue;
       const results = await qdrant.search(provider.collectionName, {
         vector,
-        limit,
+        // Over-fetch per provider so diversification has candidates from many docs.
+        limit: Math.max(limit * 2, 48),
         with_payload: true,
         filter,
       });
@@ -132,5 +161,26 @@ export async function searchWorkspace(
     }
   }
 
-  return hits.sort((a, b) => b.score - a.score).slice(0, limit);
+  // Per-document diversity instead of a pure global top-`limit` slice.
+  return diversifyByDocument(hits, limit, 6);
+}
+
+/**
+ * How many chunks of a workspace are actually in the vector index. Lets the search
+ * tool tell the agent when results are partial, and distinguish an EMPTY index
+ * (embedding outage → files present but unsearchable) from "genuinely nothing".
+ * Uses Qdrant's fast count API (approximate) rather than scrolling every point.
+ */
+export async function countWorkspaceChunks(workspaceId: string): Promise<number> {
+  const filter = { must: [{ key: 'workspace_id', match: { value: workspaceId } }] };
+  let total = 0;
+  for (const provider of getAllEmbeddingProviders()) {
+    try {
+      const res = await qdrant.count(provider.collectionName, { filter, exact: false });
+      total += res.count;
+    } catch {
+      // Provider down / collection missing — count what we can.
+    }
+  }
+  return total;
 }
