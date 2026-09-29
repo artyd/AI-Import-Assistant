@@ -18,7 +18,7 @@ import type {
   Workspace,
 } from "@/lib/types";
 import { Chat, type EntitySelector } from "@/components/Chat";
-import type { SurveyAnswers, SurveyStatus } from "@/lib/surveyQuestions";
+import type { SurveyAnswers, SurveyIntakeField, SurveyStatus } from "@/lib/surveyQuestions";
 import { AnalyzePanel } from "@/components/AnalyzePanel";
 import { ArchiveList } from "@/components/ArchiveModal";
 import { AiSettingsModal } from "@/components/AiSettingsModal";
@@ -314,6 +314,45 @@ export default function WorkspacePage() {
     },
     [id, onPatch]
   );
+
+  // Bumped to force the ShipmentPanel to re-load its data (parties / checklist /
+  // intake) after the workspace changed out-of-band (agent turn, survey intake).
+  const [sidebarRefreshKey, setSidebarRefreshKey] = useState(0);
+
+  // Deterministic survey → intake: write contract_type/transport_mode/product_category
+  // straight to the workspace so the sidebar reflects the survey immediately.
+  const onSurveyIntake = useCallback(
+    (patch: Partial<Record<SurveyIntakeField, string>>) => {
+      void (async () => {
+        try {
+          const r = await api<{ workspace: Workspace }>(`/api/workspaces/${id}/intake`, {
+            method: "PATCH",
+            body: patch,
+          });
+          setWorkspace((w) => (w ? { ...w, ...r.workspace } : r.workspace));
+        } catch {
+          /* non-blocking */
+        }
+        setSidebarRefreshKey((k) => k + 1);
+      })();
+    },
+    [id]
+  );
+
+  // After a supply chat turn the agent may have changed workspace context via tools;
+  // re-fetch the workspace and refresh the sidebar so it never shows stale data.
+  const onSupplyTurnComplete = useCallback(() => {
+    void (async () => {
+      try {
+        const r = await api<{ workspace: Workspace; folders: Folder[] }>(`/api/workspaces/${id}`);
+        setWorkspace(r.workspace);
+        setFolders(r.folders);
+      } catch {
+        /* ignore */
+      }
+      setSidebarRefreshKey((k) => k + 1);
+    })();
+  }, [id]);
 
   const refreshFiles = useCallback(async () => {
     const r = await api<{ files: FileItem[] }>(`/api/workspaces/${id}/files`);
@@ -1302,9 +1341,14 @@ export default function WorkspacePage() {
               folders={folders}
               onUploadAndClassify={uploadAndClassify}
               onMoveFile={moveFile}
+              onTurnComplete={chatKind === "supply" ? onSupplyTurnComplete : undefined}
               onSurveyPersist={chatKind === "supply" ? persistSurvey : undefined}
-              initialSurveyStatus={workspace.survey_status ?? null}
-              initialSurveyAnswers={(workspace.survey_answers as SurveyAnswers | null) ?? null}
+              onSurveyIntake={chatKind === "supply" ? onSurveyIntake : undefined}
+              surveyPrefilled={{
+                contract_type: !!workspace.contract_type,
+                transport_mode: !!workspace.transport_mode,
+                product_category: !!workspace.product_category,
+              }}
             />
           )}
         </div>
@@ -1334,7 +1378,14 @@ export default function WorkspacePage() {
             />
           }
           journal={<AgentLog entries={log} embedded />}
-          complete={<ShipmentPanel workspaceId={id} workspace={workspace} onPatch={onPatch} />}
+          complete={
+            <ShipmentPanel
+              workspaceId={id}
+              workspace={workspace}
+              onPatch={onPatch}
+              refreshKey={sidebarRefreshKey}
+            />
+          }
         />
       )}
 

@@ -20,10 +20,12 @@ import { chunkPages } from '../services/extract/chunk.js';
 import {
   extractDocumentFields,
   extractDocumentFieldsFromDocument,
+  type ExtractedFields,
 } from '../services/extraction/extractFields.js';
 import { classifyAndFile } from '../services/classify.js';
 import { getWorkspaceById } from '../services/workspaceAccess.js';
 import { refreshWorkspaceState } from '../services/status.js';
+import { autoFillWorkspaceContext } from '../services/autoContext.js';
 import { computeRisks } from '../services/risks.js';
 import { maybeReconcileBatch } from '../services/reconcileBatch.js';
 import { insertNotification } from '../services/notifications.js';
@@ -47,6 +49,27 @@ interface FileJobRow {
   disk_path: string;
   folder_name: string | null;
   batch_id: string | null;
+}
+
+/**
+ * True when an extraction carries at least one real signal. A forced-tool call
+ * (tool_choice) essentially always returns a non-null object, so "vision produced
+ * garbage/near-empty" was previously indistinguishable from "good data" and got
+ * marked `ok`. This gate downgrades an all-null extraction to no_fields/unreadable
+ * so it reaches the manual-verification screen instead of silently looking read.
+ */
+function extractionIsSubstantive(f: ExtractedFields): boolean {
+  const backbone = [
+    f.invoice_number, f.contract_number, f.po_number, f.total_value, f.currency,
+    f.hs_code, f.country_of_origin, f.buyer, f.seller, f.incoterm, f.manufacturer,
+    f.registration_number, f.document_date, f.net_weight_kg, f.gross_weight_kg,
+    f.total_weight_kg, f.packages_count,
+  ];
+  const hasBackbone = backbone.some((v) => v !== null && v !== undefined && v !== '');
+  const hasLines = Array.isArray(f.line_items) && f.line_items.length > 0;
+  const hasParties = Array.isArray(f.parties) && f.parties.length > 0;
+  const hasDocType = !!f.doc_type && f.doc_type !== 'other';
+  return hasBackbone || hasLines || hasParties || hasDocType;
 }
 
 async function setStatus(
@@ -80,14 +103,18 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
     const buf = await readStoredFile(file.disk_path);
     let pages = await extractText(buf, file.type);
 
-    // OCR fallback: a scanned PDF (no text layer) or an image yields no text
-    // from extractText. Transcribe it with Claude vision so it still gets
-    // indexed + field-extracted. Best-effort — a failure leaves pages empty and
-    // the file simply indexes as before (status still becomes 'ready').
-    if (pages.length === 0 && (file.type === 'pdf' || file.type === 'image')) {
+    // OCR fallback: triggered by text DENSITY, not just zero-text. A mostly-scanned
+    // PDF with a thin text layer (a cover page, a digital stamp, OCR artifacts)
+    // used to skip OCR and index near-empty. Now we OCR whenever the extracted
+    // text is sparse and only KEEP the OCR result if it recovered MORE text, so a
+    // good text layer is never regressed. Best-effort — failure leaves pages as-is.
+    const textLen = (ps: typeof pages): number => ps.reduce((n, p) => n + p.text.length, 0);
+    const sparse = pages.length === 0 || textLen(pages) < Math.max(120, pages.length * 60);
+    if (sparse && (file.type === 'pdf' || file.type === 'image')) {
       try {
-        pages = await ocrDocument(buf, file.type, file.name);
-        if (pages.length > 0) {
+        const ocrPages = await ocrDocument(buf, file.type, file.name);
+        if (textLen(ocrPages) > textLen(pages)) {
+          pages = ocrPages;
           // eslint-disable-next-line no-console
           console.log(`OCR recovered text for file ${file.id} (${file.name}).`);
         }
@@ -152,7 +179,7 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
             : null;
         if (!fields && pages.length > 0) fields = await extractDocumentFields(fullText);
 
-        if (fields) {
+        if (fields && extractionIsSubstantive(fields)) {
           await query(
             `INSERT INTO document_extractions (file_id, workspace_id, extracted_fields, model_version)
              VALUES ($1, $2, $3::jsonb, $4)`,
@@ -183,6 +210,15 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
         const ws = await getWorkspaceById(file.workspace_id);
         if (ws) {
           await refreshWorkspaceState(ws);
+          // AUTOPILOT: persist document-derived context (parties, contract_type,
+          // Incoterms, origin) so the agent/sidebar don't ask for what the docs
+          // already state. NULL-only + manual-lock-respecting; best-effort.
+          try {
+            await autoFillWorkspaceContext(ws.id);
+          } catch (err) {
+            // eslint-disable-next-line no-console
+            console.error(`Auto-fill context failed for workspace ${ws.id}:`, (err as Error).message);
+          }
           // Proactive risk scan: notify the responsible user about NEW critical
           // (error-level) risks. De-duped per (user, workspace, type) per day.
           if (ws.responsible_user_id) {

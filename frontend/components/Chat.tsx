@@ -7,6 +7,7 @@ import { folderLabel } from "@/lib/folderLabels";
 import {
   SURVEY_QUESTIONS,
   type SurveyAnswers,
+  type SurveyIntakeField,
   type SurveyOption,
   type SurveyQuestion,
   type SurveyStatus,
@@ -133,6 +134,11 @@ interface Props {
   onSurveyPersist?: (state: { answers?: SurveyAnswers; status: SurveyStatus }) => void;
   initialSurveyStatus?: SurveyStatus | null;
   initialSurveyAnswers?: SurveyAnswers | null;
+  // Deterministic survey → intake: writes contract_type/transport_mode/product_category
+  // straight to the workspace so the sidebar updates immediately (not via the agent).
+  onSurveyIntake?: (patch: Partial<Record<SurveyIntakeField, string>>) => void;
+  // Which intake fields are already filled (autopilot) — those questions are skipped.
+  surveyPrefilled?: Partial<Record<SurveyIntakeField, boolean>>;
 }
 
 // Local-only chat items for the paperclip flow. These are NOT persisted to the
@@ -162,7 +168,8 @@ interface ClassifyCard {
 interface QuestionCard {
   kind: "question";
   id: string;
-  qIndex: number; // index into SURVEY_QUESTIONS
+  q: SurveyQuestion; // the resolved question (from the filtered active list)
+  index: number; // 1-based position for display
   total: number;
   answered: boolean;
   answerLabel?: string; // chosen option label (or free text) once answered
@@ -214,8 +221,8 @@ export function Chat({
   onUploadAndClassify,
   onMoveFile,
   onSurveyPersist,
-  initialSurveyStatus,
-  initialSurveyAnswers,
+  onSurveyIntake,
+  surveyPrefilled,
 }: Props) {
   // File intake is only wired when the host supplies the workspace file handlers.
   const fileIntake = !!(onUploadAndClassify && onMoveFile && folders);
@@ -531,88 +538,98 @@ export function Chat({
   // so the agent persists everything in a single turn (cheaper than a turn per
   // question) while still honouring "answer = normal chat message". State (answers
   // + status) is also persisted to the workspace via onSurveyPersist for resume.
-  const surveyAnswersRef = useRef<{ id: string; question: string; answer: string }[]>([]);
+  const surveyAnswersRef = useRef<
+    { id: string; question: string; label: string; value: string; q: SurveyQuestion }[]
+  >([]);
+  // The active (filtered) question list for the current run — questions whose
+  // intake field is already filled (autopilot) are skipped.
+  const activeQuestionsRef = useRef<SurveyQuestion[]>([]);
 
   const answersRecord = useCallback(
     (): SurveyAnswers =>
       Object.fromEntries(
-        surveyAnswersRef.current.map((a) => [a.id, { question: a.question, answer: a.answer }])
+        surveyAnswersRef.current.map((a) => [a.id, { question: a.question, answer: a.label }])
       ),
     []
   );
+
+  // Build the deterministic intake patch (contract_type / transport_mode /
+  // product_category) from the answers using each question's `intake` mapping.
+  const intakePatch = useCallback((): Partial<Record<SurveyIntakeField, string>> => {
+    const patch: Partial<Record<SurveyIntakeField, string>> = {};
+    for (const a of surveyAnswersRef.current) {
+      const m = a.q.intake;
+      if (!m || a.value === "other") continue;
+      if (m.skipValues?.includes(a.value)) continue;
+      patch[m.field] = m.use === "value" ? a.value : a.label;
+    }
+    return patch;
+  }, []);
 
   const submitSurvey = useCallback(() => {
     const answers = surveyAnswersRef.current;
     if (answers.length === 0) return;
     const record = answersRecord();
-    const lines = answers.map((a) => `• ${a.question}\n  → ${a.answer}`).join("\n");
+    const patch = intakePatch();
+    const lines = answers.map((a) => `• ${a.question}\n  → ${a.label}`).join("\n");
     const msg =
-      "Це мої відповіді на опитування про постачання. Онови контекст постачання за ними " +
-      '(структуру контракту — через set_contract_mode із source="survey"; інші параметри — ' +
-      "через save_workspace_context), потім коротко підсумуй, що збережено і що варто уточнити:\n\n" +
+      "Я пройшов коротке опитування про постачання (дані вже збережено в картці постачання). " +
+      "Ось відповіді — коротко підсумуй план перевірки з урахуванням пріоритету і що ще варто уточнити:\n\n" +
       lines;
     surveyAnswersRef.current = [];
+    activeQuestionsRef.current = [];
+    // Deterministic sidebar update (does not wait for the agent).
+    if (Object.keys(patch).length > 0) onSurveyIntake?.(patch);
     onSurveyPersist?.({ answers: record, status: "completed" });
     void runMessage(msg);
-  }, [runMessage, onSurveyPersist, answersRecord]);
+  }, [runMessage, onSurveyPersist, onSurveyIntake, answersRecord, intakePatch]);
 
   const startSurvey = useCallback(() => {
     if (streaming) return;
-    // Resume: seed prior answers and jump to the first still-unanswered question.
-    const seed = initialSurveyAnswers ?? {};
-    const firstUnanswered = SURVEY_QUESTIONS.findIndex((q) => !seed[q.id]);
-    const startIndex = firstUnanswered < 0 ? 0 : firstUnanswered;
-    surveyAnswersRef.current =
-      startIndex === 0
-        ? []
-        : SURVEY_QUESTIONS.filter((q) => seed[q.id]).map((q) => ({
-            id: q.id,
-            question: q.question,
-            answer: seed[q.id]!.answer,
-          }));
+    // Skip questions whose intake field is already filled (autopilot).
+    const active = SURVEY_QUESTIONS.filter(
+      (q) => !q.skipIfFilled || !surveyPrefilled?.[q.skipIfFilled]
+    );
+    activeQuestionsRef.current = active;
+    surveyAnswersRef.current = [];
+    const first = active[0];
+    if (!first) return; // nothing left to ask
     setItems((m) => [
       ...m,
-      {
-        kind: "question",
-        id: `q-${Date.now()}-${startIndex}`,
-        qIndex: startIndex,
-        total: SURVEY_QUESTIONS.length,
-        answered: false,
-      },
+      { kind: "question", id: `q-${Date.now()}-0`, q: first, index: 1, total: active.length, answered: false },
     ]);
     onSurveyPersist?.({ status: "in_progress" });
-  }, [streaming, initialSurveyAnswers, onSurveyPersist]);
+  }, [streaming, surveyPrefilled, onSurveyPersist]);
 
   const answerQuestion = useCallback(
     (card: QuestionCard, answer: SurveyOption) => {
-      const q = SURVEY_QUESTIONS[card.qIndex];
-      if (!q) return;
       surveyAnswersRef.current = [
-        ...surveyAnswersRef.current.filter((a) => a.id !== q.id),
-        { id: q.id, question: q.question, answer: answer.label },
+        ...surveyAnswersRef.current.filter((a) => a.id !== card.q.id),
+        { id: card.q.id, question: card.q.question, label: answer.label, value: answer.value, q: card.q },
       ];
-      const nextIndex = card.qIndex + 1;
-      const last = nextIndex >= SURVEY_QUESTIONS.length;
+      const active = activeQuestionsRef.current;
+      const nextQ = active[card.index]; // index is 1-based → next lives at [index]
       setItems((m) => {
         const marked = m.map((it) =>
           it.kind === "question" && it.id === card.id
             ? { ...it, answered: true, answerLabel: answer.label }
             : it
         );
-        return last
-          ? marked
-          : [
+        return nextQ
+          ? [
               ...marked,
               {
                 kind: "question" as const,
-                id: `q-${Date.now()}-${nextIndex}`,
-                qIndex: nextIndex,
-                total: SURVEY_QUESTIONS.length,
+                id: `q-${Date.now()}-${card.index}`,
+                q: nextQ,
+                index: card.index + 1,
+                total: active.length,
                 answered: false,
               },
-            ];
+            ]
+          : marked;
       });
-      if (last) submitSurvey();
+      if (!nextQ) submitSurvey();
       else onSurveyPersist?.({ answers: answersRecord(), status: "in_progress" });
     },
     [submitSurvey, onSurveyPersist, answersRecord]
@@ -621,6 +638,7 @@ export function Chat({
   const skipSurvey = useCallback(
     (card: QuestionCard) => {
       surveyAnswersRef.current = [];
+      activeQuestionsRef.current = [];
       setItems((m) =>
         m.map((it) =>
           it.kind === "question" && it.id === card.id
@@ -1542,10 +1560,9 @@ function QuestionBubble({
   onAnswer: (card: QuestionCard, answer: SurveyOption) => void;
   onSkip: (card: QuestionCard) => void;
 }) {
-  const q: SurveyQuestion | undefined = SURVEY_QUESTIONS[card.qIndex];
+  const q: SurveyQuestion = card.q;
   const [otherOpen, setOtherOpen] = useState(false);
   const [otherText, setOtherText] = useState("");
-  if (!q) return null;
 
   const optBtn = { height: 30, padding: "0 12px", fontSize: 13 } as const;
   const submitOther = () => {
@@ -1571,7 +1588,7 @@ function QuestionBubble({
           ?
         </span>
         <span style={{ fontWeight: 600 }}>
-          Опитування про постачання · Питання {card.qIndex + 1} з {card.total}
+          Опитування про постачання · Питання {card.index} з {card.total}
         </span>
       </div>
       <div style={{ paddingLeft: 34 }}>

@@ -1,18 +1,22 @@
-// Shipment survey — the 10 guided questions Штурман asks to build a complete
-// picture of a delivery (contract structure, invoicing, consignor/consignee,
-// Incoterms, transport, product form, broker, priority). UA-only, following the
-// repo convention of module-level label maps (no i18n library).
+// Shipment survey — a SHORT guided confirmation Штурман asks only for what the
+// documents can't reliably infer. Auto-detection (contract_type, parties,
+// Incoterms, origin) is persisted by the worker, so those questions are skipped
+// when the field is already filled — a 10-question survey collapses to ~2-3.
+// UA-only, following the repo convention of module-level maps (no i18n library).
 //
-// The survey is CLIENT-DRIVEN: cards are shown one at a time in the chat thread,
-// answers are collected locally, then submitted to the agent as a single normal
-// chat message (see Chat.tsx). `feeds` documents which sidebar field / analysis
-// decision each answer informs — it is not used at runtime.
+// Answers persist DETERMINISTICALLY on the client: each question with an `intake`
+// mapping is written straight to the workspace via PATCH /intake (using the
+// machine `value` where the sidebar expects a slug), so the sidebar updates
+// immediately. The agent turn is then advisory only (summary + priority).
 
 export type SurveyStatus = "not_started" | "in_progress" | "completed" | "skipped";
 
 // Persisted answers, keyed by question id → the question text + the chosen answer
 // label. Stored in workspaces.survey_answers (JSONB) for resumability.
 export type SurveyAnswers = Record<string, { question: string; answer: string }>;
+
+// Workspace intake fields the survey can write directly.
+export type SurveyIntakeField = "contract_type" | "transport_mode" | "product_category";
 
 export interface SurveyOption {
   value: string;
@@ -25,8 +29,16 @@ export interface SurveyQuestion {
   options: SurveyOption[];
   /** Allow a free-text "Інше…" answer. Defaults to true. */
   allowOther?: boolean;
-  /** Which sidebar field / analysis-plan decision the answer feeds (documentation). */
-  feeds?: string;
+  /** Deterministic client-side persistence to a workspace intake field. */
+  intake?: {
+    field: SurveyIntakeField;
+    /** Store the option's machine `value` (slug) or its human `label`. */
+    use: "value" | "label";
+    /** Option values that mean "leave unset" (e.g. "unknown" → keep auto). */
+    skipValues?: string[];
+  };
+  /** Skip this card when the workspace already has this field set (autopilot). */
+  skipIfFilled?: SurveyIntakeField;
 }
 
 export const SURVEY_QUESTIONS: SurveyQuestion[] = [
@@ -38,59 +50,8 @@ export const SURVEY_QUESTIONS: SurveyQuestion[] = [
       { value: "trilateral", label: "Постачальник → PrimeForce → AGroup95" },
       { value: "unknown", label: "Ще не знаю / визначити автоматично" },
     ],
-    feeds: "contract_type (+ source=survey); 2-leg vs 1-leg analysis",
-  },
-  {
-    id: "invoices_ag95",
-    question: "Хто виставляє інвойс кінцевому покупцю (AGroup95)?",
-    options: [
-      { value: "manufacturer", label: "Виробник напряму" },
-      { value: "trader", label: "Торговий постачальник (не виробник)" },
-      { value: "primeforce", label: "PrimeForce" },
-    ],
-    feeds: "seller party; reinforces bilateral/trilateral",
-  },
-  {
-    id: "consignor_consignee",
-    question: "Хто вантажовідправник (consignor) і хто вантажоодержувач (consignee)?",
-    options: [
-      { value: "supplier_ag95", label: "Відправник — постачальник, одержувач — AGroup95" },
-      { value: "supplier_prime", label: "Відправник — постачальник, одержувач — PrimeForce" },
-      { value: "prime_ag95", label: "Відправник — PrimeForce, одержувач — AGroup95" },
-    ],
-    feeds: "parties slots; reconcile party axis",
-  },
-  {
-    id: "payer",
-    question: "Хто платник за товар / за перевезення?",
-    options: [
-      { value: "ag95_direct", label: "AGroup95 платить постачальнику напряму" },
-      { value: "via_prime", label: "AGroup95 платить PrimeForce, Prime — постачальнику" },
-      { value: "split", label: "Розділено (товар і перевезення окремо)" },
-    ],
-    feeds: "value-chain / markup logic; number of commercial layers",
-  },
-  {
-    id: "price_differs",
-    question:
-      "Чи відрізняються ціни між наборами документів (Постачальник→Prime та Prime→AGroup95)?",
-    options: [
-      { value: "markup", label: "Так, є націнка (різні суми)" },
-      { value: "same", label: "Ні, ціни однакові" },
-      { value: "single_set", label: "Лише один набір документів" },
-      { value: "unknown", label: "Не знаю" },
-    ],
-    feeds: "markup-expected branch in reconcile (suppresses false value-mismatch)",
-  },
-  {
-    id: "incoterms",
-    question: "Які умови постачання (Incoterms) і на якому плечі?",
-    options: [
-      { value: "single", label: "Одні умови на все постачання" },
-      { value: "split", label: "Різні: вхідні (Supplier→Prime) та вихідні (Prime→AG95)" },
-      { value: "unknown", label: "Ще не визначено" },
-    ],
-    feeds: "incoterm_in / incoterm_out; incoterm-split checks",
+    intake: { field: "contract_type", use: "value", skipValues: ["unknown", "other"] },
+    skipIfFilled: "contract_type",
   },
   {
     id: "transport",
@@ -101,7 +62,8 @@ export const SURVEY_QUESTIONS: SurveyQuestion[] = [
       { value: "air", label: "Авіа" },
       { value: "rail", label: "Залізниця / комбінований" },
     ],
-    feeds: "transport_mode; checklist transport docs",
+    intake: { field: "transport_mode", use: "value" },
+    skipIfFilled: "transport_mode",
   },
   {
     id: "product_form",
@@ -112,18 +74,8 @@ export const SURVEY_QUESTIONS: SurveyQuestion[] = [
       { value: "in_bulk", label: "In-bulk / напівфабрикат" },
       { value: "equipment", label: "Обладнання / інше" },
     ],
-    feeds: "product_category; HS-code path, required certs",
-  },
-  {
-    id: "broker_forwarder",
-    question: "Чи залучені брокер / експедитор?",
-    options: [
-      { value: "broker", label: "Митний брокер" },
-      { value: "forwarder", label: "Транспортний експедитор" },
-      { value: "both", label: "І брокер, і експедитор" },
-      { value: "none", label: "Ні" },
-    ],
-    feeds: "extra parties roles; checklist (transit/forwarding docs)",
+    intake: { field: "product_category", use: "label" },
+    skipIfFilled: "product_category",
   },
   {
     id: "priority",
@@ -134,6 +86,5 @@ export const SURVEY_QUESTIONS: SurveyQuestion[] = [
       { value: "classification", label: "Класифікація УКТ ЗЕД / дозволи" },
       { value: "all", label: "Терміново — усе одразу" },
     ],
-    feeds: "analysis-plan ordering; urgency/priority",
   },
 ];
