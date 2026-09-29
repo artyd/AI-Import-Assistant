@@ -1298,32 +1298,6 @@ function Composer({
             <IconAttach size={21} />
           </button>
         )}
-        {onStartSurvey && (
-          <button
-            title="Опитування про постачання"
-            aria-label="Опитування про постачання"
-            data-testid="chat-survey"
-            onClick={onStartSurvey}
-            disabled={streaming}
-            style={{
-              flex: "none",
-              height: 40,
-              alignSelf: "center",
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              padding: "0 12px",
-              borderRadius: 10,
-              border: "1px solid var(--border2)",
-              background: "transparent",
-              color: "var(--muted)",
-              fontSize: 13,
-              cursor: streaming ? "default" : "pointer",
-            }}
-          >
-            <span style={{ fontSize: 15, lineHeight: 1 }}>?</span> Опитування
-          </button>
-        )}
         <textarea
           ref={inputRef}
           value={input}
@@ -1363,6 +1337,34 @@ function Composer({
         >
           {streaming ? <IconSpinner size={16} /> : <IconSend size={16} />}
         </button>
+        {onStartSurvey && (
+          <button
+            title="Опитування про постачання"
+            aria-label="Опитування про постачання"
+            data-testid="chat-survey"
+            onClick={onStartSurvey}
+            disabled={streaming}
+            style={{
+              flex: "none",
+              width: 40,
+              height: 40,
+              alignSelf: "center",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              borderRadius: 10,
+              border: "1px solid var(--border2)",
+              background: "transparent",
+              color: "var(--muted)",
+              fontSize: 18,
+              fontWeight: 700,
+              lineHeight: 1,
+              cursor: streaming ? "default" : "pointer",
+            }}
+          >
+            ?
+          </button>
+        )}
       </div>
     </div>
   );
