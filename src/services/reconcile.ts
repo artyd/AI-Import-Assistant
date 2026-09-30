@@ -669,7 +669,21 @@ function reconcileLineItems(
     const pl = plItems[j]!;
     const label = inv.description ?? inv.batch_no ?? key;
 
-    if (inv.quantity !== null && pl.quantity !== null && inv.quantity > 0) {
+    // Quantities are comparable only in the same unit (invoice in kg vs packing
+    // list in drums is not a mismatch) — different units → a yellow check-this.
+    const invUnit = normalizeUnit(inv.unit);
+    const plUnit = normalizeUnit(pl.unit);
+    const unitsDiffer = invUnit !== null && plUnit !== null && invUnit !== plUnit;
+    if (unitsDiffer && inv.quantity !== null && pl.quantity !== null) {
+      out.push({
+        field: 'line_quantity',
+        expected: `invoice «${label}»: ${inv.quantity} ${inv.unit}`,
+        actual: `packing_list: ${pl.quantity} ${pl.unit} (інші одиниці — перевірте перерахунок)`,
+        severity: 'warning',
+        kind: 'suspected',
+        citations: [cite(invoice, inv.quantity), cite(packing, pl.quantity)],
+      });
+    } else if (inv.quantity !== null && pl.quantity !== null && inv.quantity > 0) {
       const rel = Math.abs(inv.quantity - pl.quantity) / inv.quantity;
       if (rel > WEIGHT_TOLERANCE) {
         out.push({
@@ -716,3 +730,20 @@ function lineKey(it: ExtractedLineItem): string {
   if (b) return b;
   return it.description ? it.description.toLowerCase().replace(/[^a-z0-9а-яіїєґ]/gi, '') : '';
 }
+
+const UNIT_ALIASES: Record<string, string> = {
+  kg: 'kg', kgs: 'kg', кг: 'kg', kilogram: 'kg', kilograms: 'kg', кілограм: 'kg',
+  g: 'g', gr: 'g', г: 'g', gram: 'g', grams: 'g',
+  t: 't', mt: 't', ton: 't', tons: 't', tonne: 't', т: 't',
+  l: 'l', ltr: 'l', л: 'l', litre: 'l', liter: 'l',
+  pcs: 'pcs', pc: 'pcs', шт: 'pcs', piece: 'pcs', pieces: 'pcs', units: 'pcs', unit: 'pcs',
+};
+
+/** Canonical unit for comparison; null when unknown/absent (then quantities are compared as-is). */
+export function normalizeUnit(u: string | null | undefined): string | null {
+  if (!u) return null;
+  const k = u.trim().toLowerCase().replace(/[.\s]/g, '');
+  if (!k) return null;
+  return UNIT_ALIASES[k] ?? k;
+}
+
