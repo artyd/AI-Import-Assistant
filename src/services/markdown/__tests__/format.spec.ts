@@ -108,3 +108,19 @@ describe('full-text search helpers', () => {
     expect(out.map((x) => x.fileId)).toEqual(['a', 'b']);
   });
 });
+
+describe('splitLongMarkdown', () => {
+  it('splits on row boundaries and repeats the table header', async () => {
+    const { splitLongMarkdown } = await import('../format.js');
+    const rows = Array.from({ length: 6 }, (_, i) => `| item${i} | ${i}0 |`);
+    const md = ['| Товар | К-сть |', '| --- | --- |', ...rows].join('\n');
+    const parts = splitLongMarkdown(md, 60);
+    expect(parts.length).toBeGreaterThan(1);
+    for (const p of parts) {
+      expect(p.startsWith('| Товар | К-сть |\n| --- | --- |')).toBe(true);
+      for (const line of p.split('\n')) expect(line.endsWith('|')).toBe(true);
+    }
+    const allRows = parts.flatMap((p) => p.split('\n').filter((l) => l.startsWith('| item')));
+    expect(allRows).toEqual(rows);
+  });
+});

@@ -147,6 +147,8 @@ export interface ExtractedFields {
 // fields (totals often sit on the last page). The vision path sends the whole
 // document image instead and is not clipped here.
 const MAX_INPUT_CHARS = 120_000;
+// Max extraction passes per document (~1M chars of Markdown).
+const MAX_EXTRACTION_PARTS = 8;
 // Anthropic PDF request limit (same bound as the OCR path).
 const PDF_MAX_BYTES = 32 * 1024 * 1024;
 
@@ -286,7 +288,7 @@ function toStr(v: unknown): string | null {
  * separator = decimal), but returns null on empty/unparseable so a present
  * value that can't be read is skipped explicitly rather than coerced to 0.
  */
-function toNum(v: unknown): number | null {
+export function toNum(v: unknown): number | null {
   if (v === null || v === undefined || v === '') return null;
   if (typeof v === 'number') return Number.isFinite(v) ? v : null;
   let s = String(v).trim().replace(/\s/g, '').replace(/[^\d.,-]/g, '');
@@ -297,8 +299,15 @@ function toNum(v: unknown): number | null {
     // Whichever separator comes last is the decimal; the other is thousands.
     if (s.lastIndexOf(',') > s.lastIndexOf('.')) s = s.replace(/\./g, '').replace(',', '.');
     else s = s.replace(/,/g, '');
-  } else if (hasComma) {
-    s = s.replace(',', '.');
+  } else if (hasComma || hasDot) {
+    const sep = hasComma ? ',' : '.';
+    // The same separator repeated ("1,234,567" / "1.234.567") can only be a
+    // thousands separator — the old code read these as 1.234.
+    if (s.split(sep).length > 2) s = s.split(sep).join('');
+    // A single one stays a decimal ("12,5" / "12.5"); "12,500" is genuinely
+    // ambiguous (12.5 kg vs 12 500) — the instruction asks the model to return
+    // plain numbers so this path is only a fallback.
+    else if (hasComma) s = s.replace(',', '.');
   }
   const n = parseFloat(s);
   return Number.isFinite(n) ? n : null;
@@ -416,6 +425,8 @@ const INSTRUCTION =
   'по рядках. Витягуй виробника (manufacturer) та реєстраційний номер ' +
   '(registration_number, напр. UA/19603/01/01) ДОСЛІВНО, якщо вони є. ' +
   'Не вигадуй значень: якщо поля немає в документі — пропусти його. ' +
+  'Числові поля повертай як число (крапка — десятковий роздільник, без роздільників ' +
+  'тисяч): «12 500,00» → 12500, «1,234.50» → 1234.5; у line_items завжди вказуй unit. ' +
   'Для кожного заповненого ключового поля познач field_confidence; якщо документ ' +
   'погано читається — додай extraction_note.';
 
@@ -473,8 +484,12 @@ export async function extractDocumentFieldsWithMeta(text: string): Promise<Extra
  * the tail of a long packing list is no longer clipped.
  */
 export async function extractFieldsFromMarkdown(pages: MarkdownPage[]): Promise<ExtractionResult> {
-  const parts = groupPagesByChars(pages, MAX_INPUT_CHARS);
-  if (parts.length === 0) return { fields: null, truncated: false };
+  const all = groupPagesByChars(pages, MAX_INPUT_CHARS);
+  if (all.length === 0) return { fields: null, truncated: false };
+  // Cost guard: a giant spreadsheet would otherwise fan out into dozens of Opus
+  // calls. Beyond the cap the result is flagged partial (never silently 'ok').
+  const parts = all.slice(0, MAX_EXTRACTION_PARTS);
+  const overCap = all.length > parts.length;
   const results = await Promise.all(
     parts.map((part, i) => {
       const where =
@@ -486,7 +501,7 @@ export async function extractFieldsFromMarkdown(pages: MarkdownPage[]): Promise<
     }),
   );
   const fields = mergeExtractions(results.map((r) => r.fields).filter((f): f is ExtractedFields => !!f));
-  return { fields, truncated: results.some((r) => r.truncated) };
+  return { fields, truncated: overCap || results.some((r) => r.truncated) };
 }
 
 /**

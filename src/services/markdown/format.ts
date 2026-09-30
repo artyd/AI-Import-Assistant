@@ -170,9 +170,7 @@ export function groupPagesByChars(pages: MarkdownPage[], maxChars: number): Mark
   for (const p of pages) {
     if (p.markdown.length > maxChars) {
       flush();
-      for (let i = 0; i < p.markdown.length; i += maxChars) {
-        parts.push([{ page: p.page, markdown: p.markdown.slice(i, i + maxChars) }]);
-      }
+      for (const piece of splitLongMarkdown(p.markdown, maxChars)) parts.push([{ page: p.page, markdown: piece }]);
       continue;
     }
     if (size + p.markdown.length > maxChars) flush();
@@ -181,4 +179,47 @@ export function groupPagesByChars(pages: MarkdownPage[], maxChars: number): Mark
   }
   flush();
   return parts;
+}
+
+/**
+ * Splits an oversized page on LINE boundaries (never mid table row) and repeats
+ * the most recent Markdown table header (header + `| --- |` line) at the top of
+ * each continuation, so rows in later parts keep their column meaning.
+ */
+export function splitLongMarkdown(md: string, maxChars: number): string[] {
+  const lines = md.split('\n');
+  const out: string[] = [];
+  let cur: string[] = [];
+  let size = 0;
+  let header: string[] | null = null;
+  const isSep = (l: string): boolean => /^\s*\|?\s*:?-{3,}/.test(l);
+
+  lines.forEach((line, i) => {
+    // Track the current table header: the line before a `| --- |` separator.
+    if (isSep(line) && i > 0 && lines[i - 1]!.trim().startsWith('|')) header = [lines[i - 1]!, line];
+    else if (!line.trim().startsWith('|')) header = null;
+
+    if (size + line.length + 1 > maxChars && cur.length) {
+      out.push(cur.join('\n'));
+      cur = [];
+      size = 0;
+      if (header && line.trim().startsWith('|') && !isSep(line)) {
+        cur.push(...header);
+        size = header.join('\n').length + 1;
+      }
+    }
+    // A single line longer than the budget is the only case still cut mid-line.
+    for (let s = 0; s < Math.max(line.length, 1); s += maxChars) {
+      const chunk = line.slice(s, s + maxChars);
+      if (s > 0 && cur.length) {
+        out.push(cur.join('\n'));
+        cur = [];
+        size = 0;
+      }
+      cur.push(chunk);
+      size += chunk.length + 1;
+    }
+  });
+  if (cur.length) out.push(cur.join('\n'));
+  return out;
 }
