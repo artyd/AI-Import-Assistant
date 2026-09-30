@@ -43,6 +43,10 @@ export async function unpackZip(buf: Buffer): Promise<ZipEntry[]> {
     throw new ZipGuardError('uncompressed_too_large');
   }
 
+  // The sizes above are what the archive CLAIMS — an attacker controls them and
+  // unzipper's inflater doesn't enforce them. Count the bytes actually inflated
+  // and abort past the per-entry and total caps (zip-bomb → OOM otherwise).
+  let remaining = config.MAX_ZIP_UNCOMPRESSED_BYTES;
   const out: ZipEntry[] = [];
   for (const f of fileEntries) {
     const p = f.path.replace(/\\/g, '/');
@@ -51,8 +55,25 @@ export async function unpackZip(buf: Buffer): Promise<ZipEntry[]> {
     // Skip junk: macOS resource forks, hidden/dotfiles, empty names.
     if (!base || base.startsWith('.') || p.startsWith('__MACOSX/')) continue;
     const folderName = segments.length > 1 ? segments[segments.length - 2]! : null;
-    const buffer = await f.buffer();
+    const buffer = await readCapped(f.stream(), Math.min(config.MAX_UPLOAD_BYTES, remaining));
+    remaining -= buffer.length;
     out.push({ path: p, name: base, folderName, buffer });
   }
   return out;
+}
+
+/** Reads a stream into memory, aborting once more than `limit` bytes arrive. */
+export async function readCapped(stream: NodeJS.ReadableStream, limit: number): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of stream as AsyncIterable<Buffer | string>) {
+    const b = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
+    size += b.length;
+    if (size > limit) {
+      (stream as unknown as { destroy?: () => void }).destroy?.();
+      throw new ZipGuardError('uncompressed_too_large');
+    }
+    chunks.push(b);
+  }
+  return Buffer.concat(chunks);
 }

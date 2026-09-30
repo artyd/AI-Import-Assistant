@@ -3,13 +3,13 @@ import type { Archiver } from 'archiver';
 import type { FastifyReply } from 'fastify';
 import { readFile } from 'node:fs/promises';
 
-// @types/archiver@8 exposes only named type exports (no callable default), while
-// the runtime module IS the factory function. Load it via require and type it.
+// archiver@8 is CommonJS and exports CLASSES ({ ZipArchive, TarArchive, … }) —
+// there is no callable `archiver('zip')` factory any more (calling it threw
+// "archiver is not a function", breaking the ZIP export). Load via require.
 const require = createRequire(import.meta.url);
-const archiver = require('archiver') as (
-  format: string,
-  options?: { zlib?: { level?: number } },
-) => Archiver;
+const { ZipArchive } = require('archiver') as {
+  ZipArchive: new (options?: { zlib?: { level?: number } }) => Archiver;
+};
 import { query } from '../db/pool.js';
 import type { WorkspaceRow } from './workspaceAccess.js';
 import { readStoredFile } from './storage.js';
@@ -66,7 +66,7 @@ export async function streamWorkspaceZip(ws: WorkspaceRow, reply: FastifyReply):
   await regenerateStaleArtifacts(ws);
   const latest = await getLatestArtifacts(ws.id);
 
-  const archive = archiver('zip', { zlib: { level: 9 } });
+  const archive = new ZipArchive({ zlib: { level: 9 } });
   archive.on('error', (err) => {
     // eslint-disable-next-line no-console
     console.error('Export archive error:', err.message);
