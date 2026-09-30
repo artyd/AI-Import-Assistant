@@ -27,6 +27,15 @@ const envSchema = z.object({
   // loopback + private ranges are the only possible hops. proxy-addr syntax.
   TRUST_PROXY: z.string().default('loopback,uniquelocal'),
 
+  // Quick PIN login (the UI keypad). OFF unless explicitly configured. The PIN
+  // must be 6–8 digits and is bound to ACCESS_CODE_EMAIL (never "oldest user").
+  // Brute force is blocked by a per-IP limit plus a GLOBAL lockout: after
+  // ACCESS_CODE_MAX_FAILURES wrong PINs within 24 h (from any IPs) PIN login is
+  // disabled for 24 h — password login keeps working.
+  ACCESS_CODE: z.string().default(''),
+  ACCESS_CODE_EMAIL: z.string().default(''),
+  ACCESS_CODE_MAX_FAILURES: z.coerce.number().int().positive().default(20),
+
   // CORS: comma-separated exact origins to allow. The app is same-origin behind
   // Caddy, so this is usually empty; set it only if the API is served cross-origin.
   CORS_ORIGIN: z.string().default(''),

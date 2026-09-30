@@ -53,7 +53,14 @@ Response `200`: `{ "token": string, "user": { "id", "email", "name" } }`
 Response `401`: `{ "error": "invalid_credentials" }`
 Response `429`: throttled — more than 10 attempts per IP per 15 min, or the email
 is locked after 8 failed passwords within 15 min (`{ "error": "too_many_attempts" }`).
-There is no code/PIN login (`/api/auth/login-code` was removed).
+
+### `GET /api/auth/methods`
+Response `200`: `{ "codeLogin": boolean, "codeLength": number | null }` — whether the PIN keypad is enabled.
+
+### `POST /api/auth/login-code`
+Request: `{ "code": string }` → `200` like `/login`; `401 invalid_code`; `404 code_login_disabled`;
+`429` when over 5 tries/IP/15 min, or `{ "error": "code_login_locked" }` after
+`ACCESS_CODE_MAX_FAILURES` wrong PINs from all IPs within 24 h (PIN login off for 24 h).
 
 ### `POST /api/auth/logout`  (auth)
 Response `200`: `{ "ok": true }` (JWT is stateless — client discards the token).

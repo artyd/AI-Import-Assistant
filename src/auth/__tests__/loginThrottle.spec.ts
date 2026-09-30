@@ -19,3 +19,16 @@ describe('login lockout', () => {
     expect(isEmailLocked('x@y.z', t)).toBe(false);
   });
 });
+
+describe('PIN global lockout', () => {
+  it('locks PIN login after N failures from anywhere within 24h, then expires', async () => {
+    const { isCodeLoginLocked, recordCodeFailure, resetCodeFailures } = await import('../loginThrottle.js');
+    resetCodeFailures();
+    const t = 10_000_000;
+    for (let i = 0; i < 19; i++) recordCodeFailure(t + i);
+    expect(isCodeLoginLocked(20, t + 100)).toBe(false);
+    recordCodeFailure(t + 200);
+    expect(isCodeLoginLocked(20, t + 300)).toBe(true);
+    expect(isCodeLoginLocked(20, t + 24 * 60 * 60 * 1000 + 1000)).toBe(false);
+  });
+});
