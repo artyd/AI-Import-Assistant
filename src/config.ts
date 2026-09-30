@@ -180,6 +180,21 @@ function loadConfig(): AppConfig {
     console.error(`Invalid environment configuration:\n${issues}`);
     process.exit(1);
   }
+  // The .env.example placeholder passes min(16) — booting prod with it would let
+  // anyone forge a JWT for any user. Refuse; merely-short secrets only warn (a
+  // hard length check could take down an existing deployment on upgrade).
+  const secret = parsed.data.JWT_SECRET;
+  if (parsed.data.NODE_ENV === 'production') {
+    if (/change-me/i.test(secret)) {
+      // eslint-disable-next-line no-console
+      console.error('JWT_SECRET is the .env.example placeholder — set a random one: openssl rand -base64 48');
+      process.exit(1);
+    }
+    if (secret.length < 32) {
+      // eslint-disable-next-line no-console
+      console.warn('JWT_SECRET is shorter than 32 chars — rotate it: openssl rand -base64 48');
+    }
+  }
   return parsed.data;
 }
 
