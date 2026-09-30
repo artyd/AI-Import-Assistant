@@ -14,9 +14,9 @@ boundary to cross.
 Browser ──HTTPS + SSE──▶  System Caddy (host, :443, /etc/caddy/Caddyfile)
                               │
                               ├─ /api/*  /health ─▶  backend   127.0.0.1:8006  (Fastify, docker)
-                              │                          │      │
-                              │                      Postgres  Qdrant
-                              │                          ▲      ▲
+                              │                          │
+                              │                      Postgres (data + full-text search)
+                              │                          ▲
                               │                          └ worker (BullMQ + Redis)
                               │                          │
                               │                      disk volume (storage_data)
@@ -35,20 +35,19 @@ other sites, so TLS is terminated once, centrally, by the system Caddy.
   serving other sites on `:80`/`:443`.
 - A DNS record for the domain (prod: `ai-import-assistant.duckdns.org`) pointing
   at the server. The system Caddy obtains/renews TLS automatically.
-- An **Anthropic API key** and a **Voyage AI key** (embeddings).
+- An **Anthropic API key** (the only AI vendor — Claude reads every document).
 
 ## First deploy
 
 ```bash
 cp .env.example .env
-# Edit .env — set ANTHROPIC_API_KEY, EMBEDDING_API_KEY, JWT_SECRET,
+# Edit .env — set ANTHROPIC_API_KEY, JWT_SECRET,
 # and the POSTGRES_* values. (CORS_ORIGIN is optional — same-origin needs none.)
 
 docker compose up -d --build
 ```
 
-On boot the backend and worker each run migrations (idempotent) and ensure the
-Qdrant collection exists. Then wire up the domain in the system Caddy (next
+On boot the backend and worker each run migrations (idempotent). Then wire up the domain in the system Caddy (next
 section) and check health through it:
 
 ```bash
@@ -171,7 +170,7 @@ tunes how long to wait for indexing. Exit code is non-zero if any check fails.
   red build is never deployed. Deploy stays inert until you configure it — run
   **`bash scripts/setup-deploy.sh`** once (generates a deploy key, stores the
   `DEPLOY_*` GitHub secrets, and sets the `DEPLOY_ENABLED=true` repo variable).
-- **Backups:** persist the named volumes `postgres_data`, `qdrant_data`, and
+- **Backups:** persist the named volumes `postgres_data` and
   `storage_data` (raw files). `redis_data` is a transient job queue.
 - **Rotate secrets:** edit `.env`, then `docker compose up -d`.
 
@@ -180,9 +179,7 @@ tunes how long to wait for indexing. Exit code is non-zero if any check fails.
 | Variable | Required | Default | Purpose |
 |----------|----------|---------|---------|
 | `ANTHROPIC_API_KEY` | ✅ | — | Claude API (server-side only) |
-| `EMBEDDING_API_KEY` | ✅ | — | Voyage AI embeddings |
 | `DATABASE_URL` | ✅ | — | PostgreSQL (derived in compose) |
-| `QDRANT_URL` | — | `http://localhost:6333` | Qdrant (derived in compose) |
 | `REDIS_URL` | — | `redis://localhost:6379` | BullMQ (derived in compose) |
 | `JWT_SECRET` | ✅ | — | Session signing (≥16 chars) |
 | `ACCESS_CODE` | — | `1995` | Shared PIN for the UI code-login keypad; empty disables it |
@@ -190,12 +187,13 @@ tunes how long to wait for indexing. Exit code is non-zero if any check fails.
 | `CORS_ORIGIN` | — | `` (empty) | Comma-separated exact origins to allow. Same-origin behind Caddy needs none; set only if the API is served cross-origin |
 | `STORAGE_DIR` | — | `./storage` | On-disk file storage root |
 | `ANTHROPIC_MODEL` | — | `claude-opus-4-8` | Chat model |
-| `EMBEDDING_MODEL` | — | `voyage-3` | Multilingual (Ukrainian) embeddings |
 | `MAX_UPLOAD_BYTES` | — | `26214400` | Per-file upload cap (25 MB) |
 | `CHAT_RATE_MAX` / `CHAT_RATE_WINDOW` | — | `30` / `1 minute` | Per-user chat rate limit |
-| `QDRANT_API_KEY` | — | — | If Qdrant auth is enabled |
 | `OCR_ENABLED` | — | `true` | Worker OCR fallback for scanned PDFs / images via Claude vision (`true`/`false`) |
-| `OCR_MODEL` | — | `claude-opus-4-8` | Vision model for OCR; set `claude-haiku-4-5` to cut cost |
+| `OCR_MODEL` | — | `claude-opus-4-8` | Vision model for OCR / Markdown transcription; set `claude-haiku-4-5` to cut cost |
+| `MARKDOWN_VISION_ENABLED` | — | `true` | Transcribe ALL PDFs to Markdown with Claude vision (`false` = vision only for scans; text-layer PDFs use the local parser) |
+| `MARKDOWN_PDF_BATCH_PAGES` | — | `5` | PDF pages per Claude vision call |
+| `LIBREOFFICE_BIN` | — | `soffice` | LibreOffice binary for legacy `.doc` → `.docx` (installed in the image) |
 | `EXTRACTION_ENABLED` | — | `true` | Worker structured field extraction (`true`/`false`) |
 | `REMINDERS_ENABLED` | — | `true` | Daily in-app reminder job (`true`/`false`) |
 | `REMINDERS_CRON` | — | `0 6 * * *` | Cron for the reminder scan |
@@ -208,3 +206,17 @@ tunes how long to wait for indexing. Exit code is non-zero if any check fails.
 - **Native structured agent blocks** — reconciliation diff-tables / completeness
   checklists currently arrive as Markdown inside the answer; a typed
   `checks[]`/`diff{}` schema can replace that later without changing the transport.
+
+## Migrating from Voyage/Qdrant (2026-09-30)
+
+Search no longer uses embeddings. After deploying this version, convert files that
+were indexed before it (dry-run first):
+
+```bash
+docker compose exec worker node dist/db/backfillMarkdown.js          # how many
+docker compose exec worker node dist/db/backfillMarkdown.js --apply  # enqueue
+```
+
+Until backfilled, `read_file` converts a file lazily on first read. The old
+`qdrant` container/volume can then be removed (`docker compose up -d --remove-orphans`,
+`docker volume rm <project>_qdrant_data`); `EMBEDDING_*`/`QDRANT_*` in `.env` are ignored.

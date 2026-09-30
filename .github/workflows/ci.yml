@@ -33,7 +33,6 @@ jobs:
         # satisfy it; nothing here connects to a real service.
         env:
           ANTHROPIC_API_KEY: ci-test
-          EMBEDDING_API_KEY: ci-test
           DATABASE_URL: postgres://localhost:5432/ci
           JWT_SECRET: ci-test-secret-0123456789
 

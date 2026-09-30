@@ -7,6 +7,8 @@ import {
 import { runWithAnthropicLimit } from '../../anthropic/limiter.js';
 import { config } from '../../config.js';
 import type { FileType } from '../../domain/folders.js';
+import { groupPagesByChars, joinPages, type MarkdownPage } from '../markdown/format.js';
+import { mergeExtractions } from './mergeExtractions.js';
 
 /**
  * Structured field extraction for a single document. Runs a non-streaming Claude
@@ -461,6 +463,30 @@ async function runExtraction(content: ChatContentBlockParam[]): Promise<Extracti
 export async function extractDocumentFieldsWithMeta(text: string): Promise<ExtractionResult> {
   const clipped = text.slice(0, MAX_INPUT_CHARS);
   return runExtraction([{ type: 'text', text: `${INSTRUCTION}\n\n${clipped}` }]);
+}
+
+/**
+ * Multi-pass extraction over a document's stored Markdown (the primary path).
+ * Short documents are one call; a document longer than MAX_INPUT_CHARS is split
+ * on page boundaries into parts, each extracted separately and merged (header
+ * fields from the first part, totals from the last, line_items concatenated) —
+ * the tail of a long packing list is no longer clipped.
+ */
+export async function extractFieldsFromMarkdown(pages: MarkdownPage[]): Promise<ExtractionResult> {
+  const parts = groupPagesByChars(pages, MAX_INPUT_CHARS);
+  if (parts.length === 0) return { fields: null, truncated: false };
+  const results = await Promise.all(
+    parts.map((part, i) => {
+      const where =
+        parts.length > 1
+          ? `\n\n(Це частина ${i + 1} з ${parts.length} одного документа. Витягни поля, які є в ЦІЙ частині; ` +
+            'line_items — лише рядки з цієї частини.)'
+          : '';
+      return runExtraction([{ type: 'text', text: `${INSTRUCTION}${where}\n\n${joinPages(part)}` }]);
+    }),
+  );
+  const fields = mergeExtractions(results.map((r) => r.fields).filter((f): f is ExtractedFields => !!f));
+  return { fields, truncated: results.some((r) => r.truncated) };
 }
 
 /**

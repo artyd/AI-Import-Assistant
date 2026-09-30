@@ -16,7 +16,6 @@ import {
 import { inferFileType } from '../domain/folders.js';
 import { enqueueIndexJob } from '../queue/index.js';
 import { publishFileStatus } from '../events/fileStatus.js';
-import { deleteFileChunks } from '../services/qdrant.js';
 import { classifyAndFile, sortInbox } from '../services/classify.js';
 import { isZipUpload, unpackZip, ZipGuardError } from '../services/zip.js';
 
@@ -325,7 +324,6 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       const file = rows[0];
       if (!file) return reply.code(404).send({ error: 'not_found' });
 
-      await deleteFileChunks(req.params.fileId);
       await deleteStoredFile(file.disk_path);
       await query('DELETE FROM files WHERE id = $1', [req.params.fileId]);
       await publishFileStatus(ws.id, { fileId: req.params.fileId, status: 'deleted' });

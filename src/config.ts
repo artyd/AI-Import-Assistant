@@ -12,12 +12,9 @@ const envSchema = z.object({
 
   // Secrets / providers — never sent to the browser.
   ANTHROPIC_API_KEY: z.string().min(1, 'ANTHROPIC_API_KEY is required'),
-  EMBEDDING_API_KEY: z.string().min(1, 'EMBEDDING_API_KEY is required'),
 
   // Infra
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
-  QDRANT_URL: z.string().url().default('http://localhost:6333'),
-  QDRANT_API_KEY: z.string().optional(),
   REDIS_URL: z.string().min(1).default('redis://localhost:6379'),
 
   // Auth
@@ -91,15 +88,19 @@ const envSchema = z.object({
     .transform((v) => v === 'true'),
   INGEST_RETRY_CRON: z.string().default('*/5 * * * *'),
   INGEST_MAX_RETRIES: z.coerce.number().int().nonnegative().default(3),
-  EMBEDDING_PROVIDER: z.enum(['voyage', 'openai']).default('voyage'),
-  EMBEDDING_MODEL: z.string().default('voyage-3'),
-
-  // Optional FALLBACK embedding provider, used only when the primary is
-  // unavailable during indexing (search fans out across both collections).
-  // Leave EMBEDDING_FALLBACK_PROVIDER = 'none' (default) to disable.
-  EMBEDDING_FALLBACK_PROVIDER: z.enum(['voyage', 'openai', 'none']).default('none'),
-  EMBEDDING_FALLBACK_MODEL: z.string().default('text-embedding-3-large'),
-  EMBEDDING_FALLBACK_API_KEY: z.string().optional(),
+  // Ingest-time Markdown conversion (worker). Every file is converted ONCE to
+  // Markdown and stored (file_markdown); read_file, extraction and full-text
+  // search all read that — Claude is the only reader, there is no embedding API.
+  // PDFs/images are transcribed by Claude vision in windows of
+  // MARKDOWN_PDF_BATCH_PAGES pages per call. MARKDOWN_VISION_ENABLED=false keeps
+  // text-layer PDFs on the cheap pdf-parse path (vision only for sparse/scanned).
+  MARKDOWN_VISION_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
+  MARKDOWN_PDF_BATCH_PAGES: z.coerce.number().int().positive().default(5),
+  // LibreOffice binary used to convert legacy binary .doc → .docx.
+  LIBREOFFICE_BIN: z.string().default('soffice'),
 
   // Chat rate limit (per user)
   CHAT_RATE_MAX: z.coerce.number().int().positive().default(30),

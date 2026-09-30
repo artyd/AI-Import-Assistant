@@ -14,11 +14,10 @@ import {
 } from '../queue/ingestRetry.js';
 import { sweepStuckFiles } from '../services/ingestRetry.js';
 import { readStoredFile } from '../services/storage.js';
-import { extractText } from '../services/extract/index.js';
-import { ocrDocument } from '../services/ocr/claudeOcr.js';
-import { chunkPages } from '../services/extract/chunk.js';
+import { convertToMarkdown } from '../services/markdown/convert.js';
+import { saveFileMarkdown } from '../services/markdown/store.js';
 import {
-  extractDocumentFieldsWithMeta,
+  extractFieldsFromMarkdown,
   extractDocumentFieldsFromDocumentWithMeta,
   type ExtractedFields,
 } from '../services/extraction/extractFields.js';
@@ -31,13 +30,6 @@ import { maybeReconcileBatch } from '../services/reconcileBatch.js';
 import { insertNotification } from '../services/notifications.js';
 import { scanAndNotify } from '../services/reminders.js';
 import { ingestNews, purgeOldNews } from '../services/news/index.js';
-import { embedForIndex } from '../services/embeddings/index.js';
-import {
-  ensureQdrantCollection,
-  deleteFileChunks,
-  upsertChunks,
-  type ChunkPayload,
-} from '../services/qdrant.js';
 import { publishFileStatus } from '../events/fileStatus.js';
 import type { FileType } from '../domain/folders.js';
 
@@ -101,65 +93,22 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
 
   try {
     const buf = await readStoredFile(file.disk_path);
-    let pages = await extractText(buf, file.type);
 
-    // OCR fallback: triggered by text DENSITY, not just zero-text. A mostly-scanned
-    // PDF with a thin text layer (a cover page, a digital stamp, OCR artifacts)
-    // used to skip OCR and index near-empty. Now we OCR whenever the extracted
-    // text is sparse and only KEEP the OCR result if it recovered MORE text, so a
-    // good text layer is never regressed. Best-effort — failure leaves pages as-is.
-    const textLen = (ps: typeof pages): number => ps.reduce((n, p) => n + p.text.length, 0);
-    const sparse = pages.length === 0 || textLen(pages) < Math.max(120, pages.length * 60);
-    if (sparse && (file.type === 'pdf' || file.type === 'image')) {
-      try {
-        const ocrPages = await ocrDocument(buf, file.type, file.name);
-        if (textLen(ocrPages) > textLen(pages)) {
-          pages = ocrPages;
-          // eslint-disable-next-line no-console
-          console.log(`OCR recovered text for file ${file.id} (${file.name}).`);
-        }
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.error(`OCR failed for file ${file.id}:`, (err as Error).message);
-      }
-    }
+    // Ingest-time Markdown: Claude vision transcribes PDFs/scans/photos in page
+    // windows (tables → Markdown tables, real page numbers); docx/xlsx/csv are
+    // converted locally; legacy .doc goes through LibreOffice. Stored once and
+    // read by read_file, extraction, classification and full-text search — there
+    // is no embedding vendor in the pipeline any more.
+    const conv = await convertToMarkdown(buf, file.type, file.name);
+    await saveFileMarkdown(file.id, file.workspace_id, conv);
+    const pages = conv.pages;
+    // eslint-disable-next-line no-console
+    console.log(
+      `Converted ${file.id} (${file.name}) → Markdown via ${conv.converter}: ` +
+        `${pages.length} page(s), ${pages.reduce((n, p) => n + p.markdown.length, 0)} chars` +
+        `${conv.partial ? ' [PARTIAL]' : ''}${conv.note ? ` — ${conv.note}` : ''}.`,
+    );
 
-    const chunks = chunkPages(pages);
-
-    // Vector indexing for semantic search (search_documents) is BEST-EFFORT: it
-    // powers only the agent's semantic search, NOT reading / field extraction /
-    // reconciliation. If the embedding provider is unavailable (e.g. Voyage rate
-    // limits without a billing method), we log and carry on so the file still
-    // becomes "ready" and gets its deterministic structured extraction below.
-    // The file simply isn't semantically searchable until a later re-index.
-    try {
-      // Replace any prior vectors for this file (safe on re-index).
-      await deleteFileChunks(file.id);
-      if (chunks.length > 0) {
-        const { vectors, provider } = await embedForIndex(chunks.map((c) => c.text));
-        const payloads: ChunkPayload[] = chunks.map((c) => ({
-          workspace_id: file.workspace_id,
-          file_id: file.id,
-          file_name: file.name,
-          folder: file.folder_name,
-          chunk_index: c.index,
-          page: c.page,
-          text: c.text,
-          provider: provider.id,
-        }));
-        await upsertChunks(vectors, payloads, provider.collectionName);
-      }
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error(
-        `Embedding/indexing failed for file ${file.id} (${file.name}) — file still ` +
-          `readable & reconcilable, just not semantically searchable yet: ${(err as Error).message}`,
-      );
-    }
-
-    // Files with no recoverable text (e.g. a blank or un-OCR-able image) — or
-    // whose embedding failed above — are still "ready": reading + extraction do
-    // not depend on the vector index.
     await setStatus(file.id, file.workspace_id, 'ready');
 
     // Structured extraction (best-effort): populate document_extractions so the
@@ -167,17 +116,16 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
     // fail indexing — the file stays "ready".
     if (config.EXTRACTION_ENABLED) {
       try {
-        const fullText = pages.map((p) => p.text).join('\n\n');
         await query('DELETE FROM document_extractions WHERE file_id = $1', [file.id]);
-        // Vision first for PDFs/images (reads figures/tables from the document
-        // image itself); fall back to the text path if vision is unavailable or
-        // the type is text-based. For a scan with no recovered text, vision can
-        // still read the image directly — so we attempt it even when pages == 0.
-        let meta =
-          file.type === 'pdf' || file.type === 'image'
-            ? await extractDocumentFieldsFromDocumentWithMeta(buf, file.type, file.name)
-            : { fields: null as ExtractedFields | null, truncated: false };
-        if (!meta.fields && pages.length > 0) meta = await extractDocumentFieldsWithMeta(fullText);
+        // Primary: multi-pass extraction over the stored Markdown (already a
+        // faithful Claude transcription, so no second vision pass is needed).
+        // Fallback: direct vision on the original file when no Markdown came out.
+        let meta: { fields: ExtractedFields | null; truncated: boolean } =
+          pages.length > 0 ? await extractFieldsFromMarkdown(pages) : { fields: null, truncated: false };
+        if (!meta.fields && (file.type === 'pdf' || file.type === 'image')) {
+          meta = await extractDocumentFieldsFromDocumentWithMeta(buf, file.type, file.name);
+        }
+        if (conv.partial) meta.truncated = true;
         const fields = meta.fields;
 
         if (fields && extractionIsSubstantive(fields)) {
@@ -206,8 +154,9 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
             also_contains: [],
             unreadable: true,
             extraction_note:
+              conv.note ??
               'Документ не вдалося прочитати (скан без текстового шару / OCR не дав результату). ' +
-              'Введіть ключові поля вручну.',
+                'Введіть ключові поля вручну.',
           };
           await query(
             `INSERT INTO document_extractions (file_id, workspace_id, extracted_fields, model_version)
@@ -252,8 +201,7 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
         }
 
         // Auto-file the document into its skeleton folder using the CLAUDE
-        // classifier (structured extraction → filename heuristic → LLM-on-text —
-        // Voyage/embeddings are never consulted here). High/medium confidence
+        // classifier (structured extraction → filename heuristic → LLM-on-Markdown). High/medium confidence
         // moves the file; low confidence stays in the inbox with a suggestion for
         // the user to confirm. Guarded on folder_id IS NULL so we never touch a
         // file the user already placed by hand.
@@ -331,7 +279,6 @@ async function processIngestRetry(_job: Job<IngestRetryJobData>): Promise<void> 
 
 async function main(): Promise<void> {
   await runMigrations();
-  await ensureQdrantCollection();
 
   const worker = new Worker<IndexJobData>(INDEX_QUEUE, processJob, {
     connection: createRedis(),
