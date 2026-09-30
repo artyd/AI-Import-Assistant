@@ -545,7 +545,7 @@ ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS survey_status TEXT NOT NULL DEFA
 -- 'ok'. Drop+add is re-runnable; the inline CHECK above is auto-named.
 ALTER TABLE files DROP CONSTRAINT IF EXISTS files_extraction_status_check;
 ALTER TABLE files ADD CONSTRAINT files_extraction_status_check
-  CHECK (extraction_status IN ('ok', 'unreadable', 'no_fields', 'partial'));
+  CHECK (extraction_status IN ('ok', 'unreadable', 'no_fields', 'partial', 'failed'));
 
 -- Lossless conversation memory: store the full Anthropic content blocks of each
 -- turn (assistant tool_use/text + the following tool_result user message) so the
@@ -586,3 +586,21 @@ CREATE TABLE IF NOT EXISTS document_sections (
 CREATE INDEX IF NOT EXISTS idx_sections_workspace ON document_sections(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_sections_file ON document_sections(file_id);
 CREATE INDEX IF NOT EXISTS idx_sections_tsv ON document_sections USING GIN (tsv);
+
+-- ── Ingest integrity (audit R3–R6) ──
+
+-- One structured extraction per file. Concurrent/duplicate index jobs used to
+-- leave two rows → reconcile reported "invoice: знайдено 2". Dedupe (keep the
+-- newest) before the unique index; the worker now upserts.
+DELETE FROM document_extractions d
+  USING document_extractions newer
+  WHERE d.file_id = newer.file_id
+    AND (d.extracted_at, d.id) < (newer.extracted_at, newer.id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_extractions_file ON document_extractions(file_id);
+
+-- extraction_status 'failed' (the extraction call itself errored — surfaced and
+-- retried, never a stale 'ok') is part of the CHECK in the block above.
+
+-- When the worker last moved the file's status — lets the sweep find files stuck
+-- in queued/indexing (worker crash, stalled job, enqueue failure).
+ALTER TABLE files ADD COLUMN IF NOT EXISTS status_changed_at TIMESTAMPTZ;

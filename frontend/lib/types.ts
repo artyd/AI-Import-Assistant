@@ -130,7 +130,7 @@ export interface Discrepancy {
 export interface FileExtraction {
   file_id: string;
   file_name: string;
-  extraction_status: "ok" | "unreadable" | "no_fields" | null;
+  extraction_status: "ok" | "unreadable" | "no_fields" | "partial" | "failed" | null;
   fields: Record<string, unknown>;
   needs_review: string[];
   verified: boolean;
@@ -200,8 +200,9 @@ export interface FileItem {
   folderConfidence?: "high" | "medium" | "low" | null;
   suggestedFolderId?: string | null;
   // Extraction outcome (plan Q29): 'unreadable' means the human must enter key
-  // fields on the verification screen.
-  extractionStatus?: "ok" | "unreadable" | "no_fields" | null;
+  // fields on the verification screen; 'failed' = the extraction call errored
+  // and will be retried automatically; 'partial' = truncated (incomplete rows).
+  extractionStatus?: "ok" | "unreadable" | "no_fields" | "partial" | "failed" | null;
 }
 
 // Read-progress for a shipment (or one upload batch). Mirrors the backend
@@ -223,7 +224,7 @@ export interface IngestStatus {
     id: string;
     name: string;
     status: FileStatus;
-    extractionStatus?: "ok" | "unreadable" | "no_fields" | null;
+    extractionStatus?: "ok" | "unreadable" | "no_fields" | "partial" | "failed" | null;
     errorReason?: string | null;
     folderId: string | null;
   }[];
@@ -234,7 +235,7 @@ export interface ProblemFile {
   id: string;
   name: string;
   status: FileStatus;
-  extractionStatus?: "ok" | "unreadable" | "no_fields" | null;
+  extractionStatus?: "ok" | "unreadable" | "no_fields" | "partial" | "failed" | null;
   errorReason?: string | null;
   workspaceId: string;
   workspaceNumber: string;

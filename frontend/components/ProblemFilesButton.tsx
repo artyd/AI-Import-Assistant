@@ -130,7 +130,11 @@ export function ProblemFilesButton() {
                   </span>
                 </div>
                 <div style={{ color: "var(--muted)", fontSize: 11, marginTop: 2 }}>
-                  Постачання №{f.workspaceNumber} · {manual ? "потребує ручного вводу" : "помилка читання"}
+                  Постачання №{f.workspaceNumber} · {manual
+                    ? "потребує ручного вводу"
+                    : f.extractionStatus === "failed"
+                      ? "не вдалося витягти поля — повторимо автоматично"
+                      : "помилка читання"}
                 </div>
               </div>
             );

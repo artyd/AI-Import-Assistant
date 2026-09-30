@@ -1,6 +1,6 @@
 import { config } from '../config.js';
 import { query } from '../db/pool.js';
-import { enqueueIndexJob } from '../queue/index.js';
+import { enqueueIndexJob, hasLiveIndexJob } from '../queue/index.js';
 import { publishFileStatus } from '../events/fileStatus.js';
 import { maybeReconcileBatch } from './reconcileBatch.js';
 
@@ -16,6 +16,10 @@ export interface SweepResult {
   requeued: number;
   flagged: number;
 }
+
+// A file in queued/indexing longer than this with NO live queue job is stuck
+// (worker crash, stalled job, enqueue failure after the row was inserted).
+const STUCK_AFTER_MINUTES = 30;
 
 /**
  * Auto-retry sweep for files that exhausted their BullMQ job attempts and are
@@ -35,12 +39,22 @@ export interface SweepResult {
  * Returns how many files were re-queued vs newly flagged.
  */
 export async function sweepStuckFiles(): Promise<SweepResult> {
-  const { rows } = await query<StuckFileRow>(
-    `SELECT f.id, f.workspace_id, f.name, f.index_attempts, f.batch_id
+  // Retry candidates: indexing errors, files whose structured extraction call
+  // failed (status ready but extraction_status 'failed'), and files stuck in
+  // queued/indexing with no live job behind them.
+  const { rows: candidates } = await query<StuckFileRow & { status: string }>(
+    `SELECT f.id, f.workspace_id, f.name, f.index_attempts, f.batch_id, f.status
      FROM files f
-     WHERE f.status = 'error'
-       AND (f.extraction_status IS DISTINCT FROM 'unreadable')`,
+     WHERE (f.status = 'error' AND f.extraction_status IS DISTINCT FROM 'unreadable')
+        OR (f.status = 'ready' AND f.extraction_status = 'failed')
+        OR (f.status IN ('queued', 'indexing')
+            AND COALESCE(f.status_changed_at, f.created_at) < now() - interval '${STUCK_AFTER_MINUTES} minutes')`,
   );
+  const rows: StuckFileRow[] = [];
+  for (const f of candidates) {
+    if ((f.status === 'queued' || f.status === 'indexing') && (await hasLiveIndexJob(f.id))) continue;
+    rows.push(f);
+  }
 
   let requeued = 0;
   let flagged = 0;
@@ -52,7 +66,8 @@ export async function sweepStuckFiles(): Promise<SweepResult> {
     if (f.index_attempts < config.INGEST_MAX_RETRIES) {
       await query(
         `UPDATE files
-         SET status = 'queued', error_reason = NULL, index_attempts = index_attempts + 1
+         SET status = 'queued', error_reason = NULL, index_attempts = index_attempts + 1,
+             status_changed_at = now()
          WHERE id = $1`,
         [f.id],
       );
@@ -66,8 +81,8 @@ export async function sweepStuckFiles(): Promise<SweepResult> {
       // text from). error_reason tells the user what to do.
       await query(
         `UPDATE files
-         SET extraction_status = 'unreadable',
-             error_reason = $2
+         SET status = 'error', extraction_status = 'unreadable',
+             error_reason = $2, status_changed_at = now()
          WHERE id = $1`,
         [
           f.id,
