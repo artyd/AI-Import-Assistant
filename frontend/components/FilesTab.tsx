@@ -33,6 +33,8 @@ interface Props {
   onMoveFile: (file: FileItem, folderId: string) => void;
   onReindex: (file: FileItem) => void;
   onPreview: (file: FileItem) => void;
+  // Bytes-sent progress of an upload in flight (null/undefined when idle).
+  uploadProgress?: { pct: number; files: number } | null;
 }
 
 function fileIcon(name: string) {
@@ -173,7 +175,7 @@ export function FilesTab(props: Props) {
         </div>
       </div>
 
-      <IngestProgress files={files} onReindex={props.onReindex} />
+      <IngestProgress files={files} onReindex={props.onReindex} upload={props.uploadProgress} />
 
       <div
         onDragOver={(e) => {

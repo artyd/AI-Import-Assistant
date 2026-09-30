@@ -3,14 +3,22 @@ import { test, expect, type Page } from "@playwright/test";
 /**
  * Interface quality — verifies the Material Design language is actually applied
  * and the layout is sound. Run standalone against the login page. The primary
- * button + text inputs live on the admin email form, so those tests switch to it.
+ * button + text inputs live on the email form, so those tests switch to it.
  */
 async function gotoEmailForm(page: Page) {
   await page.goto("/login");
-  await page.getByRole("button", { name: /Вхід адміністратора/ }).click();
+  await page.getByRole("button", { name: "Вхід через email" }).click();
 }
 
 test.describe("Interface quality (Material)", () => {
+  // The login page asks the backend which methods exist; mock it (PIN on) so
+  // the page renders standalone without a 404 console error.
+  test.beforeEach(async ({ page }) => {
+    await page.route("**/api/auth/methods", (r) =>
+      r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ codeLogin: true, codeLength: 6 }) })
+    );
+  });
+
   test("primary button carries Material elevation (box-shadow)", async ({ page }) => {
     await gotoEmailForm(page);
     const btn = page.getByRole("button", { name: "Увійти" });

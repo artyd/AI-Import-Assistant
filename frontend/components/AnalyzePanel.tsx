@@ -8,7 +8,7 @@
 // A single "Аналізувати" button POSTs to /api/collections/:id/analyze and calls
 // back with the returned AnalysisResult. A stepped loader runs while in flight.
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { streamAnalyze } from "@/lib/sse";
 import type { AnalysisResult } from "@/lib/types";
 import { LnSettings } from "./LineIcons";
@@ -46,6 +46,9 @@ export function AnalyzePanel({
   const [step, setStep] = useState("");
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  // In-flight analyze stream — aborted when the panel unmounts.
+  const abortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   const trimmed = text.trim();
   const canRun = !running && (file !== null || trimmed.length > 0);
@@ -85,6 +88,10 @@ export function AnalyzePanel({
     }
 
     let done = false;
+    let failed = false;
+    abortRef.current?.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
     try {
       await streamAnalyze(path, body, {
         onProgress: (e) => {
@@ -97,9 +104,12 @@ export function AnalyzePanel({
           setText("");
           setFile(null);
         },
-        onError: (message) => setError(message || "Не вдалося виконати аналіз."),
-      });
-      if (!done && !error) setError("Аналіз перервано. Спробуйте ще раз.");
+        onError: (message) => {
+          failed = true;
+          setError(message || "Не вдалося виконати аналіз.");
+        },
+      }, ctrl.signal);
+      if (!done && !failed && !ctrl.signal.aborted) setError("Аналіз перервано. Спробуйте ще раз.");
     } catch {
       setError("Не вдалося виконати аналіз.");
     } finally {

@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import type { ChatKind, Citation, Folder, Message } from "@/lib/types";
 import { streamChat } from "@/lib/sse";
+import { Notice } from "./ui/Notice";
 import { folderLabel } from "@/lib/folderLabels";
 import {
   SURVEY_QUESTIONS,
@@ -229,8 +230,12 @@ export function Chat({
   const [items, setItems] = useState<ChatItem[]>(() =>
     initialMessages.map((m) => ({ kind: "message" as const, ...m }))
   );
-  const [input, setInput] = useState("");
+  // NB: the composer's text lives inside <Composer> (F5) so typing re-renders
+  // only the composer, never the message list.
   const [streaming, setStreaming] = useState(false);
+  // The in-flight chat stream; aborted on stop / unmount / conversation or
+  // endpoint (workspace, collection) change.
+  const abortRef = useRef<AbortController | null>(null);
   const [dragging, setDragging] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   // Files chosen via paperclip/drag/paste are STAGED here (chips above the input)
@@ -256,10 +261,16 @@ export function Chat({
   // of a brand-new chat (that would wipe the just-streamed messages). convRef is
   // already kept in sync inside onDone, and is re-synced here on a real load.
   useEffect(() => {
+    // Another conversation was loaded → stop streaming into the old thread.
+    abortRef.current?.abort();
     setItems(initialMessages.map((m) => ({ kind: "message" as const, ...m })));
     convRef.current = conversationId;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialMessages]);
+
+  // Abort the in-flight stream on unmount and when the chat endpoint changes
+  // (switching shipment / collection keeps this component mounted).
+  useEffect(() => () => abortRef.current?.abort(), [postPath]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
@@ -333,10 +344,17 @@ export function Chat({
       if (!onUploadAndClassify) return;
       const outcomes = await onUploadAndClassify(files);
 
-      // Match outcomes back to cards positionally (upload preserves order). Any
-      // file the server rejected has no outcome → mark that card as an error.
+      // Match outcomes back to cards by name (a file skipped client-side — too
+      // large — or rejected by the server has no outcome, which would shift a
+      // positional match); fall back to position only when nothing was dropped.
+      const used = new Set<string>();
       cards.forEach((card, i) => {
-        const outcome = outcomes[i];
+        const outcome =
+          outcomes.find((o) => o.name === card.name && !used.has(o.fileId)) ??
+          (outcomes.length === cards.length && outcomes[i] && !used.has(outcomes[i]!.fileId)
+            ? outcomes[i]
+            : undefined);
+        if (outcome) used.add(outcome.fileId);
         if (!outcome) {
           patchCard(card.id, { state: "error" });
           return;
@@ -457,9 +475,11 @@ export function Chat({
   const runMessage = useCallback(async (raw: string) => {
     const text = raw.trim();
     if (!text || streaming) return;
-    setInput("");
     setStreaming(true);
     streamTextRef.current = "";
+    abortRef.current?.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
 
     const userMsg: ChatItem = {
       kind: "message",
@@ -524,14 +544,27 @@ export function Chat({
                 (streamTextRef.current ? streamTextRef.current + "\n\n" : "") +
                 `⚠️ ${e.message}`,
             }),
-        }
+        },
+        ctrl.signal
       );
+      // Stopped by the user: keep what arrived and mark it. (On unmount or a
+      // conversation switch the bubble is already gone, so this is a no-op.)
+      if (ctrl.signal.aborted) {
+        updateAssistant({
+          content:
+            (streamTextRef.current ? streamTextRef.current + "\n\n" : "") +
+            "⏹ Відповідь зупинено.",
+        });
+      }
     } catch {
-      updateAssistant({ content: "⚠️ Помилка з’єднання з сервером." });
+      if (!ctrl.signal.aborted) updateAssistant({ content: "⚠️ Помилка з’єднання з сервером." });
     } finally {
+      if (abortRef.current === ctrl) abortRef.current = null;
       setStreaming(false);
     }
   }, [streaming, postPath, onConversationStarted, onLog, onTurnComplete]);
+
+  const stop = useCallback(() => abortRef.current?.abort(), []);
 
   // ── Shipment survey (client-driven question cards) ──────────────────────────
   // Answers are collected locally and submitted as ONE chat message at the end,
@@ -654,19 +687,19 @@ export function Chat({
   // On send: first upload + classify any staged files (they show as classify
   // cards in the thread, exactly like the old inline flow), then stream the text
   // message if there is one. Sending is allowed with files only, text only, or both.
-  const send = useCallback(async () => {
-    if (streaming) return;
-    const text = input.trim();
+  // Returns whether the composer's text was consumed (→ the composer clears it).
+  const send = useCallback((raw: string): boolean => {
+    if (streaming) return false;
+    const text = raw.trim();
     const files = pending;
     const q = quote;
-    if (!text && files.length === 0 && !q) return;
+    if (!text && files.length === 0 && !q) return false;
 
     // Client-driven survey: a typed command starts it (supply chat only). A
     // dedicated button lands in Phase 5.
     if (chatKind === "supply" && !q && files.length === 0 && SURVEY_TRIGGER_RX.test(text)) {
-      setInput("");
       startSurvey();
-      return;
+      return true;
     }
 
     // Consolidated: a pasted Google Sheets link runs the analysis DIRECTLY (exact
@@ -674,32 +707,39 @@ export function Chat({
     if (onAnalyzeManifest && !q && files.length === 0) {
       const m = text.match(/https?:\/\/docs\.google\.com\/spreadsheets\/\S+/i);
       if (m) {
-        setInput("");
         onAnalyzeManifest({ url: m[0] });
-        return;
+        return true;
       }
     }
-    if (files.length) {
-      setPending([]);
-      await handleFiles(files);
-    }
-    if (text || q) {
-      // When a fragment is quoted, prepend it as context so the agent answers
-      // about that exact excerpt. A quote with no question ⇒ "explain it".
-      const composed = q
-        ? `Стосовно цього фрагмента попередньої відповіді:\n«${q}»\n\n${text || "Поясни детальніше."}`
-        : input;
-      if (q) setQuote(null);
-      await runMessage(composed);
-    }
-  }, [streaming, input, pending, quote, handleFiles, runMessage, onAnalyzeManifest, chatKind, startSurvey]);
+    void (async () => {
+      if (files.length) {
+        setPending([]);
+        await handleFiles(files);
+      }
+      if (text || q) {
+        // When a fragment is quoted, prepend it as context so the agent answers
+        // about that exact excerpt. A quote with no question ⇒ "explain it".
+        const composed = q
+          ? `Стосовно цього фрагмента попередньої відповіді:\n«${q}»\n\n${text || "Поясни детальніше."}`
+          : raw;
+        if (q) setQuote(null);
+        await runMessage(composed);
+      }
+    })();
+    return true;
+  }, [streaming, pending, quote, handleFiles, runMessage, onAnalyzeManifest, chatKind, startSurvey]);
+
+  const clearQuote = useCallback(() => setQuote(null), []);
+  const clearNotice = useCallback(() => setNotice(null), []);
 
   // Which action the composer paperclip performs: manifest analyse (consolidated)
   // or the supply auto-file staging flow.
+  const openManifestPicker = useCallback(() => manifestInputRef.current?.click(), []);
+  const openFilePicker = useCallback(() => fileInputRef.current?.click(), []);
   const attachAction = onAnalyzeManifest
-    ? () => manifestInputRef.current?.click()
+    ? openManifestPicker
     : fileIntake
-      ? () => fileInputRef.current?.click()
+      ? openFilePicker
       : undefined;
 
   return (
@@ -875,13 +915,12 @@ export function Chat({
                 </>
               )}
             </p>
-            {notice && <Notice text={notice} onClear={() => setNotice(null)} />}
+            {notice && <Notice text={notice} onClear={clearNotice} />}
             <Composer
-              input={input}
-              setInput={setInput}
               inputRef={inputRef}
               onPaste={onPaste}
               onSend={send}
+              onStop={stop}
               onAttach={attachAction}
               onStartSurvey={chatKind === "supply" ? startSurvey : undefined}
               streaming={streaming}
@@ -892,7 +931,7 @@ export function Chat({
               pending={pending}
               onRemovePending={removePending}
               quote={quote}
-              onClearQuote={() => setQuote(null)}
+              onClearQuote={clearQuote}
             />
             <div
               style={{
@@ -946,7 +985,7 @@ export function Chat({
               <DateSeparator />
               {items.map((it) =>
                 it.kind === "classify" ? (
-                  <ClassifyBubble key={it.id} card={it} folders={folders ?? []} onPick={pickFolder} />
+                  <ClassifyBubble key={it.id} card={it} folders={folders ?? NO_FOLDERS} onPick={pickFolder} />
                 ) : it.kind === "question" ? (
                   <QuestionBubble key={it.id} card={it} onAnswer={answerQuestion} onSkip={skipSurvey} />
                 ) : it.role === "user" ? (
@@ -965,13 +1004,12 @@ export function Chat({
 
           <div style={{ flex: "none", padding: "8px 28px 20px" }}>
             <div style={{ maxWidth: 760, margin: "0 auto" }}>
-              {notice && <Notice text={notice} onClear={() => setNotice(null)} />}
+              {notice && <Notice text={notice} onClear={clearNotice} />}
               <Composer
-                input={input}
-                setInput={setInput}
                 inputRef={inputRef}
                 onPaste={onPaste}
                 onSend={send}
+                onStop={stop}
                 onAttach={attachAction}
                 onStartSurvey={chatKind === "supply" ? startSurvey : undefined}
                 streaming={streaming}
@@ -982,7 +1020,7 @@ export function Chat({
                 pending={pending}
                 onRemovePending={removePending}
                 quote={quote}
-                onClearQuote={() => setQuote(null)}
+                onClearQuote={clearQuote}
               />
               <div
                 style={{
@@ -1009,32 +1047,15 @@ const STARTERS: { text: string; icon: React.ReactNode }[] = [
   { text: "Яких документів ще бракує?", icon: <IconFolder size={15} /> },
 ];
 
-function Notice({ text, onClear }: { text: string; onClear: () => void }) {
-  return (
-    <div
-      role="alert"
-      onClick={onClear}
-      style={{
-        marginBottom: 8,
-        padding: "8px 12px",
-        borderRadius: 10,
-        background: "var(--errBg)",
-        color: "var(--err)",
-        fontSize: 13,
-        cursor: "pointer",
-      }}
-    >
-      {text}
-    </div>
-  );
-}
+const NO_FOLDERS: Folder[] = [];
 
-function Composer({
-  input,
-  setInput,
+// Memoised and owns its own text state: typing re-renders only the composer,
+// and streaming tokens (which re-render <Chat>) skip it while its props hold.
+const Composer = memo(function Composer({
   inputRef,
   onPaste,
   onSend,
+  onStop,
   onAttach,
   onStartSurvey,
   streaming,
@@ -1047,11 +1068,11 @@ function Composer({
   quote,
   onClearQuote,
 }: {
-  input: string;
-  setInput: (v: string) => void;
   inputRef?: React.Ref<HTMLTextAreaElement>;
   onPaste: (e: React.ClipboardEvent) => void;
-  onSend: () => void;
+  // Returns true when the text was consumed (→ clear the input).
+  onSend: (text: string) => boolean;
+  onStop: () => void;
   onAttach?: () => void;
   onStartSurvey?: () => void;
   streaming: boolean;
@@ -1064,6 +1085,10 @@ function Composer({
   quote: string | null;
   onClearQuote: () => void;
 }) {
+  const [input, setInput] = useState("");
+  const submit = () => {
+    if (onSend(input)) setInput("");
+  };
   return (
     <div
       className="composer"
@@ -1324,7 +1349,7 @@ function Composer({
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
-              onSend();
+              submit();
             }
           }}
           placeholder={
@@ -1346,15 +1371,32 @@ function Composer({
             padding: "8px 4px",
           }}
         />
-        <button
-          className="btn btn-primary"
-          onClick={onSend}
-          disabled={streaming || (!input.trim() && pending.length === 0 && !quote)}
-          style={{ height: 40, width: 40, padding: 0, borderRadius: 11 }}
-          aria-label="Надіслати"
-        >
-          {streaming ? <IconSpinner size={16} /> : <IconSend size={16} />}
-        </button>
+        {streaming ? (
+          // While a reply streams, the send slot becomes "Зупинити" (aborts it).
+          <button
+            className="btn btn-primary"
+            onClick={onStop}
+            data-testid="chat-stop"
+            title="Зупинити відповідь"
+            aria-label="Зупинити"
+            style={{ height: 40, width: 40, padding: 0, borderRadius: 11 }}
+          >
+            <span
+              aria-hidden
+              style={{ width: 12, height: 12, borderRadius: 2, background: "currentColor" }}
+            />
+          </button>
+        ) : (
+          <button
+            className="btn btn-primary"
+            onClick={submit}
+            disabled={!input.trim() && pending.length === 0 && !quote}
+            style={{ height: 40, width: 40, padding: 0, borderRadius: 11 }}
+            aria-label="Надіслати"
+          >
+            <IconSend size={16} />
+          </button>
+        )}
         {onStartSurvey && (
           <button
             title="Опитування про постачання"
@@ -1386,7 +1428,7 @@ function Composer({
       </div>
     </div>
   );
-}
+});
 
 function DateSeparator() {
   const d = new Date();
@@ -1433,7 +1475,9 @@ function AgentAvatar() {
   );
 }
 
-function UserBubble({ text }: { text: string }) {
+// Bubbles are memoised on primitive/stable props: while a reply streams only
+// the last (assistant) item gets a new object, so earlier messages skip render.
+const UserBubble = memo(function UserBubble({ text }: { text: string }) {
   return (
     <div style={{ display: "flex", justifyContent: "flex-end", margin: "14px 0 26px" }}>
       <div
@@ -1452,7 +1496,7 @@ function UserBubble({ text }: { text: string }) {
       </div>
     </div>
   );
-}
+});
 
 function ClassifyBubble({
   card,
@@ -1662,7 +1706,7 @@ function QuestionBubble({
   );
 }
 
-function AssistantBubble({
+const AssistantBubble = memo(function AssistantBubble({
   text,
   citations,
   pending,
@@ -1704,4 +1748,4 @@ function AssistantBubble({
       </div>
     </div>
   );
-}
+});
