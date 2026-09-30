@@ -446,8 +446,8 @@ async function runExtraction(content: ChatContentBlockParam[]): Promise<Extracti
       // the tool JSON mid-array. 32k fits far larger tables; truncation is still
       // detected below via stop_reason and surfaced (never silently marked ok).
       max_tokens: 32000,
-      // Deterministic extraction — low temperature reduces field variance.
-      temperature: 0,
+      // No `temperature`: current Claude models (Opus 4.7+/Sonnet 5.5) reject
+      // non-default sampling params with a 400.
       tools: [EXTRACTION_TOOL],
       tool_choice: { type: 'tool', name: 'record_extraction' },
       messages: [{ role: 'user', content }],
