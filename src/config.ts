@@ -21,12 +21,11 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(16, 'JWT_SECRET must be at least 16 chars'),
   JWT_EXPIRES_IN: z.string().default('12h'),
 
-  // Access-code login (the PIN keypad in the UI). Entering ACCESS_CODE issues a
-  // JWT for ACCESS_CODE_EMAIL (or the oldest user if unset) — a shared team
-  // code, alongside the per-user email/password login. Set ACCESS_CODE='' to
-  // disable code login entirely.
-  ACCESS_CODE: z.string().default('1995'),
-  ACCESS_CODE_EMAIL: z.string().optional(),
+  // Proxies whose X-Forwarded-For is trusted, so req.ip is the real client
+  // (login throttling is keyed on it). The API port is published only on the
+  // host's 127.0.0.1 and reached through the system Caddy + Docker's bridge, so
+  // loopback + private ranges are the only possible hops. proxy-addr syntax.
+  TRUST_PROXY: z.string().default('loopback,uniquelocal'),
 
   // CORS: comma-separated exact origins to allow. The app is same-origin behind
   // Caddy, so this is usually empty; set it only if the API is served cross-origin.

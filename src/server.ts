@@ -33,6 +33,7 @@ async function buildServer() {
   const app = Fastify({
     logger: { level: config.NODE_ENV === 'development' ? 'info' : 'warn' },
     bodyLimit: config.MAX_UPLOAD_BYTES + 1024 * 1024,
+    trustProxy: config.TRUST_PROXY,
   });
 
   // The frontend and API share one origin (system Caddy), so CORS is a
@@ -52,7 +53,7 @@ async function buildServer() {
     allowedHeaders: ['Content-Type', 'Authorization'],
   });
 
-  // Rate limiting is opt-in per route (only the chat endpoint uses it).
+  // Rate limiting is opt-in per route (chat + login).
   await app.register(rateLimit, { global: false });
 
   await app.register(multipart, {
