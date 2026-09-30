@@ -19,14 +19,14 @@ import {
 
 const codeSchema = z.object({ code: z.string().min(1).max(32) });
 
-/** PIN login is on only when a 6–8 digit PIN AND its target email are configured. */
+/** PIN login is on when a 6–8 digit PIN is configured. */
 function codeLoginEnabled(): boolean {
-  return /^\d{6,8}$/.test(config.ACCESS_CODE) && config.ACCESS_CODE_EMAIL.trim().length > 0;
+  return /^\d{6,8}$/.test(config.ACCESS_CODE);
 }
 
 if (config.ACCESS_CODE && !codeLoginEnabled()) {
   // eslint-disable-next-line no-console
-  console.warn('ACCESS_CODE ignored: PIN login needs a 6–8 digit ACCESS_CODE and ACCESS_CODE_EMAIL.');
+  console.warn('ACCESS_CODE ignored: the PIN must be 6–8 digits.');
 }
 
 /** Constant-time PIN comparison (hash first so lengths always match). */
@@ -88,7 +88,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ codeLogin: enabled, codeLength: enabled ? config.ACCESS_CODE.length : null });
   });
 
-  // POST /api/auth/login-code — quick PIN login for ACCESS_CODE_EMAIL. Guarded
+  // POST /api/auth/login-code — quick shared PIN login. Guarded
   // by a per-IP limit (5 / 15 min) AND a global lockout (ACCESS_CODE_MAX_FAILURES
   // wrong PINs in 24 h from any IPs → PIN login off for 24 h), so neither one
   // client nor a botnet can enumerate the PIN space.
@@ -103,10 +103,17 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       recordCodeFailure();
       return reply.code(401).send({ error: 'invalid_code' });
     }
-    const { rows } = await query<{ id: string; email: string; name: string }>(
-      'SELECT id, email, name FROM users WHERE email = $1',
-      [config.ACCESS_CODE_EMAIL.trim().toLowerCase()],
-    );
+    // The PIN opens ACCESS_CODE_EMAIL's account when set, otherwise the main
+    // (first-created) account — one shared team code, no email needed.
+    const target = config.ACCESS_CODE_EMAIL.trim().toLowerCase();
+    const { rows } = target
+      ? await query<{ id: string; email: string; name: string }>(
+          'SELECT id, email, name FROM users WHERE email = $1',
+          [target],
+        )
+      : await query<{ id: string; email: string; name: string }>(
+          'SELECT id, email, name FROM users ORDER BY created_at ASC LIMIT 1',
+        );
     const user = rows[0];
     if (!user) return reply.code(401).send({ error: 'no_user' });
     const token = signToken({ sub: user.id, email: user.email });
