@@ -604,3 +604,18 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_extractions_file ON document_extractions(fi
 -- When the worker last moved the file's status — lets the sweep find files stuck
 -- in queued/indexing (worker crash, stalled job, enqueue failure).
 ALTER TABLE files ADD COLUMN IF NOT EXISTS status_changed_at TIMESTAMPTZ;
+
+-- ── Query performance (audit C8) ──
+-- Conversation history is read ordered by time on every chat turn.
+CREATE INDEX IF NOT EXISTS idx_messages_conversation_time ON messages(conversation_id, created_at);
+-- Cross-shipment Markdown reuse looks files up by content hash alone.
+CREATE INDEX IF NOT EXISTS idx_files_content_hash ON files(content_hash) WHERE content_hash IS NOT NULL;
+-- search_documents' exact-substring match (codes like UA/19603/01/01) uses
+-- ILIKE; a trigram index keeps it off a sequential scan on big shipments.
+-- Best-effort: if the role may not create the extension, skip (search still works).
+DO $$ BEGIN
+  CREATE EXTENSION IF NOT EXISTS pg_trgm;
+  CREATE INDEX IF NOT EXISTS idx_sections_text_trgm ON document_sections USING GIN (text gin_trgm_ops);
+EXCEPTION WHEN OTHERS THEN  -- not installed / no privilege: optional index
+  RAISE NOTICE 'pg_trgm unavailable — substring search stays unindexed';
+END $$;

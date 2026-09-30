@@ -14,7 +14,7 @@ import {
 } from '../queue/ingestRetry.js';
 import { sweepStuckFiles } from '../services/ingestRetry.js';
 import { readStoredFile } from '../services/storage.js';
-import { convertToMarkdown } from '../services/markdown/convert.js';
+import { convertToMarkdown, type ConversionResult } from '../services/markdown/convert.js';
 import { saveFileMarkdown } from '../services/markdown/store.js';
 import {
   extractFieldsFromMarkdown,
@@ -41,6 +41,7 @@ interface FileJobRow {
   disk_path: string;
   folder_name: string | null;
   batch_id: string | null;
+  content_hash: string | null;
 }
 
 /**
@@ -81,7 +82,8 @@ async function setStatus(
 async function processJob(job: Job<IndexJobData>): Promise<void> {
   const { fileId } = job.data;
   const { rows } = await query<FileJobRow>(
-    `SELECT f.id, f.workspace_id, f.name, f.type, f.disk_path, f.batch_id, fo.name AS folder_name
+    `SELECT f.id, f.workspace_id, f.name, f.type, f.disk_path, f.batch_id, f.content_hash,
+            fo.name AS folder_name
      FROM files f LEFT JOIN folders fo ON fo.id = f.folder_id
      WHERE f.id = $1`,
     [fileId],
@@ -102,7 +104,10 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
     // converted locally; legacy .doc goes through LibreOffice. Stored once and
     // read by read_file, extraction, classification and full-text search — there
     // is no embedding vendor in the pipeline any more.
-    const conv = await convertToMarkdown(buf, file.type, file.name);
+    // Identical bytes were already converted (re-upload, another shipment, a new
+    // version of the same file, a retry) → reuse that Markdown instead of paying
+    // for Claude vision again. Only clean conversions are reused.
+    const conv = (await reuseMarkdownByHash(file)) ?? (await convertToMarkdown(buf, file.type, file.name));
     await saveFileMarkdown(file.id, file.workspace_id, conv);
     const pages = conv.pages;
     // eslint-disable-next-line no-console
@@ -254,6 +259,27 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
     }
     throw err; // Let BullMQ record the failure / retry.
   }
+}
+
+async function reuseMarkdownByHash(file: FileJobRow): Promise<ConversionResult | null> {
+  if (!file.content_hash) return null;
+  const { rows } = await query<{
+    pages: ConversionResult['pages'];
+    converter: ConversionResult['converter'];
+    page_count: number | null;
+  }>(
+    `SELECT m.pages, m.converter, m.page_count
+     FROM files f JOIN file_markdown m ON m.file_id = f.id
+     WHERE f.content_hash = $1 AND f.id <> $2 AND m.partial = false
+       AND m.converter <> 'none' AND m.char_count > 0
+     ORDER BY m.created_at DESC LIMIT 1`,
+    [file.content_hash, file.id],
+  );
+  const r = rows[0];
+  if (!r) return null;
+  // eslint-disable-next-line no-console
+  console.log(`Reusing Markdown for ${file.id} (${file.name}) from an identical file (content hash).`);
+  return { pages: r.pages, converter: r.converter, partial: false, pageCount: r.page_count, note: null };
 }
 
 /** One extraction row per file (UNIQUE file_id) — replace atomically. */

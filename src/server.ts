@@ -3,6 +3,7 @@ import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import multipart from '@fastify/multipart';
 import { config } from './config.js';
+import { pool } from './db/pool.js';
 import { runMigrations } from './db/migrate.js';
 import { authRoutes } from './routes/auth.js';
 import { workspaceRoutes } from './routes/workspaces.js';
@@ -32,7 +33,9 @@ import { mapRoutes } from './routes/map.js';
 async function buildServer() {
   const app = Fastify({
     logger: { level: config.NODE_ENV === 'development' ? 'info' : 'warn' },
-    bodyLimit: config.MAX_UPLOAD_BYTES + 1024 * 1024,
+    // JSON bodies only (multipart uploads stream through @fastify/multipart with
+    // their own `limits` below) — was ~26 MB for every route.
+    bodyLimit: 2 * 1024 * 1024,
     trustProxy: config.TRUST_PROXY,
   });
 
@@ -63,6 +66,15 @@ async function buildServer() {
       fileSize: Math.max(config.MAX_UPLOAD_BYTES, config.MAX_ZIP_BYTES),
       files: config.MAX_UPLOAD_FILES,
     },
+  });
+
+  // Baseline security headers on every API response (the frontend sets its own
+  // CSP in next.config). Route-specific headers (file sandbox CSP) win.
+  app.addHook('onSend', async (_req, reply, payload) => {
+    reply.header('X-Content-Type-Options', 'nosniff');
+    reply.header('Referrer-Policy', 'same-origin');
+    if (!reply.hasHeader('X-Frame-Options')) reply.header('X-Frame-Options', 'SAMEORIGIN');
+    return payload;
   });
 
   app.get('/health', async () => ({ status: 'ok' }));
@@ -100,6 +112,25 @@ async function main(): Promise<void> {
   const app = await buildServer();
   await app.listen({ port: config.PORT, host: config.HOST });
   app.log.info(`Backend listening on http://${config.HOST}:${config.PORT}`);
+
+  // Graceful shutdown (docker stop / redeploy): stop accepting connections and
+  // give in-flight chat turns time to finish and persist their answer, instead of
+  // being cut mid-stream. Hard exit after the deadline (compose grace is 60 s).
+  let shuttingDown = false;
+  const shutdown = (signal: string): void => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    // eslint-disable-next-line no-console
+    console.log(`${signal} received — draining connections…`);
+    const deadline = setTimeout(() => process.exit(0), 50_000);
+    deadline.unref();
+    app
+      .close()
+      .then(() => pool.end())
+      .finally(() => process.exit(0));
+  };
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
 main().catch((err) => {

@@ -98,6 +98,9 @@ export async function computeChecklist(ws: WorkspaceRow): Promise<ChecklistItem[
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    // Concurrent recomputes (3 index jobs in one workspace) each DELETE+INSERT;
+    // under READ COMMITTED both inserts survived → duplicate checklist items.
+    await client.query("SELECT pg_advisory_xact_lock(hashtext('checklist:' || $1))", [ws.id]);
     await client.query('DELETE FROM workspace_checklist_items WHERE workspace_id = $1', [ws.id]);
     for (const item of items) {
       await client.query(

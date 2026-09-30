@@ -251,12 +251,15 @@ export async function classifyAndFile(
   }
 
   // High/medium → move. Never deletes or overwrites. Record why + how confident.
-  await query(
+  // Only if the file is still where we found it: the classification can take an
+  // LLM call, and a manual move made meanwhile must win.
+  const moved = await query(
     `UPDATE files SET folder_id = $1, suggested_folder_id = NULL,
             folder_reason = $2, folder_confidence = $3
-     WHERE id = $4 AND workspace_id = $5`,
-    [target.id, reason, confidence, file.id, workspaceId],
+     WHERE id = $4 AND workspace_id = $5 AND folder_id IS NOT DISTINCT FROM $6`,
+    [target.id, reason, confidence, file.id, workspaceId, file.folder_id],
   );
+  if ((moved.rowCount ?? 0) === 0) return empty;
 
   return {
     fileId: file.id,

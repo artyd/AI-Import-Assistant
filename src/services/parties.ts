@@ -66,10 +66,25 @@ export function canonicalRole(role: string | null | undefined): PartyRole | null
 export async function upsertParties(
   workspaceId: string,
   parties: PartyInput[],
+  opts: { onlyIfEmpty?: boolean } = {},
 ): Promise<PartyRow[]> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    // Serialize every writer of this workspace's parties (worker auto-fill, the
+    // sidebar save, the agent tool): two concurrent replaces used to duplicate
+    // rows, and an auto-fill could wipe parties the user saved a moment earlier.
+    await client.query("SELECT pg_advisory_xact_lock(hashtext('parties:' || $1))", [workspaceId]);
+    if (opts.onlyIfEmpty) {
+      const { rows } = await client.query<{ n: number }>(
+        'SELECT count(*)::int AS n FROM parties WHERE workspace_id = $1',
+        [workspaceId],
+      );
+      if ((rows[0]?.n ?? 0) > 0) {
+        await client.query('COMMIT');
+        return [];
+      }
+    }
     await client.query('DELETE FROM parties WHERE workspace_id = $1', [workspaceId]);
     const out: PartyRow[] = [];
     for (const p of parties) {

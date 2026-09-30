@@ -5,6 +5,7 @@ import { verifyPassword } from '../auth/passwords.js';
 import { signToken } from '../auth/jwt.js';
 import { authenticate } from '../auth/hook.js';
 import { createHash, timingSafeEqual } from 'node:crypto';
+import { issueSseTicket } from '../auth/sseTicket.js';
 import { config } from '../config.js';
 import {
   loginRateLimit,
@@ -110,6 +111,11 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     if (!user) return reply.code(401).send({ error: 'no_user' });
     const token = signToken({ sub: user.id, email: user.email });
     return reply.send({ token, user: { id: user.id, email: user.email, name: user.name } });
+  });
+
+  // POST /api/auth/sse-ticket — one-time 60 s ticket for an EventSource URL.
+  app.post('/api/auth/sse-ticket', { preHandler: authenticate }, async (req, reply) => {
+    return reply.send({ ticket: issueSseTicket(req.user!) });
   });
 
   // POST /api/auth/logout — JWT is stateless; client discards the token.

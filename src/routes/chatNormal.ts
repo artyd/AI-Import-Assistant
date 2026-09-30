@@ -15,7 +15,7 @@ import { logistTools } from '../agent/tools.js';
 import { chatRateLimitConfig } from './chatRateLimit.js';
 
 const chatSchema = z.object({
-  message: z.string().min(1),
+  message: z.string().min(1).max(20_000),
   conversationId: z.string().uuid().optional(),
 });
 
@@ -55,6 +55,7 @@ export async function chatNormalRoutes(app: FastifyInstance): Promise<void> {
         history,
         userMessage: message,
         sse,
+        signal: sse.signal,
         // Global consultant: no shipment tools, but the customs/logistics
         // reference lookups (УКТ ЗЕД / dual-use / НБУ / PubChem) when enabled.
         tools: logistTools(),

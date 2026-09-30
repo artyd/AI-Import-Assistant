@@ -34,24 +34,50 @@ export async function publishFileStatus(
   await getPublisher().publish(channel(workspaceId), JSON.stringify(event));
 }
 
-/**
- * Subscribes to a workspace's status channel. Returns an async close function.
- * Each subscription uses its own connection (Redis subscribe mode is exclusive).
- */
+// ONE shared subscriber connection per process (Redis subscribe mode makes it
+// exclusive to subscriptions), fanned out to listeners by channel — it used to
+// be one Redis connection per open browser tab.
+let subscriber: Redis | null = null;
+const listeners = new Map<string, Set<(event: FileStatusEvent) => void>>();
+
+function getSubscriber(): Redis {
+  if (subscriber) return subscriber;
+  subscriber = createRedis();
+  subscriber.on('message', (ch: string, payload: string) => {
+    const set = listeners.get(ch);
+    if (!set || set.size === 0) return;
+    let event: FileStatusEvent;
+    try {
+      event = JSON.parse(payload) as FileStatusEvent;
+    } catch {
+      return; // Ignore malformed payloads.
+    }
+    for (const fn of set) fn(event);
+  });
+  return subscriber;
+}
+
+/** Subscribes to a workspace's status channel. Returns an async close function. */
 export function subscribeFileStatus(
   workspaceId: string,
   onEvent: (event: FileStatusEvent) => void,
 ): () => Promise<void> {
-  const sub = createRedis();
-  void sub.subscribe(channel(workspaceId));
-  sub.on('message', (_ch: string, payload: string) => {
-    try {
-      onEvent(JSON.parse(payload) as FileStatusEvent);
-    } catch {
-      // Ignore malformed payloads.
-    }
-  });
+  const ch = channel(workspaceId);
+  const sub = getSubscriber();
+  let set = listeners.get(ch);
+  if (!set) {
+    set = new Set();
+    listeners.set(ch, set);
+    void sub.subscribe(ch);
+  }
+  set.add(onEvent);
   return async () => {
-    await sub.quit();
+    const cur = listeners.get(ch);
+    if (!cur) return;
+    cur.delete(onEvent);
+    if (cur.size === 0) {
+      listeners.delete(ch);
+      await sub.unsubscribe(ch).catch(() => undefined);
+    }
   };
 }

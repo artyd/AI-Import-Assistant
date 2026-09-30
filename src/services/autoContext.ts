@@ -61,21 +61,17 @@ export async function autoFillWorkspaceContext(workspaceId: string): Promise<voi
   }
 
   // Parties — only when NONE exist yet, so we never clobber user-entered rows.
-  const { rows } = await query<{ n: number }>(
-    'SELECT count(*)::int AS n FROM parties WHERE workspace_id = $1',
-    [ws.id],
-  );
-  if ((rows[0]?.n ?? 0) === 0) {
-    const parties: PartyInput[] = analysis.suggestions
-      .filter((s) => s.company_name.trim())
-      .map((s) => ({
-        role: s.role,
-        company_name: s.company_name,
-        country: s.country ?? null,
-        is_internal: false,
-      }));
-    if (parties.length > 0) await upsertParties(ws.id, parties);
-  }
+  // The emptiness check runs inside upsertParties' locked transaction (a
+  // separate count-then-insert raced with concurrent jobs / the user's save).
+  const parties: PartyInput[] = analysis.suggestions
+    .filter((s) => s.company_name.trim())
+    .map((s) => ({
+      role: s.role,
+      company_name: s.company_name,
+      country: s.country ?? null,
+      is_internal: false,
+    }));
+  if (parties.length > 0) await upsertParties(ws.id, parties, { onlyIfEmpty: true });
 
   // Recompute intake_complete (required-five) + refresh derived checklist/status.
   const merged = await getWorkspaceById(ws.id);

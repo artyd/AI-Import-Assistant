@@ -36,6 +36,8 @@ export interface AgentTurnParams {
    * message with no tool_use round-trips.
    */
   tools?: typeof toolDefinitions;
+  /** Aborts the turn (client disconnected) — no further model calls or tools. */
+  signal?: AbortSignal;
 }
 
 export interface AgentTurnResult {
@@ -146,6 +148,7 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
 
   try {
     for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
+      if (params.signal?.aborted) throw new Error('client_disconnected');
       const stream = anthropic.messages.stream({
         model: MODEL,
         max_tokens: MAX_TOKENS,
@@ -153,7 +156,7 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
         system: systemParam,
         messages: request(),
         tools: toolsParam,
-      });
+      }, { signal: params.signal });
 
       stream.on('text', (delta: string) => {
         text += delta;
@@ -215,7 +218,7 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
     // the model synthesizes a closing answer. `tools` must still be sent (history
     // holds tool blocks — the API 400s without a definition); tool_choice none
     // forbids new calls.
-    if (toolsStillPending) {
+    if (toolsStillPending && !params.signal?.aborted) {
       const stream = anthropic.messages.stream({
         model: MODEL,
         max_tokens: MAX_TOKENS,
@@ -224,7 +227,7 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
         messages: request(),
         tools: toolsParam,
         tool_choice: { type: 'none' },
-      });
+      }, { signal: params.signal });
       stream.on('text', (delta: string) => {
         text += delta;
         sse.send('token', { text: delta });
