@@ -543,7 +543,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
                 folder_id AS "folderId"
          FROM files
          WHERE workspace_id = $1 AND is_latest = true${batchFilter}
-           AND (status = 'error' OR extraction_status = 'unreadable')
+           AND (status = 'error' OR extraction_status IN ('unreadable', 'failed'))
          ORDER BY created_at`,
         params,
       );
@@ -583,7 +583,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
        JOIN workspaces w ON w.id = f.workspace_id
        WHERE w.owner_id = $1
          AND f.is_latest = true
-         AND (f.status = 'error' OR f.extraction_status = 'unreadable')
+         AND (f.status = 'error' OR f.extraction_status IN ('unreadable', 'failed'))
        ORDER BY f.created_at DESC`,
       [req.user!.sub],
     );

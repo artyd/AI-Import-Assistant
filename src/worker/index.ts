@@ -70,7 +70,7 @@ async function setStatus(
   status: 'indexing' | 'ready' | 'error',
   errorReason: string | null = null,
 ): Promise<void> {
-  await query('UPDATE files SET status = $2, error_reason = $3 WHERE id = $1', [
+  await query('UPDATE files SET status = $2, error_reason = $3, status_changed_at = now() WHERE id = $1', [
     fileId,
     status,
     errorReason,
@@ -90,6 +90,9 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
   if (!file) return; // File deleted before indexing ran.
 
   await setStatus(file.id, file.workspace_id, 'indexing');
+  // Fresh run: no extraction verdict yet (a stale 'ok' from a previous run must
+  // not survive if this run's extraction fails). Batch reconcile waits on NULL.
+  await query('UPDATE files SET extraction_status = NULL WHERE id = $1', [file.id]);
 
   try {
     const buf = await readStoredFile(file.disk_path);
@@ -115,8 +118,10 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
     // checklist/discrepancy checks are deterministic. A failure here must NOT
     // fail indexing — the file stays "ready".
     if (config.EXTRACTION_ENABLED) {
+      // Set once the extraction verdict is stored — a later failure (risk scan,
+      // classification…) must not be reported as an extraction failure.
+      let extractionStored = false;
       try {
-        await query('DELETE FROM document_extractions WHERE file_id = $1', [file.id]);
         // Primary: multi-pass extraction over the stored Markdown (already a
         // faithful Claude transcription, so no second vision pass is needed).
         // Fallback: direct vision on the original file when no Markdown came out.
@@ -129,11 +134,7 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
         const fields = meta.fields;
 
         if (fields && extractionIsSubstantive(fields)) {
-          await query(
-            `INSERT INTO document_extractions (file_id, workspace_id, extracted_fields, model_version)
-             VALUES ($1, $2, $3::jsonb, $4)`,
-            [file.id, file.workspace_id, JSON.stringify(fields), MODEL],
-          );
+          await upsertExtraction(file.id, file.workspace_id, fields);
           // 'partial' when the extraction JSON was truncated by the output cap:
           // fields are present but line_items are under-counted — don't trust as
           // a clean 'ok' (reconciliation/totals may be incomplete).
@@ -158,15 +159,14 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
               'Документ не вдалося прочитати (скан без текстового шару / OCR не дав результату). ' +
                 'Введіть ключові поля вручну.',
           };
-          await query(
-            `INSERT INTO document_extractions (file_id, workspace_id, extracted_fields, model_version)
-             VALUES ($1, $2, $3::jsonb, $4)`,
-            [file.id, file.workspace_id, JSON.stringify(placeholder), MODEL],
-          );
+          await upsertExtraction(file.id, file.workspace_id, placeholder);
           await query('UPDATE files SET extraction_status = $2 WHERE id = $1', [file.id, 'unreadable']);
         } else {
+          // Nothing extractable this run — drop any stale row from a previous run.
+          await query('DELETE FROM document_extractions WHERE file_id = $1', [file.id]);
           await query('UPDATE files SET extraction_status = $2 WHERE id = $1', [file.id, 'no_fields']);
         }
+        extractionStored = true;
         const ws = await getWorkspaceById(file.workspace_id);
         if (ws) {
           await refreshWorkspaceState(ws);
@@ -221,7 +221,16 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
         }
       } catch (err) {
         // eslint-disable-next-line no-console
-        console.error(`Extraction failed for file ${file.id}:`, (err as Error).message);
+        console.error(
+          `${extractionStored ? 'Post-extraction step' : 'Extraction'} failed for file ${file.id}:`,
+          (err as Error).message,
+        );
+        // Surface + let the sweep retry it, instead of a silently missing document.
+        if (!extractionStored) {
+          await query(`UPDATE files SET extraction_status = 'failed' WHERE id = $1`, [file.id]).catch(
+            () => undefined,
+          );
+        }
       }
     }
 
@@ -235,9 +244,28 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
     }
   } catch (err) {
     const reason = (err as Error).message?.slice(0, 300) ?? 'unknown error';
-    await setStatus(file.id, file.workspace_id, 'error', reason);
+    // Only the LAST attempt is a real 'error' (the retry sweep re-queues errors —
+    // doing it while BullMQ still retries ran two jobs for one file).
+    const finalAttempt = job.attemptsMade + 1 >= (job.opts.attempts ?? 1);
+    if (finalAttempt) await setStatus(file.id, file.workspace_id, 'error', reason);
+    else {
+      await query(`UPDATE files SET status = 'queued', status_changed_at = now() WHERE id = $1`, [file.id]);
+      await publishFileStatus(file.workspace_id, { fileId: file.id, status: 'queued' });
+    }
     throw err; // Let BullMQ record the failure / retry.
   }
+}
+
+/** One extraction row per file (UNIQUE file_id) — replace atomically. */
+async function upsertExtraction(fileId: string, workspaceId: string, fields: unknown): Promise<void> {
+  await query(
+    `INSERT INTO document_extractions (file_id, workspace_id, extracted_fields, model_version)
+     VALUES ($1, $2, $3::jsonb, $4)
+     ON CONFLICT (file_id) DO UPDATE SET
+       extracted_fields = EXCLUDED.extracted_fields, model_version = EXCLUDED.model_version,
+       extracted_at = now()`,
+    [fileId, workspaceId, JSON.stringify(fields), MODEL],
+  );
 }
 
 /**
@@ -292,6 +320,22 @@ async function main(): Promise<void> {
   worker.on('failed', (job, err) => {
     // eslint-disable-next-line no-console
     console.error(`Indexing job ${job?.id} failed:`, err.message);
+    // A job that stalled out (worker OOM/SIGKILL) never ran processJob's catch —
+    // on the final attempt make sure the file doesn't stay 'indexing' forever.
+    if (job && job.attemptsMade >= (job.opts.attempts ?? 1)) {
+      const reason = err.message?.slice(0, 300) ?? 'failed';
+      void query(
+        `UPDATE files SET status = 'error', error_reason = $2, status_changed_at = now()
+         WHERE id = $1 AND status IN ('queued', 'indexing')
+         RETURNING workspace_id`,
+        [job.data.fileId, reason],
+      )
+        .then(({ rows }) => {
+          const ws = (rows[0] as { workspace_id?: string } | undefined)?.workspace_id;
+          if (ws) return publishFileStatus(ws, { fileId: job.data.fileId, status: 'error', errorReason: reason });
+        })
+        .catch(() => undefined);
+    }
   });
 
   // Daily reminders (in-app). Optional — gated by REMINDERS_ENABLED.

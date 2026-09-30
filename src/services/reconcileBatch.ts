@@ -1,3 +1,4 @@
+import { config } from '../config.js';
 import { query } from '../db/pool.js';
 import { getWorkspaceById } from './workspaceAccess.js';
 import { computeDiscrepancies } from './discrepancies.js';
@@ -29,12 +30,17 @@ export async function maybeReconcileBatch(batchId: string | null | undefined): P
 
   // Complete = nothing still queued/indexing AND no error file the sweep will
   // still retry (every error is already flagged unreadable → done retrying).
+  // A 'ready' file whose extraction hasn't produced a verdict yet (NULL) or
+  // failed (will be retried) also blocks — reconciling before extraction lands
+  // notified the user with wrong counts.
   const { rows: pend } = await query<{ pending: string; retriable: string }>(
     `SELECT
-       COUNT(*) FILTER (WHERE status IN ('queued','indexing')) AS pending,
+       COUNT(*) FILTER (WHERE status IN ('queued','indexing')
+         OR (status = 'ready' AND $2::boolean
+             AND (extraction_status IS NULL OR extraction_status = 'failed'))) AS pending,
        COUNT(*) FILTER (WHERE status = 'error' AND extraction_status IS DISTINCT FROM 'unreadable') AS retriable
      FROM files WHERE batch_id = $1 AND is_latest = true`,
-    [batchId],
+    [batchId, config.EXTRACTION_ENABLED],
   );
   const p = pend[0]!;
   if (Number(p.pending) > 0 || Number(p.retriable) > 0) return false;

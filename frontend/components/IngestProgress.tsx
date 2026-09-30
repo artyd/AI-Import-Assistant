@@ -26,7 +26,7 @@ export function IngestProgress({ files, onReindex }: Props) {
   const read = latest.filter((f) => f.status === "ready").length;
   const pending = latest.filter((f) => f.status === "queued" || f.status === "indexing").length;
   const problems = latest.filter(
-    (f) => f.status === "error" || f.extractionStatus === "unreadable"
+    (f) => f.status === "error" || f.extractionStatus === "unreadable" || f.extractionStatus === "failed"
   );
 
   // Nothing in flight and nothing broken → stay out of the way.
