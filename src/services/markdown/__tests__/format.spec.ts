@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   groupPagesByChars,
   htmlToMarkdown,
@@ -122,5 +122,14 @@ describe('splitLongMarkdown', () => {
     }
     const allRows = parts.flatMap((p) => p.split('\n').filter((l) => l.startsWith('| item')));
     expect(allRows).toEqual(rows);
+  });
+});
+
+describe('stripControlChars', () => {
+  it('drops NUL and C0 controls but keeps tabs/newlines', async () => {
+    vi.doMock('../../../config.js', () => ({ config: {} }));
+    vi.doMock('../vision.js', () => ({}));
+    const { stripControlChars } = await import('../convert.js');
+    expect(stripControlChars('a\u0000b\u0007c\td\ne\r')).toBe('abc\td\ne\r');
   });
 });

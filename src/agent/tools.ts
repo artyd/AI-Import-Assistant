@@ -7,6 +7,7 @@ import { readStoredFile, contentHashOf } from '../services/storage.js';
 import { convertToMarkdown } from '../services/markdown/convert.js';
 import { joinPages } from '../services/markdown/format.js';
 import { enqueueIndexJob } from '../queue/index.js';
+import { insertNotification } from '../services/notifications.js';
 import { publishFileStatus } from '../events/fileStatus.js';
 import {
   searchWorkspace,
@@ -749,6 +750,11 @@ async function runSaveContext(input: unknown, ctx: ToolContext): Promise<ToolOut
 
   // Recompute intake_complete and refresh derived state.
   await refreshAfterWorkspaceWrite(ws.id);
+  const changed = [
+    ...scalarKeys.filter((k) => parsed.data[k] !== undefined),
+    ...(parsed.data.parties ? ['parties'] : []),
+  ];
+  if (changed.length) await notifyAgentContextChange(ws.id, changed.join(', '));
   const finalWs = (await getWorkspaceById(ws.id))!;
   const missing = await getMissingContext(finalWs);
   return {
@@ -765,6 +771,32 @@ async function runSaveContext(input: unknown, ctx: ToolContext): Promise<ToolOut
  * status/checklist. Single source of the completeness formula for the agent-side
  * writes (save_workspace_context, set_contract_mode) so it can't drift.
  */
+/**
+ * Marks uploaded-document text as DATA for the model (prompt-injection guard; the
+ * system prompt tells it never to follow instructions found inside these tags).
+ * Closing tags inside the document are neutralised so it can't break out.
+ */
+function wrapDoc(name: string, text: string): string {
+  const safe = text.replace(/<\/?документ/gi, '‹документ');
+  return `<документ файл="${name.replace(/"/g, "'")}">\n${safe}\n</документ>`;
+}
+
+/**
+ * Provenance for agent-made context changes: the responsible user gets an in-app
+ * notification, so a change the agent was talked into (e.g. by text inside an
+ * uploaded document) is visible and can be reverted in the sidebar.
+ */
+async function notifyAgentContextChange(wsId: string, what: string): Promise<void> {
+  const ws = await getWorkspaceById(wsId);
+  if (!ws?.responsible_user_id) return;
+  await insertNotification(
+    ws.responsible_user_id,
+    wsId,
+    'agent_context_change',
+    `Постачання №${ws.number}: Штурман змінив контекст — ${what}. Перевірте на панелі.`,
+  ).catch(() => undefined);
+}
+
 async function refreshAfterWorkspaceWrite(wsId: string): Promise<void> {
   const merged = (await getWorkspaceById(wsId))!;
   const complete = Boolean(
@@ -893,6 +925,7 @@ async function runSetContractMode(input: unknown, ctx: ToolContext): Promise<Too
     [wsId, ct, 'Підтверджено користувачем у розмові.'],
   );
   await refreshAfterWorkspaceWrite(wsId);
+  await notifyAgentContextChange(wsId, `режим контракту → ${CONTRACT_MODE_UK[ct]}`);
   return {
     result: `Збережено режим (підтверджено користувачем): ${CONTRACT_MODE_UK[ct]}.`,
     summary: `Режим (survey): ${ct}`,
@@ -1136,7 +1169,7 @@ async function runSearch(input: unknown, ctx: ToolContext): Promise<ToolOutcome>
     .map((h, i) => {
       const loc = h.page ? `, стор. ${h.page}` : '';
       const fold = h.folder ? ` (${h.folder})` : '';
-      return `[${i + 1}] ${h.file}${loc}${fold}\n${h.text}`;
+      return `[${i + 1}] ${h.file}${loc}${fold}\n${wrapDoc(h.file, h.text)}`;
     })
     .join('\n\n');
   const files = [...new Set(hits.map((h) => h.file))];
@@ -1234,7 +1267,7 @@ async function runReadFile(input: unknown, ctx: ToolContext): Promise<ToolOutcom
   const citations = dedupeCitations(pages.map((p) => ({ file: file.name, page: p.page })));
   const quality = stored.partial || stored.note ? `\n(Увага: ${stored.note ?? 'документ розпізнано не повністю'}.)` : '';
   return {
-    result: `Файл: ${file.name} (Markdown${stored.pageCount ? `, ${stored.pageCount} стор.` : ''})${quality}\n${text}`,
+    result: `Файл: ${file.name} (Markdown${stored.pageCount ? `, ${stored.pageCount} стор.` : ''})${quality}\n${wrapDoc(file.name, text)}`,
     summary: `Прочитано: ${file.name}${truncated ? ' (частково)' : ''}`,
     citations: citations.length ? citations : [{ file: file.name, page: null }],
   };

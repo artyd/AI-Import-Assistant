@@ -25,7 +25,7 @@ function consolidatedTools() {
 }
 
 const chatSchema = z.object({
-  message: z.string().min(1),
+  message: z.string().min(1).max(20_000),
   conversationId: z.string().uuid().optional(),
 });
 
@@ -71,6 +71,7 @@ export async function chatConsolidatedRoutes(app: FastifyInstance): Promise<void
           history,
           userMessage: message,
           sse,
+          signal: sse.signal,
           collectionId: col.id,
           ownerId: req.user!.sub,
           tools: consolidatedTools(),

@@ -1,5 +1,6 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { verifyToken, type JwtClaims } from './jwt.js';
+import { consumeSseTicket } from './sseTicket.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -9,8 +10,9 @@ declare module 'fastify' {
 
 /**
  * preHandler that requires a valid Bearer token. Attaches request.user.
- * The frontend sends `Authorization: Bearer <jwt>`; a `token` cookie is also
- * accepted so the SSE EventSource (which cannot set headers) can authenticate.
+ * Header ONLY — the old `?access_token=` query and `token` cookie fallbacks were
+ * accepted on every route (JWT leaked into logs; cookie auth without CSRF
+ * protection). EventSource routes use `authenticateSse` + a one-time ticket.
  */
 export async function authenticate(req: FastifyRequest, reply: FastifyReply): Promise<void> {
   const token = extractToken(req);
@@ -28,18 +30,23 @@ export async function authenticate(req: FastifyRequest, reply: FastifyReply): Pr
 function extractToken(req: FastifyRequest): string | null {
   const header = req.headers.authorization;
   if (header?.startsWith('Bearer ')) return header.slice('Bearer '.length).trim();
-
-  // Query param fallback for EventSource-based SSE clients.
-  const q = (req.query as Record<string, unknown> | undefined)?.access_token;
-  if (typeof q === 'string' && q.length > 0) return q;
-
-  // Cookie fallback (`token=<jwt>`).
-  const cookie = req.headers.cookie;
-  if (cookie) {
-    for (const part of cookie.split(';')) {
-      const [k, ...v] = part.trim().split('=');
-      if (k === 'token' && v.length) return decodeURIComponent(v.join('='));
-    }
-  }
   return null;
+}
+
+/**
+ * preHandler for SSE-over-GET (EventSource) routes: a Bearer header, or a
+ * single-use `?ticket=` minted by POST /api/auth/sse-ticket (60 s).
+ */
+export async function authenticateSse(req: FastifyRequest, reply: FastifyReply): Promise<void> {
+  const ticket = (req.query as Record<string, unknown> | undefined)?.ticket;
+  if (typeof ticket === 'string' && ticket.length > 0) {
+    const claims = consumeSseTicket(ticket);
+    if (claims) {
+      req.user = claims;
+      return;
+    }
+    await reply.code(401).send({ error: 'unauthorized', message: 'Invalid or expired ticket' });
+    return;
+  }
+  return authenticate(req, reply);
 }

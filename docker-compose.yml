@@ -40,6 +40,8 @@ services:
       retries: 10
 
   backend:
+    # Time to finish in-flight chat turns / vision jobs on stop/redeploy.
+    stop_grace_period: 60s
     build:
       context: .
       dockerfile: Dockerfile
@@ -73,6 +75,8 @@ services:
       logist-mcp: { condition: service_started }
 
   worker:
+    # Time to finish in-flight chat turns / vision jobs on stop/redeploy.
+    stop_grace_period: 60s
     build:
       context: .
       dockerfile: Dockerfile

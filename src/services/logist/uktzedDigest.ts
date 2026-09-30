@@ -1,4 +1,9 @@
-import { anthropic, MODEL } from '../../anthropic/client.js';
+import { createHash } from 'node:crypto';
+import type { Redis } from 'ioredis';
+import { anthropic } from '../../anthropic/client.js';
+import { runWithAnthropicLimit } from '../../anthropic/limiter.js';
+import { config } from '../../config.js';
+import { createRedis } from '../../queue/connection.js';
 import type { UktzedTab } from './index.js';
 
 /**
@@ -30,7 +35,10 @@ const MAX_CHUNKS = 8;
 // Concurrency: sections in parallel × chunks in parallel, both bounded.
 const SECTION_CONCURRENCY = 3;
 const CHUNK_CONCURRENCY = 3;
-const CHUNK_MAX_TOKENS = 1500;
+// Room for adaptive thinking (effort low) plus the bullet list.
+const CHUNK_MAX_TOKENS = 4000;
+// Tariff/requirements pages change rarely — reuse a digest for a day.
+const CACHE_TTL_S = 24 * 60 * 60;
 
 const chunkInstruction = (code: string, section: string): string =>
   `Це фрагмент розділу «${section}» ОФІЦІЙНОЇ митної довідки по коду УКТ ЗЕД ${code} ` +
@@ -68,11 +76,16 @@ function splitChunks(text: string): string[] {
 }
 
 async function summarizeChunk(code: string, section: string, chunk: string): Promise<string> {
-  const msg = await anthropic.messages.create({
-    model: MODEL,
-    max_tokens: CHUNK_MAX_TOKENS,
-    messages: [{ role: 'user', content: `${chunkInstruction(code, section)}\n\n---\n${chunk}` }],
-  });
+  // Verbatim extraction into bullets — Sonnet at low effort, not the chat Opus;
+  // under the shared Anthropic concurrency limit like every other call.
+  const msg = await runWithAnthropicLimit(() =>
+    anthropic.messages.create({
+      model: config.LOGIST_DIGEST_MODEL,
+      max_tokens: CHUNK_MAX_TOKENS,
+      output_config: { effort: 'low' },
+      messages: [{ role: 'user', content: `${chunkInstruction(code, section)}\n\n---\n${chunk}` }],
+    }),
+  );
   return msg.content
     .map((b) => (b.type === 'text' ? b.text : ''))
     .join('')
@@ -111,11 +124,29 @@ async function digestSection(code: string, section: string, text: string): Promi
  * `common` is the shared header; `tabs` are the per-regime views. If everything
  * fails, returns '' and the caller falls back to a plain message.
  */
+let cache: Redis | null = null;
+function getCache(): Redis {
+  if (!cache) cache = createRedis();
+  return cache;
+}
+
 export async function digestUktzedSections(
   code: string,
   common: string,
   tabs: UktzedTab[],
 ): Promise<string> {
+  // Keyed by the page CONTENT, so a changed tariff page is re-digested at once.
+  const key =
+    'uktzed_digest:' +
+    createHash('sha256').update(JSON.stringify([code, common, tabs])).digest('hex');
+  const hit = await getCache().get(key).catch(() => null);
+  if (hit !== null) return hit;
+  const digest = await buildDigest(code, common, tabs);
+  if (digest) await getCache().set(key, digest, 'EX', CACHE_TTL_S).catch(() => undefined);
+  return digest;
+}
+
+async function buildDigest(code: string, common: string, tabs: UktzedTab[]): Promise<string> {
   const sections: { label: string; text: string }[] = [];
   if (common && common.trim()) {
     sections.push({ label: 'ЗАГАЛЬНЕ (опис товару, тариф, спільні коментарі)', text: common });

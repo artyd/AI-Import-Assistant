@@ -45,18 +45,28 @@ function imageMediaType(name: string): 'image/png' | 'image/jpeg' | 'image/gif' 
   return 'image/jpeg';
 }
 
+/**
+ * `media` is built LAZILY inside the concurrency slot: slicing a PDF window and
+ * base64-encoding it up front for every window at once held a whole large scan
+ * (several copies) in memory while calls queued — an OOM risk for the worker.
+ */
 async function transcribe(
-  media: ChatContentBlockParam,
+  media: ChatContentBlockParam | (() => Promise<ChatContentBlockParam>),
   prompt: string,
 ): Promise<{ text: string; truncated: boolean }> {
-  const msg = await runWithAnthropicLimit(() =>
+  const msg = await runWithAnthropicLimit(async () =>
     anthropic.messages.create({
       model: config.OCR_MODEL,
       max_tokens: config.OCR_MAX_TOKENS,
       // Verbatim transcription needs little reasoning — keep thinking cheap.
       // (No `temperature`: current models reject non-default sampling with a 400.)
       output_config: { effort: 'low' },
-      messages: [{ role: 'user', content: [media, { type: 'text', text: prompt }] }],
+      messages: [
+        {
+          role: 'user',
+          content: [typeof media === 'function' ? await media() : media, { type: 'text', text: prompt }],
+        },
+      ],
     }),
   );
   const text = msg.content
@@ -126,7 +136,7 @@ export async function pdfToMarkdown(buf: Buffer): Promise<VisionResult> {
 
   const runWindow = async (from: number, to: number): Promise<{ pages: MarkdownPage[]; partial: boolean; failed: number[] }> => {
     try {
-      const { text, truncated } = await transcribe(pdfBlock(await slice(from, to)), batchPrompt(from, to));
+      const { text, truncated } = await transcribe(async () => pdfBlock(await slice(from, to)), batchPrompt(from, to));
       if (truncated && to > from) {
         // Output cap hit for the window → redo one page per call.
         const per = await Promise.all(

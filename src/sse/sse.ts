@@ -8,8 +8,15 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 export class SseStream {
   private closed = false;
   private readonly raw: FastifyReply['raw'];
+  private readonly abort = new AbortController();
+  /**
+   * Aborted when the CLIENT goes away before we finish (tab closed, navigation,
+   * stop button) — pass it to long work (the agent loop / Anthropic stream) so a
+   * disconnected user stops costing tokens.
+   */
+  readonly signal: AbortSignal = this.abort.signal;
 
-  constructor(req: FastifyRequest, reply: FastifyReply) {
+  constructor(_req: FastifyRequest, reply: FastifyReply) {
     reply.hijack();
     this.raw = reply.raw;
 
@@ -23,8 +30,14 @@ export class SseStream {
     // Prime the stream so intermediaries flush headers immediately.
     this.raw.write(': connected\n\n');
 
-    req.raw.on('close', () => {
+    // Track the RESPONSE, not the request: on Node ≥16 `req.raw` emits 'close' as
+    // soon as the request BODY is consumed (≈ immediately for a POST), which
+    // silently turned every later send()/close() into a no-op when the stream was
+    // created early. The response 'close' reflects the connection; if it closes
+    // before we ended the stream ourselves, the client disconnected.
+    this.raw.on('close', () => {
       this.closed = true;
+      if (!this.raw.writableFinished) this.abort.abort();
     });
   }
 

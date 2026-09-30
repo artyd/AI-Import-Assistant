@@ -144,6 +144,21 @@ async function pdfToMd(buf: Buffer): Promise<ConversionResult> {
  * images; Office/CSV files are converted locally (they already carry structure).
  */
 export async function convertToMarkdown(buf: Buffer, type: FileType, name: string): Promise<ConversionResult> {
+  const conv = await convertRaw(buf, type, name);
+  return { ...conv, pages: conv.pages.map((p) => ({ ...p, markdown: stripControlChars(p.markdown) })) };
+}
+
+/**
+ * Removes NUL and other C0 control characters (keeps \t \n \r). PDF text layers
+ * can contain U+0000, which Postgres rejects in TEXT/JSONB — the save failed and
+ * the file was retried (with a full vision re-run) over and over.
+ */
+export function stripControlChars(s: string): string {
+  // eslint-disable-next-line no-control-regex
+  return s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
+}
+
+async function convertRaw(buf: Buffer, type: FileType, name: string): Promise<ConversionResult> {
   switch (type) {
     case 'pdf':
       return pdfToMd(buf);

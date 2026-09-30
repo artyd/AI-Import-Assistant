@@ -411,6 +411,9 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       }
       reply.header('Content-Type', contentType(file.type, file.name));
       reply.header('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(file.name)}`);
+      // User-uploaded content on the app origin: even if it were ever served as
+      // HTML/SVG, the sandbox CSP stops it from running script with app access.
+      reply.header('Content-Security-Policy', "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; object-src 'self'");
       return reply.send(buf);
     },
   );

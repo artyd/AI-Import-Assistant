@@ -10,9 +10,11 @@ match exactly what the prototype UI renders.
   Next.js app), so the browser uses **relative paths** (`fetch('/api/workspaces')`).
   It calls this backend only; it never calls Anthropic directly.
 - **Auth:** `Authorization: Bearer <jwt>` on every request except
-  `POST /api/auth/login`. For the two `EventSource` (SSE-over-GET) endpoints the
-  browser cannot set headers, so pass `?access_token=<jwt>` instead (a `token`
-  cookie is also accepted).
+  `POST /api/auth/login`. For the `EventSource` (SSE-over-GET) endpoint the
+  browser cannot set headers: get a one-time ticket with
+  `POST /api/auth/sse-ticket` (Bearer) → `{ "ticket" }` (valid 60 s, single use)
+  and open `…/events?ticket=<ticket>`. The JWT is never accepted in a query
+  string or cookie.
 - **Content type:** JSON request/response, except file upload (multipart) and
   the SSE streams (`text/event-stream`).
 - **Errors:** non-2xx responses are `{ "error": "<code>", ... }`. Common codes:
@@ -569,7 +571,8 @@ if older than the newest uploaded file.
 
 ### `GET /api/users`  (auth)
 Minimal directory for choosing a `responsible_user_id`.
-Response `200`: `{ "users": [ { "id","email","name" } ] }`.
+Response `200`: `{ "users": [ { "id","email","name" } ] }` — other users' emails
+are masked (`an***@domain`); only the caller's own email is returned in full.
 
 ### `GET /api/notifications`  (auth)
 Current user's in-app notifications (reminders). Delivery is **in-app only** —
