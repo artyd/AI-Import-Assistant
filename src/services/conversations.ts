@@ -1,4 +1,5 @@
 import { query } from '../db/pool.js';
+import { repairBlocks } from '../agent/historyRepair.js';
 import type { ChatMessageParam } from '../anthropic/client.js';
 
 export interface Citation {
@@ -250,10 +251,14 @@ export async function getConversationHistory(
   // (a user text turn, or an assistant turn's full block sequence).
   const groups: ChatMessageParam[][] = [];
   for (const r of rows) {
+    const plain: ChatMessageParam[] =
+      r.content && r.content.trim().length > 0 ? [{ role: r.role, content: r.content }] : [];
     if (r.role === 'assistant' && Array.isArray(r.blocks) && r.blocks.length > 0) {
-      groups.push(r.blocks);
-    } else if (r.content && r.content.trim().length > 0) {
-      groups.push([{ role: r.role, content: r.content }]);
+      // A single turn larger than the whole budget (huge read_file results) would
+      // overflow the context on every later turn — replay its prose instead.
+      groups.push(approxSize(r.blocks) > HISTORY_CHAR_BUDGET ? plain : r.blocks);
+    } else if (plain.length) {
+      groups.push(plain);
     }
   }
 
@@ -267,5 +272,7 @@ export async function getConversationHistory(
     kept.unshift(groups[i]!);
     size += s;
   }
-  return kept.flat();
+  // Heal anything stored before repair existed (unpaired tool_use, empty
+  // messages) and guarantee the window opens with a user message.
+  return repairBlocks(kept.flat());
 }
