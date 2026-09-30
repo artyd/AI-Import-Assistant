@@ -186,7 +186,9 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
           }
           // Proactive risk scan: notify the responsible user about NEW critical
           // (error-level) risks. De-duped per (user, workspace, type) per day.
-          if (ws.responsible_user_id) {
+          // Single uploads only — a batch gets ONE risk scan in its auto-reconcile
+          // (maybeReconcileBatch) instead of a full-workspace rescan per file.
+          if (ws.responsible_user_id && !file.batch_id) {
             try {
               const risks = await computeRisks(ws);
               const critical = risks.filter((r) => r.severity === 'error');
