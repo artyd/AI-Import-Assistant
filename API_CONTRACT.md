@@ -51,6 +51,9 @@ pass.
 Request: `{ "email": string, "password": string }`
 Response `200`: `{ "token": string, "user": { "id", "email", "name" } }`
 Response `401`: `{ "error": "invalid_credentials" }`
+Response `429`: throttled — more than 10 attempts per IP per 15 min, or the email
+is locked after 8 failed passwords within 15 min (`{ "error": "too_many_attempts" }`).
+There is no code/PIN login (`/api/auth/login-code` was removed).
 
 ### `POST /api/auth/logout`  (auth)
 Response `200`: `{ "ok": true }` (JWT is stateless — client discards the token).

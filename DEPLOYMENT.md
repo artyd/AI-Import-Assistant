@@ -182,8 +182,7 @@ tunes how long to wait for indexing. Exit code is non-zero if any check fails.
 | `DATABASE_URL` | ✅ | — | PostgreSQL (derived in compose) |
 | `REDIS_URL` | — | `redis://localhost:6379` | BullMQ (derived in compose) |
 | `JWT_SECRET` | ✅ | — | Session signing (≥16 chars) |
-| `ACCESS_CODE` | — | `1995` | Shared PIN for the UI code-login keypad; empty disables it |
-| `ACCESS_CODE_EMAIL` | — | — | User the code logs in as; defaults to the oldest user |
+| `TRUST_PROXY` | — | `loopback,uniquelocal` | Proxies trusted for `X-Forwarded-For` (real client IP for login throttling) |
 | `CORS_ORIGIN` | — | `` (empty) | Comma-separated exact origins to allow. Same-origin behind Caddy needs none; set only if the API is served cross-origin |
 | `STORAGE_DIR` | — | `./storage` | On-disk file storage root |
 | `ANTHROPIC_MODEL` | — | `claude-opus-4-8` | Chat model |
