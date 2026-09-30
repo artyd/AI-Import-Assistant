@@ -190,7 +190,7 @@ tunes how long to wait for indexing. Exit code is non-zero if any check fails.
 | `MAX_UPLOAD_BYTES` | — | `26214400` | Per-file upload cap (25 MB) |
 | `CHAT_RATE_MAX` / `CHAT_RATE_WINDOW` | — | `30` / `1 minute` | Per-user chat rate limit |
 | `OCR_ENABLED` | — | `true` | Worker OCR fallback for scanned PDFs / images via Claude vision (`true`/`false`) |
-| `OCR_MODEL` | — | `claude-opus-4-8` | Vision model for OCR / Markdown transcription; set `claude-haiku-4-5` to cut cost |
+| `OCR_MODEL` | — | `claude-sonnet-5-5` | Vision model for OCR / Markdown transcription (no forced tools/temperature needed) |
 | `MARKDOWN_VISION_ENABLED` | — | `true` | Transcribe ALL PDFs to Markdown with Claude vision (`false` = vision only for scans; text-layer PDFs use the local parser) |
 | `MARKDOWN_PDF_BATCH_PAGES` | — | `5` | PDF pages per Claude vision call |
 | `LIBREOFFICE_BIN` | — | `soffice` | LibreOffice binary for legacy `.doc` → `.docx` (installed in the image) |

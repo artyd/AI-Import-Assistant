@@ -53,7 +53,9 @@ async function transcribe(
     anthropic.messages.create({
       model: config.OCR_MODEL,
       max_tokens: config.OCR_MAX_TOKENS,
-      temperature: 0,
+      // Verbatim transcription needs little reasoning — keep thinking cheap.
+      // (No `temperature`: current models reject non-default sampling with a 400.)
+      output_config: { effort: 'low' },
       messages: [{ role: 'user', content: [media, { type: 'text', text: prompt }] }],
     }),
   );

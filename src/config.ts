@@ -112,9 +112,11 @@ const envSchema = z.object({
     .enum(['true', 'false'])
     .default('true')
     .transform((v) => v === 'true'),
-  // Model used for OCR transcription. Defaults to the chat model; a cheaper
-  // vision-capable model (e.g. claude-haiku-4-5) can be set to cut cost.
-  OCR_MODEL: z.string().default('claude-opus-4-8'),
+  // Model for vision transcription (PDF/scan/photo → Markdown). Verbatim
+  // transcription doesn't need Opus-level reasoning; Sonnet 5.5 reads as well at
+  // ~2.5x lower cost. (Structured extraction stays on ANTHROPIC_MODEL — it uses a
+  // forced tool_choice, which Sonnet 5.5 rejects.)
+  OCR_MODEL: z.string().default('claude-sonnet-5-5'),
   // Max output tokens for one OCR pass. Raised from the old hardcoded 8000 so a
   // long multi-page scan (e.g. a 10+ page contract) isn't transcribed only
   // partway. 16000 is the safe non-streaming ceiling (above that the SDK can hit
