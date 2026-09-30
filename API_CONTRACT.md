@@ -60,7 +60,8 @@ is locked after 8 failed passwords within 15 min (`{ "error": "too_many_attempts
 Response `200`: `{ "codeLogin": boolean, "codeLength": number | null }` — whether the PIN keypad is enabled.
 
 ### `POST /api/auth/login-code`
-Request: `{ "code": string }` → `200` like `/login`; `401 invalid_code`; `404 code_login_disabled`;
+Request: `{ "code": string }` → `200` like `/login` (logs in as `ACCESS_CODE_EMAIL`,
+or the main first-created account when unset); `401 invalid_code`; `404 code_login_disabled`;
 `429` when over 5 tries/IP/15 min, or `{ "error": "code_login_locked" }` after
 `ACCESS_CODE_MAX_FAILURES` wrong PINs from all IPs within 24 h (PIN login off for 24 h).
 

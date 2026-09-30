@@ -183,7 +183,7 @@ tunes how long to wait for indexing. Exit code is non-zero if any check fails.
 | `REDIS_URL` | — | `redis://localhost:6379` | BullMQ (derived in compose) |
 | `JWT_SECRET` | ✅ | — | Session signing (≥16 chars) |
 | `ACCESS_CODE` | — | `` (off) | Quick PIN for the UI keypad: 6–8 digits; empty disables it |
-| `ACCESS_CODE_EMAIL` | with PIN | — | The user the PIN logs in as |
+| `ACCESS_CODE_EMAIL` | — | — | Account the PIN opens; default = the main (first-created) account |
 | `ACCESS_CODE_MAX_FAILURES` | — | `20` | Wrong PINs (all IPs) per 24 h before PIN login locks for 24 h |
 | `TRUST_PROXY` | — | `loopback,uniquelocal` | Proxies trusted for `X-Forwarded-For` (real client IP for login throttling) |
 | `CORS_ORIGIN` | — | `` (empty) | Comma-separated exact origins to allow. Same-origin behind Caddy needs none; set only if the API is served cross-origin |

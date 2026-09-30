@@ -28,7 +28,8 @@ const envSchema = z.object({
   TRUST_PROXY: z.string().default('loopback,uniquelocal'),
 
   // Quick PIN login (the UI keypad). OFF unless explicitly configured. The PIN
-  // must be 6–8 digits and is bound to ACCESS_CODE_EMAIL (never "oldest user").
+  // must be 6–8 digits; it opens ACCESS_CODE_EMAIL's account if set, otherwise
+  // the main (first-created) account.
   // Brute force is blocked by a per-IP limit plus a GLOBAL lockout: after
   // ACCESS_CODE_MAX_FAILURES wrong PINs within 24 h (from any IPs) PIN login is
   // disabled for 24 h — password login keeps working.
