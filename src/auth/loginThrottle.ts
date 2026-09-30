@@ -46,3 +46,31 @@ export function recordLoginFailure(email: string, now = Date.now()): void {
 export function clearLoginFailures(email: string): void {
   failures.delete(key(email));
 }
+
+// ── Quick PIN login ──────────────────────────────────────────────────────────
+
+/** Per-IP limit for the PIN endpoint (@fastify/rate-limit route config). */
+export const codeLoginRateLimit = { max: 5, timeWindow: '15 minutes' } as const;
+
+const CODE_WINDOW_MS = 24 * 60 * 60 * 1000;
+let codeFailures: number[] = [];
+
+function prune(now: number): void {
+  codeFailures = codeFailures.filter((t) => now - t < CODE_WINDOW_MS);
+}
+
+/** Global (all-IP) lockout: too many wrong PINs in 24 h disables PIN login. */
+export function isCodeLoginLocked(maxFailures: number, now = Date.now()): boolean {
+  prune(now);
+  return codeFailures.length >= maxFailures;
+}
+
+export function recordCodeFailure(now = Date.now()): void {
+  prune(now);
+  codeFailures.push(now);
+}
+
+/** Test hook. */
+export function resetCodeFailures(): void {
+  codeFailures = [];
+}

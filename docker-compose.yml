@@ -57,6 +57,9 @@ services:
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-4-8}
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-12h}
+      # Quick PIN login (off unless set): 6–8 digits, bound to ACCESS_CODE_EMAIL.
+      ACCESS_CODE: ${ACCESS_CODE:-}
+      ACCESS_CODE_EMAIL: ${ACCESS_CODE_EMAIL:-}
       CORS_ORIGIN: ${CORS_ORIGIN}
       STORAGE_DIR: /data/storage
       MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-26214400}
