@@ -1,0 +1,155 @@
+import { PDFDocument } from 'pdf-lib';
+import { anthropic, type ChatContentBlockParam } from '../../anthropic/client.js';
+import { runWithAnthropicLimit } from '../../anthropic/limiter.js';
+import { config } from '../../config.js';
+import { splitVisionPages, type MarkdownPage } from './format.js';
+
+/**
+ * Claude vision → Markdown. Scans, photos AND text PDFs are transcribed by Claude
+ * page-by-page into Markdown (tables as GFM tables), in windows of
+ * MARKDOWN_PDF_BATCH_PAGES pages per call. Batching removes the old whole-PDF
+ * cliffs (32 MB / ~100 pages / one output budget for the entire document) and
+ * gives every page its real number.
+ */
+
+// Anthropic PDF request limit.
+const PDF_MAX_BYTES = 32 * 1024 * 1024;
+
+const RULES =
+  'Правила: переписуй ДОСЛІВНО, нічого не перекладай, не скорочуй і не вигадуй. ' +
+  'Таблиці — у форматі Markdown-таблиць (| … |), по одному рядку документа на рядок таблиці, ' +
+  'з заголовками колонок; цифри, суми, ваги, коди, дати, номери — точно як у документі. ' +
+  'Заголовки розділів — через #. Печатки, підписи, рукописні позначки — коротко в [квадратних дужках] ' +
+  '(напр. [печатка: ТОВ «…»], [підпис]). Нечитабельне — [нерозбірливо]. ' +
+  'Не додавай власних коментарів чи вступу — лише вміст документа.';
+
+function batchPrompt(from: number, to: number): string {
+  return (
+    `Це сторінки ${from}–${to} документа постачання (українською, російською, англійською або іншою мовою). ` +
+    'Перепиши їх у Markdown. ПЕРЕД вмістом кожної сторінки постав окремим рядком маркер ' +
+    `<!-- стор. N -->, де N — справжній номер сторінки (від ${from} до ${to}). ` +
+    RULES
+  );
+}
+
+const IMAGE_PROMPT =
+  'Це фото або скан документа постачання. Перепиши його вміст у Markdown. ' +
+  RULES +
+  ' Якщо на зображенні немає тексту — поверни порожню відповідь.';
+
+function imageMediaType(name: string): 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp' {
+  const n = name.toLowerCase();
+  if (n.endsWith('.png')) return 'image/png';
+  if (n.endsWith('.gif')) return 'image/gif';
+  if (n.endsWith('.webp')) return 'image/webp';
+  return 'image/jpeg';
+}
+
+async function transcribe(
+  media: ChatContentBlockParam,
+  prompt: string,
+): Promise<{ text: string; truncated: boolean }> {
+  const msg = await runWithAnthropicLimit(() =>
+    anthropic.messages.create({
+      model: config.OCR_MODEL,
+      max_tokens: config.OCR_MAX_TOKENS,
+      temperature: 0,
+      messages: [{ role: 'user', content: [media, { type: 'text', text: prompt }] }],
+    }),
+  );
+  const text = msg.content
+    .filter((b): b is Extract<typeof b, { type: 'text' }> => b.type === 'text')
+    .map((b) => b.text)
+    .join('\n')
+    .trim();
+  return { text, truncated: msg.stop_reason === 'max_tokens' };
+}
+
+function pdfBlock(bytes: Uint8Array): ChatContentBlockParam {
+  return {
+    type: 'document',
+    source: { type: 'base64', media_type: 'application/pdf', data: Buffer.from(bytes).toString('base64') },
+  };
+}
+
+export interface VisionResult {
+  pages: MarkdownPage[];
+  /** true when some page's transcription hit the output cap even at 1 page/call. */
+  partial: boolean;
+  /** Pages (1-indexed) that could not be transcribed at all. */
+  failedPages: number[];
+  pageCount: number;
+}
+
+/** Transcribes an image into a single Markdown page. */
+export async function imageToMarkdown(buf: Buffer, name: string): Promise<VisionResult> {
+  const { text, truncated } = await transcribe(
+    { type: 'image', source: { type: 'base64', media_type: imageMediaType(name), data: buf.toString('base64') } },
+    IMAGE_PROMPT,
+  );
+  return { pages: text ? [{ page: null, markdown: text }] : [], partial: truncated, failedPages: [], pageCount: 1 };
+}
+
+/**
+ * Transcribes a PDF in page windows. A window whose output is truncated is
+ * retried page-by-page; a window that errors is recorded in `failedPages` (the
+ * caller fills those from the text layer). Throws only if the PDF can't be
+ * parsed at all (encrypted/corrupt) AND is too large for a single whole-file call.
+ */
+export async function pdfToMarkdown(buf: Buffer): Promise<VisionResult> {
+  let src: PDFDocument;
+  try {
+    src = await PDFDocument.load(buf, { ignoreEncryption: true, updateMetadata: false });
+  } catch (err) {
+    // Unsplittable PDF — last resort: one whole-document call (old behaviour).
+    if (buf.length > PDF_MAX_BYTES) throw err;
+    const { text, truncated } = await transcribe(pdfBlock(buf), batchPrompt(1, 9999));
+    return { pages: splitVisionPages(text, 1, 9999), partial: truncated, failedPages: [], pageCount: 0 };
+  }
+
+  const pageCount = src.getPageCount();
+  const size = Math.max(1, config.MARKDOWN_PDF_BATCH_PAGES);
+  const windows: [number, number][] = [];
+  for (let from = 1; from <= pageCount; from += size) windows.push([from, Math.min(pageCount, from + size - 1)]);
+
+  const slice = async (from: number, to: number): Promise<Uint8Array> => {
+    const out = await PDFDocument.create();
+    const copied = await out.copyPages(
+      src,
+      Array.from({ length: to - from + 1 }, (_, i) => from - 1 + i),
+    );
+    copied.forEach((p) => out.addPage(p));
+    return out.save();
+  };
+
+  const runWindow = async (from: number, to: number): Promise<{ pages: MarkdownPage[]; partial: boolean; failed: number[] }> => {
+    try {
+      const { text, truncated } = await transcribe(pdfBlock(await slice(from, to)), batchPrompt(from, to));
+      if (truncated && to > from) {
+        // Output cap hit for the window → redo one page per call.
+        const per = await Promise.all(
+          Array.from({ length: to - from + 1 }, (_, i) => runWindow(from + i, from + i)),
+        );
+        return {
+          pages: per.flatMap((r) => r.pages),
+          partial: per.some((r) => r.partial),
+          failed: per.flatMap((r) => r.failed),
+        };
+      }
+      return { pages: splitVisionPages(text, from, to), partial: truncated, failed: [] };
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(`Vision transcription failed for pages ${from}-${to}: ${(err as Error).message}`);
+      return { pages: [], partial: false, failed: Array.from({ length: to - from + 1 }, (_, i) => from + i) };
+    }
+  };
+
+  // Windows run concurrently; the Anthropic semaphore bounds real parallelism.
+  const results = await Promise.all(windows.map(([f, t]) => runWindow(f, t)));
+  return {
+    pages: results.flatMap((r) => r.pages).sort((a, b) => (a.page ?? 0) - (b.page ?? 0)),
+    partial: results.some((r) => r.partial),
+    failedPages: results.flatMap((r) => r.failed),
+    pageCount,
+  };
+}

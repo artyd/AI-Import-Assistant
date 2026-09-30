@@ -28,7 +28,6 @@ import { partiesRoutes } from './routes/parties.js';
 import { reportRoutes } from './routes/report.js';
 import { exportRoutes } from './routes/export.js';
 import { mapRoutes } from './routes/map.js';
-import { ensureQdrantCollection } from './services/qdrant.js';
 
 async function buildServer() {
   const app = Fastify({
@@ -97,7 +96,6 @@ async function buildServer() {
 
 async function main(): Promise<void> {
   await runMigrations();
-  await ensureQdrantCollection();
   const app = await buildServer();
   await app.listen({ port: config.PORT, host: config.HOST });
   app.log.info(`Backend listening on http://${config.HOST}:${config.PORT}`);

@@ -552,3 +552,37 @@ ALTER TABLE files ADD CONSTRAINT files_extraction_status_check
 -- agent replays what it actually read/extracted on prior turns, not just its text
 -- answers. NULL for legacy rows (they replay as plain text). See conversations.ts.
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS blocks JSONB;
+
+-- ── Claude-only Markdown pipeline (replaces Voyage embeddings + Qdrant) ──
+
+-- Every file is converted ONCE at ingest to Markdown (PDF/scans/photos via Claude
+-- vision in page windows; docx/xlsx/csv locally). read_file, structured extraction
+-- and classification read this — no re-extraction / repeat OCR per read.
+CREATE TABLE IF NOT EXISTS file_markdown (
+  file_id      UUID PRIMARY KEY REFERENCES files(id) ON DELETE CASCADE,
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  pages        JSONB NOT NULL DEFAULT '[]'::jsonb,   -- [{ page: int|null, markdown }]
+  char_count   INT NOT NULL DEFAULT 0,
+  page_count   INT,
+  converter    TEXT NOT NULL DEFAULT '',
+  partial      BOOLEAN NOT NULL DEFAULT false,
+  note         TEXT,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_file_markdown_workspace ON file_markdown(workspace_id);
+
+-- The same Markdown split into ~800-token sections for search_documents
+-- (Postgres full-text search; 'simple' config + prefix matching since Postgres
+-- ships no Ukrainian stemmer).
+CREATE TABLE IF NOT EXISTS document_sections (
+  id           BIGSERIAL PRIMARY KEY,
+  file_id      UUID NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  seq          INT NOT NULL,
+  page         INT,
+  text         TEXT NOT NULL,
+  tsv          tsvector GENERATED ALWAYS AS (to_tsvector('simple', text)) STORED
+);
+CREATE INDEX IF NOT EXISTS idx_sections_workspace ON document_sections(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_sections_file ON document_sections(file_id);
+CREATE INDEX IF NOT EXISTS idx_sections_tsv ON document_sections USING GIN (tsv);

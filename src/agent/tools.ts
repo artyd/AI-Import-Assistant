@@ -4,11 +4,16 @@ import { query } from '../db/pool.js';
 import * as logist from '../services/logist/index.js';
 import { digestUktzedSections } from '../services/logist/uktzedDigest.js';
 import { readStoredFile, contentHashOf } from '../services/storage.js';
-import { extractText } from '../services/extract/index.js';
-import { ocrDocument } from '../services/ocr/claudeOcr.js';
+import { convertToMarkdown } from '../services/markdown/convert.js';
+import { joinPages } from '../services/markdown/format.js';
 import { enqueueIndexJob } from '../queue/index.js';
 import { publishFileStatus } from '../events/fileStatus.js';
-import { searchWorkspace, countWorkspaceChunks } from '../services/qdrant.js';
+import {
+  searchWorkspace,
+  workspaceCoverage,
+  loadFileMarkdown,
+  saveFileMarkdown,
+} from '../services/markdown/store.js';
 import { getWorkspaceById } from '../services/workspaceAccess.js';
 import { buildSupplierInstruction } from '../services/supplierInstruction.js';
 import { computeDiscrepancies } from '../services/discrepancies.js';
@@ -58,9 +63,10 @@ export const toolDefinitions: ChatTool[] = [
   {
     name: 'search_documents',
     description:
-      'Семантичний пошук по проіндексованих документах поточного постачання. ' +
-      'Використовуй для широких/асоціативних запитів, коли не знаєш точного файлу. ' +
-      'Повертає найрелевантніші фрагменти з назвою файлу та сторінкою.',
+      'Повнотекстовий пошук (за ключовими словами, номерами, кодами) по Markdown-версіях документів ' +
+      'поточного постачання. Використовуй, щоб ЗНАЙТИ, де згадується номер/товар/сторона/умова, коли не ' +
+      'знаєш точного файлу. Шукає за словами, не за змістом — пробуй синоніми й мову документа. ' +
+      'Повертає фрагменти з назвою файлу та сторінкою; для аналізу документа читай його повністю через read_file.',
     input_schema: {
       type: 'object',
       properties: {
@@ -92,7 +98,7 @@ export const toolDefinitions: ChatTool[] = [
     name: 'list_files',
     description:
       'Повертає дерево файлів поточного постачання: тека, назва, ID файлу, тип документа ' +
-      '(інвойс/пакувальний/контракт/…), статус індексації та чи є файл у семантичному пошуку. ' +
+      '(інвойс/пакувальний/контракт/…), статус індексації та чи вже оброблений (перетворений на Markdown). ' +
       'Використовуй, щоб зорієнтуватися, які документи є, і взяти ID/назву для read_file.',
     input_schema: { type: 'object', properties: {} },
   },
@@ -1106,31 +1112,20 @@ async function runSearch(input: unknown, ctx: ToolContext): Promise<ToolOutcome>
   if (!q) return { result: 'Порожній запит.', summary: 'Пошук: порожній запит', citations: [] };
 
   const wsId = requireWorkspace(ctx);
-  const hits = await searchWorkspace(wsId, q); // default top-K 24, diversified per doc
-  const totalChunks = await countWorkspaceChunks(wsId).catch(() => 0);
+  const hits = await searchWorkspace(wsId, q); // top-K 24, diversified per doc
+  const cov = await workspaceCoverage(wsId).catch(() => ({ sections: 0, files: 0, unconverted: 0 }));
+  const pending =
+    cov.unconverted > 0
+      ? `\n\n(${cov.unconverted} файл(ів) ще обробляються і в пошук не потрапили — за потреби прочитай їх через read_file.)`
+      : '';
 
   if (hits.length === 0) {
-    // Distinguish a BLIND index (files exist but none vectorised — e.g. an
-    // embedding outage) from genuinely-nothing, so the agent falls back to
-    // list_files + read_file instead of concluding "no data".
-    const { rows } = await query<{ n: number }>(
-      `SELECT count(*)::int AS n FROM files WHERE workspace_id = $1 AND is_latest = true`,
-      [wsId],
-    );
-    const fileCount = rows[0]?.n ?? 0;
-    if (fileCount > 0 && totalChunks === 0) {
-      return {
-        result:
-          `Семантичний індекс порожній (${fileCount} файл(ів) ще не проіндексовано векторно). ` +
-          'Це НЕ означає, що даних немає — виклич list_files і прочитай потрібний файл через read_file.',
-        summary: 'Пошук: індекс порожній',
-        citations: [],
-      };
-    }
     return {
       result:
-        'Нічого не знайдено серед проіндексованих документів. Якщо очікуєш ці дані — ' +
-        'виклич list_files і прочитай відповідний файл через read_file.',
+        'Пошук за ключовими словами нічого не знайшов. Це пошук по словах (не за змістом): ' +
+        'спробуй інші формулювання/синоніми/номери, або виклич list_files і прочитай потрібний файл ' +
+        'повністю через read_file.' +
+        pending,
       summary: 'Пошук: 0 результатів',
       citations: [],
     };
@@ -1147,12 +1142,12 @@ async function runSearch(input: unknown, ctx: ToolContext): Promise<ToolOutcome>
   const files = [...new Set(hits.map((h) => h.file))];
   // Tell the agent this is a partial top-matches view, not the whole corpus.
   const scale =
-    totalChunks > hits.length
-      ? `\n\n(Показано ${hits.length} з ~${totalChunks} фрагментів — це топ-збіги, не повний перегляд. ` +
-        'За потреби прочитай файл повністю через read_file.)'
+    cov.sections > hits.length
+      ? `\n\n(Показано ${hits.length} з ${cov.sections} фрагментів — це топ-збіги, не повний перегляд. ` +
+        'Для аналізу документа прочитай його повністю через read_file.)'
       : '';
   return {
-    result: result + scale,
+    result: result + scale + pending,
     summary: `Знайдено ${hits.length} фрагм. у: ${files.join(', ')}`,
     citations,
   };
@@ -1175,18 +1170,36 @@ async function runReadFile(input: unknown, ctx: ToolContext): Promise<ToolOutcom
     };
   }
 
-  const buf = await readStoredFile(file.disk_path);
-  let pages = await extractText(buf, file.type);
-  // Consistency with indexing: when the file has no text layer (scanned PDF /
-  // image), fall back to Claude vision OCR — the same path the worker used to
-  // index it — so read_file returns the same content that search can find,
-  // instead of a misleading "no text layer".
-  if (pages.length === 0 && (file.type === 'pdf' || file.type === 'image')) {
-    pages = await ocrDocument(buf, file.type, file.name).catch(() => []);
+  // Read the ingest-time Markdown (Claude's transcription). Files indexed before
+  // the Markdown pipeline existed are converted on first read and stored.
+  let stored = await loadFileMarkdown(file.id);
+  if (!stored && (file.status === 'queued' || file.status === 'indexing')) {
+    // The worker is converting it right now — don't duplicate the (vision) cost inline.
+    return {
+      result: `Файл "${file.name}" ще обробляється (розпізнавання в Markdown). Спробуй прочитати його трохи пізніше.`,
+      summary: `Читання: ${file.name} (ще обробляється)`,
+      citations: [{ file: file.name, page: null }],
+    };
   }
+  if (!stored) {
+    const buf = await readStoredFile(file.disk_path);
+    const conv = await convertToMarkdown(buf, file.type, file.name);
+    await saveFileMarkdown(file.id, requireWorkspace(ctx), conv).catch(() => undefined);
+    stored = {
+      pages: conv.pages,
+      converter: conv.converter,
+      partial: conv.partial,
+      pageCount: conv.pageCount,
+      note: conv.note,
+      charCount: conv.pages.reduce((n, p) => n + p.markdown.length, 0),
+    };
+  }
+  let pages = stored.pages.map((p) => ({ page: p.page, text: p.markdown }));
   if (pages.length === 0) {
     return {
-      result: `Файл "${file.name}" не містить тексту, який вдалося розпізнати.`,
+      result:
+        `Файл "${file.name}" не містить тексту, який вдалося розпізнати.` +
+        (stored.note ? ` Причина: ${stored.note}` : ''),
       summary: `Читання: ${file.name} (без тексту)`,
       citations: [{ file: file.name, page: null }],
     };
@@ -1198,7 +1211,7 @@ async function runReadFile(input: unknown, ctx: ToolContext): Promise<ToolOutcom
     pages = pages.filter((p) => p.page !== null && p.page >= from && p.page <= to);
   }
 
-  let text = pages.map((p) => (p.page ? `--- стор. ${p.page} ---\n${p.text}` : p.text)).join('\n\n');
+  let text = joinPages(pages.map((p) => ({ page: p.page, markdown: p.text })));
 
   // Optional char range "0-2000".
   if (typeof range === 'string' && /^\d+-\d+$/.test(range) && !pages.some((p) => p.page)) {
@@ -1219,8 +1232,9 @@ async function runReadFile(input: unknown, ctx: ToolContext): Promise<ToolOutcom
   }
 
   const citations = dedupeCitations(pages.map((p) => ({ file: file.name, page: p.page })));
+  const quality = stored.partial || stored.note ? `\n(Увага: ${stored.note ?? 'документ розпізнано не повністю'}.)` : '';
   return {
-    result: `Файл: ${file.name}\n${text}`,
+    result: `Файл: ${file.name} (Markdown${stored.pageCount ? `, ${stored.pageCount} стор.` : ''})${quality}\n${text}`,
     summary: `Прочитано: ${file.name}${truncated ? ' (частково)' : ''}`,
     citations: citations.length ? citations : [{ file: file.name, page: null }],
   };

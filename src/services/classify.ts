@@ -1,6 +1,7 @@
 import { query } from '../db/pool.js';
 import { readStoredFile } from './storage.js';
 import { extractText } from './extract/index.js';
+import { loadFileMarkdown } from './markdown/store.js';
 import { extractDocumentFields } from './extraction/extractFields.js';
 import type { FileType } from '../domain/folders.js';
 
@@ -122,9 +123,16 @@ async function resolveDocType(file: FileRow): Promise<DocTypeResolution> {
   //    manual confirmation rather than auto-moved).
   let text = '';
   try {
-    const buf = await readStoredFile(file.disk_path);
-    const pages = await extractText(buf, file.type);
-    text = pages.map((p) => p.text).join('\n\n').trim();
+    // Prefer the ingest-time Markdown (Claude's transcription — covers scans);
+    // fall back to raw text extraction for files not yet converted.
+    const stored = await loadFileMarkdown(file.id);
+    if (stored) {
+      text = stored.pages.map((p) => p.markdown).join('\n\n').trim();
+    } else {
+      const buf = await readStoredFile(file.disk_path);
+      const pages = await extractText(buf, file.type);
+      text = pages.map((p) => p.text).join('\n\n').trim();
+    }
   } catch {
     return { docType: null, method: null, confidence: null };
   }

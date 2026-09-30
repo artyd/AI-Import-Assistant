@@ -18,11 +18,15 @@ is not used.
 
 - **Single agent only.** One Claude conversation per chat, using tools. No
   multi-agent orchestration / sub-agent hand-off in the product runtime.
-- **Hybrid retrieval — both.** The agent must keep BOTH `search_documents`
-  (semantic, Qdrant) and `read_file` (precise, on-demand extraction). The model
-  chooses at runtime; never hardcode a fixed retrieval pipeline.
+- **Hybrid retrieval — both, Claude-only.** The agent must keep BOTH
+  `search_documents` (Postgres full-text over `document_sections`) and `read_file`
+  (the whole stored Markdown of a file). The model chooses at runtime; never
+  hardcode a fixed retrieval pipeline. **No embedding vendor** (Voyage/Qdrant were
+  removed 2026-09-30): every file is converted ONCE at ingest to Markdown
+  (`file_markdown`) — PDFs/scans/photos by Claude vision in 5-page windows,
+  docx/xlsx/csv locally, legacy .doc via LibreOffice — and everything reads that.
 - **Anthropic key server-side only** (`src/anthropic/client.ts`). The browser
-  never calls Anthropic/Voyage directly.
+  never calls Anthropic directly.
 - **Model:** `claude-opus-4-8` with `thinking: { type: 'adaptive' }`.
 
 ## Штурман grounding rules (Phase 4 — enforced in `src/agent/systemPrompt.ts`)
@@ -62,7 +66,7 @@ re-checks them manually.
 ## Stack & layout (everything flat in the repo root)
 
 Node 20 + TypeScript (ESM, `NodeNext`) · Fastify 5 · `@anthropic-ai/sdk` ·
-PostgreSQL (`pg`) · Qdrant · Voyage embeddings (behind `EmbeddingProvider`) ·
+PostgreSQL (`pg`, incl. full-text search) · `pdf-lib` (page windows) · LibreOffice (.doc) ·
 BullMQ + Redis worker · Caddy · Docker Compose.
 
 ```
@@ -74,11 +78,11 @@ src/
   routes/              auth, workspaces, files, chat (SSE), conversations, events (SSE),
                        checklist, discrepancies, supplierInstruction, parties, report, export, users, notifications
   agent/               loop.ts (tool-use loop), tools.ts (11 tools), systemPrompt.ts
-  services/            storage, extract/ (pdf|docx|xlsx|csv), embeddings/, qdrant, conversations, workspaceAccess,
+  services/            storage, extract/ (raw text + chunking), markdown/ (convert, vision, store/FTS), conversations, workspaceAccess,
                        checklist, discrepancies, status, parties, classify, extraction/, artifacts, supplierInstruction, notifications, report, export
   queue/               BullMQ queue + Redis connection
   events/              fileStatus pub/sub (live indexing status)
-  worker/index.ts      indexing worker: extract → chunk → embed → Qdrant → status
+  worker/index.ts      indexing worker: convert → Markdown (+ FTS sections) → status → extraction
 domain/folders.ts      folder skeleton + file-type inference
 scripts/               copy-assets.mjs (build), smoke-test.mjs
 docker-compose.yml  Caddyfile  .env.example  Dockerfile
@@ -93,7 +97,7 @@ API_CONTRACT.md  DEPLOYMENT.md
 - `npm run migrate` — apply schema (idempotent)
 - `npm run seed -- <email> <password> [name]` — create a user (no public signup)
 - `npm run smoke` — end-to-end API smoke test (needs a running stack + seeded user)
-- `docker compose up -d --build` — full stack (postgres, redis, qdrant, backend, worker, caddy)
+- `docker compose up -d --build` — full stack (postgres, redis, backend, worker, frontend, logist-mcp)
 
 ## Conventions
 
@@ -114,9 +118,9 @@ API_CONTRACT.md  DEPLOYMENT.md
   `server.ts`, add `authenticate` preHandler, scope by `getOwnedWorkspace`.
 - **A new agent tool** → add a definition to `toolDefinitions` and a handler in
   `executeTool` (`src/agent/tools.ts`); it returns `{ result, summary, citations }`.
-- **A new embedding vendor** → implement `EmbeddingProvider`
-  (`src/services/embeddings/`) and branch in `getEmbeddingProvider()`.
-- **A new file format** → extend `extractText` (`src/services/extract/index.ts`)
+- **Backfill Markdown** for files indexed before the pipeline →
+  `npm run migrate:markdown -- --apply` (dry-run without `--apply`).
+- **A new file format** → extend `convertToMarkdown` (`src/services/markdown/convert.ts`)
   and `inferFileType` (`domain/folders.ts`) + the allow-list in `storage.ts`.
 
 Out of scope (documented v2): OCR for images; native structured agent blocks

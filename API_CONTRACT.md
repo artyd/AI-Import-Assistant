@@ -8,7 +8,7 @@ match exactly what the prototype UI renders.
 - **Base URL:** none — the frontend and backend share one origin (the system
   Caddy routes `/api/*` + `/health` to the backend and everything else to the
   Next.js app), so the browser uses **relative paths** (`fetch('/api/workspaces')`).
-  It calls this backend only; it never calls Anthropic/Voyage directly.
+  It calls this backend only; it never calls Anthropic directly.
 - **Auth:** `Authorization: Bearer <jwt>` on every request except
   `POST /api/auth/login`. For the two `EventSource` (SSE-over-GET) endpoints the
   browser cannot set headers, so pass `?access_token=<jwt>` instead (a `token`
@@ -73,7 +73,7 @@ Response `200`: `{ "workspaces": [ { "id","number","supplier","status","created_
 ### `DELETE /api/workspaces/:id`  (auth)
 Deletes the shipment and everything it owns — folders, files, conversations +
 messages, extractions, checklist, parties, notifications, artifacts (DB cascade),
-plus its Qdrant vectors and on-disk files. Irreversible.
+plus its on-disk files. Irreversible.
 Response `200`: `{ "ok": true }`. `404 not_found` if not owned/found.
 
 ### `GET /api/workspaces/:id`  (auth)
