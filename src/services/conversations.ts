@@ -1,5 +1,5 @@
 import { query } from '../db/pool.js';
-import { repairBlocks } from '../agent/historyRepair.js';
+import { repairBlocks, stableWindowStart } from '../agent/historyRepair.js';
 import type { ChatMessageParam } from '../anthropic/client.js';
 
 export interface Citation {
@@ -263,15 +263,11 @@ export async function getConversationHistory(
   }
 
   // Keep the most recent groups within the char budget (never split a group, so
-  // tool_use/tool_result pairing stays valid). Always keep at least the last one.
-  const kept: ChatMessageParam[][] = [];
-  let size = 0;
-  for (let i = groups.length - 1; i >= 0; i--) {
-    const s = approxSize(groups[i]!);
-    if (kept.length > 0 && size + s > HISTORY_CHAR_BUDGET) break;
-    kept.unshift(groups[i]!);
-    size += s;
-  }
+  // tool_use/tool_result pairing stays valid). The window start moves in
+  // quantized jumps so the replayed prefix stays byte-stable for several turns
+  // and the prompt cache keeps hitting (see stableWindowStart).
+  const start = stableWindowStart(groups.map(approxSize), HISTORY_CHAR_BUDGET);
+  const kept = groups.slice(start);
   // Heal anything stored before repair existed (unpaired tool_use, empty
   // messages) and guarantee the window opens with a user message.
   return repairBlocks(kept.flat());

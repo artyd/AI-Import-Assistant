@@ -73,3 +73,28 @@ describe('stripToolBlocks', () => {
     ]);
   });
 });
+
+describe('stableWindowStart', () => {
+  it('keeps everything under budget', async () => {
+    const { stableWindowStart } = await import('../historyRepair.js');
+    expect(stableWindowStart([10, 10, 10], 100)).toBe(0);
+  });
+
+  it('drops old groups in quantized jumps so the start is stable across turns', async () => {
+    const { stableWindowStart } = await import('../historyRepair.js');
+    const budget = 100; // step 40
+    const sizes = Array.from({ length: 12 }, () => 10); // 120 total → drop ≥40
+    const s1 = stableWindowStart(sizes, budget);
+    expect(s1).toBe(4);
+    // Next two turns add 10 each: total 130, 140 → still drop 40 → same start.
+    expect(stableWindowStart([...sizes, 10], budget)).toBe(s1);
+    expect(stableWindowStart([...sizes, 10, 10], budget)).toBe(s1);
+    // Crossing the next step (total 150 → drop 80) jumps forward once.
+    expect(stableWindowStart([...sizes, 10, 10, 10], budget)).toBe(8);
+  });
+
+  it('always keeps the newest group', async () => {
+    const { stableWindowStart } = await import('../historyRepair.js');
+    expect(stableWindowStart([500, 500], 100)).toBe(1);
+  });
+});

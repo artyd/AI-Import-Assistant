@@ -3,6 +3,8 @@ import {
   MODEL,
   type ChatMessageParam,
   type ChatContentBlockParam,
+  type ChatSystem,
+  type ChatTool,
 } from '../anthropic/client.js';
 import type { SseStream } from '../sse/sse.js';
 import type { Citation, ToolCallRecord } from '../services/conversations.js';
@@ -21,7 +23,8 @@ export interface AgentTurnParams {
    */
   collectionId?: string;
   ownerId?: string;
-  system: string;
+  /** A plain string, or blocks (supply chat: cached rules + per-shipment state). */
+  system: string | ChatSystem;
   /** Prior turns as replay-ready Anthropic message params (may include tool blocks). */
   history: ChatMessageParam[];
   userMessage: string;
@@ -44,6 +47,43 @@ export interface AgentTurnResult {
   turnBlocks: ChatMessageParam[];
   /** Set when the model/stream errored — caller persists partial text + surfaces it. */
   error?: string;
+}
+
+// ── Prompt caching ────────────────────────────────────────────────────────────
+// Every iteration re-sends tools + system + the whole history; without caching
+// that was billed in full up to 15× per turn. Breakpoints (max 4): the last tool,
+// the static system rules, the end of prior history, and the newest message — so
+// each iteration and the next turn read the shared prefix at ~10% of the price.
+const EPHEMERAL = { type: 'ephemeral' } as const;
+
+function cachedSystem(system: string | ChatSystem): ChatSystem {
+  if (typeof system !== 'string') return system;
+  return [{ type: 'text', text: system, cache_control: EPHEMERAL }];
+}
+
+function cachedTools(tools: ChatTool[]): ChatTool[] {
+  if (tools.length === 0) return tools;
+  const last = tools[tools.length - 1]!;
+  return [...tools.slice(0, -1), { ...last, cache_control: EPHEMERAL } as ChatTool];
+}
+
+/** Copy of `messages` with a cache breakpoint on the last block of each listed index. */
+function withBreakpoints(messages: ChatMessageParam[], indexes: number[]): ChatMessageParam[] {
+  const out = [...messages];
+  for (const i of indexes) {
+    const m = out[i];
+    if (!m) continue;
+    const blocks: ChatContentBlockParam[] =
+      typeof m.content === 'string' ? [{ type: 'text', text: m.content }] : [...m.content];
+    const lastIdx = blocks.length - 1;
+    const last = blocks[lastIdx];
+    // Thinking blocks can't carry cache_control; the newest message is always a
+    // user message (text or tool_results), so this only skips odd history ends.
+    if (!last || last.type === 'thinking' || last.type === 'redacted_thinking') continue;
+    blocks[lastIdx] = { ...last, cache_control: EPHEMERAL } as ChatContentBlockParam;
+    out[i] = { role: m.role, content: blocks } as ChatMessageParam;
+  }
+  return out;
 }
 
 const MAX_ITERATIONS = 14;
@@ -80,6 +120,23 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
     { role: 'user' as const, content: userMessage },
   ];
   const seedLen = messages.length; // everything appended past this = THIS turn
+  const systemParam = cachedSystem(system);
+  const toolsParam = cachedTools(tools);
+  const historyEnd = seedLen - 2; // last message of prior history (−1 = none)
+  const usage = { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 };
+  const request = (): ChatMessageParam[] =>
+    withBreakpoints(messages, historyEnd >= 0 ? [historyEnd, messages.length - 1] : [messages.length - 1]);
+  const track = (u: {
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_input_tokens?: number | null;
+    cache_creation_input_tokens?: number | null;
+  }): void => {
+    usage.input += u.input_tokens;
+    usage.output += u.output_tokens;
+    usage.cacheRead += u.cache_read_input_tokens ?? 0;
+    usage.cacheWrite += u.cache_creation_input_tokens ?? 0;
+  };
 
   let text = '';
   const citations: Citation[] = [];
@@ -93,9 +150,9 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
         model: MODEL,
         max_tokens: MAX_TOKENS,
         thinking: { type: 'adaptive' },
-        system,
-        messages,
-        tools,
+        system: systemParam,
+        messages: request(),
+        tools: toolsParam,
       });
 
       stream.on('text', (delta: string) => {
@@ -104,6 +161,7 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
       });
 
       const msg = await stream.finalMessage();
+      track(msg.usage);
       // Preserve the full assistant content (incl. thinking + tool_use blocks).
       messages.push({ role: 'assistant', content: msg.content });
 
@@ -162,9 +220,9 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
         model: MODEL,
         max_tokens: MAX_TOKENS,
         thinking: { type: 'adaptive' },
-        system,
-        messages,
-        tools,
+        system: systemParam,
+        messages: request(),
+        tools: toolsParam,
         tool_choice: { type: 'none' },
       });
       stream.on('text', (delta: string) => {
@@ -172,6 +230,7 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
         sse.send('token', { text: delta });
       });
       const msg = await stream.finalMessage();
+      track(msg.usage);
       messages.push({ role: 'assistant', content: msg.content });
     }
   } catch (err) {
@@ -179,6 +238,13 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
     // partial answer (survives reload) instead of losing it.
     error = (err as Error).message;
   }
+
+  // One line per turn so prompt-cache effectiveness is visible in prod logs.
+  // eslint-disable-next-line no-console
+  console.log(
+    `Agent turn: input ${usage.input} + cache_read ${usage.cacheRead} + cache_write ${usage.cacheWrite}, ` +
+      `output ${usage.output} tokens.`,
+  );
 
   // Only persist replay blocks for a clean turn, and repair them (a response cut
   // by max_tokens mid-tool-call, or a thinking-only message, would otherwise be

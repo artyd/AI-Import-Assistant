@@ -43,7 +43,7 @@ export type DocType =
   | 'transport'
   | 'other';
 
-const DOC_TYPES: readonly DocType[] = [
+export const DOC_TYPES: readonly DocType[] = [
   'invoice',
   'packing_list',
   'contract',
@@ -502,6 +502,34 @@ export async function extractFieldsFromMarkdown(pages: MarkdownPage[]): Promise<
   );
   const fields = mergeExtractions(results.map((r) => r.fields).filter((f): f is ExtractedFields => !!f));
   return { fields, truncated: overCap || results.some((r) => r.truncated) };
+}
+
+/**
+ * Cheap document-type classifier (CLASSIFY_MODEL, default Haiku): first ~6k chars,
+ * one word back. Used only when a file has NO structured extraction — the old
+ * path re-ran the full Opus extraction (32k max_tokens) just to read doc_type.
+ */
+export async function classifyDocTypeCheap(text: string): Promise<DocType | null> {
+  const msg = await runWithAnthropicLimit(() =>
+    anthropic.messages.create({
+      model: config.CLASSIFY_MODEL,
+      max_tokens: 20,
+      messages: [
+        {
+          role: 'user',
+          content:
+            'Визнач тип документа постачання. Відповідай ОДНИМ словом із переліку: ' +
+            `${DOC_TYPES.join(', ')}.\n\n${text.slice(0, 6000)}`,
+        },
+      ],
+    }),
+  );
+  const answer = msg.content
+    .filter((b): b is Extract<typeof b, { type: 'text' }> => b.type === 'text')
+    .map((b) => b.text)
+    .join(' ')
+    .toLowerCase();
+  return DOC_TYPES.find((t) => answer.includes(t)) ?? null;
 }
 
 /**
