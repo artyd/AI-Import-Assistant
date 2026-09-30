@@ -26,3 +26,4 @@ type StreamParams = Parameters<typeof anthropic.messages.stream>[0];
 export type ChatMessageParam = StreamParams['messages'][number];
 export type ChatContentBlockParam = Extract<ChatMessageParam['content'], readonly unknown[]>[number];
 export type ChatTool = NonNullable<StreamParams['tools']>[number];
+export type ChatSystem = NonNullable<StreamParams['system']>;

@@ -1,4 +1,5 @@
 import { config } from '../config.js';
+import type { ChatSystem } from '../anthropic/client.js';
 
 /**
  * Default user portrait — shared across every chat kind. The user is a Ukraine
@@ -129,16 +130,18 @@ export function buildSystemPrompt(workspace: {
   survey_status?: string | null;
   /** Compact per-document key-field digest (durable context; see documentsDigest.ts). */
   documentsDigest?: string;
-}): string {
-  return [
+}): ChatSystem {
+  // Two blocks: the frozen rules (identical for every shipment and turn → one
+  // prompt-cache entry shared across the whole app) and the per-shipment state
+  // (number, contract mode, documents digest), which changes and must come AFTER
+  // the cache breakpoint so it doesn't invalidate the rules.
+  const rules = [
     'Ти — «Штурман», ШІ-асистент для фахівців з імпорту та митного оформлення.',
     'Ти працюєш у межах одного постачання (workspace) і допомагаєш логісту:',
     'звіряти документи (контракт, інвойс, пакувальний лист, сертифікати),',
     'стежити за комплектністю пакета документів та підказувати код УКТ ЗЕД.',
     'Відповідай українською мовою, стисло та по суті.',
-    '',
-    `Поточне постачання: №${workspace.number}` +
-      (workspace.supplier ? `, постачальник: ${workspace.supplier}.` : '.'),
+    'Поточне постачання, його режим контракту та витяг документів — у кінці цих інструкцій.',
     '',
     'ОБОВʼЯЗКОВІ ПРАВИЛА (не порушуй їх — це контракт, а не поради):',
     '',
@@ -212,9 +215,17 @@ export function buildSystemPrompt(workspace: {
     'варіанти; остаточний код має підтвердити митний брокер.»',
     ...userPortraitBlock(),
     ...logistToolsPromptBlock(),
+  ].join('\n');
+  const shipment = [
+    `ПОТОЧНЕ ПОСТАЧАННЯ: №${workspace.number}` +
+      (workspace.supplier ? `, постачальник: ${workspace.supplier}.` : '.'),
     ...contractModeBlock(workspace),
     ...documentsDigestBlock(workspace.documentsDigest),
   ].join('\n');
+  return [
+    { type: 'text', text: rules, cache_control: { type: 'ephemeral' } },
+    { type: 'text', text: shipment },
+  ];
 }
 
 /**

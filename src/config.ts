@@ -116,6 +116,8 @@ const envSchema = z.object({
   // ~2.5x lower cost. (Structured extraction stays on ANTHROPIC_MODEL — it uses a
   // forced tool_choice, which Sonnet 5.5 rejects.)
   OCR_MODEL: z.string().default('claude-sonnet-5-5'),
+  // Tiny doc-type classifier used only for files without a structured extraction.
+  CLASSIFY_MODEL: z.string().default('claude-haiku-4-5'),
   // Max output tokens for one OCR pass. Raised from the old hardcoded 8000 so a
   // long multi-page scan (e.g. a 10+ page contract) isn't transcribed only
   // partway. 16000 is the safe non-streaming ceiling (above that the SDK can hit

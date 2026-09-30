@@ -108,3 +108,22 @@ export function stripToolBlocks(input: ChatMessageParam[]): ChatMessageParam[] {
   }
   return repairBlocks(out);
 }
+
+/**
+ * Index of the first history group to replay, given each group's size. Keeps the
+ * total within `budget`, but moves the start only in `step`-sized jumps: sliding
+ * it by one turn every time (the old behaviour) changed the prompt prefix on every
+ * turn once a chat was over budget, so the prompt cache never hit. Always keeps at
+ * least the newest group.
+ */
+export function stableWindowStart(sizes: number[], budget: number, step = Math.floor(budget * 0.4)): number {
+  const total = sizes.reduce((a, b) => a + b, 0);
+  if (total <= budget || sizes.length === 0) return 0;
+  const target = Math.ceil((total - budget) / step) * step; // chars to drop, quantized
+  let dropped = 0;
+  for (let i = 0; i < sizes.length - 1; i++) {
+    if (dropped >= target) return i;
+    dropped += sizes[i]!;
+  }
+  return sizes.length - 1;
+}

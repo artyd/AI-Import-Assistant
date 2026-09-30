@@ -2,7 +2,7 @@ import { query } from '../db/pool.js';
 import { readStoredFile } from './storage.js';
 import { extractText } from './extract/index.js';
 import { loadFileMarkdown } from './markdown/store.js';
-import { extractDocumentFields } from './extraction/extractFields.js';
+import { classifyDocTypeCheap } from './extraction/extractFields.js';
 import type { FileType } from '../domain/folders.js';
 
 /**
@@ -108,6 +108,10 @@ async function resolveDocType(file: FileRow): Promise<DocTypeResolution> {
   if (stored && stored !== 'other') {
     return { docType: stored, method: 'extraction', confidence: 'high' };
   }
+  // The full extraction already looked at this document and said 'other' — a
+  // second LLM pass over the same text won't do better (it used to re-run the
+  // whole Opus extraction). Filename heuristics below still apply.
+  const alreadyExtracted = rows.length > 0;
 
   // 2. Images have no text layer → photos.
   if (file.type === 'image') return { docType: 'photos', method: 'image', confidence: 'high' };
@@ -136,9 +140,8 @@ async function resolveDocType(file: FileRow): Promise<DocTypeResolution> {
   } catch {
     return { docType: null, method: null, confidence: null };
   }
-  if (text.length < 20) return { docType: null, method: null, confidence: null };
-  const fields = await extractDocumentFields(text);
-  const docType = fields?.doc_type;
+  if (text.length < 20 || alreadyExtracted) return { docType: null, method: null, confidence: null };
+  const docType = await classifyDocTypeCheap(text).catch(() => null);
   return docType && docType !== 'other'
     ? { docType, method: 'llm', confidence: 'low' }
     : { docType: null, method: null, confidence: null };
