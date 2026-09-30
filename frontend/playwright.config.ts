@@ -8,6 +8,10 @@ import { defineConfig, devices } from "@playwright/test";
  * interface-quality / accessibility checks render standalone); tests that need a
  * live API self-skip when `PW_BACKEND=1` is not set.
  */
+// PW_BASE_URL runs the suite against an already-running server (e.g. the
+// production build, to check the prod CSP) instead of booting `next dev`.
+const externalBaseURL = process.env.PW_BASE_URL;
+
 export default defineConfig({
   testDir: "./e2e",
   timeout: 30_000,
@@ -16,7 +20,7 @@ export default defineConfig({
   retries: 0,
   reporter: [["list"], ["html", { open: "never" }]],
   use: {
-    baseURL: "http://localhost:3100",
+    baseURL: externalBaseURL ?? "http://localhost:3100",
     trace: "on-first-retry",
     screenshot: "only-on-failure",
   },
@@ -24,11 +28,13 @@ export default defineConfig({
     { name: "desktop-chromium", use: { ...devices["Desktop Chrome"] } },
     { name: "mobile", use: { ...devices["Pixel 5"] } },
   ],
-  webServer: {
-    // Dedicated port so a stray dev server on :3000 is never reused.
-    command: "npm run dev -- -p 3100",
-    url: "http://localhost:3100",
-    reuseExistingServer: false,
-    timeout: 120_000,
-  },
+  webServer: externalBaseURL
+    ? undefined
+    : {
+        // Dedicated port so a stray dev server on :3000 is never reused.
+        command: "npm run dev -- -p 3100",
+        url: "http://localhost:3100",
+        reuseExistingServer: false,
+        timeout: 120_000,
+      },
 });

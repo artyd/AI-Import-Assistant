@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, uploadWithProgress } from "@/lib/api";
+import { NoticeBanner, type NoticeTone } from "@/components/ui/Notice";
 import { useAuth } from "@/lib/auth";
 import { useTheme } from "@/lib/theme";
 import { openEventsChannel, streamAnalyze } from "@/lib/sse";
@@ -66,6 +67,69 @@ async function mapLimit<T, R>(
   return results;
 }
 
+// Apply one live file_status event to the file list (pure — also used to
+// replay events on top of a refreshed snapshot).
+function applyFileStatus(prev: FileItem[], ev: FileStatusEvent): FileItem[] {
+  if (ev.status === "deleted") return prev.filter((f) => f.id !== ev.fileId);
+  const idx = prev.findIndex((f) => f.id === ev.fileId);
+  if (idx === -1) {
+    if (!ev.name) return prev;
+    return [
+      ...prev,
+      {
+        id: ev.fileId,
+        folderId: ev.folderId ?? null,
+        name: ev.name,
+        type: "",
+        status: ev.status,
+        errorReason: ev.errorReason ?? null,
+      },
+    ];
+  }
+  const next = [...prev];
+  next[idx] = {
+    ...next[idx]!,
+    status: ev.status,
+    errorReason: ev.errorReason ?? next[idx]!.errorReason,
+    folderId: ev.folderId !== undefined ? ev.folderId : next[idx]!.folderId,
+  };
+  return next;
+}
+
+// Upload limits — mirror the backend (MAX_UPLOAD_BYTES / MAX_ZIP_BYTES) so an
+// oversize file is refused up front instead of after a long upload.
+const MAX_FILE_BYTES = 25 * 1024 * 1024;
+const MAX_ZIP_BYTES = 200 * 1024 * 1024;
+// Batching: well under the backend MAX_UPLOAD_FILES, and ~100 MB per request.
+const CLIENT_BATCH_FILES = 40;
+const CLIENT_BATCH_BYTES = 100 * 1024 * 1024;
+
+const isZip = (f: File) => f.name.toLowerCase().endsWith(".zip");
+const fmtMb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} МБ`;
+
+/** Drop oversize files and split the rest into count- AND byte-bounded batches. */
+function planUpload(all: File[]): { batches: File[][]; skipped: File[] } {
+  const skipped: File[] = [];
+  const batches: File[][] = [];
+  let cur: File[] = [];
+  let curBytes = 0;
+  for (const f of all) {
+    if (f.size > (isZip(f) ? MAX_ZIP_BYTES : MAX_FILE_BYTES)) {
+      skipped.push(f);
+      continue;
+    }
+    if (cur.length && (cur.length >= CLIENT_BATCH_FILES || curBytes + f.size > CLIENT_BATCH_BYTES)) {
+      batches.push(cur);
+      cur = [];
+      curBytes = 0;
+    }
+    cur.push(f);
+    curBytes += f.size;
+  }
+  if (cur.length) batches.push(cur);
+  return { batches, skipped };
+}
+
 // Starter prompts for a NEW consolidated (Збірний) chat — analysis-oriented.
 const CONSOLIDATED_STARTERS: { text: string; icon: React.ReactNode }[] = [
   { text: "Проаналізуй збірник за посиланням на Google Sheets", icon: <LnList size={15} /> },
@@ -105,6 +169,18 @@ export default function WorkspacePage() {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [checklist, setChecklist] = useState<ChecklistItem[] | null>(null);
+
+  // In-app notice banner (replaces blocking alert()).
+  const [notice, setNotice] = useState<{ text: string; tone: NoticeTone } | null>(null);
+  const notify = useCallback(
+    (text: string, tone: NoticeTone = "error") => setNotice({ text, tone }),
+    []
+  );
+  const closeNotice = useCallback(() => setNotice(null), []);
+  // Upload progress (bytes sent across all batches of the current upload).
+  const [uploadProgress, setUploadProgress] = useState<{ pct: number; files: number } | null>(
+    null
+  );
 
   // Collection (Збірник) files/folders for the right panel when consolidated is active.
   const [colFolders, setColFolders] = useState<Folder[]>([]);
@@ -260,41 +336,6 @@ export default function WorkspacePage() {
     if (user && workspace) refreshChecklist();
   }, [user, workspace, refreshChecklist]);
 
-  // Live file-status channel.
-  useEffect(() => {
-    if (!user || !workspace) return;
-    const es = openEventsChannel(id, (raw) => {
-      const ev = raw as FileStatusEvent;
-      setFiles((prev) => {
-        if (ev.status === "deleted") return prev.filter((f) => f.id !== ev.fileId);
-        const idx = prev.findIndex((f) => f.id === ev.fileId);
-        if (idx === -1) {
-          if (!ev.name) return prev;
-          return [
-            ...prev,
-            {
-              id: ev.fileId,
-              folderId: null,
-              name: ev.name,
-              type: "",
-              status: ev.status,
-              errorReason: ev.errorReason ?? null,
-            },
-          ];
-        }
-        const next = [...prev];
-        next[idx] = {
-          ...next[idx]!,
-          status: ev.status,
-          errorReason: ev.errorReason ?? next[idx]!.errorReason,
-          folderId: ev.folderId !== undefined ? ev.folderId : next[idx]!.folderId,
-        };
-        return next;
-      });
-    });
-    return () => es.close();
-  }, [id, user, workspace]);
-
   const onLog = useCallback((entry: LogEntry) => setLog((l) => [...l, entry]), []);
   const onPatch = useCallback(
     (partial: Partial<Workspace>) => setWorkspace((w) => (w ? { ...w, ...partial } : w)),
@@ -354,10 +395,43 @@ export default function WorkspacePage() {
     })();
   }, [id]);
 
+  // file_status events that arrive while a files refresh is in flight are
+  // re-applied on top of its (possibly older) snapshot, so a resync can never
+  // roll a file back to a stale status.
+  const refreshInFlight = useRef(0);
+  const bufferedEvents = useRef<FileStatusEvent[]>([]);
+
   const refreshFiles = useCallback(async () => {
-    const r = await api<{ files: FileItem[] }>(`/api/workspaces/${id}/files`);
-    setFiles(r.files);
+    refreshInFlight.current += 1;
+    try {
+      const r = await api<{ files: FileItem[] }>(`/api/workspaces/${id}/files`);
+      const replay = bufferedEvents.current.slice();
+      setFiles(replay.reduce(applyFileStatus, r.files));
+    } finally {
+      refreshInFlight.current -= 1;
+      if (refreshInFlight.current === 0) bufferedEvents.current = [];
+    }
   }, [id]);
+
+  // Live file-status channel. Depends only on stable values (NOT the workspace
+  // object, which changes on every patch/turn and used to re-open the channel,
+  // dropping events in the gap). The channel reconnects itself with backoff and
+  // a fresh SSE ticket; every (re)open resyncs the file list.
+  const workspaceLoaded = workspace != null;
+  useEffect(() => {
+    if (!user || !workspaceLoaded) return;
+    const channel = openEventsChannel(id, {
+      onFileStatus: (raw) => {
+        const ev = raw as FileStatusEvent;
+        if (refreshInFlight.current > 0) bufferedEvents.current.push(ev);
+        setFiles((prev) => applyFileStatus(prev, ev));
+      },
+      onOpen: () => {
+        void refreshFiles().catch(() => {});
+      },
+    });
+    return () => channel.close();
+  }, [id, user, workspaceLoaded, refreshFiles]);
 
   const upload = useCallback(
     async (
@@ -365,13 +439,12 @@ export default function WorkspacePage() {
       fileList: FileList | File[],
       replacesFileId?: string
     ): Promise<FileItem[]> => {
-      // Large selections are split into sub-limit batches and POSTed
-      // sequentially, so a big drag-drop (or a folder of hundreds) never trips
-      // the server's per-request file cap and nothing is silently dropped. A
-      // .zip counts as one part here and is expanded server-side. Kept well
-      // under the backend MAX_UPLOAD_FILES.
-      const CLIENT_BATCH_SIZE = 40;
-      const all = Array.from(fileList);
+      // Oversize files (>25 MB, or >200 MB for a .zip) are skipped up front and
+      // reported. The rest is split into batches bounded by count (40) AND
+      // bytes (~100 MB) and POSTed sequentially, so a big drag-drop never trips
+      // the server's per-request caps and nothing is silently dropped. A .zip
+      // counts as one part here and is expanded server-side.
+      const { batches, skipped } = planUpload(Array.from(fileList));
       const sp = new URLSearchParams();
       if (folderId) sp.set("folderId", folderId);
       // A version-replace targets a single existing file — only the very first
@@ -379,19 +452,43 @@ export default function WorkspacePage() {
       if (replacesFileId) sp.set("replacesFileId", replacesFileId);
       const qs = sp.toString() ? `?${sp.toString()}` : "";
 
+      const skippedText = skipped.length
+        ? "Пропущено — файл завеликий (макс. 25 МБ, архів .zip — 200 МБ):\n" +
+          skipped.map((f) => `• ${f.name} — ${fmtMb(f.size)}`).join("\n")
+        : "";
+      if (batches.length === 0) {
+        if (skippedText) notify(skippedText);
+        return [];
+      }
+
+      const totalBytes = batches.flat().reduce((s, f) => s + f.size, 0) || 1;
+      const totalFiles = batches.reduce((s, b) => s + b.length, 0);
+      let sentBytes = 0;
+      setUploadProgress({ pct: 0, files: totalFiles });
+
       const created: FileItem[] = [];
       const rejected: { name: string; reason: string }[] = [];
+      let failure: string | null = null;
       try {
-        for (let i = 0; i < all.length; i += CLIENT_BATCH_SIZE) {
-          const chunk = all.slice(i, i + CLIENT_BATCH_SIZE);
+        for (let i = 0; i < batches.length; i++) {
+          const chunk = batches[i]!;
+          const chunkBytes = chunk.reduce((s, f) => s + f.size, 0);
           const form = new FormData();
           for (const f of chunk) form.append("files", f, f.name || "file");
           // replacesFileId only applies to the first request.
           const chunkQs = i === 0 ? qs : folderId ? `?folderId=${encodeURIComponent(folderId)}` : "";
-          const res = await api<{
+          const res = await uploadWithProgress<{
             files: FileItem[];
             rejected?: { name: string; reason: string }[];
-          }>(`/api/workspaces/${id}/files${chunkQs}`, { form });
+          }>(`/api/workspaces/${id}/files${chunkQs}`, form, (loaded, total) => {
+            // XHR's total includes multipart overhead → scale to this chunk's bytes.
+            const done = sentBytes + (total > 0 ? (loaded / total) * chunkBytes : 0);
+            setUploadProgress({
+              pct: Math.min(100, Math.round((done / totalBytes) * 100)),
+              files: totalFiles,
+            });
+          });
+          sentBytes += chunkBytes;
           created.push(...res.files);
           if (res.rejected) rejected.push(...res.rejected);
           setFiles((prev) => {
@@ -399,18 +496,25 @@ export default function WorkspacePage() {
             return [...prev, ...res.files.filter((f) => !known.has(f.id))];
           });
         }
-        if (rejected.length) {
-          alert("Відхилено:\n" + rejected.map((r) => `• ${r.name} — ${r.reason}`).join("\n"));
-        }
-        return created;
       } catch (err) {
-        if (err instanceof ApiError && err.code === "no_valid_files")
-          alert("Жоден файл не підійшов (дозволені: pdf, doc, docx, xls, xlsx, csv, png, jpg, zip).");
-        else alert("Не вдалося завантажити файли.");
-        return created;
+        if (err instanceof ApiError && err.status === 401) failure = null; // → /login
+        else if (err instanceof ApiError && err.code === "no_valid_files")
+          failure = "Жоден файл не підійшов (дозволені: pdf, doc, docx, xls, xlsx, csv, png, jpg, zip).";
+        else failure = "Не вдалося завантажити файли.";
+      } finally {
+        setUploadProgress(null);
       }
+      const parts = [
+        failure,
+        rejected.length
+          ? "Відхилено:\n" + rejected.map((r) => `• ${r.name} — ${r.reason}`).join("\n")
+          : "",
+        skippedText,
+      ].filter(Boolean);
+      if (parts.length) notify(parts.join("\n\n"));
+      return created;
     },
-    [id]
+    [id, notify]
   );
 
   const onUploadVersion = useCallback(
@@ -516,9 +620,9 @@ export default function WorkspacePage() {
       });
       setFolders((f) => [...f, folder]);
     } catch {
-      alert("Не вдалося створити теку.");
+      notify("Не вдалося створити теку.");
     }
-  }, [id]);
+  }, [id, notify]);
 
   const sortInbox = useCallback(async () => {
     try {
@@ -528,11 +632,14 @@ export default function WorkspacePage() {
       }>(`/api/workspaces/${id}/sort-inbox`, { method: "POST" });
       await refreshFiles();
       const left = res.unclassified.length;
-      alert(`Розкладено: ${res.moved.length}.` + (left ? `\nНе вдалося визначити: ${left}.` : ""));
+      notify(
+        `Розкладено: ${res.moved.length}.` + (left ? `\nНе вдалося визначити: ${left}.` : ""),
+        "info"
+      );
     } catch {
-      alert("Не вдалося розкласти інбокс.");
+      notify("Не вдалося розкласти інбокс.");
     }
-  }, [id, refreshFiles]);
+  }, [id, refreshFiles, notify]);
 
   const refreshConversations = useCallback(async () => {
     if (!endpoints) return;
@@ -556,10 +663,10 @@ export default function WorkspacePage() {
         setConversationId(conv.conversationId);
         setInitialMessages(conv.messages);
       } catch {
-        alert("Не вдалося завантажити розмову.");
+        notify("Не вдалося завантажити розмову.");
       }
     },
-    [endpoints, conversationId]
+    [endpoints, conversationId, notify]
   );
 
   const newChat = useCallback(() => {
@@ -584,11 +691,11 @@ export default function WorkspacePage() {
       try {
         await api(`/api/workspaces/${id}/files/${file.id}/reindex`, { method: "POST" });
       } catch {
-        alert("Не вдалося запустити переіндексацію.");
+        notify("Не вдалося запустити переіндексацію.");
         await refreshFiles();
       }
     },
-    [id, refreshFiles]
+    [id, refreshFiles, notify]
   );
 
   // Shell actions.
@@ -609,9 +716,9 @@ export default function WorkspacePage() {
       addCollection(collection); // prepends + sets it active
       setChatKind("consolidated");
     } catch {
-      alert("Не вдалося створити збірник.");
+      notify("Не вдалося створити збірник.");
     }
-  }, [addCollection, setChatKind]);
+  }, [addCollection, setChatKind, notify]);
   const deleteActiveCollection = useCallback(async () => {
     if (!activeCollectionId) return;
     const ok = window.confirm(
@@ -622,9 +729,9 @@ export default function WorkspacePage() {
       await api(`/api/collections/${activeCollectionId}`, { method: "DELETE" });
       removeCollection(activeCollectionId);
     } catch {
-      alert("Не вдалося видалити збірник.");
+      notify("Не вдалося видалити збірник.");
     }
-  }, [activeCollectionId, removeCollection]);
+  }, [activeCollectionId, removeCollection, notify]);
 
   const renameActiveCollection = useCallback(async () => {
     if (!activeCollectionId) return;
@@ -640,9 +747,9 @@ export default function WorkspacePage() {
         collections.map((c) => (c.id === activeCollectionId ? { ...c, number: next } : c))
       );
     } catch {
-      alert("Не вдалося перейменувати збірник.");
+      notify("Не вдалося перейменувати збірник.");
     }
-  }, [activeCollectionId, collections, setCollections]);
+  }, [activeCollectionId, collections, setCollections, notify]);
 
   // Resolve the collection to analyse into — or AUTO-CREATE one (like a new
   // shipment) so a manifest can be analysed without picking a сборник first.
@@ -693,6 +800,10 @@ export default function WorkspacePage() {
   // Chat-triggered analysis (paperclip file / pasted Google Sheets link): runs the
   // analyze endpoint DIRECTLY (not via the agent), which posts the exact per-product
   // Markdown into the conversation — so the answer isn't reformatted into a table.
+  // The in-flight analyze stream — aborted on unmount (leaving the page).
+  const analyzeAbortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => analyzeAbortRef.current?.abort(), []);
+
   const analyzeManifest = useCallback(
     async (source: { file?: File; url?: string }) => {
       if (analyzeProgress) return; // one at a time
@@ -701,7 +812,7 @@ export default function WorkspacePage() {
         : "Google Sheets";
       const cid = await ensureCollectionForAnalysis(suggestedName);
       if (!cid) {
-        alert("Не вдалося визначити збірник.");
+        notify("Не вдалося визначити збірник.");
         return;
       }
       const path = `/api/collections/${cid}/analyze`;
@@ -717,20 +828,35 @@ export default function WorkspacePage() {
           : { sheetUrl: source.url };
       }
       setAnalyzeProgress({ pct: 0, step: "Готую аналіз…" });
-      await streamAnalyze(path, body, {
-        onProgress: (e) => setAnalyzeProgress(e),
-        onDone: (d) => {
-          setAnalyzeProgress(null);
-          setAnalysis(d.analysis);
-          if (d.conversationId) void showAnalysisConversation(cid, d.conversationId);
-        },
-        onError: (m) => {
-          setAnalyzeProgress(null);
-          alert(m || "Не вдалося виконати аналіз.");
-        },
-      });
+      analyzeAbortRef.current?.abort();
+      const ctrl = new AbortController();
+      analyzeAbortRef.current = ctrl;
+      try {
+        await streamAnalyze(
+          path,
+          body,
+          {
+            onProgress: (e) => setAnalyzeProgress(e),
+            onDone: (d) => {
+              setAnalyzeProgress(null);
+              setAnalysis(d.analysis);
+              if (d.conversationId) void showAnalysisConversation(cid, d.conversationId);
+            },
+            onError: (m) => {
+              setAnalyzeProgress(null);
+              notify(m || "Не вдалося виконати аналіз.");
+            },
+          },
+          ctrl.signal
+        );
+      } catch {
+        notify("Не вдалося виконати аналіз.");
+      } finally {
+        if (analyzeAbortRef.current === ctrl) analyzeAbortRef.current = null;
+        setAnalyzeProgress(null);
+      }
     },
-    [analyzeProgress, ensureCollectionForAnalysis, conversationId, showAnalysisConversation]
+    [analyzeProgress, ensureCollectionForAnalysis, conversationId, showAnalysisConversation, notify]
   );
 
   // After a consolidated chat turn (analysis may have been run from chat), pull the
@@ -818,10 +944,10 @@ export default function WorkspacePage() {
         await api(`/api/collections/${activeCollectionId}/files${qs}`, { form });
         await refreshColFiles();
       } catch {
-        alert("Не вдалося завантажити файл.");
+        notify("Не вдалося завантажити файл.");
       }
     },
-    [activeCollectionId, refreshColFiles]
+    [activeCollectionId, refreshColFiles, notify]
   );
   const colCreateFolder = useCallback(async () => {
     if (!activeCollectionId) return;
@@ -834,9 +960,9 @@ export default function WorkspacePage() {
       );
       setColFolders(colRes.folders);
     } catch {
-      alert("Не вдалося створити теку.");
+      notify("Не вдалося створити теку.");
     }
-  }, [activeCollectionId]);
+  }, [activeCollectionId, notify]);
   const colRename = useCallback(
     async (file: FileItem, name: string) => {
       if (!activeCollectionId) return;
@@ -847,10 +973,10 @@ export default function WorkspacePage() {
         });
         await refreshColFiles();
       } catch {
-        alert("Не вдалося перейменувати файл.");
+        notify("Не вдалося перейменувати файл.");
       }
     },
-    [activeCollectionId, refreshColFiles]
+    [activeCollectionId, refreshColFiles, notify]
   );
   const colDelete = useCallback(
     async (file: FileItem) => {
@@ -860,10 +986,10 @@ export default function WorkspacePage() {
         await api(`/api/collections/${activeCollectionId}/files/${file.id}`, { method: "DELETE" });
         await refreshColFiles();
       } catch {
-        alert("Не вдалося видалити файл.");
+        notify("Не вдалося видалити файл.");
       }
     },
-    [activeCollectionId, refreshColFiles]
+    [activeCollectionId, refreshColFiles, notify]
   );
   const colMove = useCallback(
     async (file: FileItem, folderId: string) => {
@@ -875,10 +1001,10 @@ export default function WorkspacePage() {
         });
         await refreshColFiles();
       } catch {
-        alert("Не вдалося перемістити файл.");
+        notify("Не вдалося перемістити файл.");
       }
     },
-    [activeCollectionId, refreshColFiles]
+    [activeCollectionId, refreshColFiles, notify]
   );
 
   const newShipment = useCallback(async () => {
@@ -889,9 +1015,9 @@ export default function WorkspacePage() {
       });
       router.push(`/workspaces/${workspace.id}`);
     } catch {
-      alert("Не вдалося створити постачання.");
+      notify("Не вдалося створити постачання.");
     }
-  }, [router]);
+  }, [router, notify]);
 
   const deleteShipment = useCallback(async () => {
     if (!workspace) return;
@@ -905,9 +1031,9 @@ export default function WorkspacePage() {
       const other = workspaces.find((w) => w.id !== id);
       router.push(other ? `/workspaces/${other.id}` : "/workspaces");
     } catch {
-      alert("Не вдалося видалити постачання.");
+      notify("Не вдалося видалити постачання.");
     }
-  }, [id, workspace, workspaces, router]);
+  }, [id, workspace, workspaces, router, notify]);
 
   const renameShipment = useCallback(async () => {
     if (!workspace) return;
@@ -918,9 +1044,9 @@ export default function WorkspacePage() {
       onPatch({ number: next });
       setWorkspaces((ws) => ws.map((w) => (w.id === id ? { ...w, number: next } : w)));
     } catch {
-      alert("Не вдалося перейменувати постачання.");
+      notify("Не вдалося перейменувати постачання.");
     }
-  }, [id, workspace, onPatch]);
+  }, [id, workspace, onPatch, notify]);
 
   const saveSupplier = useCallback(
     async (supplier: string) => {
@@ -1371,10 +1497,11 @@ export default function WorkspacePage() {
               onDeleteFile={deleteFile}
               onVersions={setVersionsFile}
               onMoveFile={(file, folderId) => {
-                void moveFile(file.id, folderId).catch(() => alert("Не вдалося перемістити файл."));
+                void moveFile(file.id, folderId).catch(() => notify("Не вдалося перемістити файл."));
               }}
               onReindex={reindexFile}
               onPreview={setPreviewFile}
+              uploadProgress={uploadProgress}
             />
           }
           journal={<AgentLog entries={log} embedded />}
@@ -1434,6 +1561,7 @@ export default function WorkspacePage() {
         <FilePreviewModal workspaceId={id} file={previewFile} onClose={() => setPreviewFile(null)} />
       )}
       {aiSettingsOpen && <AiSettingsModal onClose={() => setAiSettingsOpen(false)} />}
+      {notice && <NoticeBanner text={notice.text} tone={notice.tone} onClose={closeNotice} />}
     </div>
   );
 }

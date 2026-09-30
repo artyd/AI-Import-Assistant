@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { FileItem } from "@/lib/types";
-import { getToken, downloadBlob } from "@/lib/api";
+import { getToken, downloadBlob, handleUnauthorized } from "@/lib/api";
 import { IconSpinner, IconDownload } from "./icons";
 
 interface Props {
@@ -15,7 +15,8 @@ export function FilePreviewModal({ workspaceId, file, onClose }: Props) {
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState(false);
   const contentPath = `/api/workspaces/${workspaceId}/files/${file.id}/content`;
-  const previewable = file.type === "image" || file.type === "pdf";
+  const isPdf = file.type === "pdf";
+  const previewable = file.type === "image" || isPdf;
 
   useEffect(() => {
     if (!previewable) return;
@@ -27,9 +28,16 @@ export function FilePreviewModal({ workspaceId, file, onClose }: Props) {
         const res = await fetch(contentPath, {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
         });
-        if (!res.ok) throw new Error("fetch_failed");
-        const blob = await res.blob();
+        if (!res.ok) {
+          handleUnauthorized(contentPath, res.status);
+          throw new Error("fetch_failed");
+        }
+        const raw = await res.blob();
         if (cancelled) return;
+        // Force the MIME type we render: a PDF blob is ALWAYS application/pdf,
+        // so a mislabelled HTML/SVG payload can never render as a same-origin
+        // document. Images are only ever shown via <img>, which runs no scripts.
+        const blob = isPdf ? new Blob([raw], { type: "application/pdf" }) : raw;
         objectUrl = URL.createObjectURL(blob);
         setUrl(objectUrl);
       } catch {
@@ -40,7 +48,7 @@ export function FilePreviewModal({ workspaceId, file, onClose }: Props) {
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [contentPath, previewable]);
+  }, [contentPath, previewable, isPdf]);
 
   return (
     <div
@@ -142,11 +150,27 @@ export function FilePreviewModal({ workspaceId, file, onClose }: Props) {
               style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }}
             />
           ) : (
-            <iframe
-              src={url}
-              title={file.name}
+            // PDF via <object type="application/pdf"> instead of an unsandboxed
+            // iframe: only the browser's PDF viewer renders it (a sandboxed
+            // iframe would block that viewer). CSP: object-src 'self' blob:.
+            <object
+              data={url}
+              type="application/pdf"
+              aria-label={file.name}
+              data-testid="pdf-preview"
               style={{ width: "100%", height: "100%", border: "none", background: "#fff" }}
-            />
+            >
+              <div style={{ textAlign: "center", color: "var(--muted)", padding: 24 }}>
+                <p style={{ margin: "0 0 12px" }}>Браузер не може показати PDF тут.</p>
+                <button
+                  className="btn btn-primary"
+                  onClick={() => void downloadBlob(contentPath, file.name)}
+                  style={{ margin: "0 auto" }}
+                >
+                  <IconDownload size={16} /> Завантажити файл
+                </button>
+              </div>
+            </object>
           )}
         </div>
       </div>

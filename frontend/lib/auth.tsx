@@ -7,7 +7,7 @@ import {
   useEffect,
   useState,
 } from "react";
-import { api, getToken, setToken } from "./api";
+import { api, AUTH_EXPIRED_EVENT, getToken, setToken } from "./api";
 import type { User } from "./types";
 
 interface AuthCtx {
@@ -45,6 +45,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // Global 401: api()/sse drop the token and fire AUTH_EXPIRED_EVENT; clearing
+  // the user here lets every page's existing "no user → /login" redirect run.
+  useEffect(() => {
+    const onExpired = () => {
+      setUser(null);
+      setLoading(false);
+    };
+    window.addEventListener(AUTH_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, onExpired);
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
