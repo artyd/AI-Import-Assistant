@@ -7,6 +7,7 @@ import {
 import type { SseStream } from '../sse/sse.js';
 import type { Citation, ToolCallRecord } from '../services/conversations.js';
 import { toolDefinitions, executeTool, type ToolContext } from './tools.js';
+import { repairBlocks, stripToolBlocks } from './historyRepair.js';
 
 export interface AgentTurnParams {
   /**
@@ -45,20 +46,6 @@ export interface AgentTurnResult {
   error?: string;
 }
 
-/** Drop thinking blocks before persisting/replaying — required only for the live
- *  turn, and replaying them across turns risks signature errors. */
-function sanitizeBlocks(msgs: ChatMessageParam[]): ChatMessageParam[] {
-  return msgs.map((m) => {
-    if (m.role === 'assistant' && Array.isArray(m.content)) {
-      const content = m.content.filter(
-        (b) => b.type !== 'thinking' && b.type !== 'redacted_thinking',
-      );
-      return { role: 'assistant', content };
-    }
-    return m;
-  });
-}
-
 const MAX_ITERATIONS = 14;
 // Generous completion budget. The old 4096 truncated long answers (consolidated
 // per-line tables, reports, multi-doc write-ups) — especially with adaptive
@@ -86,8 +73,10 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
   const ctx: ToolContext = { workspaceId, collectionId, ownerId };
 
   // History is already replay-ready message params (may carry prior tool blocks).
+  // The API rejects tool blocks when no `tools` are advertised — a tool-less
+  // turn (e.g. logist disabled) replays the prose only.
   const messages: ChatMessageParam[] = [
-    ...history,
+    ...(tools.length === 0 ? stripToolBlocks(history) : history),
     { role: 'user' as const, content: userMessage },
   ];
   const seedLen = messages.length; // everything appended past this = THIS turn
@@ -118,11 +107,24 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
       // Preserve the full assistant content (incl. thinking + tool_use blocks).
       messages.push({ role: 'assistant', content: msg.content });
 
-      if (msg.stop_reason !== 'tool_use') break;
+      // Output cap hit mid tool call: the tool input is truncated JSON — don't run
+      // it; answer with an error result so the model retries instead of the turn
+      // ending with no answer (and an unpaired tool_use).
+      const cutToolUse = msg.stop_reason === 'max_tokens' && msg.content.some((b) => b.type === 'tool_use');
+      if (msg.stop_reason !== 'tool_use' && !cutToolUse) break;
 
       const toolResults: ChatContentBlockParam[] = [];
       for (const block of msg.content) {
         if (block.type !== 'tool_use') continue;
+        if (cutToolUse) {
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: block.id,
+            content: 'Виклик обрізано лімітом відповіді — повтори його коротше або відповідай без нього.',
+            is_error: true,
+          });
+          continue;
+        }
         sse.send('tool_call', { tool: block.name, input: block.input });
 
         let outcome;
@@ -151,8 +153,10 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
       if (iteration === MAX_ITERATIONS - 1) toolsStillPending = true;
     }
 
-    // Iterations exhausted mid-tool-use: make one final call WITHOUT tools so the
-    // model must synthesize a closing answer instead of leaving the turn empty.
+    // Iterations exhausted mid-tool-use: one final call that may NOT use tools, so
+    // the model synthesizes a closing answer. `tools` must still be sent (history
+    // holds tool blocks — the API 400s without a definition); tool_choice none
+    // forbids new calls.
     if (toolsStillPending) {
       const stream = anthropic.messages.stream({
         model: MODEL,
@@ -160,6 +164,8 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
         thinking: { type: 'adaptive' },
         system,
         messages,
+        tools,
+        tool_choice: { type: 'none' },
       });
       stream.on('text', (delta: string) => {
         text += delta;
@@ -174,9 +180,10 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
     error = (err as Error).message;
   }
 
-  // Only persist replay blocks for a clean turn — a mid-turn error can leave an
-  // unpaired tool_use/tool_result, which would be invalid to replay.
-  const turnBlocks = error ? [] : sanitizeBlocks(messages.slice(seedLen));
+  // Only persist replay blocks for a clean turn, and repair them (a response cut
+  // by max_tokens mid-tool-call, or a thinking-only message, would otherwise be
+  // an unpaired/empty block that 400s every later turn).
+  const turnBlocks = error ? [] : repairBlocks(messages.slice(seedLen), { requireUserStart: false });
   return { text, citations: dedupe(citations), toolCalls, turnBlocks, error };
 }
 
