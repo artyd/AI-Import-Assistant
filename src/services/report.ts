@@ -1,4 +1,5 @@
 import { query } from '../db/pool.js';
+import { fieldLabel, label } from './risks.js';
 import type { WorkspaceRow } from './workspaceAccess.js';
 import { computeChecklist, type ChecklistItem } from './checklist.js';
 import { computeDiscrepancies, type Discrepancy } from './discrepancies.js';
@@ -26,7 +27,8 @@ function esc(v: unknown): string {
 interface Figures {
   totalValue: number | null;
   currency: string | null;
-  weightKg: number | null;
+  netKg: number | null;
+  grossKg: number | null;
   packages: number | null;
 }
 
@@ -34,18 +36,27 @@ async function gatherFigures(workspaceId: string): Promise<Figures> {
   const { rows } = await query<{ doc_type: string | null; fields: Record<string, unknown> }>(
     `SELECT de.extracted_fields->>'doc_type' AS doc_type, de.extracted_fields AS fields
      FROM document_extractions de JOIN files f ON f.id = de.file_id
-     WHERE de.workspace_id = $1 AND f.is_latest = true`,
+     WHERE de.workspace_id = $1 AND f.is_latest = true
+     -- Issued documents (PDF/scan) before editable drafts (.doc/.xlsx), then stable.
+     ORDER BY (f.name ~* '[.](docx?|xlsx?|csv|md|txt)$'), f.created_at, f.name`,
     [workspaceId],
   );
-  const invoice = rows.find((r) => r.doc_type === 'invoice')?.fields ?? {};
-  const packing = rows.find((r) => r.doc_type === 'packing_list')?.fields ?? {};
+  const of = (t: string) => rows.find((r) => r.doc_type === t)?.fields ?? {};
+  const invoice = of('invoice');
+  const packing = of('packing_list');
+  const declaration = of('customs_declaration');
   const num = (v: unknown): number | null => (typeof v === 'number' ? v : null);
   const str = (v: unknown): string | null => (typeof v === 'string' && v ? v : null);
+  // Weights / places: the declared figures (МД) first, then the packing list,
+  // then the invoice — the same cargo, so the most authoritative source wins.
+  const first = (key: string): number | null =>
+    num(declaration[key]) ?? num(packing[key]) ?? num(invoice[key]);
   return {
     totalValue: num(invoice.total_value),
     currency: str(invoice.currency),
-    weightKg: num(invoice.total_weight_kg) ?? num(packing.total_weight_kg),
-    packages: num(packing.packages_count) ?? num(invoice.packages_count),
+    netKg: first('net_weight_kg'),
+    grossKg: first('gross_weight_kg') ?? first('total_weight_kg'),
+    packages: first('packages_count'),
   };
 }
 
@@ -79,9 +90,11 @@ function deriveConclusions(
   const errors = discrepancies.filter((d) => d.severity === 'error');
   const warnings = discrepancies.filter((d) => d.severity === 'warning');
 
-  if (missing.length) out.push(`Бракує обовʼязкових документів: ${missing.join(', ')}.`);
-  for (const e of errors) out.push(`Блокуюча розбіжність — ${e.field}: очікується ${e.expected}, факт ${e.actual}.`);
-  for (const w of warnings) out.push(`Попередження — ${w.field}: ${w.actual}.`);
+  if (missing.length) out.push(`Бракує обовʼязкових документів: ${missing.map(label).join(', ')}.`);
+  for (const e of errors) {
+    out.push(`Блокуюча розбіжність — ${fieldLabel(e.field)}: очікується ${e.expected}, факт ${e.actual}.`);
+  }
+  for (const w of warnings) out.push(`Попередження — ${fieldLabel(w.field)}: ${w.actual}.`);
   if (!missing.length && !errors.length) {
     out.push(
       status === 'customs_ready'
@@ -93,6 +106,16 @@ function deriveConclusions(
 }
 
 const SEVERITY_LABEL: Record<string, string> = { error: 'Блокуюче', warning: 'Попередження', info: 'Інфо' };
+const CHECK_STATUS_LABEL: Record<string, string> = {
+  verified: 'підтверджено',
+  received: 'отримано',
+  missing: 'бракує',
+};
+const ROLE_LABEL: Record<string, string> = {
+  sender: 'Відправник / виробник',
+  intermediary: 'Посередник',
+  recipient: 'Покупець / одержувач',
+};
 
 function render(
   ws: WorkspaceRow,
@@ -114,7 +137,7 @@ function render(
           ? ' <span class="tag">авто</span>'
           : '';
       const internal = p.is_internal ? ' <span class="tag">internal</span>' : '';
-      return `<tr><td>${esc(p.role)}</td><td>${esc(p.company_name)}${internal}${auto}</td><td>${esc(p.country ?? '—')}</td></tr>`;
+      return `<tr><td>${esc(ROLE_LABEL[p.role] ?? p.role)}</td><td>${esc(p.company_name)}${internal}${auto}</td><td>${esc(p.country ?? '—')}</td></tr>`;
     })
     .join('');
 
@@ -128,7 +151,7 @@ function render(
   const checklistRows = checklist
     .map((i) => {
       const cls = i.status === 'verified' ? 'ok' : i.status === 'received' ? 'warn' : 'err';
-      return `<tr><td>${esc(i.requirement_key)}</td><td><span class="pill ${cls}">${esc(i.status)}</span></td></tr>`;
+      return `<tr><td>${esc(label(i.requirement_key))}</td><td><span class="pill ${cls}">${esc(CHECK_STATUS_LABEL[i.status] ?? i.status)}</span></td></tr>`;
     })
     .join('');
 
@@ -136,7 +159,7 @@ function render(
     ? discrepancies
         .map(
           (d) =>
-            `<tr class="sev-${esc(d.severity)}"><td>${esc(SEVERITY_LABEL[d.severity] ?? d.severity)}</td><td>${esc(d.field)}</td><td>${esc(d.expected)}</td><td>${esc(d.actual)}</td></tr>`,
+            `<tr class="sev-${esc(d.severity)}"><td>${esc(SEVERITY_LABEL[d.severity] ?? d.severity)}</td><td>${esc(fieldLabel(d.field))}</td><td>${esc(d.expected)}</td><td>${esc(d.actual)}</td></tr>`,
         )
         .join('')
     : `<tr><td colspan="4" class="muted">Розбіжностей не виявлено.</td></tr>`;
@@ -219,7 +242,8 @@ ul.concl{margin:8px 0;padding-left:18px} ul.concl li{margin:4px 0}
   <h2>Ключові показники</h2>
   <div class="figs">
     ${fig('Загальна вартість', figures.totalValue != null ? `${figures.totalValue} ${figures.currency ?? ''}`.trim() : '—')}
-    ${fig('Вага, кг', figures.weightKg != null ? String(figures.weightKg) : '—')}
+    ${fig('Вага нетто, кг', figures.netKg != null ? String(figures.netKg) : '—')}
+    ${fig('Вага брутто, кг', figures.grossKg != null ? String(figures.grossKg) : '—')}
     ${fig('Кількість місць', figures.packages != null ? String(figures.packages) : '—')}
   </div>
 

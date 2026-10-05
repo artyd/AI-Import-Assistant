@@ -19,10 +19,11 @@ import { getWorkspaceById } from '../services/workspaceAccess.js';
 import { buildSupplierInstruction } from '../services/supplierInstruction.js';
 import { computeDiscrepancies } from '../services/discrepancies.js';
 import { computeRegistryChecks } from '../services/drugRegistry.js';
-import { computeRisks } from '../services/risks.js';
+import { computeRisks, fieldLabel } from '../services/risks.js';
 import { refreshWorkspaceState } from '../services/status.js';
 import { getMissingContext, upsertParties, type PartyInput } from '../services/parties.js';
 import { analyzeParties } from '../services/partyExtraction.js';
+import { changedFields, stampManualEdit } from '../services/autoContext.js';
 import { classifyAndFile, sortInbox } from '../services/classify.js';
 import { buildAndSaveReport } from '../services/report.js';
 import { compareFileVersions, previousVersionId } from '../services/versions.js';
@@ -193,8 +194,8 @@ export const toolDefinitions: ChatTool[] = [
     name: 'get_contract_mode',
     description:
       'Визначає структуру контракту постачання за завантаженими документами: ' +
-      'двосторонній (2 сторони: постачальник→AGroup95) чи тристоронній (3 сторони: ' +
-      'постачальник→PrimeForce→AGroup95). Рішення детерміноване (виробник vs продавець в ' +
+      'двосторонній (2 сторони: постачальник→імпортер) чи тристоронній (3 сторони: ' +
+      'постачальник→посередник→імпортер). Рішення детерміноване (виробник vs продавець в ' +
       'інвойсі). Повертає авто-висновок, впевненість (0..1), пояснення, а також поточне ' +
       'збережене значення та його джерело (ручне/авто). НЕ змінює даних. Виклич перед ' +
       'аналізом, щоб знати режим — перевірки для 2- і 3-сторонніх постачань різні.',
@@ -591,9 +592,15 @@ async function runDiscrepancies(ctx: ToolContext): Promise<ToolOutcome> {
         .map((c) => (c.file_name ? `${c.doc_type}: «${c.file_name}» = ${c.value}` : `${c.doc_type} = ${c.value}`))
         .join('; ');
       const src = srcs ? ` (джерела: ${srcs})` : '';
-      return `- ${mark} [${f.severity}] ${f.field}: очікується ${f.expected}; факт ${f.actual}${src}`;
+      return `- ${mark} [${f.severity}] ${fieldLabel(f.field)} (${f.field}): очікується ${f.expected}; факт ${f.actual}${src}`;
     })
-    .join('\n');
+    .join('\n')
+    .concat(
+      '\n\nЛегенда: 🔴 підтверджено (обидва значення прочитано впевнено), 🟡 підозра — перевір ' +
+        'у документі (read_file), перш ніж називати критичним. Рівень (error/warning/info) ' +
+        'передавай як є — НЕ підвищуй його. Якщо прочитаний документ спростовує знахідку, ' +
+        'скажи про це прямо.',
+    );
   // Surface the source documents as citation chips (dedup by file name).
   const seen = new Set<string>();
   const citations: Citation[] = [];
@@ -738,6 +745,9 @@ async function runSaveContext(input: unknown, ctx: ToolContext): Promise<ToolOut
     sets.push(`contract_type_reason = $${vals.length + 1}`);
     vals.push('Зібрано в розмові з користувачем.');
   }
+  // Context the user gave in conversation is a manual value — the document
+  // autopilot must not overwrite it later.
+  stampManualEdit(changedFields(ws, parsed.data), sets, vals);
   if (sets.length > 0) {
     await query(`UPDATE workspaces SET ${sets.join(', ')} WHERE id = $1`, vals);
   }
@@ -815,8 +825,8 @@ async function refreshAfterWorkspaceWrite(wsId: string): Promise<void> {
 
 // Ukrainian labels for the two contract structures, used in tool output.
 const CONTRACT_MODE_UK: Record<'bilateral' | 'trilateral', string> = {
-  bilateral: 'двосторонній (2 сторони: постачальник → AGroup95)',
-  trilateral: 'тристоронній (3 сторони: постачальник → PrimeForce → AGroup95)',
+  bilateral: 'двосторонній (2 сторони: постачальник → імпортер)',
+  trilateral: 'тристоронній (3 сторони: постачальник → посередник → імпортер)',
 };
 
 async function runGetContractMode(ctx: ToolContext): Promise<ToolOutcome> {

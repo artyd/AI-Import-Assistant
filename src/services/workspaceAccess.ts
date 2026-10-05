@@ -42,6 +42,9 @@ export interface WorkspaceRow {
   contract_type_source: 'sidebar' | 'survey' | 'auto' | null;
   contract_type_confidence: number | null;
   contract_type_reason: string | null;
+  // Intake fields last written by the document autopilot (autoContext.ts);
+  // a manual edit removes a field from this list.
+  auto_context_fields: string[];
   // Interactive shipment survey state.
   survey_answers: Record<string, unknown> | null;
   survey_status: 'not_started' | 'in_progress' | 'completed' | 'skipped';

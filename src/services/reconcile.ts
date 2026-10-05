@@ -79,10 +79,28 @@ interface DocRef {
   fields: Fields;
 }
 
+/**
+ * Editable office formats (.doc/.docx/.xls/.xlsx/.csv/.md) are usually the
+ * drafts a supplier sends for approval; the issued document is the PDF/scan.
+ * When several files share a doc_type, prefer the issued one.
+ */
+const DRAFT_EXT_RX = /\.(docx?|xlsx?|csv|md|txt)$/i;
+export function isLikelyDraft(fileName: string | null): boolean {
+  return !!fileName && DRAFT_EXT_RX.test(fileName.trim());
+}
+
+/** Stable preference order among same-type docs: issued (PDF/scan) before drafts, then input order. */
+function preferIssued<T extends { file_name: string | null }>(list: T[]): T[] {
+  return list
+    .map((d, i) => ({ d, i }))
+    .sort((a, b) => Number(isLikelyDraft(a.d.file_name)) - Number(isLikelyDraft(b.d.file_name)) || a.i - b.i)
+    .map((x) => x.d);
+}
+
 function pick(docs: ReconcileDoc[], type: string): DocRef | null {
   // Match the primary doc_type first; then fall back to a combined file that
   // declares this type in `also_contains` (2-in-1, e.g. invoice+packing list).
-  const primary = docs.find((x) => x.doc_type === type);
+  const primary = preferIssued(docs.filter((x) => x.doc_type === type))[0];
   const r =
     primary ??
     docs.find((x) => {
@@ -121,6 +139,8 @@ export interface ReconcileOptions {
   incotermIn?: string | null;
   /** Sell-side (Prime→AGroup95) Incoterm (outbound leg is checked vs the contract). */
   incotermOut?: string | null;
+  /** The intermediary's name from the parties card — orients the invoice legs. */
+  intermediaryName?: string | null;
 }
 
 /**
@@ -144,13 +164,10 @@ export function reconcile(docs: ReconcileDoc[], opts: ReconcileOptions = {}): Di
   // leg (Prime→AGroup95) is what the contract / value / Incoterms are checked
   // against; the inbound leg (Supplier→Prime) legitimately differs in price and
   // is reconciled separately (markup + physical consistency).
-  const invoiceRefs = docs.filter((d) => d.doc_type === 'invoice').map(toRef);
-  const outbound = trilateral
-    ? invoiceRefs.find((i) => classifyInvoiceLeg(i) === 'outbound') ?? null
-    : null;
-  const inbound = trilateral
-    ? invoiceRefs.find((i) => classifyInvoiceLeg(i) === 'inbound') ?? null
-    : null;
+  const invoiceRefs = preferIssued(docs.filter((d) => d.doc_type === 'invoice')).map(toRef);
+  const legOf = (i: DocRef) => classifyInvoiceLeg(i, opts.intermediaryName ?? null);
+  const outbound = trilateral ? invoiceRefs.find((i) => legOf(i) === 'outbound') ?? null : null;
+  const inbound = trilateral ? invoiceRefs.find((i) => legOf(i) === 'inbound') ?? null : null;
   const invoice = trilateral ? outbound ?? pick(docs, 'invoice') : pick(docs, 'invoice');
 
   const out: Discrepancy[] = [];
@@ -159,10 +176,12 @@ export function reconcile(docs: ReconcileDoc[], opts: ReconcileOptions = {}): Di
   // commercial reference the invoice is checked against (value / currency /
   // Incoterms).
 
-  // ── Weight: invoice vs packing list, within tolerance. Prefer net↔net, then
-  //    gross↔gross, then the legacy total. ───────────────────────────────────
-  compareWeight(invoice, packing, 'net_weight_kg', out);
-  compareWeight(invoice, packing, 'gross_weight_kg', out);
+  // ── Weight & packages: net / gross / places must agree across EVERY document
+  //    that states them (invoices, packing lists, AWB/CMR/T1, МД, COO) — the
+  //    transport and customs documents are where a rounded 31.85→32 kg or a
+  //    T1 "net = gross" slip shows up. Legacy total stays invoice↔packing. ───
+  checkPhysicalConsistency(docs, 'net_weight_kg', out);
+  checkPhysicalConsistency(docs, 'gross_weight_kg', out);
   if (
     !hasNum(invoice, 'net_weight_kg') && !hasNum(packing, 'net_weight_kg') &&
     !hasNum(invoice, 'gross_weight_kg') && !hasNum(packing, 'gross_weight_kg')
@@ -170,19 +189,8 @@ export function reconcile(docs: ReconcileDoc[], opts: ReconcileOptions = {}): Di
     compareWeight(invoice, packing, 'total_weight_kg', out);
   }
 
-  // ── Packages count: invoice vs packing list, exact. ────────────────────────
-  const pInv = numOf(invoice, 'packages_count');
-  const pPl = numOf(packing, 'packages_count');
-  if (invoice && packing && pInv !== null && pPl !== null && pInv !== pPl) {
-    out.push({
-      field: 'packages_count',
-      expected: `invoice: ${pInv}`,
-      actual: `packing_list: ${pPl}`,
-      severity: 'error',
-      kind: kindFor(invoice, packing, 'packages_count'),
-      citations: [cite(invoice, pInv), cite(packing, pPl)],
-    });
-  }
+  // ── Packages count: exact, across every document that states it. ─────────
+  checkPhysicalConsistency(docs, 'packages_count', out);
 
   // ── Currency: invoice vs contract, explicit. ───────────────────────────────
   {
@@ -267,7 +275,7 @@ export function reconcile(docs: ReconcileDoc[], opts: ReconcileOptions = {}): Di
   // ── Incoterms should agree between the invoice and the contract. ───────────
   const incInv = strOf(invoice, 'incoterm');
   const incC = strOf(contract, 'incoterm');
-  if (invoice && contract && incInv && incC && incInv.toUpperCase() !== incC.toUpperCase()) {
+  if (invoice && contract && incInv && incC && !sameIncoterm(incInv, incC)) {
     out.push({
       field: 'incoterm',
       expected: `contract: ${incC}`,
@@ -308,10 +316,16 @@ export function reconcile(docs: ReconcileDoc[], opts: ReconcileOptions = {}): Di
     // on 3+; bilateral warns on 2+ as before.
     const threshold = t === 'invoice' && trilateral ? 2 : 1;
     if (n > threshold) {
+      const used = t === 'invoice' ? invoice : t === 'contract' ? contract : packing;
+      const others = docs
+        .filter((d) => d.doc_type === t && d.file_id !== used?.file_id)
+        .map((d) => d.file_name ?? '—');
       out.push({
         field: 'documents',
         expected: 'один документ цього типу',
-        actual: `${t}: знайдено ${n} — звірено лише перший`,
+        actual:
+          `${t}: знайдено ${n} — звірено «${used?.file_name ?? '—'}»` +
+          (others.length ? `; інші не звірено: ${others.join(', ')}` : ''),
         severity: 'warning',
         kind: 'suspected',
         citations: [],
@@ -379,6 +393,27 @@ function compareWeight(
   }
 }
 
+const INCOTERM_RX = /\b(EXW|FCA|FAS|FOB|CFR|CNF|CIF|CPT|CIP|DAP|DPU|DAT|DDP|DDU)\b/i;
+
+/** The 3-letter Incoterms rule in a free-text term ("CPT - Bila Tserkva (INCOTERMS 2010)" → "CPT"). */
+export function incotermCode(term: string | null | undefined): string | null {
+  const m = term ? INCOTERM_RX.exec(term) : null;
+  return m ? m[1]!.toUpperCase() : null;
+}
+
+/**
+ * Two Incoterms agree when their rule (CPT/FCA/…) agrees. The named place is
+ * spelled differently across documents ("Bila Tserkva" / "Bila Tzerkva") and is
+ * not a customs-relevant mismatch on its own; fall back to the raw string only
+ * when no rule code can be read.
+ */
+function sameIncoterm(a: string, b: string): boolean {
+  const ca = incotermCode(a);
+  const cb = incotermCode(b);
+  if (ca && cb) return ca === cb;
+  return a.trim().toUpperCase() === b.trim().toUpperCase();
+}
+
 function normalizeHs(hs: string): string {
   // Digits only, and drop leading zeros so a dropped-leading-zero read
   // ("0102030000" vs "102030000") is not a false mismatch. Genuinely different
@@ -389,7 +424,7 @@ function normalizeHs(hs: string): string {
 function normalizeName(name: string): string {
   return name
     .toLowerCase()
-    .replace(/\b(ltd|llc|inc|gmbh|co|corp|company|тов|ооо|пп|лтд)\b/g, '')
+    .replace(/\b(ltd|limited|llc|inc|gmbh|co|corp|company|pvt|private|тов|ооо|пп|лтд)\b/g, '')
     .replace(/[^a-z0-9а-яіїєґ]/gi, '')
     .trim();
 }
@@ -438,12 +473,27 @@ function nameMatches(name: string | null, rx: RegExp): boolean {
  *   inbound  (Supplier→Prime) — buyer is the intermediary
  * `unknown` when the names don't identify a leg (never guessed).
  */
-function classifyInvoiceLeg(ref: DocRef): 'outbound' | 'inbound' | 'unknown' {
+function classifyInvoiceLeg(ref: DocRef, intermediary: string | null): 'outbound' | 'inbound' | 'unknown' {
   const seller = strOf(ref, 'seller');
   const buyer = strOf(ref, 'buyer');
+  // The shipment's own intermediary (parties card) first; the known group
+  // companies are only a fallback for shipments whose parties aren't filled yet.
+  if (intermediary) {
+    if (sameName(seller, intermediary)) return 'outbound';
+    if (sameName(buyer, intermediary)) return 'inbound';
+  }
   if (nameMatches(buyer, IMPORTER_RX) || nameMatches(seller, INTERMEDIARY_RX)) return 'outbound';
   if (nameMatches(buyer, INTERMEDIARY_RX)) return 'inbound';
   return 'unknown';
+}
+
+function sameName(a: string | null, b: string | null): boolean {
+  if (!a || !b) return false;
+  const ka = normalizeName(a);
+  const kb = normalizeName(b);
+  if (!ka || !kb) return false;
+  if (ka === kb) return true;
+  return Math.min(ka.length, kb.length) >= 5 && (ka.includes(kb) || kb.includes(ka));
 }
 
 /**
@@ -462,7 +512,7 @@ function reconcileTrilateral(
   if (invoices.length < 2) {
     out.push({
       field: 'documents',
-      expected: 'два набори інвойсів (Постачальник→Prime і Prime→AGroup95)',
+      expected: 'два набори інвойсів (постачальник→посередник і посередник→імпортер)',
       actual:
         invoices.length === 1
           ? 'знайдено лише один інвойс — для тристороннього постачання очікується два плеча'
@@ -505,44 +555,21 @@ function reconcileTrilateral(
       }
     }
 
-    // Physical goods must be identical across the two legs (same cargo).
-    for (const f of ['net_weight_kg', 'gross_weight_kg'] as const) {
-      const a = numOf(inbound, f);
-      const b = numOf(outbound, f);
-      if (a !== null && b !== null && a > 0 && Math.abs(a - b) / a > WEIGHT_TOLERANCE) {
-        out.push({
-          field: f,
-          expected: `вхідний інвойс: ${a}`,
-          actual: `вихідний інвойс: ${b}`,
-          severity: 'error',
-          kind: kindFor(inbound, outbound, f),
-          citations: [cite(inbound, a), cite(outbound, b)],
-        });
-      }
-    }
-    const pIn = numOf(inbound, 'packages_count');
-    const pOut = numOf(outbound, 'packages_count');
-    if (pIn !== null && pOut !== null && pIn !== pOut) {
-      out.push({
-        field: 'packages_count',
-        expected: `вхідний інвойс: ${pIn}`,
-        actual: `вихідний інвойс: ${pOut}`,
-        severity: 'error',
-        kind: kindFor(inbound, outbound, 'packages_count'),
-        citations: [cite(inbound, pIn), cite(outbound, pOut)],
-      });
-    }
+    // Physical goods (weights / places) across the two legs are covered by the
+    // document-wide checkPhysicalConsistency() — one grouped finding, not two.
   }
 
   // Intermediary orientation: PrimeForce should be the outbound SELLER and/or the
   // inbound BUYER. Emit ONE honest note only when it can't be confirmed anywhere.
+  const isIntermediary = (name: string | null): boolean =>
+    (!!opts.intermediaryName && sameName(name, opts.intermediaryName)) || nameMatches(name, INTERMEDIARY_RX);
   const intermediaryConfirmed =
-    (!!outbound && nameMatches(strOf(outbound, 'seller'), INTERMEDIARY_RX)) ||
-    (!!inbound && nameMatches(strOf(inbound, 'buyer'), INTERMEDIARY_RX));
+    (!!outbound && isIntermediary(strOf(outbound, 'seller'))) ||
+    (!!inbound && isIntermediary(strOf(inbound, 'buyer')));
   if (invoices.length >= 1 && !intermediaryConfirmed) {
     out.push({
       field: 'intermediary',
-      expected: 'посередник (PrimeForce) як продавець вихідного / покупець вхідного інвойсу',
+      expected: 'посередник як продавець вихідного / покупець вхідного інвойсу',
       actual: 'посередника не підтверджено в інвойсах — перевірте сторони',
       severity: 'warning',
       kind: 'suspected',
@@ -554,7 +581,7 @@ function reconcileTrilateral(
   // already covered by the invoice↔contract Incoterm check).
   if (inbound && opts.incotermIn) {
     const inc = strOf(inbound, 'incoterm');
-    if (inc && inc.toUpperCase() !== opts.incotermIn.toUpperCase()) {
+    if (inc && !sameIncoterm(inc, opts.incotermIn)) {
       out.push({
         field: 'incoterm',
         expected: `вхідне плече: ${opts.incotermIn}`,
@@ -565,6 +592,103 @@ function reconcileTrilateral(
       });
     }
   }
+}
+
+/**
+ * Documents that describe THIS cargo's product (and so must agree on
+ * manufacturer / registration). `other` is excluded: it is where unrelated
+ * files land (e.g. registration certificates of a different finished product).
+ */
+function isProductDoc(d: ReconcileDoc): boolean {
+  return !!d.doc_type && d.doc_type !== 'other';
+}
+
+/**
+ * A regulatory (drug / veterinary) registration number — UA/19603/01/01 or
+ * АВ-09881-03-25 — NOT an AWB/CMR/MRN/declaration/certificate number, which the
+ * extractor sometimes files under `registration_number`.
+ */
+const REGISTRATION_RX = /^(UA\/\d{3,6}\/\d{2}\/\d{2}(\/\d{2})?|[AА][BВ]-\d{4,6}-\d{2}-\d{2})$/i;
+export function isRegulatoryRegistration(val: string): boolean {
+  return REGISTRATION_RX.test(val.trim().replace(/\s+/g, ''));
+}
+
+/** "«A» (file1, file2) · «B» (file3)" — the distinct values and where each was read. */
+function distinctValues(entries: { ref: DocRef; val: string }[]): string {
+  const groups = new Map<string, { val: string; files: string[] }>();
+  for (const e of entries) {
+    const k = normalizeName(e.val) || e.val;
+    const g = groups.get(k) ?? { val: e.val, files: [] };
+    g.files.push(e.ref.file_name ?? e.ref.doc_type);
+    groups.set(k, g);
+  }
+  return [...groups.values()].map((g) => `«${g.val}» (${g.files.join(', ')})`).join(' · ');
+}
+
+/**
+ * Net / gross weight and packages count describe the SAME physical cargo in
+ * every document (invoices of both legs, packing lists, AWB/CMR/T1, МД, COO), so
+ * any difference is surfaced, grouped by value with the files that state it.
+ * A weight gap above the 1% tolerance (or any places difference) is RED; a small
+ * weight gap (rounded 31.85 → 32 kg) is YELLOW — still worth aligning, because
+ * the declared weight must match the shipping documents.
+ */
+const PHYSICAL_DOC_TYPES = new Set([
+  'invoice',
+  'packing_list',
+  'transport',
+  'customs_declaration',
+  'certificate_of_origin',
+]);
+const PHYSICAL_LABEL: Record<string, string> = {
+  net_weight_kg: 'вага нетто, кг',
+  gross_weight_kg: 'вага брутто, кг',
+  packages_count: 'кількість місць',
+};
+function checkPhysicalConsistency(
+  docs: ReconcileDoc[],
+  field: 'net_weight_kg' | 'gross_weight_kg' | 'packages_count',
+  out: Discrepancy[],
+): void {
+  // Editable drafts (.doc/.xlsx) are skipped when an issued document of the same
+  // type exists — a superseded draft's weights are not a mismatch.
+  const issuedTypes = new Set(docs.filter((d) => !isLikelyDraft(d.file_name)).map((d) => d.doc_type));
+  const groups = new Map<number, DocRef[]>();
+  for (const d of docs) {
+    if (!d.doc_type || !PHYSICAL_DOC_TYPES.has(d.doc_type)) continue;
+    if (isLikelyDraft(d.file_name) && issuedTypes.has(d.doc_type)) continue;
+    const ref = toRef(d);
+    const v = numOf(ref, field);
+    if (v === null || v <= 0) continue;
+    const key = Math.round(v * 1000) / 1000;
+    groups.set(key, [...(groups.get(key) ?? []), ref]);
+  }
+  if (groups.size < 2) return;
+  const values = [...groups.keys()].sort((a, b) => a - b);
+  const min = values[0]!;
+  const max = values[values.length - 1]!;
+  // Places: carriers often count PALLETS where the packing list counts cartons,
+  // so a gap that only involves transport documents / COO is a check-this
+  // (YELLOW); a gap among the commercial documents and the МД is RED.
+  const commercial = new Set(['invoice', 'packing_list', 'customs_declaration']);
+  const commercialValues = new Set(
+    [...groups.entries()].filter(([, refs]) => refs.some((r) => commercial.has(r.doc_type))).map(([v]) => v),
+  );
+  const big =
+    field === 'packages_count' ? commercialValues.size > 1 : (max - min) / min > WEIGHT_TOLERANCE;
+  // Majority value first — what most documents say is the reference point.
+  const ordered = [...groups.entries()].sort((a, b) => b[1].length - a[1].length || a[0] - b[0]);
+  const list = (refs: DocRef[]): string => refs.map((r) => r.file_name ?? r.doc_type).join(', ');
+  const [major, ...rest] = ordered;
+  const lowConf = [...groups.values()].flat().some((r) => confidenceOf(r, field) === 'low');
+  out.push({
+    field,
+    expected: `${PHYSICAL_LABEL[field]}: ${major![0]} (${list(major![1])})`,
+    actual: rest.map(([v, refs]) => `${v} (${list(refs)})`).join(' · '),
+    severity: big ? 'error' : 'warning',
+    kind: big && !lowConf ? 'confirmed' : 'suspected',
+    citations: ordered.flatMap(([v, refs]) => refs.map((r) => cite(r, v))),
+  });
 }
 
 /** Every document that states `field`, paired with its value. */
@@ -580,7 +704,7 @@ function docsWithField(docs: ReconcileDoc[], field: string): { ref: DocRef; val:
 
 /** Manufacturer name must agree across all documents (fuzzy → YELLOW). */
 function checkManufacturerConsistency(docs: ReconcileDoc[], out: Discrepancy[]): void {
-  const entries = docsWithField(docs, 'manufacturer');
+  const entries = docsWithField(docs.filter(isProductDoc), 'manufacturer');
   if (entries.length < 2) return;
   let mismatch = false;
   for (const a of entries) {
@@ -595,7 +719,7 @@ function checkManufacturerConsistency(docs: ReconcileDoc[], out: Discrepancy[]):
   out.push({
     field: 'manufacturer',
     expected: 'єдиний виробник у всіх документах',
-    actual: 'назви виробника різняться між документами — уточніть у постачальника',
+    actual: `назви виробника різняться: ${distinctValues(entries)}`,
     severity: 'warning',
     kind: 'suspected',
     citations: entries.map((e) => cite(e.ref, e.val)),
@@ -604,7 +728,9 @@ function checkManufacturerConsistency(docs: ReconcileDoc[], out: Discrepancy[]):
 
 /** Registration number must be identical everywhere it appears (normalized). */
 function checkRegistrationConsistency(docs: ReconcileDoc[], out: Discrepancy[]): void {
-  const entries = docsWithField(docs, 'registration_number');
+  const entries = docsWithField(docs.filter(isProductDoc), 'registration_number').filter((e) =>
+    isRegulatoryRegistration(e.val),
+  );
   if (entries.length < 2) return;
   const norm = (s: string): string => s.toUpperCase().replace(/\s+/g, '');
   const distinct = new Set(entries.map((e) => norm(e.val)));
@@ -624,8 +750,10 @@ function reconcileLineItems(
   packing: DocRef | null,
   out: Discrepancy[],
 ): void {
-  const invItems = Array.isArray(invoice?.fields.line_items) ? invoice!.fields.line_items : [];
-  const plItems = Array.isArray(packing?.fields.line_items) ? packing!.fields.line_items : [];
+  // A packing list typically splits one invoice line across cartons (10 + 10 + 5
+  // kg of the SAME batch); compare per product/batch, not per physical row.
+  const invItems = aggregateLines(Array.isArray(invoice?.fields.line_items) ? invoice!.fields.line_items : []);
+  const plItems = aggregateLines(Array.isArray(packing?.fields.line_items) ? packing!.fields.line_items : []);
   if (!invoice || !packing || (invItems.length === 0 && plItems.length === 0)) return;
 
   const maxLen = Math.max(invItems.length, plItems.length);
@@ -722,6 +850,31 @@ function reconcileLineItems(
       });
     }
   }
+}
+
+/**
+ * Collapse rows that describe the same product/batch into one, summing quantity
+ * and amount (quantity only when the units agree). Rows without a key are kept.
+ */
+export function aggregateLines(items: ExtractedLineItem[]): ExtractedLineItem[] {
+  const out: ExtractedLineItem[] = [];
+  const byKey = new Map<string, ExtractedLineItem>();
+  for (const it of items) {
+    const key = lineKey(it);
+    const prev = key ? byKey.get(key) : undefined;
+    if (!key || !prev) {
+      const copy = { ...it };
+      out.push(copy);
+      if (key) byKey.set(key, copy);
+      continue;
+    }
+    const sameUnit = normalizeUnit(prev.unit) === normalizeUnit(it.unit);
+    prev.quantity =
+      sameUnit && prev.quantity !== null && it.quantity !== null ? prev.quantity + it.quantity : null;
+    prev.amount = prev.amount !== null && it.amount !== null ? prev.amount + it.amount : null;
+    prev.hs_code = prev.hs_code ?? it.hs_code;
+  }
+  return out;
 }
 
 /** Row-matching key: prefer batch number, else normalized description. */

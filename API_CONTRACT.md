@@ -99,7 +99,7 @@ Response `200`:
                  "transport_mode","origin_country","destination_country",
                  "responsible_user_id",
                  "contract_type_source","contract_type_confidence","contract_type_reason",
-                 "survey_status","survey_answers" },
+                 "survey_status","survey_answers","auto_context_fields" },
   "folders": [ { "id","name","position" } ]
 }
 ```
@@ -120,6 +120,13 @@ the server stamps `contract_type_source="sidebar"` (and clears `contract_type_co
 so auto-detection never overwrites it. Setting `contract_type` to `null` ("Auto")
 clears the lock so auto-detection may repopulate it. These provenance columns are
 read-only in the API (server-managed) — they are returned by `GET`, not accepted here.
+`auto_context_fields` (read-only) lists the intake fields the document autopilot
+filled (`incoterm_in`, `incoterm_out`, `transport_mode`, `origin_country`,
+`destination_country`); the autopilot keeps refining those as documents arrive.
+Any manual write of a field (this PATCH, `/intake`, or context confirmed in chat)
+replaces it with a `manual:<field>` marker and the autopilot never touches it again.
+Autopilot values use the sidebar's vocabulary: Incoterm code (`FCA`), transport
+slug (`air`/`road`/`multimodal`…), Ukrainian country name (`Індія`).
 Response `200`: `{ "workspace": {…}, "checklist"?: [ {…} ] }` (checklist present when intake complete).
 
 ### `PATCH /api/workspaces/:id/status`  (auth)
@@ -546,7 +553,14 @@ Response `200`: `{ "items": [ { "requirement_key", "status":"missing"|"received"
 
 ### `GET /api/workspaces/:id/discrepancies`  (auth)
 Deterministic invoice/PO/packing-list reconciliation; also saves a
-`discrepancy_report` artifact.
+`discrepancy_report` artifact. Net/gross weight and places are compared across
+EVERY document that states them (invoices, packing lists, transport docs, МД, COO)
+and reported once per field, grouped by value with the files that state it (>1%
+weight gap or any places gap → `error`, smaller weight gap → `warning`). Packing
+lists split per carton are aggregated per batch/product before the line check.
+Incoterms are compared by rule code (place spelling is ignored). When several files
+share a type, the issued PDF/scan is reconciled before an editable draft and the
+`documents` note names the reconciled and skipped files.
 Response `200`: `{ "discrepancies": [ { "field", "expected", "actual", "severity":"error"|"warning"|"info" } ], "artifactId": uuid }`.
 
 ### `POST /api/workspaces/:id/compare-versions`  (auth)

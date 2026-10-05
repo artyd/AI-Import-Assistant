@@ -36,7 +36,10 @@ export async function computeDiscrepancies(workspaceId: string): Promise<
             de.extracted_fields AS fields
      FROM document_extractions de
      JOIN files f ON f.id = de.file_id
-     WHERE de.workspace_id = $1 AND f.is_latest = true`,
+     WHERE de.workspace_id = $1 AND f.is_latest = true
+     -- Stable order: when several files share a doc_type the reconciler picks
+     -- among them, and the verdict must not change between calls.
+     ORDER BY f.created_at, f.name, f.id`,
     [workspaceId],
   );
 
@@ -50,9 +53,16 @@ export async function computeDiscrepancies(workspaceId: string): Promise<
   // Pass the shipment's contract mode + Incoterms so trilateral (3-party) gets
   // the two-leg checks; bilateral/unknown keeps the single-invoice behaviour.
   const ws = await getWorkspaceById(workspaceId);
+  const { rows: inter } = await query<{ company_name: string }>(
+    `SELECT company_name FROM parties
+     WHERE workspace_id = $1 AND role = 'intermediary' AND company_name <> ''
+     ORDER BY created_at LIMIT 1`,
+    [workspaceId],
+  );
   return reconcile(docs, {
     contractMode: ws?.contract_type ?? null,
     incotermIn: ws?.incoterm_in ?? ws?.incoterm ?? null,
     incotermOut: ws?.incoterm_out ?? null,
+    intermediaryName: inter[0]?.company_name ?? null,
   });
 }

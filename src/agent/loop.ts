@@ -141,6 +141,19 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
   };
 
   let text = '';
+  // Each text block (one per model call, or after a tool/thinking block) is its
+  // own paragraph. Streamed back-to-back they used to glue into one line —
+  // "…хвилинку!## Комплектність" — breaking the Markdown heading.
+  let blockBreak = false;
+  const emitText = (delta: string): void => {
+    let out = delta;
+    if (blockBreak && text.length > 0 && !/\n\s*$/.test(text) && !/^\s*\n/.test(delta)) {
+      out = `\n\n${delta}`;
+    }
+    blockBreak = false;
+    text += out;
+    sse.send('token', { text: out });
+  };
   const citations: Citation[] = [];
   const toolCalls: ToolCallRecord[] = [];
   let toolsStillPending = false;
@@ -158,10 +171,11 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
         tools: toolsParam,
       }, { signal: params.signal });
 
-      stream.on('text', (delta: string) => {
-        text += delta;
-        sse.send('token', { text: delta });
+      blockBreak = true;
+      stream.on('contentBlock', () => {
+        blockBreak = true;
       });
+      stream.on('text', emitText);
 
       const msg = await stream.finalMessage();
       track(msg.usage);
@@ -228,10 +242,11 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
         tools: toolsParam,
         tool_choice: { type: 'none' },
       }, { signal: params.signal });
-      stream.on('text', (delta: string) => {
-        text += delta;
-        sse.send('token', { text: delta });
+      blockBreak = true;
+      stream.on('contentBlock', () => {
+        blockBreak = true;
       });
+      stream.on('text', emitText);
       const msg = await stream.finalMessage();
       track(msg.usage);
       messages.push({ role: 'assistant', content: msg.content });

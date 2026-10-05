@@ -1,5 +1,6 @@
 import { pool, query } from '../db/pool.js';
 import type { WorkspaceRow } from './workspaceAccess.js';
+import { sameCompany } from './contextDerive.js';
 
 /**
  * Deterministic document-completeness checklist. Requirements come from
@@ -36,6 +37,8 @@ interface LatestFileRow {
   folder_name: string | null;
   doc_type: string | null;
   also_contains: string[] | null;
+  seller: string | null;
+  buyer: string | null;
 }
 
 async function requiredKeys(ws: WorkspaceRow): Promise<string[]> {
@@ -51,7 +54,35 @@ async function requiredKeys(ws: WorkspaceRow): Promise<string[]> {
   return [...new Set(rows.flatMap((r) => r.required_document_types))];
 }
 
-function resolveItems(required: string[], files: LatestFileRow[]): ChecklistItem[] {
+/**
+ * `intermediary_agreement` (trilateral) is not a doc_type the extractor emits:
+ * it is the CONTRACT one of whose sides is the intermediary (e.g. PRIME FORCE as
+ * seller to the importer, or as buyer from the manufacturer). Verified when such
+ * a contract is in the package; with no intermediary named yet, any contract
+ * counts as "received" (present, sides not yet confirmed).
+ */
+function resolveIntermediaryAgreement(
+  files: LatestFileRow[],
+  intermediary: string | null,
+): ChecklistItem {
+  const contracts = files.filter(
+    (f) => f.doc_type === 'contract' || (Array.isArray(f.also_contains) && f.also_contains.includes('contract')),
+  );
+  const match = intermediary
+    ? contracts.find((f) => sameCompany(f.seller, intermediary) || sameCompany(f.buyer, intermediary))
+    : undefined;
+  if (match) return { requirement_key: 'intermediary_agreement', status: 'verified', source_file_id: match.file_id };
+  if (!intermediary && contracts[0]) {
+    return { requirement_key: 'intermediary_agreement', status: 'received', source_file_id: contracts[0].file_id };
+  }
+  return { requirement_key: 'intermediary_agreement', status: 'missing', source_file_id: null };
+}
+
+export function resolveItems(
+  required: string[],
+  files: LatestFileRow[],
+  intermediary: string | null = null,
+): ChecklistItem[] {
   // Extraction-verified: doc_type → file_id.
   const verified = new Map<string, string>();
   // Folder-covered: category → file_id.
@@ -66,6 +97,7 @@ function resolveItems(required: string[], files: LatestFileRow[]): ChecklistItem
     for (const c of cats) if (!received.has(c)) received.set(c, f.file_id);
   }
   return required.map((key) => {
+    if (key === 'intermediary_agreement') return resolveIntermediaryAgreement(files, intermediary);
     if (verified.has(key)) {
       return { requirement_key: key, status: 'verified', source_file_id: verified.get(key)! };
     }
@@ -84,15 +116,24 @@ export async function computeChecklist(ws: WorkspaceRow): Promise<ChecklistItem[
   const { rows: files } = await query<LatestFileRow>(
     `SELECT f.id AS file_id, fo.name AS folder_name,
             de.extracted_fields->>'doc_type' AS doc_type,
-            de.extracted_fields->'also_contains' AS also_contains
+            de.extracted_fields->'also_contains' AS also_contains,
+            de.extracted_fields->>'seller' AS seller,
+            de.extracted_fields->>'buyer' AS buyer
      FROM files f
      LEFT JOIN folders fo ON fo.id = f.folder_id
      LEFT JOIN document_extractions de ON de.file_id = f.id
-     WHERE f.workspace_id = $1 AND f.is_latest = true`,
+     WHERE f.workspace_id = $1 AND f.is_latest = true
+     ORDER BY f.created_at, f.name, f.id`,
+    [ws.id],
+  );
+  const { rows: inter } = await query<{ company_name: string }>(
+    `SELECT company_name FROM parties
+     WHERE workspace_id = $1 AND role = 'intermediary' AND company_name <> ''
+     ORDER BY created_at LIMIT 1`,
     [ws.id],
   );
 
-  const items = resolveItems(required, files);
+  const items = resolveItems(required, files, inter[0]?.company_name ?? null);
 
   // Replace persisted items atomically.
   const client = await pool.connect();

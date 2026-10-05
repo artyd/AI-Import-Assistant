@@ -1,12 +1,12 @@
 import { query } from '../db/pool.js';
+import { analyzeParties } from './partyExtraction.js';
+import { deriveIncoterms, type DeriveDoc } from './contextDerive.js';
 
 /**
- * Best-effort derivation of the incoming (buy-side) and outgoing (sell-side)
- * Incoterms from a workspace's stored document extractions. No LLM call — reads
- * `document_extractions`. Heuristic, user-editable in the shipment card:
- *   - incoming = the Incoterm on the invoice → else the contract → else any
- *   - outgoing = a DIFFERENT Incoterm seen on another document (re-sale leg), else null
- * A single-Incoterm shipment yields incoterm_in only.
+ * Incoming (buy-side) and outgoing (sell-side) Incoterms derived from a
+ * workspace's stored extractions. No LLM call. Party-aware: in a trilateral deal
+ * the inbound leg is the document the intermediary buys on, the outbound leg the
+ * one it sells on (see `deriveIncoterms`). User-editable in the shipment card.
  */
 
 export interface IncotermSuggestion {
@@ -14,39 +14,49 @@ export interface IncotermSuggestion {
   incoterm_out: string | null;
 }
 
-interface Row {
-  doc_type: string | null;
-  incoterm: string | null;
-}
-
-export async function suggestIncoterms(workspaceId: string): Promise<IncotermSuggestion> {
-  const { rows } = await query<Row>(
-    `SELECT de.extracted_fields->>'doc_type' AS doc_type,
-            de.extracted_fields->>'incoterm' AS incoterm
+/**
+ * Latest extractions of a workspace in a STABLE order (same input → same
+ * derivation), optionally with the head of each transport document's Markdown.
+ */
+export async function loadDeriveDocs(
+  workspaceId: string,
+  opts: { transportMarkdown?: boolean } = {},
+): Promise<DeriveDoc[]> {
+  const { rows } = await query<{
+    file_name: string | null;
+    doc_type: string | null;
+    fields: Record<string, unknown> | null;
+    markdown: string | null;
+  }>(
+    `SELECT f.name AS file_name,
+            de.extracted_fields->>'doc_type' AS doc_type,
+            de.extracted_fields AS fields,
+            ${
+              opts.transportMarkdown
+                ? `CASE WHEN de.extracted_fields->>'doc_type' = 'transport' THEN
+                     (SELECT left(string_agg(p.value->>'markdown', E'\\n' ORDER BY p.ord), 4000)
+                        FROM file_markdown fm,
+                             jsonb_array_elements(fm.pages) WITH ORDINALITY AS p(value, ord)
+                       WHERE fm.file_id = f.id)
+                   END`
+                : 'NULL'
+            } AS markdown
      FROM document_extractions de
      JOIN files f ON f.id = de.file_id
      WHERE de.workspace_id = $1 AND f.is_latest = true
-       AND de.extracted_fields->>'incoterm' IS NOT NULL`,
+     ORDER BY f.created_at, f.name, f.id`,
     [workspaceId],
   );
+  return rows.map((r) => ({
+    file_name: r.file_name,
+    doc_type: r.doc_type,
+    fields: r.fields ?? {},
+    markdown: r.markdown,
+  }));
+}
 
-  const norm = (s: string): string => s.trim().toUpperCase();
-  const byType = new Map<string, string>();
-  const all: string[] = [];
-  for (const r of rows) {
-    if (!r.incoterm) continue;
-    const term = norm(r.incoterm);
-    all.push(term);
-    const key = r.doc_type ?? 'other';
-    if (!byType.has(key)) byType.set(key, term);
-  }
-  if (all.length === 0) return { incoterm_in: null, incoterm_out: null };
-
-  const incoterm_in =
-    byType.get('invoice') ??
-    byType.get('contract') ??
-    all[0]!;
-
-  const outgoing = all.find((t) => t !== incoterm_in) ?? null;
-  return { incoterm_in, incoterm_out: outgoing };
+export async function suggestIncoterms(workspaceId: string): Promise<IncotermSuggestion> {
+  const [docs, analysis] = await Promise.all([loadDeriveDocs(workspaceId), analyzeParties(workspaceId)]);
+  const intermediary = analysis.suggestions.find((s) => s.role === 'intermediary')?.company_name ?? null;
+  return deriveIncoterms(docs, analysis.contract_type, intermediary);
 }
