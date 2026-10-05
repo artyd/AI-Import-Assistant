@@ -10,6 +10,7 @@ import { renderText, letterSubject } from '../services/instruction/render.js';
 import { instructionDocx, instructionPdf } from '../services/instruction/exportFormats.js';
 import { proposeRefinement } from '../services/instruction/refine.js';
 import { userRateLimit } from './chatRateLimit.js';
+import { query } from '../db/pool.js';
 
 /** Allowed status moves (server-enforced; the screen mirrors them). */
 const NEXT: Record<string, string[]> = { draft: ['approved'], approved: ['sent'], sent: [] };
@@ -37,7 +38,8 @@ export async function supplierInstructionRoutes(app: FastifyInstance): Promise<v
   app.get<{ Params: { id: string } }>('/api/workspaces/:id/instruction/prefill', async (req, reply) => {
     const ws = await getOwnedWorkspace(req.user!.sub, req.params.id);
     if (!ws) return reply.code(404).send({ error: 'not_found' });
-    const draft = await prefillDraft(ws);
+    const { rows } = await query<{ name: string }>('SELECT name FROM users WHERE id = $1', [req.user!.sub]);
+    const draft = await prefillDraft(ws, rows[0]?.name ? { name: rows[0].name } : null);
     return reply.send({ draft, missing: missingFields(draft) });
   });
 
