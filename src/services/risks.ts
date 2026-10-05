@@ -77,6 +77,7 @@ export const DISCREPANCY_FIELD_LABELS: Record<string, string> = {
   seller: 'продавець',
   buyer: 'покупець',
   documents: 'документи',
+  instruction: 'виконання інструкції постачальнику',
 };
 
 export function fieldLabel(field: string): string {
