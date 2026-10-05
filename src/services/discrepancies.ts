@@ -1,6 +1,8 @@
 import { query } from '../db/pool.js';
 import type { ExtractedFields } from './extraction/extractFields.js';
 import { reconcile, type ReconcileDoc } from './reconcile.js';
+import { latestApproved } from './instruction/store.js';
+import { checkInstructionCompliance } from './instruction/compliance.js';
 import { getWorkspaceById } from './workspaceAccess.js';
 
 /**
@@ -59,10 +61,15 @@ export async function computeDiscrepancies(workspaceId: string): Promise<
      ORDER BY created_at LIMIT 1`,
     [workspaceId],
   );
-  return reconcile(docs, {
+  const findings = reconcile(docs, {
     contractMode: ws?.contract_type ?? null,
     incotermIn: ws?.incoterm_in ?? ws?.incoterm ?? null,
     incotermOut: ws?.incoterm_out ?? null,
     intermediaryName: inter[0]?.company_name ?? null,
   });
+  // Did the supplier follow our approved instruction? (no-op until one is approved
+  // and shipping documents have arrived)
+  const approved = await latestApproved(workspaceId);
+  if (approved) findings.push(...checkInstructionCompliance(approved.draft, docs, approved.version));
+  return findings;
 }

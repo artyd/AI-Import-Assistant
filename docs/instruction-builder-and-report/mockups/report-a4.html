@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<title>Звіт по постачанню — S-METHOPRENE</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  /* МАКЕТ · звіт для керівництва · 1 сторінка A4 · токени з frontend/app/globals.css */
+  :root{
+    --bg:#fff; --panel:#f7f7f8; --text:#0d0d0f; --muted:#8b8b94; --faint:#b4b4bc;
+    --border:rgba(13,13,15,.09); --border2:rgba(13,13,15,.14);
+    --accent:#2f6feb; --accentSoft:rgba(47,111,235,.12);
+    --ok:#12936a; --okBg:rgba(18,147,106,.12);
+    --warn:#d98213; --warnBg:rgba(217,130,19,.14);
+    --err:#dc4a4f; --errBg:rgba(220,74,79,.12);
+    --font:"Hanken Grotesk",system-ui,-apple-system,sans-serif;
+  }
+  @page{ size:A4; margin:0 }
+  *{ box-sizing:border-box }
+  html,body{ margin:0; background:#e9e9ee; font-family:var(--font); color:var(--text); -webkit-print-color-adjust:exact; print-color-adjust:exact }
+  .page{ width:210mm; height:297mm; margin:12mm auto; background:var(--bg); padding:11mm 12mm 9mm; display:flex; flex-direction:column; gap:3.2mm; box-shadow:0 10px 34px rgba(13,13,20,.12); overflow:hidden }
+  @media print{ html,body{ background:#fff } .page{ margin:0; box-shadow:none } .note{ display:none } }
+
+  /* header */
+  .hd{ display:flex; align-items:center; justify-content:space-between; padding-bottom:3mm; border-bottom:1.5px solid var(--text) }
+  .brand{ display:flex; align-items:center; gap:8px }
+  .mark{ width:26px; height:26px; border-radius:8px; background:var(--accent); color:#fff; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:14px }
+  .brand b{ font-weight:700; font-size:14px; letter-spacing:1.5px }
+  .brand span{ color:var(--muted); font-size:12px; margin-left:6px }
+  .meta{ text-align:right; font-size:10.5px; color:var(--muted); line-height:1.45 }
+  .meta b{ color:var(--text); font-weight:600 }
+
+  /* hero */
+  .hero{ display:grid; grid-template-columns:1fr auto; gap:6mm; align-items:start }
+  .title{ font-size:22px; font-weight:800; letter-spacing:-.3px; line-height:1.1 }
+  .title small{ font-size:13px; font-weight:500; color:var(--muted); margin-left:6px; letter-spacing:0 }
+  .chain{ margin-top:5px; font-size:11.5px; display:flex; flex-wrap:wrap; gap:4px; align-items:center }
+  .chip{ padding:2px 7px; border-radius:999px; background:var(--panel); border:1px solid var(--border); font-weight:600 }
+  .chip i{ font-style:normal; color:var(--muted); font-weight:500; margin-left:3px }
+  .arr{ color:var(--faint) }
+  .status{ display:flex; flex-direction:column; gap:5px; align-items:flex-end }
+  .pill{ display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:999px; font-size:11.5px; font-weight:700; white-space:nowrap }
+  .pill .dot{ width:7px; height:7px; border-radius:50% }
+  .p-ok{ background:var(--okBg); color:var(--ok) } .p-ok .dot{ background:var(--ok) }
+  .p-err{ background:var(--errBg); color:var(--err) } .p-err .dot{ background:var(--err) }
+
+  /* kpis */
+  .kpis{ display:grid; grid-template-columns:repeat(4,1fr); gap:2.6mm }
+  .kpi{ background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:8px 10px 9px }
+  .kpi .l{ font-size:9.5px; text-transform:uppercase; letter-spacing:.7px; color:var(--muted); font-weight:600 }
+  .kpi .v{ font-size:19px; font-weight:800; margin-top:3px; letter-spacing:-.3px }
+  .kpi .s{ font-size:10px; color:var(--muted); margin-top:2px; line-height:1.35 }
+  .kpi .s b{ color:var(--text); font-weight:600 }
+  .neg{ color:var(--err) }
+
+  /* card */
+  .card{ border:1px solid var(--border); border-radius:10px; padding:8px 10px }
+  .card h3{ margin:0 0 6px; font-size:9.5px; text-transform:uppercase; letter-spacing:.7px; color:var(--muted); font-weight:700; display:flex; justify-content:space-between }
+  .card h3 em{ font-style:normal; text-transform:none; letter-spacing:0; font-weight:500 }
+
+  /* route */
+  .route{ display:flex; align-items:flex-start; gap:0; font-size:10.5px; padding-top:4px }
+  .stop{ display:flex; flex-direction:column; align-items:center; text-align:center; min-width:0; flex:none; width:22mm }
+  .stop .pt{ width:11px; height:11px; border-radius:50%; background:#fff; border:2.5px solid var(--accent) }
+  .stop.end .pt{ background:var(--accent) }
+  .stop b{ margin-top:4px; font-size:11px }
+  .stop span{ color:var(--muted); font-size:9.5px; line-height:1.25 }
+  .leg{ flex:1; display:flex; flex-direction:column; align-items:center; margin-top:2px; min-width:0 }
+  .leg .ln{ height:2px; width:100%; background:var(--accent); opacity:.5 }
+  .leg.road .ln{ background:repeating-linear-gradient(90deg,var(--accent) 0 6px,transparent 6px 10px); opacity:.6 }
+  .leg .md{ font-size:9.5px; color:var(--accent); font-weight:700; background:#fff; padding:0 5px; margin-bottom:2px; white-space:nowrap }
+
+  /* timeline */
+  .tl{ position:relative; display:grid; grid-template-columns:repeat(8,1fr); margin-top:3px }
+  .tl:before{ content:""; position:absolute; left:4%; right:4%; top:5px; height:2px; background:var(--border2) }
+  .ev{ position:relative; text-align:center; font-size:9.5px; line-height:1.3; padding:0 2px }
+  .ev .d{ width:12px; height:12px; border-radius:50%; background:var(--accent); border:2.5px solid #fff; box-shadow:0 0 0 1px var(--accent); margin:0 auto 4px }
+  .ev.m .d{ background:#fff }
+  .ev b{ display:block; font-size:10.5px }
+  .ev span{ color:var(--muted) }
+  .tlfoot{ display:flex; gap:12px; margin-top:6px; font-size:10px; color:var(--muted) }
+  .tlfoot b{ color:var(--text) }
+
+  .grid2{ display:grid; grid-template-columns:1.15fr 1fr; gap:2.6mm }
+  .summary p{ margin:0; font-size:11.2px; line-height:1.5 }
+  .summary .ai{ display:inline-flex; gap:4px; align-items:center; font-size:9px; font-weight:700; color:var(--accent); background:var(--accentSoft); padding:1px 6px; border-radius:999px; text-transform:none; letter-spacing:0 }
+  .risks{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:5px }
+  .risks li{ display:grid; grid-template-columns:18px 1fr; gap:6px; font-size:10.8px; line-height:1.35 }
+  .risks .n{ width:18px; height:18px; border-radius:6px; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:10px }
+  .r-err{ background:var(--errBg); color:var(--err) } .r-warn{ background:var(--warnBg); color:var(--warn) }
+  .risks small{ display:block; color:var(--muted); font-size:9.8px }
+
+  .kv{ display:grid; grid-template-columns:auto 1fr; gap:3px 10px; font-size:10.6px }
+  .kv dt{ color:var(--muted) } .kv dd{ margin:0; font-weight:600 }
+  .src{ font-size:8.5px; font-weight:700; color:var(--accent); background:var(--accentSoft); padding:0 5px; border-radius:999px; margin-left:4px; vertical-align:1px }
+
+  .docs{ display:grid; grid-template-columns:1fr 1fr; gap:3px 10px; font-size:10.4px }
+  .docs div{ display:flex; gap:5px; align-items:center }
+  .ck{ color:var(--ok); font-weight:800 }
+  .counts{ display:flex; gap:6px; margin-top:7px }
+  .cnt{ flex:1; border-radius:8px; padding:5px 7px; font-size:10px; font-weight:600 }
+  .cnt b{ font-size:15px; font-weight:800; display:block }
+
+  .ft{ margin-top:auto; display:flex; justify-content:space-between; font-size:9px; color:var(--faint); border-top:1px solid var(--border); padding-top:2.5mm }
+
+  .note{ max-width:210mm; margin:0 auto 12mm; font-size:12px; color:#555; line-height:1.5 }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="hd">
+    <div class="brand"><div class="mark">Ш</div><b>ШТУРМАН</b><span>Звіт по постачанню для керівництва</span></div>
+    <div class="meta">Постачання <b>TEST-Метопрен</b> · сформовано <b>05.10.2026</b><br>Відповідальний: Тест Користувач</div>
+  </div>
+
+  <div class="hero">
+    <div>
+      <div class="title">S-METHOPRENE 25 кг<small>CAS 65733-16-6 · субстанція</small></div>
+      <div class="chain">
+        <span class="chip">NGL Fine-Chem<i>IN · виробник</i></span><span class="arr">→</span>
+        <span class="chip">PRIME FORCE UK<i>GB · посередник</i></span><span class="arr">→</span>
+        <span class="chip">ТЕХІНФОРМ ПЛЮС<i>UA · покупець</i></span>
+        <span style="color:var(--muted);margin-left:4px">тристоронній · контракт 03062026/PTM</span>
+      </div>
+    </div>
+    <div class="status">
+      <span class="pill p-ok"><span class="dot"></span>Розмитнено 31.07.2026</span>
+      <span class="pill p-err"><span class="dot"></span>2 критичні ризики</span>
+    </div>
+  </div>
+
+  <div class="kpis">
+    <div class="kpi"><div class="l">Вартість товару</div><div class="v">$8 750</div>
+      <div class="s">продаж, CPT Біла Церква<br>закупівля посередника <b>$13 125</b> <span class="neg">−33%</span></div></div>
+    <div class="kpi"><div class="l">Митні платежі</div><div class="v">108 712 ₴</div>
+      <div class="s">мито 6,5% <b>25 418 ₴</b> · ПДВ <b>83 294 ₴</b><br>МВ 391 052 ₴ · курс 44,6916</div></div>
+    <div class="kpi"><div class="l">Собівартість</div><div class="v">16 905 ₴<span style="font-size:12px;font-weight:600"> /кг</span></div>
+      <div class="s">товар + мито + брокер <b>6 163 ₴</b><br>без ПДВ (до кредиту); фрахт у ціні CPT</div></div>
+    <div class="kpi"><div class="l">Строк</div><div class="v">58 днів</div>
+      <div class="s">контракт → МД<br>відвантаження → МД <b>17 днів</b></div></div>
+  </div>
+
+  <div class="card">
+    <h3>Маршрут <em>авіа + авто · 3 місця · брутто 32 кг</em></h3>
+    <div class="route">
+      <div class="stop"><span class="pt"></span><b>Мумбаї</b><span>BOM · FCA<br>14.07</span></div>
+      <div class="leg"><span class="md">✈ AI2027 · AWB 098-31298724</span><span class="ln"></span></div>
+      <div class="stop"><span class="pt"></span><b>Франкфурт</b><span>FRA · T1<br>23.07</span></div>
+      <div class="leg road"><span class="md">🚚 CMR SAID0009199</span><span class="ln"></span></div>
+      <div class="stop"><span class="pt"></span><b>Київ</b><span>митниця UA100100<br>31.07</span></div>
+      <div class="leg road"><span class="md">🚚 Нова Пошта</span><span class="ln"></span></div>
+      <div class="stop end"><span class="pt"></span><b>Біла Церква</b><span>склад покупця<br>01.08</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Таймлайн <em>етапи з документів</em></h3>
+    <div class="tl">
+      <div class="ev"><div class="d"></div><b>03.06</b><span>контракт</span></div>
+      <div class="ev m"><div class="d"></div><b>22.06</b><span>COA, партія</span></div>
+      <div class="ev m"><div class="d"></div><b>09.07</b><span>інвойс, ShB</span></div>
+      <div class="ev"><div class="d"></div><b>14.07</b><span>AWB, COO</span></div>
+      <div class="ev m"><div class="d"></div><b>16.07</b><span>виліт</span></div>
+      <div class="ev"><div class="d"></div><b>23.07</b><span>T1 + CMR</span></div>
+      <div class="ev"><div class="d"></div><b>31.07</b><span>МД</span></div>
+      <div class="ev"><div class="d"></div><b>01.08</b><span>доставка</span></div>
+    </div>
+    <div class="tlfoot"><span>Виробництво → відвантаження <b>22 дні</b></span><span>Транзит ЄС <b>8 днів</b></span><span>Розмитнення <b>≈4 дні</b></span></div>
+  </div>
+
+  <div class="grid2">
+    <div class="card summary">
+      <h3>Резюме для керівництва <span class="ai">✦ ШІ</span></h3>
+      <p>Поставку 25 кг S-метопрену розмитнено 31.07.2026, товар доставлено покупцю 01.08. Митні платежі сплачено правильно: 108 712 ₴ за ставкою 6,5% мита та 20% ПДВ. Головний ризик — ціна продажу посередника на 33% нижча за ціну закупівлі у виробника: митниця може скоригувати митну вартість. Варто підготувати письмове обґрунтування ціни. Також у транзитній декларації T1 помилково вказано нетто 32 кг замість 25.</p>
+    </div>
+    <div class="card">
+      <h3>Головні ризики <em>топ-3 з 7</em></h3>
+      <ul class="risks">
+        <li><span class="n r-err">1</span><div>Продаж на 33% нижче закупівлі<small>$8 750 проти $13 125 → ризик коригування митної вартості</small></div></li>
+        <li><span class="n r-err">2</span><div>T1: вага нетто 32 кг замість 25<small>DEP-1 / MRN 26DE330296234194K2</small></div></li>
+        <li><span class="n r-warn">3</span><div>Брутто 31,85 кг проти 32 кг<small>інвойс, PL, COO ↔ AWB, CMR, T1, МД</small></div></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <div class="card">
+      <h3>Товар і класифікація</h3>
+      <dl class="kv">
+        <dt>УКТ ЗЕД</dt><dd>2918 99 90 90 <span class="src">qdpro</span></dd>
+        <dt>Ставки</dt><dd>мито 6,5% · ПДВ 20% · без преференцій (IN)</dd>
+        <dt>Дозволи</dt><dd>5509 держконтроль · 5520 експорт. контроль <span class="src">qdpro</span></dd>
+        <dt>Партія</dt><dd>SMP/06/012/2026 · чистота 98,82%</dd>
+        <dt>Придатність</dt><dd>06.2026 → 05.2029</dd>
+      </dl>
+    </div>
+    <div class="card">
+      <h3>Документи <em>7 з 7 обовʼязкових</em></h3>
+      <div class="docs">
+        <div><span class="ck">✓</span>Контракти (2 плечі)</div><div><span class="ck">✓</span>Інвойси + PL</div>
+        <div><span class="ck">✓</span>COO, COA</div><div><span class="ck">✓</span>AWB, CMR, T1</div>
+        <div><span class="ck">✓</span>МД ІМ40АА</div><div style="color:var(--muted)">— страховий поліс</div>
+      </div>
+      <div class="counts">
+        <div class="cnt" style="background:var(--errBg);color:var(--err)"><b>2</b>критичні</div>
+        <div class="cnt" style="background:var(--warnBg);color:var(--warn)"><b>4</b>попередження</div>
+        <div class="cnt" style="background:var(--panel);color:var(--muted)"><b>28</b>файлів</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="ft"><span>Дані зібрано автоматично з документів поставки · резюме ✦ згенеровано ШІ, перевірте перед рішенням</span><span>Деталі та джерела — у Штурмані</span></div>
+</div>
+
+<div class="note"><b>Макет, на утвердження.</b> Дані — реальна поставка «TEST-Метопрен v2». Друк (Ctrl+P → «Зберегти як PDF», поля «Немає») дає саме ту сторінку A4, яку бекенд рендеритиме в PDF.</div>
+</body>
+</html>

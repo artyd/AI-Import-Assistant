@@ -14,8 +14,11 @@ FROM node:20-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 # Headless LibreOffice (Writer only) converts legacy binary .doc → .docx at ingest.
+# Chromium prints the management report / supplier instruction HTML → PDF
+# (puppeteer-core, CHROMIUM_PATH); fonts-dejavu covers Cyrillic if the web font can't load.
+ENV CHROMIUM_PATH=/usr/bin/chromium PUPPETEER_SKIP_DOWNLOAD=1
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends libreoffice-writer-nogui \
+  && apt-get install -y --no-install-recommends libreoffice-writer-nogui chromium fonts-dejavu-core \
   && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev && npm cache clean --force

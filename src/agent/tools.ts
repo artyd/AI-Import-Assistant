@@ -17,6 +17,9 @@ import {
 } from '../services/markdown/store.js';
 import { getWorkspaceById } from '../services/workspaceAccess.js';
 import { buildSupplierInstruction } from '../services/supplierInstruction.js';
+import { ensureDraftVersion, listVersions, setProposals } from '../services/instruction/store.js';
+import { prefillDraft } from '../services/instruction/prefill.js';
+import { getPath, isProposablePath, missingFields, REQUIRED_FIELDS } from '../services/instruction/types.js';
 import { computeDiscrepancies } from '../services/discrepancies.js';
 import { computeRegistryChecks } from '../services/drugRegistry.js';
 import { computeRisks, fieldLabel } from '../services/risks.js';
@@ -142,9 +145,48 @@ export const toolDefinitions: ChatTool[] = [
   {
     name: 'generate_supplier_instruction',
     description:
-      'Генерує інструкцію (лист) для постачальника на основі параметрів постачання та ' +
-      'сторін. Якщо бракує вхідних даних — поверне їх перелік замість вигаданого листа.',
+      'Повертає англійський лист-інструкцію постачальнику з конструктора (детермінований ' +
+      'шаблон, остання збережена версія або автозаповнення). Якщо бракує обовʼязкових полів — ' +
+      'поверне їх перелік. Для редагування інструкції користувач має екран «Інструкція».',
     input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'get_instruction_draft',
+    description:
+      'Читає поточну інструкцію постачальнику з конструктора: усі поля, їх джерела, незаповнені ' +
+      'обовʼязкові поля та вже запропоновані значення. Викликай першим, коли користувач питає про ' +
+      'інструкцію або просить допомогти її заповнити.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'propose_instruction_fields',
+    description:
+      'ПРОПОНУЄ значення полів інструкції (НЕ зберігає): кожна пропозиція показується в конструкторі ' +
+      'з кнопками «Прийняти/Відхилити». Пропонуй ЛИШЕ те, що знайшов у документах постачання (вкажи ' +
+      'файл у reason) або що користувач прямо назвав у чаті. Не вигадуй контакти, адреси, номери. ' +
+      'Шляхи полів: from.name, product.name, product.grade, product.cas, product.quantity, ' +
+      'product.hsCode, product.regNumber, consignor.name, consignor.address, consignor.country, ' +
+      'consignee.name, consignee.address, finalConsignee, contract.number, contract.date, ' +
+      'terms.incoterm, terms.place, terms.destination, terms.finalDestination, labelNotes, ' +
+      'originals.contact, originals.phone, originals.address, supplierEmail.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        fields: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              path: { type: 'string' },
+              value: { type: 'string' },
+              reason: { type: 'string', description: 'Звідки значення (файл/сторінка або «зі слів користувача»).' },
+            },
+            required: ['path', 'value', 'reason'],
+          },
+        },
+      },
+      required: ['fields'],
+    },
   },
   {
     name: 'get_missing_context',
@@ -432,6 +474,10 @@ export async function executeTool(
       return runRegistryCheck(ctx);
     case 'generate_supplier_instruction':
       return runSupplierInstruction(ctx);
+    case 'get_instruction_draft':
+      return runGetInstructionDraft(ctx);
+    case 'propose_instruction_fields':
+      return runProposeInstructionFields(input, ctx);
     case 'get_missing_context':
       return runMissingContext(ctx);
     case 'save_workspace_context':
@@ -670,6 +716,53 @@ async function runSupplierInstruction(ctx: ToolContext): Promise<ToolOutcome> {
     };
   }
   return { result: res.instruction, summary: 'Згенеровано інструкцію постачальнику', citations: [] };
+}
+
+async function runGetInstructionDraft(ctx: ToolContext): Promise<ToolOutcome> {
+  // Read-only: an unsaved shipment gets a prefill preview, nothing is written.
+  const wsId = requireWorkspace(ctx);
+  const [latest] = await listVersions(wsId);
+  const v = latest ?? { version: 0, status: 'не збережено', draft: await prefillDraft((await getWorkspaceById(wsId))!) };
+  const d = v.draft;
+  const missing = missingFields(d);
+  const fields = Object.keys(REQUIRED_FIELDS)
+    .concat(['product.cas', 'product.hsCode', 'consignor.address', 'consignee.address', 'finalConsignee', 'terms.destination', 'terms.finalDestination', 'supplierEmail'])
+    .map((p) => `${p} = ${JSON.stringify(getPath(d, p) ?? '')}${d.sources[p] ? ` [${d.sources[p]}]` : ''}`)
+    .join('\n');
+  const docs = d.docs.filter((x) => x.checked).map((x) => x.labelUk || x.label).join(', ');
+  const result = [
+    `Інструкція v${v.version} (${v.status}). Категорія: ${d.category}. Транспорт: ${d.terms.transport}. Consignee: ${d.consigneeChoice}.`,
+    `Поля:\n${fields}`,
+    `Документи в листі: ${docs}`,
+    missing.length ? `НЕ заповнено: ${missing.map((m) => `${m.label} (${m.path})`).join(', ')}` : 'Усі обовʼязкові поля заповнені.',
+    d.proposals.length ? `Вже запропоновано: ${d.proposals.map((p) => `${p.path}=${p.value}`).join(', ')}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+  return { result, summary: `Інструкція v${v.version}: бракує ${missing.length}`, citations: [] };
+}
+
+async function runProposeInstructionFields(input: unknown, ctx: ToolContext): Promise<ToolOutcome> {
+  const parsed = z
+    .object({
+      fields: z
+        .array(z.object({ path: z.string().max(64), value: z.string().trim().min(1).max(500), reason: z.string().max(300) }))
+        .min(1)
+        .max(20),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { result: 'Некоректні пропозиції.', summary: 'Інструкція: помилка', citations: [] };
+  const wsId = requireWorkspace(ctx);
+  const known = parsed.data.fields.filter((f) => isProposablePath(f.path));
+  if (!known.length) return { result: 'Жодного дозволеного шляху поля — перевір назви.', summary: 'Інструкція: 0 пропозицій', citations: [] };
+  const v = await ensureDraftVersion(wsId, async () => prefillDraft((await getWorkspaceById(wsId))!));
+  const proposals = [...v.draft.proposals.filter((p) => !known.some((k) => k.path === p.path)), ...known].slice(-30);
+  await setProposals(wsId, v.version, proposals);
+  return {
+    result: `Запропоновано ${known.length} знач. у конструкторі інструкції (v${v.version}) — користувач прийме або відхилить їх на екрані «Інструкція». Нічого не збережено автоматично.`,
+    summary: `Інструкція: ${known.length} пропозицій`,
+    citations: [],
+  };
 }
 
 async function runMissingContext(ctx: ToolContext): Promise<ToolOutcome> {

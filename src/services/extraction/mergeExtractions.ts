@@ -11,7 +11,16 @@ import type { ConfidenceField, ExtractedFields, ExtractedParty, FieldConfidence 
  * - line_items concatenate in document order; parties de-dupe by name.
  */
 
-const TOTAL_FIELDS = ['total_value', 'total_weight_kg', 'net_weight_kg', 'gross_weight_kg', 'packages_count'] as const;
+const TOTAL_FIELDS = [
+  'total_value',
+  'total_weight_kg',
+  'net_weight_kg',
+  'gross_weight_kg',
+  'packages_count',
+  'customs_value_uah',
+  'duty_uah',
+  'vat_uah',
+] as const;
 
 const HEADER_FIELDS = [
   'po_number',
@@ -29,6 +38,17 @@ const HEADER_FIELDS = [
   'expiry_date',
   'shipment_date',
   'delivery_deadline',
+  'product_name',
+  'cas_number',
+  'batch_number',
+  'manufacture_date',
+  'transport_mode',
+  'transport_doc_number',
+  'place_of_loading',
+  'place_of_discharge',
+  'final_destination',
+  'exchange_rate',
+  'service_kind',
 ] as const;
 
 export function mergeExtractions(parts: ExtractedFields[]): ExtractedFields | null {

@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<title>Конструктор інструкції — ШТУРМАН</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  /* МАКЕТ · конструктор інструкції постачальнику · токени з frontend/app/globals.css */
+  :root{
+    --bg:#fff; --panel:#f7f7f8; --surface:#fff; --text:#0d0d0f; --muted:#8b8b94; --faint:#b4b4bc;
+    --border:rgba(13,13,15,.09); --border2:rgba(13,13,15,.14); --hover:rgba(13,13,15,.045);
+    --accent:#2f6feb; --accentSoft:rgba(47,111,235,.12);
+    --ok:#12936a; --okBg:rgba(18,147,106,.12); --warn:#d98213; --warnBg:rgba(217,130,19,.14);
+    --err:#dc4a4f; --errBg:rgba(220,74,79,.12);
+    --shadow:0 10px 34px rgba(13,13,20,.12);
+    --font:"Hanken Grotesk",system-ui,-apple-system,sans-serif; --mono:ui-monospace,Menlo,Consolas,monospace;
+  }
+  *{ box-sizing:border-box }
+  html,body{ margin:0; height:100%; font-family:var(--font); color:var(--text); background:var(--bg); font-size:13.5px }
+  button{ font:inherit; cursor:pointer }
+
+  .top{ height:56px; display:flex; align-items:center; gap:12px; padding:0 18px; border-bottom:1px solid var(--border) }
+  .mark{ width:28px; height:28px; border-radius:8px; background:var(--accent); color:#fff; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:15px }
+  .crumbs{ color:var(--muted); font-size:13px } .crumbs b{ color:var(--text); font-weight:600 }
+  .top .sp{ flex:1 }
+  .ver{ display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--muted) }
+  .badge{ display:inline-flex; align-items:center; gap:5px; padding:2px 8px; border-radius:999px; font-size:11.5px; font-weight:600 }
+  .b-draft{ background:var(--warnBg); color:var(--warn) }
+  .btn{ border:1px solid var(--border2); background:var(--surface); border-radius:10px; padding:7px 12px; font-weight:600; font-size:13px; display:inline-flex; align-items:center; gap:6px }
+  .btn:hover{ background:var(--hover) }
+  .btn-p{ background:var(--accent); border-color:var(--accent); color:#fff } .btn-p:hover{ background:#2a63d6 }
+  .btn-g{ border-color:transparent; background:var(--accentSoft); color:var(--accent) }
+
+  .wrap{ display:grid; grid-template-columns:minmax(520px,1fr) minmax(460px,.95fr); height:calc(100% - 56px) }
+  .form{ overflow:auto; padding:18px 22px 60px; background:var(--panel); border-right:1px solid var(--border) }
+  .preview{ display:flex; flex-direction:column; min-width:0; min-height:0; overflow:hidden }
+
+  .alert{ display:flex; gap:10px; align-items:flex-start; background:var(--warnBg); color:#8a5208; border-radius:12px; padding:10px 12px; margin-bottom:14px; font-size:12.8px }
+  .alert b{ color:#6e4106 }
+  .sec{ background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:14px 16px; margin-bottom:12px }
+  .sec h2{ margin:0 0 10px; font-size:13px; font-weight:700; display:flex; align-items:center; gap:8px }
+  .sec h2 .n{ width:22px; height:22px; border-radius:7px; background:var(--accentSoft); color:var(--accent); font-size:12px; display:flex; align-items:center; justify-content:center; font-weight:800 }
+  .sec h2 .ok{ margin-left:auto; color:var(--ok); font-size:12px; font-weight:600 }
+  .sec h2 .miss{ margin-left:auto; color:var(--warn); font-size:12px; font-weight:600 }
+  .row{ display:grid; grid-template-columns:repeat(2,1fr); gap:10px }
+  .row3{ grid-template-columns:2fr 1fr 1fr }
+  .f{ display:flex; flex-direction:column; gap:4px; margin-bottom:10px; min-width:0 }
+  .f label{ font-size:11.5px; color:var(--muted); font-weight:600; display:flex; align-items:center; gap:6px }
+  .in{ border:1px solid var(--border2); border-radius:9px; padding:7px 10px; background:#fff; font:inherit; width:100%; min-width:0 }
+  .in.missing{ border-color:var(--warn); background:#fffaf2 }
+  textarea.in{ resize:vertical; min-height:52px }
+  .src{ font-size:10px; font-weight:700; padding:1px 6px; border-radius:999px; white-space:nowrap }
+  .s-doc{ background:var(--accentSoft); color:var(--accent) }
+  .s-q{ background:rgba(124,58,237,.12); color:#6d35d6 }
+  .s-tpl{ background:var(--okBg); color:var(--ok) }
+  .s-prev{ background:rgba(13,13,15,.06); color:#55555c }
+  .seg{ display:flex; gap:6px; flex-wrap:wrap }
+  .seg button{ border:1px solid var(--border2); background:#fff; border-radius:999px; padding:5px 11px; font-size:12.5px; font-weight:600 }
+  .seg button.on{ background:var(--accent); border-color:var(--accent); color:#fff }
+  .hint{ font-size:12px; color:#55555c; background:var(--panel); border-radius:9px; padding:8px 10px; line-height:1.45; margin-top:2px }
+  .hint b{ color:var(--text) }
+  .tri{ border-left:3px solid var(--accent) }
+  .chk{ display:grid; grid-template-columns:1fr 1fr; gap:6px 14px }
+  .chk label{ display:flex; gap:7px; align-items:flex-start; font-size:12.8px; line-height:1.35 }
+  .chk input{ margin-top:2px; accent-color:var(--accent) }
+  .grp{ font-size:11px; color:var(--muted); font-weight:700; text-transform:uppercase; letter-spacing:.6px; margin:10px 0 6px }
+  .sel{ display:flex; gap:6px }
+  .sel .in{ flex:1 }
+
+  .ptabs{ display:flex; align-items:center; gap:8px; padding:12px 18px; border-bottom:1px solid var(--border) }
+  .tabs{ display:flex; background:var(--panel); border-radius:10px; padding:3px }
+  .tabs button{ border:0; background:transparent; padding:5px 12px; border-radius:8px; font-weight:600; font-size:12.5px; color:var(--muted) }
+  .tabs button.on{ background:#fff; color:var(--text); box-shadow:0 1px 3px rgba(0,0,0,.08) }
+  .ptabs .sp{ flex:1 }
+  .tokens{ font-size:11.5px; color:var(--ok); font-weight:600 }
+  .letter{ flex:1; min-height:0; overflow:auto; padding:22px 28px; font-size:13px; line-height:1.6; white-space:pre-wrap; font-family:var(--font) }
+  .letter .ph{ background:var(--warnBg); color:#8a5208; border-radius:4px; padding:0 3px; font-weight:600 }
+  .letter .hl{ background:var(--accentSoft); border-radius:4px; padding:0 2px }
+  .letter h4{ margin:0; font-size:13px }
+  .actions{ border-top:1px solid var(--border); padding:12px 18px; display:flex; gap:8px; flex-wrap:wrap; align-items:center }
+  .actions .sp{ flex:1 }
+
+  /* Штурман drawer */
+  .drawer{ position:fixed; right:18px; bottom:76px; width:380px; background:#fff; border:1px solid var(--border2); border-radius:16px; box-shadow:var(--shadow); display:none; flex-direction:column; overflow:hidden }
+  .drawer.open{ display:flex }
+  .dh{ display:flex; align-items:center; gap:8px; padding:10px 14px; border-bottom:1px solid var(--border); font-weight:700 }
+  .dh .x{ margin-left:auto; border:0; background:none; font-size:16px; color:var(--muted) }
+  .msgs{ padding:12px 14px; display:flex; flex-direction:column; gap:10px; max-height:430px; overflow:auto; font-size:12.8px; line-height:1.45 }
+  .m{ background:var(--panel); border-radius:12px; padding:9px 11px }
+  .m.u{ align-self:flex-end; background:var(--accent); color:#fff; max-width:80% }
+  .m .acts{ display:flex; gap:6px; margin-top:7px }
+  .m .acts button{ border:1px solid var(--border2); background:#fff; border-radius:8px; padding:3px 9px; font-size:12px; font-weight:600 }
+  .m .acts button.y{ background:var(--accent); color:#fff; border-color:var(--accent) }
+  .tool{ font-size:11px; color:var(--muted) }
+  .dinput{ display:flex; gap:6px; padding:10px; border-top:1px solid var(--border) }
+
+  /* refine modal */
+  .modal{ position:fixed; inset:0; background:rgba(13,13,15,.35); display:none; align-items:center; justify-content:center }
+  .modal.open{ display:flex }
+  .mbox{ width:620px; background:#fff; border-radius:16px; box-shadow:var(--shadow); padding:18px 20px }
+  .mbox h3{ margin:0 0 4px; font-size:16px }
+  .diff{ font-family:var(--mono); font-size:12px; background:var(--panel); border-radius:10px; padding:10px 12px; margin:10px 0; line-height:1.55; white-space:pre-wrap }
+  .diff .a{ background:var(--okBg); color:#0b6b4c; display:block }
+  .note{ font-size:11.5px; color:var(--muted); margin:-4px 0 12px }
+</style>
+</head>
+<body>
+
+<div class="top">
+  <div class="mark">Ш</div>
+  <div class="crumbs">TEST-Метопрен › <b>Інструкція постачальнику</b></div>
+  <div class="sp"></div>
+  <div class="ver">
+    <select class="in" style="width:auto;padding:4px 8px"><option>v2 · чернетка</option><option>v1 · затверджено 08.06</option></select>
+    <span class="badge b-draft">● чернетка</span>
+  </div>
+  <button class="btn">Зберегти</button>
+  <button class="btn btn-p" title="Блокується, доки є незаповнені обовʼязкові поля">Затвердити v2</button>
+</div>
+
+<div class="wrap">
+  <!-- ═════════ FORM ═════════ -->
+  <div class="form">
+    <div class="note">Макет, на утвердження · дані — реальна інструкція Метопрена, як вона виглядала б до відвантаження · кнопки «Спитати Штурмана» і «Доопрацювати з ШІ» клікабельні</div>
+    <div class="alert">⚠<div><b>2 обовʼязкові поля не заповнено</b> — телефон контактної особи для оригіналів і e-mail постачальника. Експорт і затвердження стануть доступні після заповнення. <a href="#" onclick="openDrawer();return false" style="color:#6e4106;font-weight:700">Заповнити зі Штурманом →</a></div></div>
+
+    <div class="sec"><h2><span class="n">1</span>Від імені<span class="ok">✓</span></h2>
+      <div class="sel"><select class="in"><option>ТОВ «ТЕХІНФОРМ ПЛЮС» · ЄДРПОУ 44562264 · Харків</option><option>PRIME FORCE UK BUSINESS LIMITED · London</option><option>+ додати компанію групи…</option></select></div>
+      <div class="hint" style="margin-top:8px">Шапка PDF/DOCX і підпис: <b>Тест Користувач</b>, менеджер ЗЕД. За замовчуванням — покупець зі сторін поставки <span class="src s-tpl">довідник</span></div>
+    </div>
+
+    <div class="sec"><h2><span class="n">2</span>Категорія товару<span class="ok">✓</span></h2>
+      <div class="seg"><button class="on">Субстанція (АФІ)</button><button>Готовий препарат</button><button>Хімія</button><button>Харчова / вет.</button><button>Інше</button></div>
+      <div class="hint" style="margin-top:8px">Для субстанцій — COA і MSDS обовʼязково, номер партії та дати на етикетці. Категорія задає типовий перелік документів і полів етикетки нижче.</div>
+    </div>
+
+    <div class="sec"><h2><span class="n">3</span>Товар і код<span class="ok">✓</span></h2>
+      <div class="row row3">
+        <div class="f"><label>Назва товару <span class="src s-doc">контракт</span></label><input class="in" value="S-METHOPRENE"></div>
+        <div class="f"><label>Кількість <span class="src s-doc">контракт</span></label><input class="in" value="25"></div>
+        <div class="f"><label>Одиниця</label><select class="in"><option>kg</option></select></div>
+      </div>
+      <div class="row">
+        <div class="f"><label>Ґатунок / марка</label><input class="in" value="Technical, ≥ 98%"></div>
+        <div class="f"><label>CAS <span class="src s-q">PubChem</span></label><input class="in" value="65733-16-6"></div>
+      </div>
+      <div class="row">
+        <div class="f"><label>Код УКТ ЗЕД <span class="src s-prev">попередня поставка</span> <span class="src s-q">qdpro ✓</span></label><input class="in" value="2918 99 90 90"></div>
+        <div class="f"><label>Реєстраційний номер (якщо є)</label><input class="in" placeholder="UA/… або АВ-…"></div>
+      </div>
+      <div class="hint">qdpro: мито 6,5% · ПДВ 20% · для імпорту потрібні <b>5509</b> (держконтроль нехарчової продукції) і <b>5520</b> (експортний контроль). Від постачальника для них знадобляться MSDS і COA — додано в пакет документів ↓</div>
+    </div>
+
+    <div class="sec"><h2><span class="n">4</span>Відправник (Consignor)<span class="ok">✓</span></h2>
+      <div class="sel"><select class="in"><option>NGL Fine-Chem Limited — шаблон</option></select><button class="btn">Зберегти шаблон</button></div>
+      <div class="f" style="margin-top:10px"><label>Адреса <span class="src s-tpl">шаблон</span></label><textarea class="in">W142(C) T.T.C. MIDC Industrial Area, Pawane Village, Thane Belapur Road, Navi Mumbai 400705, India</textarea></div>
+    </div>
+
+    <div class="sec tri"><h2><span class="n">5</span>Одержувач (Consignee)<span class="ok">✓</span></h2>
+      <div class="hint" style="margin:0 0 10px">🔀 <b>Тристороння схема</b> (NGL → PRIME FORCE → ТЕХІНФОРМ). Оберіть, кого вказати consignee в усіх документах — це рішення потім перевіряється автоматично в AWB, COO і пакувальному листі.</div>
+      <div class="seg" style="margin-bottom:10px"><button class="on">PRIME FORCE (посередник)</button><button>ТЕХІНФОРМ ПЛЮС (покупець)</button></div>
+      <div class="f"><label>Адреса consignee <span class="src s-tpl">шаблон</span></label><input class="in" value="PRIME FORCE UK BUSINESS LIMITED, 22 Brondesbury Park, London NW6 7DL, United Kingdom"></div>
+      <div class="f"><label>Кінцевий вантажоодержувач <span class="src s-doc">сторони поставки</span></label><input class="in" value="«TEKHINFORM PLUS» LLC, 14-A Frankivska St., Kharkiv 61001, Ukraine"></div>
+    </div>
+
+    <div class="sec"><h2><span class="n">6</span>Контракт<span class="ok">✓</span></h2>
+      <div class="row">
+        <div class="f"><label>Номер <span class="src s-doc">Контракт.pdf</span></label><input class="in" value="03062026/PNM"></div>
+        <div class="f"><label>Дата <span class="src s-doc">Контракт.pdf</span></label><input class="in" value="03.06.2026"></div>
+      </div>
+      <div class="hint">Лист іде виробнику NGL, тому береться контракт <b>NGL → PRIME FORCE</b> (вхідне плече), а не 03062026/PTM.</div>
+    </div>
+
+    <div class="sec"><h2><span class="n">7</span>Умови поставки<span class="ok">✓</span></h2>
+      <div class="row">
+        <div class="f"><label>Incoterms <span class="src s-doc">Контракт.pdf</span></label><select class="in"><option>FCA — Free Carrier</option></select></div>
+        <div class="f"><label>Місце відвантаження <span class="src s-doc">Контракт.pdf</span></label><input class="in" value="Mumbai Airport, India"></div>
+      </div>
+      <div class="row">
+        <div class="f"><label>Аеропорт призначення</label><input class="in" value="Kyiv Boryspil (KBP), Ukraine"></div>
+        <div class="f"><label>Кінцевий пункт</label><input class="in" value="Kharkiv, Ukraine"></div>
+      </div>
+      <div class="f"><label>Вид транспорту</label><div class="seg"><button>🚢 Море (B/L)</button><button class="on">✈ Авіа (MAWB / HAWB)</button><button>🚚 Авто (CMR)</button><button>Мультимодальний</button></div></div>
+    </div>
+
+    <div class="sec"><h2><span class="n">8</span>Пакет документів<span class="ok">8 обрано</span></h2>
+      <div class="grp">Базові для субстанції</div>
+      <div class="chk">
+        <label><input type="checkbox" checked>Invoice та Packing List</label>
+        <label><input type="checkbox" checked>MAWB та HAWB</label>
+        <label><input type="checkbox" checked>Certificate of Origin (COO)</label>
+        <label><input type="checkbox" checked>Certificate of Analysis (COA)</label>
+        <label><input type="checkbox" checked>Копія експортної декларації (Shipping Bill)</label>
+        <label><input type="checkbox">Страховий поліс <span class="src s-prev" style="margin-left:4px">лише CIF/CIP</span></label>
+      </div>
+      <div class="grp">За кодом 2918 99 90 90 · qdpro <span class="src s-q">qdpro</span></div>
+      <div class="chk">
+        <label><input type="checkbox" checked>MSDS / SDS (для 5509)</label>
+        <label><input type="checkbox" checked>Лист про невіднесення до товарів подвійного використання (для 5520)</label>
+      </div>
+    </div>
+
+    <div class="sec"><h2><span class="n">9</span>Маркування<span class="ok">✓</span></h2>
+      <div class="chk">
+        <label><input type="checkbox" checked>Назва товару і CAS</label>
+        <label><input type="checkbox" checked>Назва та адреса виробника</label>
+        <label><input type="checkbox" checked>Номер партії</label>
+        <label><input type="checkbox" checked>Дата виробництва / придатності</label>
+        <label><input type="checkbox" checked>Вага нетто / брутто</label>
+        <label><input type="checkbox" checked>Умови зберігання</label>
+        <label><input type="checkbox" checked>Carton No. X / Y</label>
+        <label><input type="checkbox">Реєстраційний номер</label>
+      </div>
+      <div class="hint" style="margin-top:10px">💡 Урок попередньої поставки: на етикетці було <b>CARTON 1/6</b> при 3 місцях. Додано вимогу: «Y = фактична кількість місць у відвантаженні». <span class="src s-prev">з досвіду</span></div>
+    </div>
+
+    <div class="sec"><h2><span class="n">10</span>Оригінали курʼєром<span class="miss">⚠ 2 поля</span></h2>
+      <div class="sel" style="margin-bottom:10px"><select class="in"><option>Офіс Харків — шаблон</option></select></div>
+      <div class="row">
+        <div class="f"><label>Контактна особа <span class="src s-tpl">шаблон</span></label><input class="in" value="Тест Користувач"></div>
+        <div class="f"><label>Телефон</label><input class="in missing" placeholder="обовʼязково"></div>
+      </div>
+      <div class="row">
+        <div class="f"><label>Адреса <span class="src s-tpl">шаблон</span></label><input class="in" value="14-A Frankivska St., Kharkiv 61001"></div>
+        <div class="f"><label>E-mail постачальника (для відправки)</label><input class="in missing" placeholder="обовʼязково"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═════════ PREVIEW ═════════ -->
+  <div class="preview">
+    <div class="ptabs">
+      <div class="tabs"><button class="on" id="tEn" onclick="lang('en')">EN · постачальнику</button><button id="tUk" onclick="lang('uk')">UK · перевірка</button></div>
+      <div class="sp"></div>
+      <span class="tokens">⚡ шаблон · 0 токенів</span>
+    </div>
+
+<div class="letter" id="en"><b>Shipping instructions — S-METHOPRENE 25 kg / Contract 03062026/PNM</b>
+
+Dear Sirs,
+
+Please confirm our shipping instructions for <span class="hl">S-METHOPRENE, Technical ≥ 98%, CAS 65733-16-6, 25 kg (HS code 2918 99 90 90)</span>.
+
+All shipping documents must be issued in English. Names to be indicated in all documents and on the labels:
+
+<h4>1) Consignor</h4>NGL Fine-Chem Limited
+W142(C) T.T.C. MIDC Industrial Area, Pawane Village, Thane Belapur Road, Navi Mumbai 400705, India
+
+<h4>2) Consignee</h4>PRIME FORCE UK BUSINESS LIMITED
+22 Brondesbury Park, London NW6 7DL, United Kingdom
+Final consignee: «TEKHINFORM PLUS» LLC, 14-A Frankivska St., Kharkiv 61001, Ukraine
+
+Contract: 03062026/PNM dated 03.06.2026
+Terms of delivery: FCA Mumbai Airport, India (Incoterms 2020)
+Airport of destination: Kyiv Boryspil (KBP), Ukraine
+Final destination: Kharkiv, Ukraine
+Mode of transport: by air
+
+<h4>3) Drafts for our approval before shipment</h4>Please do not stick labels on the goods and do not issue originals without our written confirmation:
+- Draft of the label
+- Invoice and Packing List
+- Certificate of Origin
+- Certificate of Analysis
+- Material Safety Data Sheet
+- Dual-use (non-controlled goods) statement
+- Draft of MAWB and HAWB
+- Photos of the packages with labels before shipment
+
+<h4>4) Label content</h4>- Product name and CAS number
+- Manufacturer name and address
+- Batch number
+- Manufacturing and expiry dates
+- Net / gross weight
+- Storage conditions
+- Carton No. X / Y, where Y is the actual number of packages in this shipment
+
+The packages must be clean and undamaged.
+
+<h4>5) After shipment</h4>Please send a copy of the export declaration (Shipping Bill) and the MAWB / HAWB.
+
+<h4>6) Originals by courier, separately from the goods</h4>- Certificate of Origin (original, wet seal)
+- Certificate of Analysis (original, wet seal)
+- Invoice and Packing List
+
+To: Тест Користувач, tel. <span class="ph">[PHONE]</span>
+14-A Frankivska St., Kharkiv 61001, Ukraine
+
+Looking forward to your confirmation.
+Kind regards,
+Тест Користувач
+«TEKHINFORM PLUS» LLC</div>
+
+<div class="letter" id="uk" style="display:none"><b>Інструкція з відвантаження — S-METHOPRENE 25 кг / контракт 03062026/PNM</b>
+<span style="color:var(--muted)">Внутрішня українська версія для перевірки — постачальнику не надсилається.</span>
+
+Просимо підтвердити інструкції для <span class="hl">S-METHOPRENE, технічний ≥ 98%, CAS 65733-16-6, 25 кг (УКТ ЗЕД 2918 99 90 90)</span>.
+
+<h4>1) Відправник</h4>NGL Fine-Chem Limited, Нави-Мумбаї, Індія
+<h4>2) Одержувач</h4>PRIME FORCE UK BUSINESS LIMITED, Лондон
+Кінцевий вантажоодержувач: ТОВ «ТЕХІНФОРМ ПЛЮС», Харків
+
+Контракт 03062026/PNM від 03.06.2026 · FCA аеропорт Мумбаї (Інкотермс 2020)
+Аеропорт призначення: Бориспіль · кінцевий пункт: Харків · авіа
+
+<h4>3) Чернетки на погодження до відвантаження</h4>етикетка, інвойс і PL, COO, COA, MSDS, лист про подвійне використання, MAWB/HAWB, фото упаковок з етикетками
+<h4>4) Етикетка</h4>назва + CAS, виробник, партія, дати, нетто/брутто, умови зберігання, «місце X з Y» (Y = фактична кількість місць)
+<h4>5) Після відвантаження</h4>копія експортної декларації, MAWB/HAWB
+<h4>6) Оригінали курʼєром</h4>COO, COA, інвойс і PL → Тест Користувач, тел. <span class="ph">[ТЕЛЕФОН]</span>, Харків</div>
+
+    <div class="actions">
+      <button class="btn" title="Скопіювати EN-лист">⧉ Копіювати</button>
+      <button class="btn">⬇ DOCX</button>
+      <button class="btn">⬇ PDF</button>
+      <button class="btn" title="Відкрити в поштовому клієнті">✉ E-mail</button>
+      <div class="sp"></div>
+      <button class="btn btn-g" onclick="document.getElementById('refine').classList.add('open')">✦ Доопрацювати з ШІ</button>
+      <button class="btn btn-p" onclick="openDrawer()">💬 Спитати Штурмана</button>
+    </div>
+  </div>
+</div>
+
+<!-- Штурман drawer -->
+<div class="drawer" id="drawer">
+  <div class="dh"><div class="mark" style="width:22px;height:22px;font-size:12px">Ш</div>Штурман · інструкція<button class="x" onclick="document.getElementById('drawer').classList.remove('open')">✕</button></div>
+  <div class="msgs">
+    <div class="m">Бачу 2 незаповнені поля. Пропоную:</div>
+    <div class="m"><span class="tool">🔎 search_documents · «e-mail NGL», «phone»</span><br><b>E-mail постачальника</b> і <b>телефон</b> у документах поставки не знайдено (у COA/інвойсі NGL лише адреса). Вкажіть їх — збережу в шаблони «NGL Fine-Chem» і «Офіс Харків», щоб наступного разу підставлялись самі.</div>
+    <div class="m u">телефон +380 57 700 00 00, пошта постачальника — візьми з шаблону, я його щойно оновив</div>
+    <div class="m"><span class="tool">📇 directory · NGL Fine-Chem Limited</span><br>Підставив телефон і e-mail із шаблону NGL. Перевірте, будь ласка:
+      <div class="acts"><button class="y">Підтвердити обидва</button><button>Змінити</button></div></div>
+    <div class="m">Після підтвердження всі обовʼязкові поля заповнені — можна затверджувати v2.</div>
+  </div>
+  <div class="dinput"><input class="in" placeholder="Запитайте про інструкцію…"><button class="btn btn-p">↑</button></div>
+</div>
+
+<!-- Refine modal -->
+<div class="modal" id="refine" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="mbox">
+    <h3>✦ Доопрацювати з ШІ</h3>
+    <div style="color:var(--muted);font-size:12.5px">Опишіть нестандартну вимогу — ШІ запропонує правку до шаблонного листа. Нічого не зміниться, доки ви не приймете.</div>
+    <input class="in" style="margin-top:10px" value="Додай вимогу: зберігати при 2–8 °C, термоіндикатор у кожній коробці">
+    <div class="diff">  4) Label content
+  - Storage conditions
+<span class="a">+ - Storage temperature 2–8 °C stated on every label
++
++ 4a) Temperature control
++ Each carton must contain a temperature indicator; please send
++ a photo of the activated indicators before handover to the carrier.</span></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <span style="margin-right:auto;font-size:11.5px;color:var(--muted);align-self:center">≈ 1 виклик Sonnet</span>
+      <button class="btn" onclick="document.getElementById('refine').classList.remove('open')">Відхилити</button>
+      <button class="btn btn-p" onclick="document.getElementById('refine').classList.remove('open')">Прийняти правку</button>
+    </div>
+  </div>
+</div>
+
+
+<script>
+  function lang(l){ en.style.display = l==='en'?'':'none'; uk.style.display = l==='uk'?'':'none';
+    tEn.classList.toggle('on', l==='en'); tUk.classList.toggle('on', l==='uk'); }
+  if(location.hash==='#chat') addEventListener('load',()=>openDrawer());
+  function openDrawer(){ document.getElementById('drawer').classList.add('open') }
+</script>
+</body>
+</html>

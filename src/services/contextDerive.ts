@@ -120,6 +120,14 @@ export function deriveTransportMode(docs: DeriveDoc[]): string | null {
   const modes = new Set<string>();
   for (const d of docs) {
     if (d.doc_type !== 'transport') continue;
+    // The extractor's own reading of THIS document's mode wins; the text
+    // heuristics below cover extractions made before the field existed.
+    const read = typeof d.fields.transport_mode === 'string' ? d.fields.transport_mode : null;
+    if (read === 'courier') continue; // last-mile courier is not the shipment's mode
+    if (read && ['air', 'road', 'sea', 'rail'].includes(read)) {
+      modes.add(read);
+      continue;
+    }
     // A CMR or T1 often CITES the AWB number further down; what the document IS
     // shows first (file name, title). So: the rule matching EARLIEST wins.
     const text = `${d.file_name ?? ''}\n${(d.markdown ?? '').slice(0, 1500)}`;

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { api, ApiError, downloadBlob } from "@/lib/api";
+import { STATUS_LABEL } from "./TopBar";
 import type {
   ChecklistItem,
   Discrepancy,
@@ -22,7 +23,6 @@ import {
   type Country,
 } from "@/lib/shipmentOptions";
 import { Combobox } from "./ui/Combobox";
-import { InstructionModal } from "./InstructionModal";
 import { VerificationModal } from "./VerificationModal";
 import { IconDownload, IconSpinner } from "./icons";
 import { LnCheck, LnExport } from "./LineIcons";
@@ -98,7 +98,6 @@ export function ShipmentPanel({
   const [users, setUsers] = useState<UserLite[]>([]);
   const [parties, setParties] = useState<Party[]>([]);
   const [risks, setRisks] = useState<Risk[] | null>(null);
-  const [instructionOpen, setInstructionOpen] = useState(false);
   const [verifyOpen, setVerifyOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [result, setResult] = useState<Result | null>(null);
@@ -375,12 +374,21 @@ export function ShipmentPanel({
       setResult({ kind: "discrepancies", items: r.discrepancies });
     });
 
-  const genReport = () =>
-    run("report", async () => {
-      const r = await api<{ html: string }>(`/api/workspaces/${workspaceId}/report`, {
+  // One-page management report: built server-side (facts + cached AI summary),
+  // downloaded as PDF, or opened as HTML in a new tab.
+  const genReport = (format: "pdf" | "html") =>
+    run(format === "pdf" ? "report" : "reportHtml", async () => {
+      const r = await api<{ html: string; artifactId: string }>(`/api/workspaces/${workspaceId}/report`, {
         method: "POST",
         body: {},
       });
+      if (format === "pdf") {
+        await downloadBlob(
+          `/api/workspaces/${workspaceId}/report/${r.artifactId}/pdf`,
+          `zvit-${workspace.number ?? "postachannia"}.pdf`
+        );
+        return;
+      }
       const url = URL.createObjectURL(new Blob([r.html], { type: "text/html" }));
       window.open(url, "_blank");
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
@@ -726,12 +734,22 @@ export function ShipmentPanel({
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             <button className="btn" onClick={loadChecklist} disabled={busy === "checklist"}>Комплектність</button>
             <button className="btn" onClick={loadDiscrepancies} disabled={busy === "discrepancies"}>Розбіжності</button>
-            <button className="btn" onClick={() => setInstructionOpen(true)}>Інструкція</button>
+            <button className="btn" onClick={() => router.push(`/workspaces/${workspaceId}/instruction`)} title="Конструктор інструкції постачальнику">Інструкція</button>
             <button className="btn" onClick={exportZip} disabled={busy === "export"}>Архів (.zip)</button>
           </div>
-          <button className="btn btn-primary" onClick={genReport} disabled={busy === "report"}>
-            {busy === "report" ? <IconSpinner size={15} /> : <IconDownload size={16} />} Експорт звіту (HTML)
-          </button>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8 }}>
+            <button
+              className="btn btn-primary"
+              onClick={() => genReport("pdf")}
+              disabled={busy === "report"}
+              title="Одна сторінка A4 для керівництва: гроші, маршрут, ризики, резюме"
+            >
+              {busy === "report" ? <IconSpinner size={15} /> : <IconDownload size={16} />} Звіт для керівництва (PDF)
+            </button>
+            <button className="btn" onClick={() => genReport("html")} disabled={busy === "reportHtml"} title="Відкрити звіт у новій вкладці">
+              {busy === "reportHtml" ? <IconSpinner size={15} /> : null} HTML
+            </button>
+          </div>
         </Section>
 
         {/* Management */}
@@ -751,9 +769,6 @@ export function ShipmentPanel({
 
         {result && <ResultView result={result} />}
       </div>
-      {instructionOpen && (
-        <InstructionModal workspaceId={workspaceId} onClose={() => setInstructionOpen(false)} />
-      )}
       {verifyOpen && (
         <VerificationModal
           workspaceId={workspaceId}
@@ -770,13 +785,13 @@ function ResultView({ result }: { result: Result }) {
     <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
       {result.kind === "checklist" && (
         <>
-          <SectionTitle>Комплектність · {result.status}</SectionTitle>
+          <SectionTitle>Комплектність · {STATUS_LABEL[result.status as keyof typeof STATUS_LABEL] ?? result.status}</SectionTitle>
           {result.items.length === 0 ? (
             <Muted>Чек-лист порожній — заповніть параметри постачання.</Muted>
           ) : (
             result.items.map((i) => (
               <div key={i.requirement_key} style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
-                <span>{i.requirement_key}</span>
+                <span>{reqLabel(i.requirement_key)}</span>
                 <span style={{ color: CHECK_CLS[i.status], fontWeight: 600 }}>{CHECK_LABEL[i.status]}</span>
               </div>
             ))
@@ -796,7 +811,7 @@ function ResultView({ result }: { result: Result }) {
               return (
                 <div key={i} style={{ fontSize: 13, borderLeft: `3px solid ${color}`, paddingLeft: 8 }}>
                   <span style={{ fontWeight: 600, color }}>
-                    {confirmed ? "🔴" : "🟡"} {d.field}
+                    {confirmed ? "🔴" : "🟡"} {FIELD_LABEL[d.field] ?? d.field}
                   </span>
                   <div style={{ color: "var(--muted)", fontSize: 12 }}>{d.expected} → {d.actual}</div>
                   {d.citations && d.citations.length > 0 && (
@@ -856,6 +871,33 @@ const REQ_LABEL: Record<string, string> = {
   customs_declaration: "Митна декларація",
   payment: "Платіжні документи",
   specification: "Специфікація",
+  transport: "Транспортні документи",
+  intermediary_agreement: "Договір з посередником",
+};
+
+// Reconciliation field keys → what the user reads (mirrors backend fieldLabel).
+const FIELD_LABEL: Record<string, string> = {
+  net_weight_kg: "Вага нетто",
+  gross_weight_kg: "Вага брутто",
+  total_weight_kg: "Загальна вага",
+  packages_count: "Кількість місць",
+  line_items: "Кількість позицій",
+  line_quantity: "Кількість товару",
+  line_amount: "Сума по позиції",
+  line_hs_code: "Код УКТ ЗЕД по позиції",
+  hs_code: "Код УКТ ЗЕД",
+  incoterm: "Умови поставки (Incoterms)",
+  currency: "Валюта",
+  total_value: "Сума",
+  country_of_origin: "Країна походження",
+  manufacturer: "Виробник",
+  registration_number: "Реєстраційний номер",
+  markup: "Націнка посередника",
+  intermediary: "Посередник",
+  seller: "Продавець",
+  buyer: "Покупець",
+  documents: "Документи",
+  instruction: "Виконання інструкції постачальнику",
 };
 function reqLabel(key: string): string {
   return REQ_LABEL[key] ?? key.replace(/_/g, " ");

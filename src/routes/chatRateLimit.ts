@@ -8,6 +8,23 @@ import { verifyToken } from '../auth/jwt.js';
  * onRequest hook runs before the auth preHandler, so req.user isn't set yet —
  * decode the JWT here to key per-user, falling back to IP.
  */
+function userKey(req: FastifyRequest): string {
+  const header = req.headers.authorization;
+  if (header?.startsWith('Bearer ')) {
+    try {
+      return verifyToken(header.slice('Bearer '.length).trim()).sub;
+    } catch {
+      /* fall through to IP */
+    }
+  }
+  return req.ip;
+}
+
+/** Per-user limit for other costly routes (LLM side calls, PDF rendering). */
+export function userRateLimit(max: number, timeWindow: string) {
+  return { rateLimit: { max, timeWindow, keyGenerator: userKey } } as const;
+}
+
 export const chatRateLimitConfig = {
   rateLimit: {
     max: config.CHAT_RATE_MAX,

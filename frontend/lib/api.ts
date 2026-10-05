@@ -171,8 +171,15 @@ export async function downloadBlob(path: string, fallbackName: string): Promise<
   }
   const blob = await res.blob();
   const cd = res.headers.get("Content-Disposition") || "";
-  const m = /filename="?([^"]+)"?/.exec(cd);
-  const name = m?.[1] || fallbackName;
+  // Prefer the RFC 5987 UTF-8 name (Cyrillic shipment numbers), else the ASCII one.
+  const utf = /filename\*=UTF-8''([^;]+)/i.exec(cd);
+  const m = /filename="?([^";]+)"?/.exec(cd);
+  let name = fallbackName;
+  try {
+    name = utf ? decodeURIComponent(utf[1]!) : m?.[1] || fallbackName;
+  } catch {
+    name = m?.[1] || fallbackName;
+  }
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;

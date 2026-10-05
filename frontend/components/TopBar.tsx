@@ -14,7 +14,7 @@ import {
   LnSun,
 } from "./LineIcons";
 
-const STATUS_LABEL: Record<WorkspaceStatus, string> = {
+export const STATUS_LABEL: Record<WorkspaceStatus, string> = {
   active: "Активна",
   draft: "Чернетка",
   done: "Готово",

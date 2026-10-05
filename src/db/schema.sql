@@ -626,3 +626,43 @@ END $$;
 -- e.g. origin_country forever); a manual edit removes the field from the list,
 -- after which the autopilot never touches it again.
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS auto_context_fields TEXT[] NOT NULL DEFAULT '{}';
+
+-- ── Management report + instruction builder (2026-10-05) ──
+-- AI summary on the one-page report, cached by a hash of the report facts.
+CREATE TABLE IF NOT EXISTS report_summaries (
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  facts_hash   TEXT NOT NULL,
+  summary      TEXT NOT NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (workspace_id, facts_hash)
+);
+
+-- Shared team directory (instruction builder templates): our group companies
+-- (letterhead), suppliers / consignees with addresses, contacts for originals.
+CREATE TABLE IF NOT EXISTS org_directory (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  kind        TEXT NOT NULL CHECK (kind IN ('own_company', 'supplier', 'consignee', 'contact')),
+  name        TEXT NOT NULL,
+  address     TEXT NOT NULL DEFAULT '',
+  country     TEXT NOT NULL DEFAULT '',
+  signer      TEXT NOT NULL DEFAULT '',
+  email       TEXT NOT NULL DEFAULT '',
+  phone       TEXT NOT NULL DEFAULT '',
+  requisites  JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_by  UUID REFERENCES users(id) ON DELETE SET NULL,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_org_directory_kind ON org_directory(kind, lower(name));
+
+-- Versioned supplier instructions (structured draft → deterministic letter).
+CREATE TABLE IF NOT EXISTS supplier_instructions (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  version      INT NOT NULL,
+  status       TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'approved', 'sent')),
+  draft        JSONB NOT NULL,
+  created_by   UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (workspace_id, version)
+);

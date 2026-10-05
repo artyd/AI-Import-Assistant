@@ -21,6 +21,7 @@ import { discrepancyRoutes } from './routes/discrepancies.js';
 import { verificationRoutes } from './routes/verification.js';
 import { riskRoutes } from './routes/risks.js';
 import { supplierInstructionRoutes } from './routes/supplierInstruction.js';
+import { directoryRoutes } from './routes/directory.js';
 import { userRoutes } from './routes/users.js';
 import { notificationRoutes } from './routes/notifications.js';
 import { aiConfigRoutes } from './routes/aiConfig.js';
@@ -95,6 +96,7 @@ async function buildServer() {
   await app.register(verificationRoutes);
   await app.register(riskRoutes);
   await app.register(supplierInstructionRoutes);
+  await app.register(directoryRoutes);
   await app.register(userRoutes);
   await app.register(notificationRoutes);
   await app.register(aiConfigRoutes);
