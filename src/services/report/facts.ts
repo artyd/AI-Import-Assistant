@@ -1,6 +1,7 @@
 import { parseFlexibleDate } from '../../domain/dates.js';
 import { isLikelyDraft, incotermCode } from '../reconcile.js';
 import { sameCompany } from '../contextDerive.js';
+import { formatHs } from '../instruction/format.js';
 
 /**
  * Pure assembly of the one-page management report from already-computed inputs
@@ -205,7 +206,10 @@ export function buildFacts(input: FactsInput): ReportFacts {
     if (recipient && buyer && !sameCompany(buyer, recipient.company_name)) continue; // billed to someone else
     const cur = (str(d.fields.currency) ?? 'UAH').toUpperCase();
     const amountUah = cur === 'UAH' || cur === 'ГРН' ? v : rate !== null && cur === out?.currency ? v * rate : null;
-    if (amountUah !== null) servicesUah.push({ kind, amountUah: Math.round(amountUah * 100) / 100 });
+    if (amountUah === null) continue;
+    const amt = Math.round(amountUah * 100) / 100;
+    // A bill and its act of completed works describe the SAME service — count once.
+    if (!servicesUah.some((x) => x.kind === kind && Math.abs(x.amountUah - amt) < 0.01)) servicesUah.push({ kind, amountUah: amt });
   }
   const freightInPrice = !!outCode && /^(C|D)/.test(outCode);
 
@@ -255,35 +259,23 @@ export function buildFacts(input: FactsInput): ReportFacts {
   const firstShip = transportDocs.find((x) => x.t !== null)?.t ?? null;
 
   // ── route ─────────────────────────────────────────────────────────────────
-  const stops: { name: string; note: string | null; date: string | null }[] = [];
-  const legs: { mode: string; ref: string | null }[] = [];
-  const addStop = (name: string | null, date: number | null, note: string | null) => {
-    if (!name) return;
-    const short = name.split(',')[0]!.trim();
-    const last = stops[stops.length - 1];
-    if (last && last.name.toLowerCase() === short.toLowerCase()) return;
-    stops.push({ name: short, note, date: fmtDate(date, false) });
-  };
-  for (const { d, t } of transportDocs) {
-    const from = str(d.fields.place_of_loading);
-    const to = str(d.fields.place_of_discharge);
-    if (!from && !to) continue;
-    addStop(from, t, null);
-    legs.push({ mode: MODE_ICON[str(d.fields.transport_mode) ?? ''] ?? 'road', ref: str(d.fields.transport_doc_number) });
-    addStop(to, null, null);
-  }
-  const finalDest = str(courier?.fields.place_of_discharge) ?? str(firstOf(docs, ['transport', 'invoice'], 'final_destination'));
-  if (finalDest && stops.length && stops[stops.length - 1]!.name.toLowerCase() !== finalDest.split(',')[0]!.trim().toLowerCase()) {
-    legs.push({ mode: 'road', ref: courier ? str(courier.fields.transport_doc_number) : null });
-    addStop(finalDest, ts(courier?.fields.document_date), null);
-  }
-  // Legs must sit BETWEEN stops; drop surplus if documents repeated a leg.
-  while (legs.length > Math.max(0, stops.length - 1)) legs.pop();
+  const { stops, legs } = buildRoute(
+    transportDocs.map(({ d, t }) => ({
+      from: str(d.fields.place_of_loading),
+      to: str(d.fields.place_of_discharge),
+      mode: MODE_ICON[str(d.fields.transport_mode) ?? ''] ?? 'road',
+      ref: str(d.fields.transport_doc_number),
+      t,
+    })),
+    str(courier?.fields.place_of_discharge) ?? str(firstOf(docs, ['transport', 'invoice'], 'final_destination')),
+    courier ? { ref: str(courier.fields.transport_doc_number), t: ts(courier.fields.document_date) } : null,
+  );
 
   // ── classification ───────────────────────────────────────────────────────
   const declHs = str(decl?.fields.hs_code);
   const invHs = str(firstOf(docs, ['invoice', 'packing_list'], 'hs_code'));
-  const hsCode = input.qdpro?.code ?? declHs ?? invHs;
+  const hsRaw = input.qdpro?.code ?? declHs ?? invHs;
+  const hsCode = hsRaw ? formatHs(hsRaw) : null;
   const hsSource = input.qdpro ? 'qdpro' : declHs ? 'МД' : invHs ? 'інвойс' : null;
   const dutyRatePct =
     customsValueUah && dutyUah !== null ? Math.round((dutyUah / customsValueUah) * 1000) / 10 : null;
@@ -293,7 +285,10 @@ export function buildFacts(input: FactsInput): ReportFacts {
   // ── risks & documents ─────────────────────────────────────────────────────
   const rank = { error: 0, warning: 1, info: 2 } as const;
   const meaningful = input.risks.filter((r) => r.severity !== 'info' && !/документи —/.test(r.title + ' ' + r.detail) && r.category !== 'registry');
-  const risksTop = [...meaningful].sort((a, b) => rank[a.severity] - rank[b.severity]).slice(0, 3);
+  const risksTop = [...meaningful]
+    .sort((a, b) => rank[a.severity] - rank[b.severity])
+    .slice(0, 3)
+    .map((r) => ({ ...r, detail: compactDetail(r.detail) }));
   const items = input.checklist.map((c) => ({ label: DOC_LABEL[c.requirement_key] ?? c.requirement_key, ok: c.status !== 'missing' }));
 
   const chain = (['sender', 'intermediary', 'recipient'] as const)
@@ -365,4 +360,92 @@ export function buildFacts(input: FactsInput): ReportFacts {
       files: input.filesCount,
     },
   };
+}
+
+/**
+ * "вага нетто, кг: 25 (a.pdf, b.pdf) → 32 (DEP-1-….pdf)" → "вага нетто, кг: 25 → 32".
+ * File lists are for the Штурман screen, not the management page.
+ */
+export function compactDetail(detail: string): string {
+  return detail.replace(/\s*\([^()]*\.(pdf|jpe?g|png|docx?|xlsx?)[^()]*\)/gi, '').replace(/\s{2,}/g, ' ').trim();
+}
+
+/** "MUMBAI (EX BOMBAY)", "Frankfurt Airport", "Kiev Int'l Airport, Ukraine" → a comparable city key. */
+function placeKey(name: string): string {
+  return name
+    .split(',')[0]!
+    .replace(/\(.*?\)/g, '')
+    .replace(/\b(int'?l|international|airport|apt|port|terminal|hub)\b/gi, '')
+    .trim()
+    .toLowerCase()
+    .replace(/^kiev$/, 'kyiv');
+}
+function placeLabel(name: string): string {
+  const k = placeKey(name);
+  return k.replace(/(^|[\s-])\p{L}/gu, (c) => c.toUpperCase());
+}
+
+type RouteLeg = { from: string | null; to: string | null; mode: string; ref: string | null; t: number | null };
+
+/**
+ * One chain of stops from the transport documents. Copies of the same document
+ * (AWB + HAWB original, CMR + its photo) collapse into one leg; a door-to-door
+ * AWB "Mumbai → Kyiv" plus a CMR "Frankfurt → Kyiv" becomes Mumbai ✈ Frankfurt
+ * 🚚 Kyiv — the later leg into the same destination reveals the transshipment.
+ */
+export function buildRoute(
+  raw: RouteLeg[],
+  finalDest: string | null,
+  lastMile: { ref: string | null; t: number | null } | null,
+): { stops: { name: string; note: string | null; date: string | null }[]; legs: { mode: string; ref: string | null }[] } {
+  const seen = new Set<string>();
+  const legsIn = raw
+    .filter((l) => l.from || l.to)
+    .filter((l) => {
+      const key = `${l.mode}|${l.from ? placeKey(l.from) : ''}|${l.to ? placeKey(l.to) : ''}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => (a.t ?? Infinity) - (b.t ?? Infinity));
+
+  const stops: { key: string; name: string; t: number | null }[] = [];
+  const legs: { mode: string; ref: string | null }[] = [];
+  const idx = (k: string) => stops.findIndex((s) => s.key === k);
+  for (const l of legsIn) {
+    const from = l.from ? { key: placeKey(l.from), name: placeLabel(l.from) } : null;
+    const to = l.to ? { key: placeKey(l.to), name: placeLabel(l.to) } : null;
+    if (!stops.length) {
+      if (from) stops.push({ ...from, t: l.t });
+      if (to) {
+        if (from) legs.push({ mode: l.mode, ref: l.ref });
+        stops.push({ ...to, t: null });
+      }
+      continue;
+    }
+    const last = stops[stops.length - 1]!;
+    if (from && to && to.key === last.key && idx(from.key) < 0) {
+      // Transshipment: insert `from` before the shared destination.
+      stops.splice(stops.length - 1, 0, { ...from, t: l.t });
+      legs.push({ mode: l.mode, ref: l.ref });
+      continue;
+    }
+    if (from && idx(from.key) < 0) {
+      legs.push({ mode: 'road', ref: null });
+      stops.push({ ...from, t: l.t });
+    } else if (from) {
+      const f = stops[idx(from.key)]!;
+      if (f.t === null) f.t = l.t;
+    }
+    if (to && idx(to.key) < 0) {
+      legs.push({ mode: l.mode, ref: l.ref });
+      stops.push({ ...to, t: null });
+    }
+  }
+  if (finalDest && stops.length && idx(placeKey(finalDest)) < 0) {
+    legs.push({ mode: 'road', ref: lastMile?.ref ?? null });
+    stops.push({ key: placeKey(finalDest), name: placeLabel(finalDest), t: lastMile?.t ?? null });
+  }
+  while (legs.length > Math.max(0, stops.length - 1)) legs.pop();
+  return { stops: stops.map((s) => ({ name: s.name, note: null, date: fmtDate(s.t, false) })), legs };
 }

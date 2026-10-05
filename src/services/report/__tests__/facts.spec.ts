@@ -37,7 +37,7 @@ describe('report facts — Метопрен', () => {
 
   it('product and classification (МД as source when qdpro is off)', () => {
     expect(f.product).toMatchObject({ name: 'S-METHOPRENE', cas: '65733-16-6', quantity: 25, batch: 'SMP/06/012/2026', manufactured: '06.2026', expiry: '05.2029' });
-    expect(f.classification).toMatchObject({ hsCode: '2918999090', hsSource: 'МД' });
+    expect(f.classification).toMatchObject({ hsCode: '2918 99 90 90', hsSource: 'МД' });
   });
 
   it('top risks: errors first, no "documents" notes or registry info', () => {
@@ -47,5 +47,36 @@ describe('report facts — Метопрен', () => {
       'Розбіжність: вага брутто',
     ]);
     expect(f.counts).toEqual({ errors: 2, warnings: 2 });
+  });
+});
+
+import { buildRoute, compactDetail } from '../facts.js';
+describe('report — live-data shapes (Метопрен prod)', () => {
+  it('AWB + HAWB copy "Mumbai → Kyiv" and CMR + photo "Frankfurt → Kyiv" make Mumbai ✈ Frankfurt 🚚 Kyiv', () => {
+    const r = buildRoute(
+      [
+        { from: 'MUMBAI (EX BOMBAY)', to: "KYIV INT'L AIRPORT", mode: 'air', ref: '098-31298724', t: Date.UTC(2026, 6, 14) },
+        { from: 'Mumbai (ex Bombay)', to: 'Kyiv', mode: 'air', ref: 'AID0009199', t: Date.UTC(2026, 6, 14) },
+        { from: 'Frankfurt Airport', to: 'Kyiv', mode: 'road', ref: 'SAID0009199', t: Date.UTC(2026, 6, 23) },
+        { from: 'Frankfurt Airport, Germany', to: 'Kiev, Ukraine', mode: 'road', ref: 'SAID0009199', t: Date.UTC(2026, 6, 23) },
+      ],
+      'Bila Tserkva',
+      { ref: '20400540693174', t: Date.UTC(2026, 6, 31) },
+    );
+    expect(r.stops.map((s) => s.name)).toEqual(['Mumbai', 'Frankfurt', 'Kyiv', 'Bila Tserkva']);
+    expect(r.legs.map((l) => l.mode)).toEqual(['air', 'road', 'road']);
+    expect(r.stops[1]!.date).toBe('23.07');
+  });
+
+  it('a bill and its act for the same broker service are counted once', () => {
+    const f = buildFacts({
+      ...base,
+      docs: [...base.docs, { file_name: 'акт.pdf', doc_type: 'other', fields: { service_kind: 'broker', total_value: 6163, currency: 'UAH', buyer: 'ТОВ «ТЕХІНФОРМ ПЛЮС»' } }],
+    });
+    expect(f.money.servicesUah).toEqual([{ kind: 'broker', amountUah: 6163 }]);
+  });
+
+  it('risk details drop file lists', () => {
+    expect(compactDetail('вага нетто, кг: 25 (26UA1.pdf, INVOICE.pdf) → 32 (DEP-1-DE2329875-0071.pdf)')).toBe('вага нетто, кг: 25 → 32');
   });
 });

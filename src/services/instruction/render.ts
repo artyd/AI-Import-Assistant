@@ -144,12 +144,15 @@ export function renderBlocks(d: InstructionDraft, lang: Lang): Block[] {
 
 export function blocksToText(blocks: Block[]): string {
   const out: string[] = [];
+  let prev: Block['kind'] | null = null;
   for (const x of blocks) {
     if (x.kind === 'li') out.push(`- ${x.text}`);
     else {
-      if (out.length) out.push('');
+      // Blank line between paragraphs, but a section heading sits right on its text.
+      if (out.length && prev !== 'h') out.push('');
       out.push(x.text);
     }
+    prev = x.kind;
   }
   return out.join('\n').replace(/\n{3,}/g, '\n\n');
 }
