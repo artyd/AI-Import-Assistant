@@ -1,4 +1,4 @@
-import { query } from '../db/pool.js';
+import { pool, query } from '../db/pool.js';
 import { getWorkspaceById, type WorkspaceRow } from './workspaceAccess.js';
 import { refreshWorkspaceState } from './status.js';
 import { analyzeParties } from './partyExtraction.js';
@@ -38,6 +38,24 @@ import { upsertParties, type PartyInput } from './parties.js';
 
 
 export async function autoFillWorkspaceContext(workspaceId: string): Promise<void> {
+  // The worker indexes several files of one shipment in parallel, and each runs
+  // the autopilot. Two overlapping runs used to read the same row and the later
+  // write dropped the other's provenance — an early value (incoterm_in = CPT
+  // from the first contract) then looked manual and was never refined. One run
+  // per shipment at a time: a session advisory lock on a dedicated connection.
+  const lock = await pool.connect();
+  try {
+    await lock.query('SELECT pg_advisory_lock(hashtext($1))', [`autofill:${workspaceId}`]);
+    await autoFillLocked(workspaceId);
+  } finally {
+    await lock
+      .query('SELECT pg_advisory_unlock(hashtext($1))', [`autofill:${workspaceId}`])
+      .catch(() => undefined);
+    lock.release();
+  }
+}
+
+async function autoFillLocked(workspaceId: string): Promise<void> {
   const ws = await getWorkspaceById(workspaceId);
   if (!ws) return;
 
@@ -92,7 +110,14 @@ export async function autoFillWorkspaceContext(workspaceId: string): Promise<voi
     written.push(f);
     provenanceChanged = true;
   }
-  if (provenanceChanged) add('auto_context_fields', [...autoFields]);
+  // Additive: merge into the stored list instead of overwriting it, so the
+  // provenance can never be lost even if a write slips past the lock.
+  if (provenanceChanged) {
+    sets.push(
+      `auto_context_fields = ARRAY(SELECT DISTINCT x FROM unnest(auto_context_fields || $${vals.length + 1}::text[]) x)`,
+    );
+    vals.push(written);
+  }
 
   if (sets.length > 0) {
     // Guard against a manual edit (sidebar / chat) that landed between our read
