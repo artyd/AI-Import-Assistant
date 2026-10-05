@@ -1,0 +1,95 @@
+/* Supplier-instruction builder — the approved mockup
+   (docs/instruction-builder-and-report/mockups/instruction-builder.html),
+   scaled up ~12% on request: base 15px, roomier fields. Theme tokens from globals.css. */
+
+.root { height: 100vh; display: flex; flex-direction: column; background: var(--bg); color: var(--text); font-size: 15px }
+
+.top { height: 62px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 20px; border-bottom: 1px solid var(--border) }
+.mark { width: 32px; height: 32px; border-radius: 9px; background: var(--accent); color: var(--accentTx); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 17px }
+.crumbs { color: var(--muted); font-size: 14.5px; display: flex; gap: 6px; align-items: center }
+.crumbs a { color: var(--muted); text-decoration: none }
+.crumbs a:hover { color: var(--text) }
+.crumbs b { color: var(--text); font-weight: 600 }
+.sp { flex: 1 }
+.badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 999px; font-size: 12.5px; font-weight: 600 }
+.bDraft { background: var(--warnBg); color: var(--warn) }
+.bOk { background: var(--okBg); color: var(--ok) }
+.bSent { background: var(--accentSoft); color: var(--accent) }
+
+.wrap { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(560px, 1fr) minmax(500px, 0.95fr) }
+.form { overflow: auto; padding: 20px 26px 80px; background: var(--panel); border-right: 1px solid var(--border) }
+.preview { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden }
+
+.alert { display: flex; gap: 10px; align-items: flex-start; background: var(--warnBg); color: var(--warn); border-radius: 13px; padding: 12px 14px; margin-bottom: 16px; font-size: 14px; line-height: 1.45 }
+.alert b { color: var(--text) }
+.alertOk { background: var(--okBg); color: var(--ok) }
+.link { background: none; border: 0; padding: 0; color: inherit; font: inherit; font-weight: 700; text-decoration: underline; cursor: pointer }
+
+.proposals { background: var(--surface); border: 1.5px solid var(--accent); border-radius: 15px; padding: 14px 16px; margin-bottom: 14px }
+.proposals h3 { margin: 0 0 10px; font-size: 15px; display: flex; gap: 8px; align-items: center }
+.prop { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; padding: 9px 0; border-top: 1px solid var(--border) }
+.prop:first-of-type { border-top: 0 }
+.prop small { display: block; color: var(--muted); font-size: 12.5px; margin-top: 2px }
+.propActs { display: flex; gap: 6px }
+
+.sec { background: var(--surface); border: 1px solid var(--border); border-radius: 15px; padding: 16px 18px; margin-bottom: 13px }
+.sec h2 { margin: 0 0 12px; font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 9px }
+.n { width: 25px; height: 25px; border-radius: 8px; background: var(--accentSoft); color: var(--accent); font-size: 13px; display: flex; align-items: center; justify-content: center; font-weight: 800 }
+.ok { margin-left: auto; color: var(--ok); font-size: 13px; font-weight: 600 }
+.miss { margin-left: auto; color: var(--warn); font-size: 13px; font-weight: 600 }
+.tri { border-left: 3px solid var(--accent) }
+
+.row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px }
+.row3 { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 12px }
+.f { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; min-width: 0 }
+.f label { font-size: 12.5px; color: var(--muted); font-weight: 600; display: flex; align-items: center; gap: 6px; flex-wrap: wrap }
+.in { border: 1px solid var(--border2); border-radius: 10px; padding: 9px 12px; background: var(--surface); color: var(--text); font: inherit; font-size: 15px; width: 100%; min-width: 0 }
+.in:focus { outline: 2px solid var(--accent); outline-offset: -1px }
+.missing { border-color: var(--warn); background: var(--warnBg) }
+textarea.in { resize: vertical; min-height: 58px }
+.src { font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px; white-space: nowrap; background: var(--accentSoft); color: var(--accent) }
+.srcTpl { background: var(--okBg); color: var(--ok) }
+.srcQ { background: rgba(124, 58, 237, 0.13); color: #7c4ddb }
+.srcPrev, .srcManual { background: var(--hl); color: var(--muted) }
+
+.seg { display: flex; gap: 7px; flex-wrap: wrap }
+.segBtn { border: 1px solid var(--border2); background: var(--surface); color: var(--text); border-radius: 999px; padding: 7px 13px; font-size: 14px; font-weight: 600; cursor: pointer }
+.segOn { background: var(--accent); border-color: var(--accent); color: var(--accentTx) }
+.hint { font-size: 13.5px; color: var(--muted); background: var(--panel); border-radius: 10px; padding: 9px 12px; line-height: 1.5; margin-top: 2px }
+.hint b { color: var(--text) }
+.sel { display: flex; gap: 7px; align-items: center }
+.sel .in { flex: 1 }
+
+.chk { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px }
+.chk label { display: flex; gap: 8px; align-items: flex-start; font-size: 14.5px; line-height: 1.4; cursor: pointer }
+.chk input { margin-top: 3px; accent-color: var(--accent); width: 16px; height: 16px }
+.grp { font-size: 12px; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; margin: 12px 0 8px; display: flex; gap: 6px; align-items: center }
+.addRow { display: flex; gap: 7px; margin-top: 10px }
+
+.ptabs { flex: none; display: flex; align-items: center; gap: 8px; padding: 13px 20px; border-bottom: 1px solid var(--border) }
+.tabs { display: flex; background: var(--panel); border-radius: 11px; padding: 3px }
+.tab { border: 0; background: transparent; padding: 6px 14px; border-radius: 9px; font-weight: 600; font-size: 14px; color: var(--muted); cursor: pointer }
+.tabOn { background: var(--surface); color: var(--text); box-shadow: var(--elev-1) }
+.tokens { font-size: 12.5px; color: var(--ok); font-weight: 600 }
+.letter { flex: 1; min-height: 0; overflow: auto; padding: 24px 30px; font-size: 15px; line-height: 1.65; white-space: pre-wrap }
+.ph { background: var(--warnBg); color: var(--warn); border-radius: 4px; padding: 0 3px; font-weight: 600 }
+.actions { flex: none; border-top: 1px solid var(--border); padding: 13px 20px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center }
+
+.drawer { position: fixed; right: 20px; bottom: 84px; width: 430px; max-height: 70vh; background: var(--surface); border: 1px solid var(--border2); border-radius: 17px; box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden; z-index: 40 }
+.dh { display: flex; align-items: center; gap: 9px; padding: 12px 16px; border-bottom: 1px solid var(--border); font-weight: 700; font-size: 15px }
+.x { margin-left: auto; border: 0; background: none; font-size: 18px; color: var(--muted); cursor: pointer }
+.msgs { flex: 1; min-height: 0; padding: 13px 16px; display: flex; flex-direction: column; gap: 10px; overflow: auto; font-size: 14px; line-height: 1.5 }
+.m { background: var(--panel); border-radius: 13px; padding: 10px 12px }
+.mu { align-self: flex-end; background: var(--bubble); color: var(--bubbleTx); max-width: 85% }
+.tool { font-size: 12px; color: var(--muted) }
+.dinput { display: flex; gap: 7px; padding: 11px; border-top: 1px solid var(--border) }
+.quick { display: flex; gap: 6px; flex-wrap: wrap; padding: 0 16px 10px }
+.quick button { border: 1px solid var(--border2); background: var(--surface); color: var(--text); border-radius: 999px; padding: 4px 10px; font-size: 12.5px; cursor: pointer }
+
+.modal { position: fixed; inset: 0; background: rgba(13, 13, 15, 0.38); display: flex; align-items: center; justify-content: center; z-index: 50 }
+.mbox { width: min(680px, 92vw); background: var(--surface); border-radius: 17px; box-shadow: var(--shadow); padding: 20px 22px }
+.mbox h3 { margin: 0 0 4px; font-size: 17px }
+.diff { font-family: var(--font-mono); font-size: 13px; background: var(--panel); border-radius: 11px; padding: 11px 13px; margin: 12px 0; line-height: 1.55; white-space: pre-wrap; max-height: 40vh; overflow: auto }
+.diffAdd { background: var(--okBg); color: var(--ok); display: block }
+.err { color: var(--err); font-size: 13.5px; margin-top: 8px }
+.center { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--muted) }

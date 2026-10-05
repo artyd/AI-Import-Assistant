@@ -37,6 +37,16 @@ export async function supplierInstructionRoutes(app: FastifyInstance): Promise<v
     return reply.send({ draft, missing: missingFields(draft) });
   });
 
+  // POST …/instruction/preview { draft } — live letter text for the screen (no LLM, not saved).
+  app.post<{ Params: { id: string } }>('/api/workspaces/:id/instruction/preview', async (req, reply) => {
+    const ws = await getOwnedWorkspace(req.user!.sub, req.params.id);
+    if (!ws) return reply.code(404).send({ error: 'not_found' });
+    const parsed = z.object({ draft: draftSchema }).safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'invalid_request', issues: parsed.error.issues });
+    const d = parsed.data.draft;
+    return reply.send({ en: renderText(d, 'en'), uk: renderText(d, 'uk'), subject: letterSubject(d), missing: missingFields(d) });
+  });
+
   // GET …/instructions — all versions (newest first).
   app.get<{ Params: { id: string } }>('/api/workspaces/:id/instructions', async (req, reply) => {
     const ws = await getOwnedWorkspace(req.user!.sub, req.params.id);
