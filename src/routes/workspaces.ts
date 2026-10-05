@@ -6,6 +6,7 @@ import { getOwnedWorkspace, WORKSPACE_STATUSES } from '../services/workspaceAcce
 import { FOLDER_SKELETON } from '../domain/folders.js';
 import { refreshWorkspaceState } from '../services/status.js';
 import { deleteWorkspaceStorage } from '../services/storage.js';
+import { changedFields, stampManualEdit } from '../services/autoContext.js';
 
 const createSchema = z.object({
   number: z.string().min(1).optional(),
@@ -255,6 +256,8 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
     }
     // A manual contract_type edit locks provenance against auto-detection.
     stampContractTypeOverride(parsed.data.contract_type, sets, vals);
+    // Fields the user set by hand are off-limits to the document autopilot.
+    stampManualEdit(changedFields(ws, parsed.data), sets, vals);
     if (sets.length > 0) {
       await query(`UPDATE workspaces SET ${sets.join(', ')} WHERE id = $1`, vals);
     }
@@ -324,6 +327,8 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
     }
     // A manual contract_type edit locks provenance against auto-detection.
     stampContractTypeOverride(parsed.data.contract_type, sets, vals);
+    // Fields the user set by hand are off-limits to the document autopilot.
+    stampManualEdit(changedFields(ws, parsed.data), sets, vals);
     if (sets.length > 0) {
       await query(`UPDATE workspaces SET ${sets.join(', ')} WHERE id = $1`, vals);
     }

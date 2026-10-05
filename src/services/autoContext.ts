@@ -1,29 +1,50 @@
 import { query } from '../db/pool.js';
-import { getWorkspaceById } from './workspaceAccess.js';
+import { getWorkspaceById, type WorkspaceRow } from './workspaceAccess.js';
 import { refreshWorkspaceState } from './status.js';
 import { analyzeParties } from './partyExtraction.js';
-import { suggestIncoterms } from './incoterms.js';
+import { loadDeriveDocs } from './incoterms.js';
+import {
+  deriveIncoterms,
+  deriveOriginCountry,
+  deriveTransportMode,
+  isUiValue,
+  AUTO_FIELDS,
+  type AutoField,
+} from './contextDerive.js';
+
+export { changedFields } from './contextDerive.js';
+import { countryToUk } from '../domain/countries.js';
 import { upsertParties, type PartyInput } from './parties.js';
 
 /**
  * AUTOPILOT: persist document-derived shipment context so the agent stops asking
- * for what the documents already say. Deterministic (no LLM) — it reuses the
- * existing derivations (`analyzeParties` / `suggestIncoterms`) that were previously
- * computed only on-demand and never written to the DB.
+ * for what the documents already say. Deterministic (no LLM) — derivations live
+ * in `contextDerive.ts` and run over ALL of the shipment's current extractions on
+ * every indexed file.
  *
  * Safety invariants:
- *  - NULL-only: never overwrites a field that already has a value.
+ *  - Provenance: the autopilot writes a field only when it is empty, or when it
+ *    wrote that field itself before (`auto_context_fields`) — so a value derived
+ *    from the first indexed file is refined as the rest of the package arrives,
+ *    while a manual edit (which removes the field from the list) is never touched.
+ *    A legacy value the UI could not have produced (e.g. "CPT - Bila Tserkva…",
+ *    "Ukraine") predates provenance and is treated as autopilot-written.
  *  - Manual lock: never touches contract_type when its source is 'sidebar'/'survey'.
  *  - Parties: only auto-populated when NONE exist yet (never clobbers user rows).
+ *  - product_category is never guessed (the form changes the code and regime).
  *
  * Best-effort: callers (the indexing worker) wrap this in try/catch.
  */
+
+
 export async function autoFillWorkspaceContext(workspaceId: string): Promise<void> {
   const ws = await getWorkspaceById(workspaceId);
   if (!ws) return;
 
-  const analysis = await analyzeParties(workspaceId);
-  const incoterms = await suggestIncoterms(workspaceId);
+  const [analysis, docs] = await Promise.all([
+    analyzeParties(workspaceId),
+    loadDeriveDocs(workspaceId, { transportMarkdown: true }),
+  ]);
 
   const sets: string[] = [];
   const vals: unknown[] = [ws.id];
@@ -41,23 +62,48 @@ export async function autoFillWorkspaceContext(workspaceId: string): Promise<voi
     add('contract_type_confidence', analysis.contract_type_confidence);
     add('contract_type_reason', analysis.contract_type_reason);
   }
+  const mode = manualMode ? ws.contract_type : (ws.contract_type ?? analysis.contract_type);
 
-  // Incoterms — NULL-only; keep legacy `incoterm` synced to incoterm_in.
-  if (!ws.incoterm_in && incoterms.incoterm_in) {
-    add('incoterm_in', incoterms.incoterm_in);
-    add('incoterm', incoterms.incoterm_in);
-  }
-  if (!ws.incoterm_out && incoterms.incoterm_out) add('incoterm_out', incoterms.incoterm_out);
+  const sender = analysis.suggestions.find((s) => s.role === 'sender');
+  const intermediary = analysis.suggestions.find((s) => s.role === 'intermediary');
+  const recipient = analysis.suggestions.find((s) => s.role === 'recipient');
+  const incoterms = deriveIncoterms(docs, mode, intermediary?.company_name ?? null);
+  const derived: Record<AutoField, string | null> = {
+    incoterm_in: incoterms.incoterm_in,
+    incoterm_out: incoterms.incoterm_out,
+    transport_mode: deriveTransportMode(docs),
+    origin_country: deriveOriginCountry(docs, sender?.country ?? null),
+    destination_country: countryToUk(recipient?.country ?? null),
+  };
 
-  // origin_country — NULL-only; taken from the derived sender/manufacturer country
-  // (which partyExtraction fills from country_of_origin).
-  if (!ws.origin_country) {
-    const originc = analysis.suggestions.find((s) => s.country)?.country ?? null;
-    if (originc) add('origin_country', originc);
+  const autoFields = new Set(ws.auto_context_fields ?? []);
+  // A `manual:` marker always wins — including a field the user deliberately
+  // cleared (null): the autopilot must not refill it.
+  const writable = (f: AutoField): boolean =>
+    !autoFields.has(`manual:${f}`) && (ws[f] === null || autoFields.has(f) || !isUiValue(f, ws[f]));
+  const written: AutoField[] = [];
+  let provenanceChanged = false;
+  for (const f of Object.keys(derived) as AutoField[]) {
+    const v = derived[f];
+    if (v === null || !writable(f) || ws[f] === v) continue;
+    add(f, v);
+    if (f === 'incoterm_in') add('incoterm', v); // legacy column mirrors incoterm_in
+    autoFields.add(f);
+    written.push(f);
+    provenanceChanged = true;
   }
+  if (provenanceChanged) add('auto_context_fields', [...autoFields]);
 
   if (sets.length > 0) {
-    await query(`UPDATE workspaces SET ${sets.join(', ')} WHERE id = $1`, vals);
+    // Guard against a manual edit (sidebar / chat) that landed between our read
+    // and this write: if any field we are about to set got a `manual:` marker in
+    // the meantime, skip this write — the next indexed file re-derives anyway.
+    vals.push(written.map((f) => `manual:${f}`));
+    await query(
+      `UPDATE workspaces SET ${sets.join(', ')}
+       WHERE id = $1 AND NOT (auto_context_fields && $${vals.length}::text[])`,
+      vals,
+    );
   }
 
   // Parties — only when NONE exist yet, so we never clobber user-entered rows.
@@ -76,16 +122,37 @@ export async function autoFillWorkspaceContext(workspaceId: string): Promise<voi
   // Recompute intake_complete (required-five) + refresh derived checklist/status.
   const merged = await getWorkspaceById(ws.id);
   if (!merged) return;
-  const complete = Boolean(
-    merged.contract_type &&
-      merged.product_category &&
-      (merged.incoterm_in ?? merged.incoterm) &&
-      merged.transport_mode &&
-      merged.origin_country,
-  );
+  const complete = isIntakeComplete(merged);
   if (complete !== merged.intake_complete) {
     await query('UPDATE workspaces SET intake_complete = $2 WHERE id = $1', [ws.id, complete]);
   }
   const finalWs = await getWorkspaceById(ws.id);
   if (finalWs) await refreshWorkspaceState(finalWs);
+}
+
+function isIntakeComplete(ws: WorkspaceRow): boolean {
+  return Boolean(
+    ws.contract_type &&
+      ws.product_category &&
+      (ws.incoterm_in ?? ws.incoterm) &&
+      ws.transport_mode &&
+      ws.origin_country,
+  );
+}
+
+/**
+ * SQL fragment for a MANUAL write (sidebar PATCH, intake, chat-confirmed
+ * context): replace each edited field's autopilot provenance with a
+ * `manual:<field>` marker so the autopilot never overwrites it again. Appends
+ * to the caller's `sets`/`vals`.
+ */
+export function stampManualEdit(fields: string[], sets: string[], vals: unknown[]): void {
+  const tracked = fields.filter((f) => AUTO_FIELDS.includes(f as AutoField));
+  if (tracked.length === 0) return;
+  const p = vals.length + 1;
+  sets.push(
+    `auto_context_fields = ARRAY(SELECT DISTINCT x FROM unnest(auto_context_fields || $${p + 1}::text[]) x ` +
+      `WHERE x <> ALL($${p}::text[]))`,
+  );
+  vals.push(tracked, tracked.map((f) => `manual:${f}`));
 }

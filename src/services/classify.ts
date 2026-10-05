@@ -117,8 +117,14 @@ async function resolveDocType(file: FileRow): Promise<DocTypeResolution> {
   if (file.type === 'image') return { docType: 'photos', method: 'image', confidence: 'high' };
 
   // 3. Filename heuristic — cheap, language-aware, works on scans. Medium.
+  //    But when the full extraction already read the content and found it is
+  //    none of the shipment document types, a filename hit ("PL_Eprinil…" — a
+  //    leaflet, not a packing list) is only a hint: LOW → stays in the inbox
+  //    with a suggestion instead of being filed into the customs package.
   const byName = classifyByFilename(file.name);
-  if (byName) return { docType: byName, method: 'filename', confidence: 'medium' };
+  if (byName) {
+    return { docType: byName, method: 'filename', confidence: alreadyExtracted ? 'low' : 'medium' };
+  }
 
   // 4. Fall back to the text-based classifier, but skip the LLM entirely when
   //    there's no meaningful text (e.g. a scanned PDF with no text layer) —

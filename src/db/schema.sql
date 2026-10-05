@@ -619,3 +619,10 @@ DO $$ BEGIN
 EXCEPTION WHEN OTHERS THEN  -- not installed / no privilege: optional index
   RAISE NOTICE 'pg_trgm unavailable — substring search stays unindexed';
 END $$;
+
+-- ── Autopilot provenance (live test 2026-10-05) ──
+-- Intake fields the indexing autopilot wrote from documents. The autopilot may
+-- refine these as more documents arrive (the first indexed file used to freeze
+-- e.g. origin_country forever); a manual edit removes the field from the list,
+-- after which the autopilot never touches it again.
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS auto_context_fields TEXT[] NOT NULL DEFAULT '{}';

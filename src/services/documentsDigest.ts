@@ -33,7 +33,22 @@ export async function buildDocumentsDigest(workspaceId: string): Promise<string>
      ORDER BY f.created_at`,
     [workspaceId],
   );
-  if (rows.length === 0) return '';
+  // Files not yet readable: the agent must not present an answer as covering
+  // "all documents" while some are still being converted / extracted.
+  const { rows: pending } = await query<{ name: string; status: string }>(
+    `SELECT name, status FROM files
+     WHERE workspace_id = $1 AND is_latest = true AND status IN ('queued', 'indexing', 'error')
+     ORDER BY created_at, name`,
+    [workspaceId],
+  );
+  const pendingNote = pending.length
+    ? `⏳ Ще НЕ оброблено ${pending.length} файл(ів): ${pending
+        .slice(0, 15)
+        .map((p) => `${p.name}${p.status === 'error' ? ' (помилка)' : ''}`)
+        .join(', ')}${pending.length > 15 ? ', …' : ''}. Їх дані поки недоступні — якщо питання ` +
+      'стосується цих файлів, прямо скажи, що відповідь неповна, доки обробка не завершиться.'
+    : '';
+  if (rows.length === 0) return pendingNote;
 
   const str = (v: unknown): string | null =>
     typeof v === 'string' && v.trim() ? v.trim() : typeof v === 'number' ? String(v) : null;
@@ -67,5 +82,5 @@ export async function buildDocumentsDigest(workspaceId: string): Promise<string>
   // Bound the size so a huge shipment can't bloat the (cacheable) system prompt.
   const MAX = 4000;
   if (digest.length > MAX) digest = `${digest.slice(0, MAX)}\n…(перелік скорочено)`;
-  return digest;
+  return pendingNote ? `${pendingNote}\n${digest}` : digest;
 }

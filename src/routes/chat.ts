@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { authenticate } from '../auth/hook.js';
+import { query } from '../db/pool.js';
 import { getOwnedWorkspace } from '../services/workspaceAccess.js';
 import {
   ensureConversation,
@@ -46,6 +47,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         const history = await getConversationHistory(conversationId);
         await appendMessage(conversationId, 'user', message);
         const documentsDigest = await buildDocumentsDigest(ws.id).catch(() => '');
+        const { rows: parties } = await query<{ role: string; company_name: string }>(
+          'SELECT role, company_name FROM parties WHERE workspace_id = $1 ORDER BY created_at',
+          [ws.id],
+        );
 
         const result = await runAgentTurn({
           workspaceId: ws.id,
@@ -56,6 +61,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
             contract_type_source: ws.contract_type_source,
             contract_type_confidence: ws.contract_type_confidence,
             survey_status: ws.survey_status,
+            parties,
             documentsDigest,
           }),
           history,

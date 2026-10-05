@@ -1,4 +1,5 @@
 import { query } from '../db/pool.js';
+import { isRegulatoryRegistration } from './reconcile.js';
 
 /**
  * Drug-registry cross-check (Phase 6 — official-source verification, run OFFLINE
@@ -123,15 +124,19 @@ export async function computeRegistryChecks(workspaceId: string): Promise<Regist
   const { rows: docs } = await query<DocFields>(
     `SELECT f.name AS file_name, de.extracted_fields AS fields
      FROM document_extractions de JOIN files f ON f.id = de.file_id
-     WHERE de.workspace_id = $1 AND f.is_latest = true`,
+     WHERE de.workspace_id = $1 AND f.is_latest = true
+       -- 'other' = unrelated files (e.g. another product's registration).
+       AND COALESCE(de.extracted_fields->>'doc_type', 'other') <> 'other'`,
     [workspaceId],
   );
 
-  // Distinct registration numbers stated anywhere in the documents.
+  // Distinct drug/vet registration numbers stated in the documents. AWB / CMR /
+  // MRN / declaration numbers the extractor sometimes files under
+  // registration_number are not registrations and are never looked up.
   const regNumbers = new Set<string>();
   for (const d of docs) {
     const rn = d.fields.registration_number;
-    if (typeof rn === 'string' && rn.trim()) regNumbers.add(rn.trim());
+    if (typeof rn === 'string' && isRegulatoryRegistration(rn)) regNumbers.add(rn.trim());
   }
   if (regNumbers.size === 0) return [];
 

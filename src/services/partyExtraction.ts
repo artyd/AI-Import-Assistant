@@ -107,7 +107,11 @@ export async function analyzeParties(workspaceId: string): Promise<PartiesAnalys
   const { rows } = await query<ExtractionRow>(
     `SELECT f.name AS file_name, de.extracted_fields AS fields
      FROM document_extractions de JOIN files f ON f.id = de.file_id
-     WHERE de.workspace_id = $1 AND f.is_latest = true`,
+     WHERE de.workspace_id = $1 AND f.is_latest = true
+       -- 'other' is where unrelated files land (e.g. registration certificates of
+       -- a different product) — their makers/holders are not parties of this deal.
+       AND COALESCE(de.extracted_fields->>'doc_type', 'other') <> 'other'
+     ORDER BY f.created_at, f.name, f.id`,
     [workspaceId],
   );
   const totalDocs = rows.length || 1;

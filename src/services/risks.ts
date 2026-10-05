@@ -76,7 +76,35 @@ const DOC_LABELS: Record<string, string> = {
   intermediary_agreement: 'Договір з посередником',
 };
 
-function label(key: string): string {
+/** Human labels for reconciliation fields (raw keys never reach the user). */
+export const DISCREPANCY_FIELD_LABELS: Record<string, string> = {
+  net_weight_kg: 'вага нетто',
+  gross_weight_kg: 'вага брутто',
+  total_weight_kg: 'загальна вага',
+  packages_count: 'кількість місць',
+  line_items: 'кількість позицій',
+  line_quantity: 'кількість товару',
+  line_amount: 'сума по позиції',
+  line_hs_code: 'код УКТ ЗЕД по позиції',
+  hs_code: 'код УКТ ЗЕД',
+  incoterm: 'умови поставки (Incoterms)',
+  currency: 'валюта',
+  total_value: 'сума',
+  country_of_origin: 'країна походження',
+  manufacturer: 'виробник',
+  registration_number: 'реєстраційний номер',
+  markup: 'націнка посередника',
+  intermediary: 'посередник',
+  seller: 'продавець',
+  buyer: 'покупець',
+  documents: 'документи',
+};
+
+export function fieldLabel(field: string): string {
+  return DISCREPANCY_FIELD_LABELS[field] ?? field;
+}
+
+export function label(key: string): string {
   return DOC_LABELS[key] ?? key;
 }
 
@@ -106,6 +134,9 @@ export async function computeRisks(ws: WorkspaceRow): Promise<Risk[]> {
      WHERE de.workspace_id = $1 AND f.is_latest = true`,
     [ws.id],
   );
+  // A customs declaration in the package means the goods have been declared —
+  // a passed delivery date is history then, not a pending risk.
+  const declared = extractions.some((r) => r.doc_type === 'customs_declaration');
 
   // 1. Expiry / validity of certificates & licences.
   let earliestDeadline: { days: number; name: string } | null = null;
@@ -134,8 +165,11 @@ export async function computeRisks(ws: WorkspaceRow): Promise<Risk[]> {
         }
       }
     }
-    // Track the nearest delivery deadline for the deadline check below.
-    const dl = r.delivery_deadline ?? r.shipment_date;
+    // Track the nearest delivery DEADLINE for the deadline check below. The
+    // shipment date (AWB / dispatch) is when goods left, not a deadline.
+    // ('other' = unrelated files — their dates are not this shipment's deadline;
+    // their expiry above still matters, e.g. a licence or registration.)
+    const dl = r.doc_type && r.doc_type !== 'other' ? r.delivery_deadline : null;
     if (dl) {
       const d = daysUntil(dl, now);
       if (d !== null && (earliestDeadline === null || d < earliestDeadline.days)) {
@@ -168,7 +202,7 @@ export async function computeRisks(ws: WorkspaceRow): Promise<Risk[]> {
       code: `discrepancy_${d.field}`,
       category: 'discrepancy',
       severity: d.severity === 'info' ? 'info' : d.severity,
-      title: `Розбіжність: ${d.field}`,
+      title: `Розбіжність: ${fieldLabel(d.field)}`,
       detail: `${d.expected} → ${d.actual}`,
       source_file_id: null,
     });
@@ -196,7 +230,7 @@ export async function computeRisks(ws: WorkspaceRow): Promise<Risk[]> {
   }
 
   // 4. Delivery-deadline pressure (only meaningful while docs are incomplete).
-  if (earliestDeadline && missing.length > 0) {
+  if (earliestDeadline && missing.length > 0 && !declared) {
     const { days } = earliestDeadline;
     if (days < 0) {
       risks.push({
