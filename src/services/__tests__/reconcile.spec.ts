@@ -39,14 +39,15 @@ describe('reconcile — contract mode', () => {
     expect(has(out, 'total_value')).toBe(false);
   });
 
-  it('trilateral: negative markup (inbound > outbound) is a warning', () => {
+  it('trilateral: negative markup (inbound > outbound) is a RED customs-value risk', () => {
     const inbound = inv(
       { seller: 'Sujata Chemicals', buyer: 'PrimeForce Ltd', total_value: 1500, currency: 'USD' },
       'inbound-hi',
     );
     const out = reconcile([OUTBOUND, inbound], { contractMode: 'trilateral' });
     const markup = out.find((d) => d.field === 'markup');
-    expect(markup?.severity).toBe('warning');
+    expect(markup?.severity).toBe('error');
+    expect(markup?.actual).toContain('коригування митної вартості');
   });
 
   it('trilateral: physical goods must match across legs (weight mismatch = error)', () => {

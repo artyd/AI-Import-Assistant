@@ -534,11 +534,18 @@ function reconcileTrilateral(
     const sameCurrency = !!cIn && !!cOut && cIn.toUpperCase() === cOut.toUpperCase();
     if (vIn !== null && vOut !== null && sameCurrency) {
       if (vIn > vOut) {
+        // RED: the declared (outbound) value is below what the goods were bought
+        // for on the inbound leg — the classic trigger for a customs-value
+        // adjustment (МКУ ст. 55). Not a document typo, a valuation risk that
+        // needs a written justification before clearance.
+        const pct = Math.round(((vIn - vOut) / vIn) * 100);
         out.push({
           field: 'markup',
-          expected: 'націнка ≥ 0 (вхідний ≤ вихідний)',
-          actual: `вхідний інвойс (${vIn} ${cIn}) більший за вихідний (${vOut} ${cOut}) — відʼємна націнка`,
-          severity: 'warning',
+          expected: 'ціна перепродажу ≥ ціни закупівлі на вхідному плечі',
+          actual:
+            `вхідний інвойс ${vIn} ${cIn} > вихідний ${vOut} ${cOut} (продаж на ${pct}% нижче закупівлі) — ` +
+            'ризик коригування митної вартості; потрібне письмове обґрунтування ціни',
+          severity: 'error',
           kind: kindFor(inbound, outbound, 'total_value'),
           citations: [cite(inbound, `${vIn} ${show(cIn)}`), cite(outbound, `${vOut} ${show(cOut)}`)],
         });
