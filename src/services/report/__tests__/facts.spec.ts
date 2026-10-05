@@ -80,3 +80,18 @@ describe('report — live-data shapes (Метопрен prod)', () => {
     expect(compactDetail('вага нетто, кг: 25 (26UA1.pdf, INVOICE.pdf) → 32 (DEP-1-DE2329875-0071.pdf)')).toBe('вага нетто, кг: 25 → 32');
   });
 });
+
+describe('report — route cleanup', () => {
+  it('drops customs-office codes and normalizes "UA Kiev" / "м. Біла Церква"', () => {
+    const r = buildRoute(
+      [
+        { from: 'Mumbai', to: 'Kyiv', mode: 'air', ref: 'AWB', t: Date.UTC(2026, 6, 14) },
+        { from: 'Frankfurt', to: 'Kyiv', mode: 'road', ref: 'CMR', t: Date.UTC(2026, 6, 23) },
+        { from: 'DE DA04', to: 'UA Kiev', mode: 'road', ref: 'MRN', t: Date.UTC(2026, 6, 23) },
+      ],
+      'м. Біла Церква',
+      null,
+    );
+    expect(r.stops.map((s) => s.name)).toEqual(['Mumbai', 'Frankfurt', 'Kyiv', 'Біла Церква']);
+  });
+});

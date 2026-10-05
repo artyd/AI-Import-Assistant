@@ -375,6 +375,8 @@ function placeKey(name: string): string {
   return name
     .split(',')[0]!
     .replace(/\(.*?\)/g, '')
+    .replace(/^\s*(м|г|смт|с|city of)\.?\s+/i, '') // "м. Біла Церква"
+    .replace(/^\s*[A-Z]{2}\s+(?=\p{L}{3,})/u, '') // "UA Kiev" (country prefix)
     .replace(/\b(int'?l|international|airport|apt|port|terminal|hub)\b/gi, '')
     .trim()
     .toLowerCase()
@@ -399,7 +401,10 @@ export function buildRoute(
   lastMile: { ref: string | null; t: number | null } | null,
 ): { stops: { name: string; note: string | null; date: string | null }[]; legs: { mode: string; ref: string | null }[] } {
   const seen = new Set<string>();
+  // Customs-office codes (T1: "DE DA04", "UA100100") are not places on the route.
+  const isCode = (v: string | null) => !!v && /^[A-Z]{2}\s?[A-Z0-9]*\d[A-Z0-9]*$/i.test(v.split(',')[0]!.trim());
   const legsIn = raw
+    .map((l) => ({ ...l, from: isCode(l.from) ? null : l.from, to: isCode(l.to) ? null : l.to }))
     .filter((l) => l.from || l.to)
     .filter((l) => {
       const key = `${l.mode}|${l.from ? placeKey(l.from) : ''}|${l.to ? placeKey(l.to) : ''}`;
