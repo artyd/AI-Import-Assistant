@@ -130,6 +130,11 @@ const envSchema = z.object({
   CLASSIFY_MODEL: z.string().default('claude-haiku-4-5'),
   // Summarizer for qdpro УКТ ЗЕД pages (logist uktzed_lookup_code digest).
   LOGIST_DIGEST_MODEL: z.string().default('claude-sonnet-5-5'),
+  // 3–5 sentence management summary on the one-page report (facts JSON in, no
+  // documents) — and the optional "refine with AI" in the instruction builder.
+  REPORT_SUMMARY_MODEL: z.string().default('claude-sonnet-5-5'),
+  // System Chromium used to print HTML → PDF (report, supplier instruction).
+  CHROMIUM_PATH: z.string().default('/usr/bin/chromium'),
   // Max output tokens for one OCR pass. Raised from the old hardcoded 8000 so a
   // long multi-page scan (e.g. a 10+ page contract) isn't transcribed only
   // partway. 16000 is the safe non-streaming ceiling (above that the SDK can hit

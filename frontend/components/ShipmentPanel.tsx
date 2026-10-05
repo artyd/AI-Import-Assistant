@@ -375,12 +375,21 @@ export function ShipmentPanel({
       setResult({ kind: "discrepancies", items: r.discrepancies });
     });
 
-  const genReport = () =>
-    run("report", async () => {
-      const r = await api<{ html: string }>(`/api/workspaces/${workspaceId}/report`, {
+  // One-page management report: built server-side (facts + cached AI summary),
+  // downloaded as PDF, or opened as HTML in a new tab.
+  const genReport = (format: "pdf" | "html") =>
+    run(format === "pdf" ? "report" : "reportHtml", async () => {
+      const r = await api<{ html: string; artifactId: string }>(`/api/workspaces/${workspaceId}/report`, {
         method: "POST",
         body: {},
       });
+      if (format === "pdf") {
+        await downloadBlob(
+          `/api/workspaces/${workspaceId}/report/${r.artifactId}/pdf`,
+          `zvit-${workspace.number ?? "postachannia"}.pdf`
+        );
+        return;
+      }
       const url = URL.createObjectURL(new Blob([r.html], { type: "text/html" }));
       window.open(url, "_blank");
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
@@ -729,9 +738,19 @@ export function ShipmentPanel({
             <button className="btn" onClick={() => setInstructionOpen(true)}>Інструкція</button>
             <button className="btn" onClick={exportZip} disabled={busy === "export"}>Архів (.zip)</button>
           </div>
-          <button className="btn btn-primary" onClick={genReport} disabled={busy === "report"}>
-            {busy === "report" ? <IconSpinner size={15} /> : <IconDownload size={16} />} Експорт звіту (HTML)
-          </button>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8 }}>
+            <button
+              className="btn btn-primary"
+              onClick={() => genReport("pdf")}
+              disabled={busy === "report"}
+              title="Одна сторінка A4 для керівництва: гроші, маршрут, ризики, резюме"
+            >
+              {busy === "report" ? <IconSpinner size={15} /> : <IconDownload size={16} />} Звіт для керівництва (PDF)
+            </button>
+            <button className="btn" onClick={() => genReport("html")} disabled={busy === "reportHtml"} title="Відкрити звіт у новій вкладці">
+              {busy === "reportHtml" ? <IconSpinner size={15} /> : null} HTML
+            </button>
+          </div>
         </Section>
 
         {/* Management */}

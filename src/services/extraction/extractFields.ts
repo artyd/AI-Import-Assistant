@@ -138,6 +138,26 @@ export interface ExtractedFields {
   gross_weight_kg: number | null;
   packages_count: number | null;
   line_items: ExtractedLineItem[];
+  // ── Product / route / money (report + instruction builder) ───────────────
+  // All optional: a document that doesn't state them leaves them null; old
+  // extractions simply lack them until a reindex.
+  product_name: string | null;
+  cas_number: string | null;
+  batch_number: string | null;
+  manufacture_date: string | null;
+  /** Mode of THIS transport document (AWB → air, CMR → road, B/L → sea). */
+  transport_mode: 'air' | 'road' | 'sea' | 'rail' | 'courier' | null;
+  transport_doc_number: string | null;
+  place_of_loading: string | null;
+  place_of_discharge: string | null;
+  final_destination: string | null;
+  /** Customs declaration (МД) money, UAH, and the NBU rate used. */
+  customs_value_uah: number | null;
+  duty_uah: number | null;
+  vat_uah: number | null;
+  exchange_rate: number | null;
+  /** For a bill for SERVICES (doc_type other): what was billed. Amount = total_value. */
+  service_kind: 'freight' | 'broker' | 'storage' | 'insurance' | 'other' | null;
   // ── Extraction metadata ──────────────────────────────────────────────────
   field_confidence: FieldConfidence;
   extraction_note: string | null;
@@ -222,6 +242,32 @@ const EXTRACTION_TOOL: ChatTool = {
       net_weight_kg: { type: 'number', description: 'Вага нетто, кг.' },
       gross_weight_kg: { type: 'number', description: 'Вага брутто, кг.' },
       packages_count: { type: 'number', description: 'Кількість місць/пакувань.' },
+      product_name: { type: 'string', description: 'Назва товару (основна позиція), напр. «S-METHOPRENE».' },
+      cas_number: { type: 'string', description: 'CAS-номер хімречовини, якщо вказано (напр. 65733-16-6).' },
+      batch_number: { type: 'string', description: 'Номер партії/лоту (основний), якщо вказано.' },
+      manufacture_date: { type: 'string', description: 'Дата виробництва, формат YYYY-MM-DD або YYYY-MM.' },
+      transport_mode: {
+        type: 'string',
+        enum: ['air', 'road', 'sea', 'rail', 'courier'],
+        description:
+          'ЛИШЕ для транспортного документа: вид перевезення ЦЬОГО документа ' +
+          '(AWB/HAWB — air, CMR — road, B/L — sea, СМГС — rail, експрес-накладна — courier).',
+      },
+      transport_doc_number: { type: 'string', description: 'Номер транспортного документа (AWB, CMR, B/L, MRN транзиту).' },
+      place_of_loading: { type: 'string', description: 'Місце/аеропорт/порт відвантаження (звідки).' },
+      place_of_discharge: { type: 'string', description: 'Місце/аеропорт/порт призначення цього перевезення (куди).' },
+      final_destination: { type: 'string', description: 'Кінцевий пункт призначення вантажу, якщо вказано окремо.' },
+      customs_value_uah: { type: 'number', description: 'ЛИШЕ МД: митна вартість, грн (графа 45).' },
+      duty_uah: { type: 'number', description: 'ЛИШЕ МД: сума ввізного мита, грн (код 020).' },
+      vat_uah: { type: 'number', description: 'ЛИШЕ МД: сума ПДВ, грн (код 028).' },
+      exchange_rate: { type: 'number', description: 'ЛИШЕ МД: курс валюти до гривні (графа 23).' },
+      service_kind: {
+        type: 'string',
+        enum: ['freight', 'broker', 'storage', 'insurance', 'other'],
+        description:
+          'ЛИШЕ для рахунку/акту за ПОСЛУГИ (doc_type other): що оплачується — фрахт/перевезення, ' +
+          'митний брокер, зберігання, страхування, інше. Сума — у total_value.',
+      },
       line_items: {
         type: 'array',
         description:
@@ -406,9 +452,28 @@ function normalize(input: Record<string, unknown>): ExtractedFields {
     gross_weight_kg: toNum(input.gross_weight_kg),
     packages_count: toNum(input.packages_count),
     line_items: normalizeLineItems(input.line_items),
+    product_name: toStr(input.product_name),
+    cas_number: toStr(input.cas_number),
+    batch_number: toStr(input.batch_number),
+    manufacture_date: toStr(input.manufacture_date),
+    transport_mode: oneOf(input.transport_mode, ['air', 'road', 'sea', 'rail', 'courier'] as const),
+    transport_doc_number: toStr(input.transport_doc_number),
+    place_of_loading: toStr(input.place_of_loading),
+    place_of_discharge: toStr(input.place_of_discharge),
+    final_destination: toStr(input.final_destination),
+    customs_value_uah: toNum(input.customs_value_uah),
+    duty_uah: toNum(input.duty_uah),
+    vat_uah: toNum(input.vat_uah),
+    exchange_rate: toNum(input.exchange_rate),
+    service_kind: oneOf(input.service_kind, ['freight', 'broker', 'storage', 'insurance', 'other'] as const),
     field_confidence: normalizeFieldConfidence(input.field_confidence),
     extraction_note: toStr(input.extraction_note),
   };
+}
+
+function oneOf<T extends string>(v: unknown, allowed: readonly T[]): T | null {
+  const s = toStr(v)?.toLowerCase();
+  return s && (allowed as readonly string[]).includes(s) ? (s as T) : null;
 }
 
 function normalizeParties(v: unknown): ExtractedParty[] {

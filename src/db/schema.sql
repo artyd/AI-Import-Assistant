@@ -626,3 +626,13 @@ END $$;
 -- e.g. origin_country forever); a manual edit removes the field from the list,
 -- after which the autopilot never touches it again.
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS auto_context_fields TEXT[] NOT NULL DEFAULT '{}';
+
+-- ── Management report + instruction builder (2026-10-05) ──
+-- AI summary on the one-page report, cached by a hash of the report facts.
+CREATE TABLE IF NOT EXISTS report_summaries (
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  facts_hash   TEXT NOT NULL,
+  summary      TEXT NOT NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (workspace_id, facts_hash)
+);
