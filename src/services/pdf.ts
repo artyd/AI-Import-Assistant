@@ -32,15 +32,51 @@ function getBrowser(): Promise<Browser> {
   return browserP;
 }
 
-export async function htmlToPdf(html: string, opts: { format?: 'A4'; margin?: string } = {}): Promise<Buffer> {
+// At most this many pages render at once on the shared browser.
+const MAX_CONCURRENT = 2;
+let active = 0;
+const waiting: (() => void)[] = [];
+async function slot<T>(fn: () => Promise<T>): Promise<T> {
+  if (active >= MAX_CONCURRENT) await new Promise<void>((r) => waiting.push(r));
+  active++;
+  try {
+    return await fn();
+  } finally {
+    active--;
+    waiting.shift()?.();
+  }
+}
+
+// Our templates need nothing but the web font; everything else is blocked so
+// injected markup can't reach the network (SSRF to internal services).
+const ALLOWED = /^(data:|about:blank|https:\/\/fonts\.(googleapis|gstatic)\.com\/)/;
+
+const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T | undefined> =>
+  Promise.race([p, new Promise<undefined>((r) => setTimeout(() => r(undefined), ms))]);
+
+export function htmlToPdf(html: string, opts: { format?: 'A4'; margin?: string } = {}): Promise<Buffer> {
+  return slot(() => render(html, opts));
+}
+
+async function render(html: string, opts: { format?: 'A4'; margin?: string }): Promise<Buffer> {
   const browser = await getBrowser();
   const page = await browser.newPage();
   try {
-    await page.setContent(html, { waitUntil: 'load', timeout: 20_000 });
-    // Web fonts (Hanken Grotesk) must be in before printing, else a fallback face is baked in.
-    // (string form: this runs in the page — no DOM types in the Node build)
-    await page.evaluate('document.fonts.ready');
+    await page.setJavaScriptEnabled(false); // templates are static HTML
+    await page.setRequestInterception(true);
+    page.on('request', (r) => {
+      if (ALLOWED.test(r.url())) void r.continue();
+      else void r.abort();
+    });
+    // Wait for the stylesheet + font, but bounded: without internet in the
+    // container the page prints with the fallback face instead of failing.
+    await page.setContent(html, { waitUntil: 'load', timeout: 10_000 }).catch(async (err: Error) => {
+      if (!/timeout/i.test(err.message)) throw err;
+    });
+    // (string form: evaluated in the page — no DOM types in the Node build)
+    await withTimeout(page.evaluate('document.fonts.ready'), 4_000);
     const pdf = await page.pdf({
+      timeout: 20_000,
       format: opts.format ?? 'A4',
       printBackground: true,
       preferCSSPageSize: true,

@@ -9,6 +9,10 @@ import { draftSchema, missingFields } from '../services/instruction/types.js';
 import { renderText, letterSubject } from '../services/instruction/render.js';
 import { instructionDocx, instructionPdf } from '../services/instruction/exportFormats.js';
 import { proposeRefinement } from '../services/instruction/refine.js';
+import { userRateLimit } from './chatRateLimit.js';
+
+/** Allowed status moves (server-enforced; the screen mirrors them). */
+const NEXT: Record<string, string[]> = { draft: ['approved'], approved: ['sent'], sent: [] };
 
 const verParam = z.coerce.number().int().positive();
 
@@ -38,7 +42,7 @@ export async function supplierInstructionRoutes(app: FastifyInstance): Promise<v
   });
 
   // POST …/instruction/preview { draft } — live letter text for the screen (no LLM, not saved).
-  app.post<{ Params: { id: string } }>('/api/workspaces/:id/instruction/preview', async (req, reply) => {
+  app.post<{ Params: { id: string } }>('/api/workspaces/:id/instruction/preview', { config: userRateLimit(240, '1 minute') }, async (req, reply) => {
     const ws = await getOwnedWorkspace(req.user!.sub, req.params.id);
     if (!ws) return reply.code(404).send({ error: 'not_found' });
     const parsed = z.object({ draft: draftSchema }).safeParse(req.body);
@@ -71,23 +75,40 @@ export async function supplierInstructionRoutes(app: FastifyInstance): Promise<v
     if (!ws) return reply.code(404).send({ error: 'not_found' });
     const ver = verParam.safeParse(req.params.ver);
     const parsed = z
-      .object({ draft: draftSchema.optional(), status: z.enum(['draft', 'approved', 'sent']).optional() })
+      .object({
+        draft: draftSchema.optional(),
+        status: z.enum(['approved', 'sent']).optional(),
+        // Proposals are server-owned (Штурман writes them): the screen only
+        // reports which ones the user accepted/rejected since the last save.
+        resolvedProposals: z.array(z.string().max(64)).max(30).optional(),
+      })
       .safeParse(req.body);
     if (!ver.success || !parsed.success) return reply.code(400).send({ error: 'invalid_request' });
     const cur = await getVersion(ws.id, ver.data);
     if (!cur) return reply.code(404).send({ error: 'not_found' });
-    const draft = parsed.data.draft ?? cur.draft;
-    if (parsed.data.status && parsed.data.status !== 'draft') {
+    // Approved / sent versions are the reference for the compliance check — never
+    // edited in place (a change is a new version via POST).
+    if (parsed.data.draft && cur.status !== 'draft') return reply.code(409).send({ error: 'version_locked' });
+    if (parsed.data.status && !NEXT[cur.status]!.includes(parsed.data.status)) {
+      return reply.code(409).send({ error: 'invalid_transition', from: cur.status, to: parsed.data.status });
+    }
+    let draft = cur.draft;
+    if (parsed.data.draft) {
+      const resolved = new Set(parsed.data.resolvedProposals ?? []);
+      draft = { ...parsed.data.draft, proposals: cur.draft.proposals.filter((p) => !resolved.has(p.path)) };
+    }
+    if (parsed.data.status) {
       const missing = missingFields(draft);
       if (missing.length) return reply.code(400).send({ error: 'missing_fields', missing });
     }
-    const v = await updateVersion(ws.id, ver.data, { draft: parsed.data.draft, status: parsed.data.status });
+    const v = await updateVersion(ws.id, ver.data, { draft: parsed.data.draft ? draft : undefined, status: parsed.data.status });
     return reply.send({ version: { ...v!, missing: missingFields(v!.draft) } });
   });
 
   // GET …/instructions/:ver/render?lang=en|uk&format=txt|docx|pdf
   app.get<{ Params: { id: string; ver: string }; Querystring: { lang?: string; format?: string } }>(
     '/api/workspaces/:id/instructions/:ver/render',
+    { config: userRateLimit(30, '1 minute') },
     async (req, reply) => {
       const ws = await getOwnedWorkspace(req.user!.sub, req.params.id);
       if (!ws) return reply.code(404).send({ error: 'not_found' });
@@ -115,7 +136,7 @@ export async function supplierInstructionRoutes(app: FastifyInstance): Promise<v
   );
 
   // POST …/instructions/:ver/refine { request } — AI proposes extra clauses (not saved).
-  app.post<{ Params: { id: string; ver: string } }>('/api/workspaces/:id/instructions/:ver/refine', async (req, reply) => {
+  app.post<{ Params: { id: string; ver: string } }>('/api/workspaces/:id/instructions/:ver/refine', { config: userRateLimit(10, '10 minutes') }, async (req, reply) => {
     const ws = await getOwnedWorkspace(req.user!.sub, req.params.id);
     if (!ws) return reply.code(404).send({ error: 'not_found' });
     const ver = verParam.safeParse(req.params.ver);

@@ -1,5 +1,6 @@
 import { pool, query } from '../../db/pool.js';
 import { draftSchema, type InstructionDraft } from './types.js';
+import { emptyDraft } from './defaults.js';
 
 export interface InstructionVersion {
   id: string;
@@ -29,7 +30,12 @@ const toVersion = (r: Row): InstructionVersion => ({
   id: r.id,
   version: r.version,
   status: r.status,
-  draft: draftSchema.parse(r.draft),
+  // A row that no longer fits the (tightened) schema must not take down the
+  // discrepancies / risks / report endpoints that read the approved version.
+  draft: (() => {
+    const p = draftSchema.safeParse(r.draft);
+    return p.success ? p.data : { ...emptyDraft(), ...(r.draft as Partial<InstructionDraft>) };
+  })(),
   createdBy: r.created_by_name,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
@@ -76,6 +82,42 @@ export async function createVersion(workspaceId: string, draft: InstructionDraft
   } finally {
     client.release();
   }
+}
+
+/**
+ * The version the AGENT may write proposals into: the latest version if it is a
+ * draft, else a fresh draft copy of it, else v1 from `prefill()`. Serialized per
+ * shipment so concurrent tool calls don't create v1 twice.
+ */
+export async function ensureDraftVersion(
+  workspaceId: string,
+  prefill: () => Promise<InstructionDraft>,
+): Promise<InstructionVersion> {
+  const lock = await pool.connect();
+  try {
+    await lock.query('SELECT pg_advisory_lock(hashtext($1))', [`instr-draft:${workspaceId}`]);
+    const [latest] = await listVersions(workspaceId);
+    if (latest?.status === 'draft') return latest;
+    const base = latest ? { ...latest.draft, proposals: [] } : await prefill();
+    return await createVersion(workspaceId, base, null);
+  } finally {
+    await lock.query('SELECT pg_advisory_unlock(hashtext($1))', [`instr-draft:${workspaceId}`]).catch(() => undefined);
+    lock.release();
+  }
+}
+
+/** Replace ONLY the proposals of a draft version (never clobbers field edits). */
+export async function setProposals(
+  workspaceId: string,
+  version: number,
+  proposals: InstructionDraft['proposals'],
+): Promise<void> {
+  await query(
+    `UPDATE supplier_instructions
+     SET draft = jsonb_set(draft, '{proposals}', $3::jsonb), updated_at = now()
+     WHERE workspace_id = $1 AND version = $2 AND status = 'draft'`,
+    [workspaceId, version, JSON.stringify(proposals)],
+  );
 }
 
 export async function updateVersion(

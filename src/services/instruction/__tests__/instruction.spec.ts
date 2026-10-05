@@ -78,3 +78,18 @@ describe('instruction compliance — Метопрен', () => {
     expect(checkInstructionCompliance(metoprene(), [doc('c.pdf', 'contract', {})], 1)).toEqual([]);
   });
 });
+
+import { isProposablePath } from '../types.js';
+describe('instruction draft guards', () => {
+  it('only whitelisted string fields can be proposed', () => {
+    expect(isProposablePath('originals.phone')).toBe(true);
+    expect(isProposablePath('constructor.name')).toBe(false);
+    expect(isProposablePath('hints.qdproSummary')).toBe(false);
+    expect(isProposablePath('docs.0.label')).toBe(false);
+  });
+  it('schema bounds oversized input', () => {
+    const d = metoprene();
+    expect(draftSchema.safeParse({ ...d, labelNotes: 'x'.repeat(5000) }).success).toBe(false);
+    expect(draftSchema.safeParse({ ...d, extra: Array.from({ length: 11 }, () => ({ en: 'a', uk: 'b' })) }).success).toBe(false);
+  });
+});

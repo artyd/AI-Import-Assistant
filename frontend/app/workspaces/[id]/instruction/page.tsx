@@ -61,6 +61,14 @@ export default function InstructionPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [refineOpen, setRefineOpen] = useState(false);
+  // Proposals are server-owned (Штурман writes them); the screen only reports
+  // which ones the user accepted/rejected, so a save never wipes new ones.
+  const resolved = useRef<Set<string>>(new Set());
+  // Latest `current` for callbacks that outlive a render (chat streaming).
+  const currentRef = useRef<InstructionVersion | null>(null);
+  useEffect(() => {
+    currentRef.current = current;
+  }, [current]);
 
   useEffect(() => {
     if (!authLoading && !user) router.replace("/login");
@@ -121,9 +129,18 @@ export default function InstructionPage() {
     if (!current || locked) {
       v = (await api<{ version: InstructionVersion }>(`/api/workspaces/${id}/instructions`, { method: "POST", body: { draft } })).version;
     } else {
-      v = (await api<{ version: InstructionVersion }>(`/api/workspaces/${id}/instructions/${current.version}`, { method: "PATCH", body: { draft } })).version;
+      v = (
+        await api<{ version: InstructionVersion }>(`/api/workspaces/${id}/instructions/${current.version}`, {
+          method: "PATCH",
+          body: { draft, resolvedProposals: [...resolved.current] },
+        })
+      ).version;
     }
+    resolved.current = new Set();
     setCurrent(v);
+    currentRef.current = v;
+    // Keep the screen's fields; take the server's proposals (Штурман may have added some).
+    setDraft((d) => (d ? { ...d, proposals: v.draft.proposals } : v.draft));
     setDirty(false);
     setVersions((vs) => [v, ...vs.filter((x) => x.version !== v.version)].sort((a, b) => b.version - a.version));
     return v;
@@ -199,11 +216,17 @@ export default function InstructionPage() {
     edit((d) => {
       const p = d.proposals[i];
       if (!p) return d;
+      resolved.current.add(p.path);
       const next = setField(d, p.path, p.value, "documents");
       next.proposals = d.proposals.filter((_, j) => j !== i);
       return next;
     });
-  const rejectProposal = (i: number) => edit((d) => ({ ...d, proposals: d.proposals.filter((_, j) => j !== i) }));
+  const rejectProposal = (i: number) =>
+    edit((d) => {
+      const p = d.proposals[i];
+      if (p) resolved.current.add(p.path);
+      return { ...d, proposals: d.proposals.filter((_, j) => j !== i) };
+    });
 
   /** After Штурман answered: pull its proposals in without touching local edits. */
   const syncProposals = useCallback(async () => {
@@ -211,13 +234,17 @@ export default function InstructionPage() {
     const latest = r.versions[0];
     if (!latest) return;
     setVersions(r.versions);
-    if (!current) {
+    const cur = currentRef.current; // not the closure's — the chat may have outlived renders
+    const pending = (ps: InstructionDraft["proposals"]) => ps.filter((p) => !resolved.current.has(p.path));
+    if (!cur || latest.version > cur.version) {
+      // Штурман wrote into a newer draft version (e.g. the shown one was approved).
       setCurrent(latest);
-      setDraft((d) => (d ? { ...d, proposals: latest.draft.proposals } : latest.draft));
-    } else if (latest.version === current.version) {
-      setDraft((d) => (d ? { ...d, proposals: latest.draft.proposals } : d));
+      currentRef.current = latest;
+      setDraft((d) => (d ? { ...d, proposals: pending(latest.draft.proposals) } : latest.draft));
+    } else if (latest.version === cur.version) {
+      setDraft((d) => (d ? { ...d, proposals: pending(latest.draft.proposals) } : d));
     }
-  }, [id, current]);
+  }, [id]);
 
   if (!draft) {
     return (
@@ -405,7 +432,7 @@ export default function InstructionPage() {
               <div className={s.f}>
                 <label>Одиниця</label>
                 <select className={s.in} value={draft.product.unit} onChange={(e) => setF("product.unit", e.target.value)}>
-                  {["kg", "g", "t", "l", "pcs"].map((u) => <option key={u}>{u}</option>)}
+                  {[...new Set(["kg", "g", "t", "l", "pcs", draft.product.unit].filter(Boolean))].map((u) => <option key={u}>{u}</option>)}
                 </select>
               </div>
             </div>
@@ -710,6 +737,9 @@ function InstructionChat({
         }
       );
       await onAnswered();
+    } catch (e) {
+      const msg = e instanceof ApiError ? e.message : String(e);
+      setMsgs((m) => [...m.slice(0, -1), { role: "assistant", text: `⚠ Не вдалося: ${msg}`, tools: [] }]);
     } finally {
       setBusy(false);
     }

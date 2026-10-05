@@ -343,7 +343,8 @@ export function buildFacts(input: FactsInput): ReportFacts {
       packages: num(firstOf(docs, ['customs_declaration', 'packing_list', 'invoice', 'transport'], 'packages_count')),
       grossKg: num(firstOf(docs, ['customs_declaration', 'transport', 'packing_list', 'invoice'], 'gross_weight_kg')),
     },
-    timeline: timeline.slice(0, 8),
+    // ≤ 8 points: keep the first (contract) and the most recent — МД/delivery matter most.
+    timeline: timeline.length > 8 ? [timeline[0]!, ...timeline.slice(-7)] : timeline,
     classification: {
       hsCode,
       hsSource,

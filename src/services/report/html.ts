@@ -88,7 +88,7 @@ export function renderReportHtml(f: ReportFacts, summary: string | null): string
           m.customsValueUah !== null ? `МВ ${nf(m.customsValueUah)} ₴` : ''
         }${m.rate !== null ? ` · курс ${nf(m.rate, 4)}` : ''}</div>`
       : `<div class="v">—</div><div class="s">МД ще немає</div>`;
-  const svc = m.servicesUah.map((s) => `${SERVICE_UK[s.kind] ?? s.kind} <b>${nf(s.amountUah)} ₴</b>`).join(' + ');
+  const svc = m.servicesUah.map((s) => `${esc(SERVICE_UK[s.kind] ?? s.kind)} <b>${nf(s.amountUah)} ₴</b>`).join(' + ');
   const kCost =
     m.costPerKgUah !== null
       ? `<div class="v">${nf(m.costPerKgUah)} ₴<span class="u"> /кг</span></div><div class="s">товар + мито${svc ? ` + ${svc}` : ''}<br>без ПДВ (до кредиту)${m.freightInPrice ? '; фрахт у ціні' : ''}</div>`

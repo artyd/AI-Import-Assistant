@@ -5,6 +5,7 @@ import { authenticate } from '../auth/hook.js';
 import { query } from '../db/pool.js';
 import { getOwnedWorkspace } from '../services/workspaceAccess.js';
 import { buildAndSaveReport, reportPdf } from '../services/report.js';
+import { userRateLimit } from './chatRateLimit.js';
 
 const bodySchema = z.object({ summary: z.boolean().optional() }).optional();
 
@@ -18,7 +19,7 @@ export async function reportRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('preHandler', authenticate);
 
   // POST /api/workspaces/:id/report — build the one-page report, persist the HTML.
-  app.post<{ Params: { id: string } }>('/api/workspaces/:id/report', async (req, reply) => {
+  app.post<{ Params: { id: string } }>('/api/workspaces/:id/report', { config: userRateLimit(20, '10 minutes') }, async (req, reply) => {
     const ws = await getOwnedWorkspace(req.user!.sub, req.params.id);
     if (!ws) return reply.code(404).send({ error: 'not_found' });
     const parsed = bodySchema.safeParse(req.body ?? undefined);
@@ -30,6 +31,7 @@ export async function reportRoutes(app: FastifyInstance): Promise<void> {
   // GET /api/workspaces/:id/report/:artifactId.(pdf|html) — download a saved report.
   app.get<{ Params: { id: string; artifactId: string; ext: string } }>(
     '/api/workspaces/:id/report/:artifactId/:ext',
+    { config: userRateLimit(30, '1 minute') },
     async (req, reply) => {
       const ws = await getOwnedWorkspace(req.user!.sub, req.params.id);
       if (!ws) return reply.code(404).send({ error: 'not_found' });

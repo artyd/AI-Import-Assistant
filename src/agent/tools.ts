@@ -17,9 +17,9 @@ import {
 } from '../services/markdown/store.js';
 import { getWorkspaceById } from '../services/workspaceAccess.js';
 import { buildSupplierInstruction } from '../services/supplierInstruction.js';
-import { createVersion, listVersions, updateVersion } from '../services/instruction/store.js';
+import { ensureDraftVersion, listVersions, setProposals } from '../services/instruction/store.js';
 import { prefillDraft } from '../services/instruction/prefill.js';
-import { getPath, missingFields, REQUIRED_FIELDS } from '../services/instruction/types.js';
+import { getPath, isProposablePath, missingFields, REQUIRED_FIELDS } from '../services/instruction/types.js';
 import { computeDiscrepancies } from '../services/discrepancies.js';
 import { computeRegistryChecks } from '../services/drugRegistry.js';
 import { computeRisks, fieldLabel } from '../services/risks.js';
@@ -718,16 +718,11 @@ async function runSupplierInstruction(ctx: ToolContext): Promise<ToolOutcome> {
   return { result: res.instruction, summary: 'Згенеровано інструкцію постачальнику', citations: [] };
 }
 
-/** Latest constructor version, or a saved v1 from prefill so proposals have a home. */
-async function currentInstruction(wsId: string) {
-  const [latest] = await listVersions(wsId);
-  if (latest) return latest;
-  const ws = await getWorkspaceById(wsId);
-  return createVersion(wsId, await prefillDraft(ws!), null);
-}
-
 async function runGetInstructionDraft(ctx: ToolContext): Promise<ToolOutcome> {
-  const v = await currentInstruction(requireWorkspace(ctx));
+  // Read-only: an unsaved shipment gets a prefill preview, nothing is written.
+  const wsId = requireWorkspace(ctx);
+  const [latest] = await listVersions(wsId);
+  const v = latest ?? { version: 0, status: 'не збережено', draft: await prefillDraft((await getWorkspaceById(wsId))!) };
   const d = v.draft;
   const missing = missingFields(d);
   const fields = Object.keys(REQUIRED_FIELDS)
@@ -749,14 +744,20 @@ async function runGetInstructionDraft(ctx: ToolContext): Promise<ToolOutcome> {
 
 async function runProposeInstructionFields(input: unknown, ctx: ToolContext): Promise<ToolOutcome> {
   const parsed = z
-    .object({ fields: z.array(z.object({ path: z.string(), value: z.string(), reason: z.string() })).min(1).max(20) })
+    .object({
+      fields: z
+        .array(z.object({ path: z.string().max(64), value: z.string().trim().min(1).max(500), reason: z.string().max(300) }))
+        .min(1)
+        .max(20),
+    })
     .safeParse(input);
   if (!parsed.success) return { result: 'Некоректні пропозиції.', summary: 'Інструкція: помилка', citations: [] };
-  const v = await currentInstruction(requireWorkspace(ctx));
-  const known = parsed.data.fields.filter((f) => typeof getPath(v.draft, f.path) === 'string');
-  if (!known.length) return { result: 'Жодного відомого шляху поля — перевір назви.', summary: 'Інструкція: 0 пропозицій', citations: [] };
-  const proposals = [...v.draft.proposals.filter((p) => !known.some((k) => k.path === p.path)), ...known];
-  await updateVersion(requireWorkspace(ctx), v.version, { draft: { ...v.draft, proposals } });
+  const wsId = requireWorkspace(ctx);
+  const known = parsed.data.fields.filter((f) => isProposablePath(f.path));
+  if (!known.length) return { result: 'Жодного дозволеного шляху поля — перевір назви.', summary: 'Інструкція: 0 пропозицій', citations: [] };
+  const v = await ensureDraftVersion(wsId, async () => prefillDraft((await getWorkspaceById(wsId))!));
+  const proposals = [...v.draft.proposals.filter((p) => !known.some((k) => k.path === p.path)), ...known].slice(-30);
+  await setProposals(wsId, v.version, proposals);
   return {
     result: `Запропоновано ${known.length} знач. у конструкторі інструкції (v${v.version}) — користувач прийме або відхилить їх на екрані «Інструкція». Нічого не збережено автоматично.`,
     summary: `Інструкція: ${known.length} пропозицій`,

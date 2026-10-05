@@ -98,6 +98,17 @@ export const TRANSPORT_LABEL: Record<Transport, string> = {
 
 export const INCOTERMS = ["EXW", "FCA", "FAS", "FOB", "CFR", "CIF", "CPT", "CIP", "DAP", "DPU", "DDP"];
 
+/** Paths a Штурман proposal may set (mirrors backend PROPOSABLE_PATHS). */
+export const PROPOSABLE_PATHS = new Set([
+  "from.name", "from.address", "from.signer", "from.email", "from.phone",
+  "product.name", "product.grade", "product.cas", "product.quantity", "product.hsCode", "product.regNumber",
+  "consignor.name", "consignor.address", "consignor.country",
+  "consignee.name", "consignee.address", "consignee.country", "finalConsignee",
+  "contract.number", "contract.date",
+  "terms.incoterm", "terms.place", "terms.destination", "terms.finalDestination",
+  "labelNotes", "originals.contact", "originals.phone", "originals.address", "supplierEmail",
+]);
+
 export function getPath(obj: unknown, path: string): unknown {
   return path
     .split(".")
@@ -106,6 +117,7 @@ export function getPath(obj: unknown, path: string): unknown {
 
 /** Immutable set of a string field; records the source as manual unless given. */
 export function setField(d: InstructionDraft, path: string, value: string, source: FieldSource = "manual"): InstructionDraft {
+  if (!PROPOSABLE_PATHS.has(path) && path !== "product.unit") return d; // known string fields only
   const keys = path.split(".");
   const next = structuredClone(d) as unknown as Record<string, unknown>;
   let cur = next;

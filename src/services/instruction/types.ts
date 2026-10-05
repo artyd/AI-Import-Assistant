@@ -14,82 +14,102 @@ export const TRANSPORTS = ['air', 'sea', 'road', 'multimodal'] as const;
 export const SOURCES = ['contract', 'invoice', 'documents', 'parties', 'template', 'qdpro', 'pubchem', 'previous', 'manual'] as const;
 export type FieldSource = (typeof SOURCES)[number];
 
+/** Bounded text field — a draft is stored per version, previewed live and sent to the refine model. */
+const str = (max = 1000) => z.string().max(max).default('');
+
 const party = z.object({
-  name: z.string().default(''),
-  address: z.string().default(''),
-  country: z.string().default(''),
+  name: str(),
+  address: str(),
+  country: str(),
 });
 
 const checkItem = z.object({
-  key: z.string(),
-  label: z.string(), // English label as it appears in the letter
-  labelUk: z.string().default(''),
+  key: z.string().max(64),
+  label: z.string().max(300), // English label as it appears in the letter
+  labelUk: str(),
   checked: z.boolean(),
   source: z.enum(['base', 'qdpro', 'previous', 'custom']).default('base'),
 });
 
 export const draftSchema = z.object({
   from: z.object({
-    directoryId: z.string().nullable().default(null),
-    name: z.string().default(''),
-    address: z.string().default(''),
-    signer: z.string().default(''),
-    email: z.string().default(''),
-    phone: z.string().default(''),
+    directoryId: z.string().max(64).nullable().default(null),
+    name: str(),
+    address: str(),
+    signer: str(),
+    email: str(),
+    phone: str(),
   }),
   category: z.enum(CATEGORIES).default('substance'),
   product: z.object({
-    name: z.string().default(''),
-    grade: z.string().default(''),
-    cas: z.string().default(''),
-    quantity: z.string().default(''),
+    name: str(),
+    grade: str(),
+    cas: str(),
+    quantity: str(),
     unit: z.string().default('kg'),
-    hsCode: z.string().default(''),
-    regNumber: z.string().default(''),
+    hsCode: str(),
+    regNumber: str(),
   }),
   consignor: party,
   consigneeChoice: z.enum(['intermediary', 'recipient', 'custom']).default('recipient'),
   consignee: party,
-  finalConsignee: z.string().default(''),
-  contract: z.object({ number: z.string().default(''), date: z.string().default('') }),
+  finalConsignee: str(),
+  contract: z.object({ number: str(), date: str() }),
   terms: z.object({
-    incoterm: z.string().default(''),
-    place: z.string().default(''),
-    destination: z.string().default(''), // port / airport of destination
-    finalDestination: z.string().default(''),
+    incoterm: str(),
+    place: str(),
+    destination: str(), // port / airport of destination
+    finalDestination: str(),
     transport: z.enum(TRANSPORTS).default('air'),
   }),
-  docs: z.array(checkItem).default([]),
-  labels: z.array(checkItem).default([]),
-  labelNotes: z.string().default(''),
+  docs: z.array(checkItem).max(60).default([]),
+  labels: z.array(checkItem).max(60).default([]),
+  labelNotes: str(),
   originals: z.object({
-    contact: z.string().default(''),
-    phone: z.string().default(''),
-    address: z.string().default(''),
+    contact: str(),
+    phone: str(),
+    address: str(),
   }),
-  supplierEmail: z.string().default(''),
+  supplierEmail: str(),
   /** Extra clauses accepted from «Доопрацювати з ШІ» (rendered as section 7). */
-  extra: z.array(z.object({ en: z.string(), uk: z.string() })).default([]),
+  extra: z.array(z.object({ en: z.string().max(2000), uk: z.string().max(2000) })).max(10).default([]),
   /** Field path → where the value came from (badges). */
   sources: z.record(z.enum(SOURCES)).default({}),
   /** Values Штурман proposed in chat, waiting for the user's accept/reject. */
   proposals: z
-    .array(z.object({ path: z.string(), value: z.string(), reason: z.string() }))
+    .array(z.object({ path: z.string().max(64), value: z.string().max(500), reason: z.string().max(300) }))
+    .max(30)
     .default([]),
   /** Context shown as hints (not rendered into the letter). */
   hints: z
     .object({
       contractType: z.enum(['bilateral', 'trilateral']).nullable().default(null),
-      intermediary: z.string().default(''),
-      recipient: z.string().default(''),
-      qdproSummary: z.string().default(''),
-      lessons: z.array(z.string()).default([]),
+      intermediary: str(),
+      recipient: str(),
+      qdproSummary: str(),
+      lessons: z.array(z.string().max(300)).max(10).default([]),
     })
     .default({}),
 });
 
 export type InstructionDraft = z.infer<typeof draftSchema>;
 export type CheckItem = z.infer<typeof checkItem>;
+
+/**
+ * The ONLY paths Штурман may propose and the screen may set from a proposal —
+ * never derived from user/model input (blocks prototype paths like
+ * `constructor.name` and edits of hints/checklists via prompt injection).
+ */
+export const PROPOSABLE_PATHS = [
+  'from.name', 'from.address', 'from.signer', 'from.email', 'from.phone',
+  'product.name', 'product.grade', 'product.cas', 'product.quantity', 'product.hsCode', 'product.regNumber',
+  'consignor.name', 'consignor.address', 'consignor.country',
+  'consignee.name', 'consignee.address', 'consignee.country', 'finalConsignee',
+  'contract.number', 'contract.date',
+  'terms.incoterm', 'terms.place', 'terms.destination', 'terms.finalDestination',
+  'labelNotes', 'originals.contact', 'originals.phone', 'originals.address', 'supplierEmail',
+] as const;
+export const isProposablePath = (p: string): boolean => (PROPOSABLE_PATHS as readonly string[]).includes(p);
 
 /** Fields that must be filled before approve / export (path → human label). */
 export const REQUIRED_FIELDS: Record<string, string> = {

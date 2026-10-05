@@ -145,11 +145,16 @@ export async function prefillDraft(ws: WorkspaceRow): Promise<InstructionDraft> 
 
   // ── previous shipment of the same supplier: HS code + package choices ─────
   if (sender) {
+    // Same owner only (shipments are owner-scoped); candidates narrowed in SQL by
+    // the supplier's first word, the fuzzy company match finishes in JS.
+    const firstWord = sender.replace(/[«»"']/g, '').trim().split(/\s+/)[0] ?? '';
     const { rows: prev } = await query<{ draft: InstructionDraft }>(
       `SELECT si.draft FROM supplier_instructions si
-       WHERE si.workspace_id <> $1 AND si.status IN ('approved', 'sent')
-       ORDER BY si.updated_at DESC LIMIT 20`,
-      [ws.id],
+       JOIN workspaces w ON w.id = si.workspace_id
+       WHERE w.owner_id = $2 AND si.workspace_id <> $1 AND si.status IN ('approved', 'sent')
+         AND si.draft->'consignor'->>'name' ILIKE $3
+       ORDER BY si.created_at DESC LIMIT 20`,
+      [ws.id, ws.owner_id, `%${firstWord.replace(/[%_\\]/g, '')}%`],
     );
     const p = prev.map((r) => r.draft).find((x) => sameCompany(x.consignor?.name ?? '', sender));
     if (p) {
