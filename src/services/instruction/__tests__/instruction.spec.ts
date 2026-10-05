@@ -93,3 +93,20 @@ describe('instruction draft guards', () => {
     expect(draftSchema.safeParse({ ...d, extra: Array.from({ length: 11 }, () => ({ en: 'a', uk: 'b' })) }).success).toBe(false);
   });
 });
+
+import { formatDate, formatHs, latinPart } from '../format.js';
+describe('prefill formatting', () => {
+  it('keeps the Latin part of bilingual names for the EN letter', () => {
+    expect(latinPart('Метопрен / S-METHOPRENE')).toBe('S-METHOPRENE');
+    expect(latinPart('«TEKHINFORM PLUS» LLC / ТОВ «ТЕХІНФОРМ ПЛЮС»')).toBe('«TEKHINFORM PLUS» LLC');
+    expect(latinPart('NGL Fine-Chem Limited')).toBe('NGL Fine-Chem Limited');
+    expect(latinPart('03062026/PNM')).toBe('03062026/PNM');
+  });
+  it('normalizes HS codes and ISO dates', () => {
+    expect(formatHs('29189990 90 0')).toBe('2918 99 90 90');
+    expect(formatHs('2918999090')).toBe('2918 99 90 90');
+    expect(formatHs('291899')).toBe('291899');
+    expect(formatDate('2026-06-03')).toBe('03.06.2026');
+    expect(formatDate('03.06.2026')).toBe('03.06.2026');
+  });
+});

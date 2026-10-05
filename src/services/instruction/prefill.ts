@@ -6,6 +6,7 @@ import { incotermCode } from '../reconcile.js';
 import { logistEnabled, uktzedFlags } from '../logist/index.js';
 import { baseDocs, baseLabels, emptyDraft, qdproDocs } from './defaults.js';
 import type { CheckItem, FieldSource, InstructionDraft } from './types.js';
+import { formatDate, formatHs, latinPart } from './format.js';
 
 /**
  * Pre-fills a new instruction draft from what the shipment already knows — no
@@ -70,7 +71,7 @@ function incotermPlace(term: string): string {
     .trim();
 }
 
-export async function prefillDraft(ws: WorkspaceRow): Promise<InstructionDraft> {
+export async function prefillDraft(ws: WorkspaceRow, user?: { name: string } | null): Promise<InstructionDraft> {
   const d = emptyDraft();
   const src: Record<string, FieldSource> = {};
   const set = (path: string, value: string, source: FieldSource): void => {
@@ -105,15 +106,21 @@ export async function prefillDraft(ws: WorkspaceRow): Promise<InstructionDraft> 
   d.docs = baseDocs(d.category);
   d.labels = baseLabels(d.category);
   d.hints.contractType = ws.contract_type;
-  d.hints.intermediary = intermediary;
-  d.hints.recipient = recipient;
+  d.hints.intermediary = latinPart(intermediary);
+  d.hints.recipient = latinPart(recipient);
 
   // ── from (letterhead) ─────────────────────────────────────────────────────
   const own = dirFind(['own_company'], recipient) ?? dir.find((r) => r.kind === 'own_company');
   if (own) {
     d.from = { directoryId: own.id, name: own.name, address: own.address, signer: own.signer, email: own.email, phone: own.phone };
     src['from.name'] = 'template';
-  } else set('from.name', recipient, 'parties');
+  } else {
+    // First use (empty directory): our company = the buyer, address from its documents.
+    set('from.name', latinPart(recipient), 'parties');
+    const a = recipient ? addressFromDocs(docs, recipient) : null;
+    if (a?.address) set('from.address', [a.address, a.country].filter(Boolean).join(', '), 'documents');
+    if (user?.name) set('from.signer', user.name, 'parties');
+  }
 
   // ── the contract the letter refers to: the one with the SUPPLIER ─────────
   const contracts = docs.filter((x) => x.doc_type === 'contract');
@@ -123,7 +130,7 @@ export async function prefillDraft(ws: WorkspaceRow): Promise<InstructionDraft> 
     contracts[0];
   if (supplierContract) {
     set('contract.number', str(supplierContract.fields.contract_number), 'contract');
-    set('contract.date', str(supplierContract.fields.document_date), 'contract');
+    set('contract.date', formatDate(str(supplierContract.fields.document_date)), 'contract');
     const inc = str(supplierContract.fields.incoterm);
     set('terms.incoterm', incotermCode(inc) ?? '', 'contract');
     set('terms.place', incotermPlace(inc), 'contract');
@@ -134,13 +141,16 @@ export async function prefillDraft(ws: WorkspaceRow): Promise<InstructionDraft> 
   const productDoc = supplierContract ?? docs.find((x) => x.doc_type === 'invoice');
   const productSrc: FieldSource = productDoc?.doc_type === 'contract' ? 'contract' : 'invoice';
   const line = (productDoc?.fields.line_items as { description?: string; quantity?: number; unit?: string }[] | undefined)?.[0];
-  set('product.name', str(productDoc?.fields.product_name) || str(line?.description), productSrc);
+  set('product.name', latinPart(str(productDoc?.fields.product_name) || str(line?.description)), productSrc);
   set('product.quantity', line?.quantity !== undefined ? str(line.quantity) : str(productDoc?.fields.net_weight_kg), productSrc);
   if (line?.unit) d.product.unit = /кг|kgs?/i.test(line.unit) ? 'kg' : line.unit;
-  const anyField = (k: string) => docs.map((x) => str(x.fields[k])).find(Boolean) ?? '';
+  // Only this cargo's documents — `other` is where unrelated files land (e.g. the
+  // registration certificate of a different finished product).
+  const productDocs = docs.filter((x) => x.doc_type && x.doc_type !== 'other');
+  const anyField = (k: string) => productDocs.map((x) => str(x.fields[k])).find(Boolean) ?? '';
   set('product.cas', anyField('cas_number'), 'documents');
-  set('product.hsCode', anyField('hs_code'), 'documents');
-  const reg = docs.map((x) => str(x.fields.registration_number)).find((v) => /^(UA\/|[AА][BВ]-)/i.test(v));
+  set('product.hsCode', formatHs(anyField('hs_code')), 'documents');
+  const reg = productDocs.map((x) => str(x.fields.registration_number)).find((v) => /^(UA\/|[AА][BВ]-)/i.test(v));
   if (reg) set('product.regNumber', reg, 'documents');
 
   // ── previous shipment of the same supplier: HS code + package choices ─────
@@ -179,7 +189,7 @@ export async function prefillDraft(ws: WorkspaceRow): Promise<InstructionDraft> 
   if (sender) {
     const t = dirFind(['supplier'], sender);
     const a = t ?? addressFromDocs(docs, sender);
-    d.consignor = { name: sender, address: a?.address ?? '', country: a?.country ?? (parties.find((x) => x.role === 'sender')?.country ?? '') };
+    d.consignor = { name: latinPart(sender), address: a?.address ?? '', country: a?.country ?? (parties.find((x) => x.role === 'sender')?.country ?? '') };
     src['consignor.name'] = 'parties';
     if (a?.address) src['consignor.address'] = t ? 'template' : 'documents';
     if (t?.email) set('supplierEmail', t.email, 'template');
@@ -189,13 +199,13 @@ export async function prefillDraft(ws: WorkspaceRow): Promise<InstructionDraft> 
     d.consigneeChoice = trilateral ? 'intermediary' : 'recipient';
     const t = dirFind(['consignee', 'own_company'], consigneeName);
     const a = t ?? addressFromDocs(docs, consigneeName);
-    d.consignee = { name: consigneeName, address: a?.address ?? '', country: a?.country ?? '' };
+    d.consignee = { name: latinPart(consigneeName), address: a?.address ?? '', country: a?.country ?? '' };
     src['consignee.name'] = 'parties';
     if (a?.address) src['consignee.address'] = t ? 'template' : 'documents';
   }
   if (trilateral && recipient) {
     const a = dirFind(['own_company', 'consignee'], recipient) ?? addressFromDocs(docs, recipient);
-    set('finalConsignee', [recipient, a?.address].filter(Boolean).join(', '), 'parties');
+    set('finalConsignee', [latinPart(recipient), a?.address].filter(Boolean).join(', '), 'parties');
   }
 
   // ── transport ─────────────────────────────────────────────────────────────
@@ -213,6 +223,13 @@ export async function prefillDraft(ws: WorkspaceRow): Promise<InstructionDraft> 
   if (contact) {
     d.originals = { contact: contact.signer || contact.name, phone: contact.phone, address: contact.address };
     for (const k of ['contact', 'phone', 'address'] as const) if (d.originals[k]) src[`originals.${k}`] = 'template';
+  } else {
+    // No contact template yet: originals go to our company (the letterhead), to
+    // the person preparing the letter. The phone stays for the user (saved to a
+    // template after the first time).
+    set('originals.contact', d.from.signer || user?.name || '', 'parties');
+    set('originals.phone', d.from.phone, 'template');
+    set('originals.address', d.from.address, d.sources['from.address'] ?? 'documents');
   }
 
   // ── qdpro: code-specific requirements for the supplier ────────────────────
