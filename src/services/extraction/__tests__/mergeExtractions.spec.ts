@@ -76,6 +76,24 @@ describe('mergeExtractions', () => {
     expect(merged.extraction_note).toBe('blurry');
   });
 
+  it('keeps the same company in two roles (seller vs consignor with its own address)', () => {
+    const merged = mergeExtractions([
+      fields({
+        doc_type: 'contract',
+        parties: [{ name: 'Jinyao Pharmaceuticals (Singapore) PTE. LTD.', role: 'Seller', country: 'Singapore', address: '78 Shenton Way' }],
+      }),
+      fields({
+        doc_type: 'other',
+        parties: [
+          { name: 'Jinyao Pharmaceuticals (Singapore) PTE. LTD.', role: 'Consignor', country: 'China', address: 'No. 19, Xin Ye 9th Street, Tianjin' },
+          { name: 'Jinyao Pharmaceuticals (Singapore) PTE. LTD.', role: 'Seller', country: null, address: null },
+        ],
+      }),
+    ])!;
+    expect(merged.parties.map((p) => p.role)).toEqual(['Seller', 'Consignor']);
+    expect(merged.parties[1]!.address).toMatch(/Tianjin/);
+  });
+
   it('returns null for no parts and the part itself for one', () => {
     expect(mergeExtractions([])).toBeNull();
     const one = fields({ invoice_number: 'X' });
