@@ -110,3 +110,34 @@ describe('prefill formatting', () => {
     expect(formatDate('03.06.2026')).toBe('03.06.2026');
   });
 });
+
+describe('render — no doubled units or countries (Hydrocortisone letter)', () => {
+  it('prints the quantity unit and the country once', () => {
+    const d = emptyDraft();
+    d.product.name = 'Hydrocortisone Acetate';
+    d.product.quantity = '1 kg'; // proposed with its unit
+    d.product.unit = 'kg';
+    d.consignor = {
+      name: 'Jinyao Pharmaceuticals (Singapore) PTE. LTD.',
+      address: 'No. 19, Xin Ye 9th Street, Tianjin 300462, China',
+      country: 'China',
+    };
+    d.consignee = { name: 'TEKHINFORM PLUS LLC', address: 'Ukraine, 61001, Kharkiv, 14-A, Frankivska street', country: '' };
+    const text = renderText(d, 'en');
+    expect(text).not.toMatch(/kg kg/);
+    expect(text).not.toMatch(/China, China/);
+    expect(text).toMatch(/Frankivska street\n/);
+    expect(text).not.toMatch(/Singapore\n\n2\)|Frankivska street, Singapore/);
+    expect(letterSubject(d)).toBe('Shipping instructions — Hydrocortisone Acetate 1 kg');
+  });
+
+  it('still appends a country the address does not name', () => {
+    const d = emptyDraft();
+    d.product.quantity = '25';
+    d.product.unit = 'kg';
+    d.consignee = { name: 'X', address: '61001, Kharkiv', country: 'Ukraine' };
+    const text = renderText(d, 'en');
+    expect(text).toMatch(/61001, Kharkiv, Ukraine/);
+    expect(text).toMatch(/25 kg/);
+  });
+});

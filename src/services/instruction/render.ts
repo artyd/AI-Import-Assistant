@@ -28,16 +28,35 @@ const TRANSPORT_UK: Record<InstructionDraft['terms']['transport'], { mode: strin
   multimodal: { mode: 'мультимодальний', doc: 'транспортні документи кожного плеча', after: 'Після відвантаження — документи кожного плеча і копія експортної декларації.' },
 };
 
+/** "1" + "kg" → "1 kg"; a quantity typed/proposed with its unit ("1 kg") is not suffixed again. */
+export function quantityText(p: { quantity: string; unit: string }): string {
+  const q = p.quantity.trim();
+  if (!q) return '';
+  return /[a-zа-яіїєґ]/i.test(q) ? q : `${q} ${p.unit}`.trim();
+}
+
+/**
+ * "address, country" — the country only when the address doesn't already end
+ * with / name it ("…Tianjin 300462, China" + "China" printed «China, China»).
+ */
+export function addressWithCountry(address: string, country: string): string {
+  const a = address.trim();
+  const c = country.trim();
+  if (!c) return a;
+  if (!a) return c;
+  return a.toLowerCase().includes(c.toLowerCase()) ? a : `${a}, ${c}`;
+}
+
 function productLine(d: InstructionDraft, lang: Lang): string {
   const p = d.product;
   const parts = [ph(p.name, lang === 'en' ? 'PRODUCT' : 'ТОВАР'), p.grade, p.cas && `CAS ${p.cas}`].filter(Boolean).join(', ');
-  const qty = p.quantity.trim() ? ` ${p.quantity.trim()} ${p.unit}` : '';
+  const qty = quantityText(p) ? ` ${quantityText(p)}` : '';
   const hs = p.hsCode.trim() ? (lang === 'en' ? ` (HS code ${p.hsCode.trim()})` : ` (УКТ ЗЕД ${p.hsCode.trim()})`) : '';
   return `${parts}${qty ? `,${qty}` : ''}${hs}`;
 }
 
 const partyLines = (p: { name: string; address: string; country: string }, placeholder: string): string =>
-  [ph(p.name, placeholder), [p.address, p.country].filter((x) => x.trim()).join(', ')].filter(Boolean).join('\n');
+  [ph(p.name, placeholder), addressWithCountry(p.address, p.country)].filter(Boolean).join('\n');
 
 export function renderBlocks(d: InstructionDraft, lang: Lang): Block[] {
   const en = lang === 'en';
@@ -49,7 +68,7 @@ export function renderBlocks(d: InstructionDraft, lang: Lang): Block[] {
     ? `${d.contract.number.trim()}${d.contract.date.trim() ? (en ? ` dated ${d.contract.date.trim()}` : ` від ${d.contract.date.trim()}`) : ''}`
     : `[${en ? 'CONTRACT NO.' : '№ КОНТРАКТУ'}]`;
   const product = d.product.name.trim() || (en ? '[PRODUCT]' : '[ТОВАР]');
-  const qty = d.product.quantity.trim() ? ` ${d.product.quantity.trim()} ${d.product.unit}` : '';
+  const qty = quantityText(d.product) ? ` ${quantityText(d.product)}` : '';
 
   b.push({
     kind: 'title',
@@ -163,6 +182,6 @@ export function renderText(d: InstructionDraft, lang: Lang): string {
 
 /** E-mail subject used by mailto and the DOCX/PDF title. */
 export function letterSubject(d: InstructionDraft): string {
-  const qty = d.product.quantity.trim() ? ` ${d.product.quantity.trim()} ${d.product.unit}` : '';
+  const qty = quantityText(d.product) ? ` ${quantityText(d.product)}` : '';
   return `Shipping instructions — ${d.product.name.trim() || 'product'}${qty}${d.contract.number.trim() ? ` / ${d.contract.number.trim()}` : ''}`;
 }

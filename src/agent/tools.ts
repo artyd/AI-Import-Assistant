@@ -783,7 +783,12 @@ async function runProposeInstructionFields(input: unknown, ctx: ToolContext): Pr
     .safeParse(input);
   if (!parsed.success) return { result: 'Некоректні пропозиції.', summary: 'Інструкція: помилка', citations: [] };
   const wsId = requireWorkspace(ctx);
-  const known = parsed.data.fields.filter((f) => isProposablePath(f.path));
+  const known = parsed.data.fields
+    .filter((f) => isProposablePath(f.path))
+    // Quantity and unit are separate fields — "1 kg" would print «1 kg kg».
+    .map((f) =>
+      f.path === 'product.quantity' ? { ...f, value: f.value.replace(/^\s*([\d.,\s]*\d)\s*[a-zа-яіїєґ.]+\s*$/i, '$1') } : f,
+    );
   if (!known.length) return { result: 'Жодного дозволеного шляху поля — перевір назви.', summary: 'Інструкція: 0 пропозицій', citations: [] };
   const v = await ensureDraftVersion(wsId, async () => prefillDraft((await getWorkspaceById(wsId))!));
   const proposals = [...v.draft.proposals.filter((p) => !known.some((k) => k.path === p.path)), ...known].slice(-30);
