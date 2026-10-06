@@ -2,6 +2,7 @@ import { query } from '../../db/pool.js';
 import type { WorkspaceRow } from '../workspaceAccess.js';
 import { listParties } from '../parties.js';
 import { sameCompany } from '../contextDerive.js';
+import { countryToUk } from '../../domain/countries.js';
 import { incotermCode } from '../reconcile.js';
 import { logistEnabled, uktzedFlags } from '../logist/index.js';
 import { baseDocs, baseLabels, emptyDraft, qdproDocs } from './defaults.js';
@@ -69,16 +70,37 @@ const CONSIGNEE_ROLE = /consignee|вантажоодерж|грузополуч|
  * consignor of clause 4.2 / the consignee of 4.3 — the contract's own words beat
  * any slot inference.
  */
-function contractParty(
+export function contractParty(
   doc: DocRow | undefined,
-  role: RegExp,
+  kind: 'consignor' | 'consignee',
 ): { name: string; address: string; country: string } | null {
   if (!doc) return null;
+  const role = kind === 'consignor' ? CONSIGNOR_ROLE : CONSIGNEE_ROLE;
+  // Dedicated fields first: the extraction fills them from the shipment clause
+  // itself (4.2 «The Consignor … Address: …»), with the address for that role.
+  const dedicatedName = str(doc.fields[`${kind}_name`]);
+  if (dedicatedName) {
+    const address = str(doc.fields[`${kind}_address`]);
+    return { name: dedicatedName, address, country: countryInAddress(address) };
+  }
   const parties = Array.isArray(doc.fields.parties)
     ? (doc.fields.parties as { name?: string; role?: string; address?: string; country?: string }[])
     : [];
   const hit = parties.find((p) => p.name && p.role && role.test(p.role));
   return hit ? { name: str(hit.name), address: str(hit.address), country: str(hit.country) } : null;
+}
+
+/**
+ * The country an address line names at its start or end ("…, Tianjin 300462,
+ * China" / "Ukraine, 61001, Kharkiv, …"), recognised against the country list —
+ * a street name is never taken for a country. '' if none.
+ */
+export function countryInAddress(address: string): string {
+  const parts = address.split(',').map((x) => x.trim()).filter(Boolean);
+  for (const part of [parts[parts.length - 1], parts[0]]) {
+    if (part && !/\d/.test(part) && countryToUk(part)) return part;
+  }
+  return '';
 }
 
 /** "CPT - Bila Tserkva, Ukraine (INCOTERMS 2010)" → "Bila Tserkva, Ukraine" */
@@ -210,7 +232,7 @@ export async function prefillDraft(ws: WorkspaceRow, user?: { name: string } | n
   // otherwise the supplier slot and the importer. The consignee defaults to the
   // IMPORTER even in a trilateral deal — goods ship straight to Ukraine; the
   // intermediary is the consignee only when the contract says so.
-  const cConsignor = contractParty(supplierContract, CONSIGNOR_ROLE);
+  const cConsignor = contractParty(supplierContract, 'consignor');
   const consignorName = cConsignor?.name || sender;
   if (consignorName) {
     const t = dirFind(['supplier'], consignorName);
@@ -226,7 +248,7 @@ export async function prefillDraft(ws: WorkspaceRow, user?: { name: string } | n
     if (a?.address) src['consignor.address'] = cConsignor?.address ? 'contract' : t ? 'template' : 'documents';
     if (t?.email) set('supplierEmail', t.email, 'template');
   }
-  const cConsignee = contractParty(supplierContract, CONSIGNEE_ROLE);
+  const cConsignee = contractParty(supplierContract, 'consignee');
   const consigneeIsIntermediary =
     trilateral && !!cConsignee && sameCompany(cConsignee.name, intermediary) && !sameCompany(cConsignee.name, recipient);
   const consigneeName = cConsignee?.name || recipient || (trilateral ? intermediary : '');
