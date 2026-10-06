@@ -273,6 +273,20 @@ export interface Message {
   usage?: ChatUsage | null;
 }
 
+/** Processing state of the shipment's documents (the «Документи» meter). */
+export interface DocsStatus {
+  /** Latest versions of the shipment's files. */
+  total: number;
+  /** Converted to Markdown and readable by the agent. */
+  ready: number;
+  /** Still queued or being read right now. */
+  inProgress: number;
+  /** Failed to read (see the problem-files button). */
+  errors: number;
+  /** Read, but key fields could not be extracted (manual entry / retry). */
+  needsAttention: number;
+}
+
 /** Context window + chat window usage of an assistant turn (`done.usage`). */
 export interface ChatUsage {
   /** Tokens in the model's context on the turn's last call (after server-side clearing). */

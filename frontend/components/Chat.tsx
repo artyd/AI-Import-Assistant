@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useEffect, useRef, useState } from "react";
-import type { ChatKind, ChatUsage, Citation, Folder, Message } from "@/lib/types";
+import type { ChatKind, ChatUsage, Citation, DocsStatus, Folder, Message } from "@/lib/types";
 import { ContextMeters } from "./ContextMeters";
 import { streamChat } from "@/lib/sse";
 import { Notice } from "./ui/Notice";
@@ -130,6 +130,8 @@ interface Props {
   folders?: Folder[];
   onUploadAndClassify?: (files: File[]) => Promise<UploadClassifyOutcome[]>;
   onMoveFile?: (fileId: string, folderId: string) => Promise<void>;
+  /** Shipment documents' processing state, for the «Документи» meter (supply chat). */
+  docsStatus?: DocsStatus | null;
   // Shipment survey (supply only). When provided, the "Опитування" button shows
   // and survey state is persisted so it survives reloads. initialSurvey* seed a
   // resume: the survey restarts at the first still-unanswered question.
@@ -224,6 +226,7 @@ export function Chat({
   folders,
   onUploadAndClassify,
   onMoveFile,
+  docsStatus,
   onSurveyPersist,
   onSurveyIntake,
   surveyPrefilled,
@@ -940,6 +943,7 @@ export function Chat({
               quote={quote}
               onClearQuote={clearQuote}
             />
+            <ContextMeters usage={null} streaming={streaming} docs={docsStatus} docsOnly />
             <div
               style={{
                 display: "flex",
@@ -1029,7 +1033,7 @@ export function Chat({
                 quote={quote}
                 onClearQuote={clearQuote}
               />
-              <ContextMeters usage={usage} streaming={streaming} />
+              <ContextMeters usage={usage} streaming={streaming} docs={docsStatus} />
             </div>
           </div>
         </>
