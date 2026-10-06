@@ -6,7 +6,7 @@ import { getOwnedWorkspace } from '../services/workspaceAccess.js';
 import {
   ensureConversation,
   appendMessage,
-  getConversationHistory,
+  getConversationHistoryWithStats,
 } from '../services/conversations.js';
 import { SseStream } from '../sse/sse.js';
 import { buildSystemPrompt } from '../agent/systemPrompt.js';
@@ -44,7 +44,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
 
       try {
         const conversationId = await ensureConversation(ws.id, incomingConvId, message);
-        const history = await getConversationHistory(conversationId);
+        const { history, stats: historyStats } = await getConversationHistoryWithStats(conversationId);
         await appendMessage(conversationId, 'user', message);
         const documentsDigest = await buildDocumentsDigest(ws.id).catch(() => '');
         const { rows: parties } = await query<{ role: string; company_name: string }>(
@@ -81,6 +81,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           result.citations,
           result.toolCalls,
           result.turnBlocks,
+          { ...result.usage, history: historyStats },
         );
 
         if (result.error) {
@@ -92,6 +93,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
             citations: result.citations,
             conversationId,
             messageId,
+            usage: { ...result.usage, history: historyStats },
           });
         }
       } catch (err) {

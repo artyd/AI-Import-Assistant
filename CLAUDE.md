@@ -27,7 +27,8 @@ is not used.
   docx/xlsx/csv locally, legacy .doc via LibreOffice — and everything reads that.
 - **Anthropic key server-side only** (`src/anthropic/client.ts`). The browser
   never calls Anthropic directly.
-- **Model:** `claude-opus-4-8` with `thinking: { type: 'adaptive' }`.
+- **Model:** `claude-sonnet-5-5` (env `ANTHROPIC_MODEL`, backend + worker) with `thinking: { type: 'adaptive' }`;
+  no forced `tool_choice` (400 on Sonnet 5.5), `block_binding: drop_block` on preserved-thinking models.
 
 ## Штурман grounding rules (Phase 4 — enforced in `src/agent/systemPrompt.ts`)
 

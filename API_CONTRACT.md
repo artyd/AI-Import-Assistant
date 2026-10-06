@@ -432,8 +432,17 @@ tool-use loop over the tools it chooses at runtime — retrieval (`find_files`, 
 | `token` | `{ "text": string }` | append incremental assistant text |
 | `tool_call` | `{ "tool": string, "input": object }` | "working" chip, e.g. `Reading: invoice.pdf`, `Searching…` |
 | `tool_result` | `{ "tool": string, "summary": string }` | agent-log panel line (short summary, not raw data) |
-| `done` | `{ "message": string, "citations": [ { "file": string, "page": number|null } ], "conversationId": string, "messageId": string }` | final message + clickable inline source chips |
+| `done` | `{ "message": string, "citations": [ { "file": string, "page": number|null } ], "conversationId": string, "messageId": string, "usage"?: ChatUsage }` | final message + clickable inline source chips; `usage` feeds the context / chat-window meters |
 | `error` | `{ "message": string }` | show error, stop the stream |
+
+`ChatUsage` (additive; also stored per assistant message and returned as `usage` in
+the conversation messages endpoints, `null` for older turns):
+`{ "contextTokens": number, "peakContextTokens": number, "contextWindow": number,
+"clearedTokens": number, "clearedToolUses": number, "outputTokens": number, "model": string,
+"history": { "totalTurns": number, "keptTurns": number, "historyChars": number, "historyBudgetChars": number } }`
+— context tokens of the turn's last model call (after server-side clearing of old
+tool results), the model window, what was cleared so reading could continue, and how
+many prior user turns are still replayed to the model.
 
 The stream also emits periodic `: ping` comments as keep-alives. `citations`
 feeds the prototype's source chips; reconciliation diff-tables and completeness

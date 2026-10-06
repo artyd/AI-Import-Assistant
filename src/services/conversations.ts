@@ -22,6 +22,31 @@ export interface MessageRow {
   citations: Citation[];
   tool_calls: ToolCallRecord[];
   created_at: string;
+  /** Context/chat-window usage of an assistant turn (UI widgets); null for user rows and older turns. */
+  usage?: ChatUsage | null;
+}
+
+/** How much of the conversation is replayed to the model (the «chat window»). */
+export interface HistoryStats {
+  /** User turns in the conversation before this one. */
+  totalTurns: number;
+  /** Of those, how many are replayed to the model (the rest no longer fit). */
+  keptTurns: number;
+  /** Replayed history size and its budget, in chars (AGENT_HISTORY_CHAR_BUDGET). */
+  historyChars: number;
+  historyBudgetChars: number;
+}
+
+/** Usage shown under the chat input: context window + chat window. */
+export interface ChatUsage {
+  contextTokens: number;
+  peakContextTokens: number;
+  contextWindow: number;
+  clearedTokens: number;
+  clearedToolUses: number;
+  outputTokens: number;
+  model: string;
+  history: HistoryStats;
 }
 
 export type ChatKind = 'normal' | 'supply' | 'consolidated';
@@ -115,10 +140,11 @@ export async function appendMessage(
   // following tool_result user messages), so the agent replays what it actually
   // read/extracted on prior turns — not just its final text. Null → text-only.
   blocks: ChatMessageParam[] | null = null,
+  usage: ChatUsage | null = null,
 ): Promise<string> {
   const { rows } = await query<{ id: string }>(
-    `INSERT INTO messages (conversation_id, role, content, citations, tool_calls, blocks)
-     VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb) RETURNING id`,
+    `INSERT INTO messages (conversation_id, role, content, citations, tool_calls, blocks, usage)
+     VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7::jsonb) RETURNING id`,
     [
       conversationId,
       role,
@@ -126,6 +152,7 @@ export async function appendMessage(
       JSON.stringify(citations),
       JSON.stringify(toolCalls),
       blocks && blocks.length > 0 ? JSON.stringify(blocks) : null,
+      usage ? JSON.stringify(usage) : null,
     ],
   );
   await query('UPDATE conversations SET updated_at = now() WHERE id = $1', [conversationId]);
@@ -183,7 +210,7 @@ async function getConversationMessagesByScope(
   );
   if (!conv[0]) return null;
   const { rows } = await query<MessageRow>(
-    `SELECT id, conversation_id, role, content, citations, tool_calls, created_at
+    `SELECT id, conversation_id, role, content, citations, tool_calls, created_at, usage
      FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC`,
     [conversationId],
   );
@@ -240,6 +267,13 @@ function approxSize(msgs: ChatMessageParam[]): number {
 export async function getConversationHistory(
   conversationId: string,
 ): Promise<ChatMessageParam[]> {
+  return (await getConversationHistoryWithStats(conversationId)).history;
+}
+
+/** Same as getConversationHistory, plus how much of the chat fits the window. */
+export async function getConversationHistoryWithStats(
+  conversationId: string,
+): Promise<{ history: ChatMessageParam[]; stats: HistoryStats }> {
   const { rows } = await query<{
     role: 'user' | 'assistant';
     content: string;
@@ -252,6 +286,7 @@ export async function getConversationHistory(
   // One group per DB row; each group is a self-contained, replay-valid unit
   // (a user text turn, or an assistant turn's full block sequence).
   const groups: ChatMessageParam[][] = [];
+  const groupIsUserTurn: boolean[] = [];
   for (const r of rows) {
     const plain: ChatMessageParam[] =
       r.content && r.content.trim().length > 0 ? [{ role: r.role, content: r.content }] : [];
@@ -259,8 +294,10 @@ export async function getConversationHistory(
       // A single turn larger than the whole budget (huge read_file results) would
       // overflow the context on every later turn — replay its prose instead.
       groups.push(approxSize(r.blocks) > HISTORY_CHAR_BUDGET ? plain : r.blocks);
+      groupIsUserTurn.push(false);
     } else if (plain.length) {
       groups.push(plain);
+      groupIsUserTurn.push(r.role === 'user');
     }
   }
 
@@ -268,9 +305,16 @@ export async function getConversationHistory(
   // tool_use/tool_result pairing stays valid). The window start moves in
   // quantized jumps so the replayed prefix stays byte-stable for several turns
   // and the prompt cache keeps hitting (see stableWindowStart).
-  const start = stableWindowStart(groups.map(approxSize), HISTORY_CHAR_BUDGET);
+  const sizes = groups.map(approxSize);
+  const start = stableWindowStart(sizes, HISTORY_CHAR_BUDGET);
   const kept = groups.slice(start);
+  const stats: HistoryStats = {
+    totalTurns: groupIsUserTurn.filter(Boolean).length,
+    keptTurns: groupIsUserTurn.slice(start).filter(Boolean).length,
+    historyChars: sizes.slice(start).reduce((a, b) => a + b, 0),
+    historyBudgetChars: HISTORY_CHAR_BUDGET,
+  };
   // Heal anything stored before repair existed (unpaired tool_use, empty
   // messages) and guarantee the window opens with a user message.
-  return repairBlocks(kept.flat());
+  return { history: repairBlocks(kept.flat()), stats };
 }

@@ -56,9 +56,12 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
-      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-4-8}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5-5}
       # Chat agent budgets (1M-token context window; see DEPLOYMENT.md).
       AGENT_CONTEXT_TOKENS: ${AGENT_CONTEXT_TOKENS:-1000000}
+      AGENT_CLEAR_TRIGGER_TOKENS: ${AGENT_CLEAR_TRIGGER_TOKENS:-500000}
+      AGENT_CLEAR_KEEP_TOOL_USES: ${AGENT_CLEAR_KEEP_TOOL_USES:-8}
+      AGENT_EFFORT: ${AGENT_EFFORT:-high}
       AGENT_MAX_TOKENS: ${AGENT_MAX_TOKENS:-64000}
       AGENT_HISTORY_CHAR_BUDGET: ${AGENT_HISTORY_CHAR_BUDGET:-1200000}
       READ_FILE_MAX_CHARS: ${READ_FILE_MAX_CHARS:-200000}
@@ -92,6 +95,9 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      # Structured field extraction runs in the worker on ANTHROPIC_MODEL — it was
+      # never passed here, so the worker silently used the code default.
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5-5}
       JWT_SECRET: ${JWT_SECRET}
       CORS_ORIGIN: ${CORS_ORIGIN}
       STORAGE_DIR: /data/storage

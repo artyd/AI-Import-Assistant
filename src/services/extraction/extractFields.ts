@@ -525,26 +525,39 @@ export interface ExtractionResult {
   truncated: boolean;
 }
 
-/** Runs the forced-tool extraction over the given content blocks. */
+/**
+ * Runs the extraction over the given content blocks. The model is steered to the
+ * record_extraction tool by the prompt with tool_choice "auto": forced tool_choice
+ * ("tool"/"any") is a 400 on Claude Sonnet 5.5 / Opus 5.5. "auto" doesn't
+ * guarantee a call, so one retry follows when the model answered without it.
+ */
 async function runExtraction(content: ChatContentBlockParam[]): Promise<ExtractionResult> {
-  const msg = await runWithAnthropicLimit(() =>
-    anthropic.messages.create({
-      model: MODEL,
-      // Large packing lists/manifests carry hundreds of line_items; 16k truncated
-      // the tool JSON mid-array. 32k fits far larger tables; truncation is still
-      // detected below via stop_reason and surfaced (never silently marked ok).
-      max_tokens: 32000,
-      // No `temperature`: current Claude models (Opus 4.7+/Sonnet 5.5) reject
-      // non-default sampling params with a 400.
-      tools: [EXTRACTION_TOOL],
-      tool_choice: { type: 'tool', name: 'record_extraction' },
-      messages: [{ role: 'user', content }],
-    }),
-  );
-  const truncated = msg.stop_reason === 'max_tokens';
-  const block = msg.content.find((b) => b.type === 'tool_use');
-  if (!block || block.type !== 'tool_use') return { fields: null, truncated };
-  return { fields: normalize(block.input as Record<string, unknown>), truncated };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const msg = await runWithAnthropicLimit(() =>
+      anthropic.messages.create({
+        model: MODEL,
+        // Large packing lists/manifests carry hundreds of line_items; 16k truncated
+        // the tool JSON mid-array. 32k fits far larger tables; truncation is still
+        // detected below via stop_reason and surfaced (never silently marked ok).
+        // Thinking counts against it too (adaptive by default on current models).
+        max_tokens: 32000,
+        // Verbatim field reading needs little reasoning — low effort keeps the
+        // (default-on) thinking short. No `temperature`: current models reject it.
+        output_config: { effort: 'low' },
+        tools: [EXTRACTION_TOOL],
+        tool_choice: { type: 'auto' },
+        messages: [{ role: 'user', content }],
+      }),
+    );
+    const truncated = msg.stop_reason === 'max_tokens';
+    const block = msg.content.find((b) => b.type === 'tool_use');
+    if (block && block.type === 'tool_use') {
+      return { fields: normalize(block.input as Record<string, unknown>), truncated };
+    }
+    // Cut off before the call, or a refusal — retrying the same request won't help.
+    if (truncated || msg.stop_reason === 'refusal') return { fields: null, truncated };
+  }
+  return { fields: null, truncated: false };
 }
 
 /** Text path with truncation metadata (used by the indexing worker). */

@@ -11,7 +11,7 @@ you must always uphold:
 - **Single agent only** (no multi-agent orchestration in the product runtime).
 - **Hybrid retrieval:** keep BOTH `search_documents` (Qdrant) and `read_file`
   (on-demand extraction). Never hardcode a fixed retrieval pipeline.
-- **Anthropic key server-side only.** Model `claude-opus-4-8`, adaptive thinking.
+- **Anthropic key server-side only.** Model `claude-sonnet-5-5` (env ANTHROPIC_MODEL), adaptive thinking, no forced tool_choice.
 - **ESM/NodeNext:** local imports end in `.js`. Strict TS incl.
   `noUncheckedIndexedAccess`. Validate inputs with `zod`.
 - **SSE contract is frozen:** `token` / `tool_call` / `tool_result` / `done` /

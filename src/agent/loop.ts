@@ -1,3 +1,4 @@
+import Anthropic from '@anthropic-ai/sdk';
 import {
   anthropic,
   MODEL,
@@ -50,6 +51,22 @@ export interface AgentTurnResult {
   turnBlocks: ChatMessageParam[];
   /** Set when the model/stream errored — caller persists partial text + surfaces it. */
   error?: string;
+  /** Context-window usage of this turn (for the UI's context widget). */
+  usage: TurnUsage;
+}
+
+export interface TurnUsage {
+  /** Tokens in the model's context on the LAST call of the turn (after server-side clearing). */
+  contextTokens: number;
+  /** Largest context on any call of the turn. */
+  peakContextTokens: number;
+  /** The model's context window (AGENT_CONTEXT_TOKENS). */
+  contextWindow: number;
+  /** Old tool results the API cleared this turn to keep reading (tokens / tool uses). */
+  clearedTokens: number;
+  clearedToolUses: number;
+  outputTokens: number;
+  model: string;
 }
 
 // ── Prompt caching ────────────────────────────────────────────────────────────
@@ -95,9 +112,42 @@ const MAX_ITERATIONS = 14;
 // the whole budget and the turn ended with NO visible text. Streaming, so a large
 // cap doesn't risk HTTP timeouts.
 const MAX_TOKENS = config.AGENT_MAX_TOKENS;
-// Input size at which a turn stops calling tools and answers from what it has —
-// so a reading spree over a big shipment can't overflow the context window.
-const CONTEXT_GUARD_TOKENS = Math.floor(config.AGENT_CONTEXT_TOKENS * config.AGENT_CONTEXT_GUARD);
+// Models with preserved thinking (thinking blocks bound to the conversation):
+// any change to the system prompt (per-shipment digest), the tools or an earlier
+// message — our history window, repairs — would invalidate replayed thinking and,
+// on new accounts, 400. "drop_block" drops such blocks instead. Older models reject
+// the field («block_binding: Extra inputs are not permitted»), so it is gated.
+const PRESERVED_THINKING = /^claude-(sonnet-5-5|opus-5-5|fable-5-1|mythos-5-1)\b/;
+const preservedThinking = PRESERVED_THINKING.test(MODEL);
+const BETAS = [
+  'context-management-2025-06-27',
+  ...(preservedThinking ? ['thinking-binding-controls-2026-08-01'] : []),
+];
+const THINKING = preservedThinking
+  ? ({ type: 'adaptive', block_binding: { prefix_mismatch_behavior: 'drop_block' } } as const)
+  : ({ type: 'adaptive' } as const);
+
+// Server-side context editing: once a request passes AGENT_CLEAR_TRIGGER_TOKENS,
+// the API clears the OLDEST tool results (documents read earlier), keeping the
+// most recent ones word for word — so the agent keeps reading new files instead
+// of stopping when the context fills up. The client history stays intact; on
+// preserved-thinking models server-side clearing never invalidates thinking.
+const CONTEXT_MANAGEMENT = {
+  edits: [
+    {
+      type: 'clear_tool_uses_20250919' as const,
+      trigger: { type: 'input_tokens' as const, value: config.AGENT_CLEAR_TRIGGER_TOKENS },
+      keep: { type: 'tool_uses' as const, value: config.AGENT_CLEAR_KEEP_TOOL_USES },
+      // Clear in big steps: each clearing rewrites the cached prefix.
+      clear_at_least: { type: 'input_tokens' as const, value: 50_000 },
+    },
+  ],
+};
+
+// Hard ceiling for ONE step's new tool results: several huge reads at once could
+// overflow the window before clearing can help. Only then is the largest result
+// replaced by a note asking to read it in parts — the loop keeps going.
+const STEP_CEILING_TOKENS = Math.floor(config.AGENT_CONTEXT_TOKENS * 0.95);
 
 const FINAL_ANSWER_NUDGE =
   'Сформулюй відповідь користувачу на основі вже зібраних даних (без нових викликів інструментів). ' +
@@ -116,20 +166,89 @@ function estimateTokens(blocks: ChatContentBlockParam[]): number {
   return Math.ceil(JSON.stringify(blocks).length / 2);
 }
 
-const UNLOADED_RESULT =
-  'Результат не завантажено: вичерпано бюджет контексту цього ходу. Відповідай за вже прочитаним; ' +
-  'якщо цих даних бракує — скажи користувачу, що файл варто розглянути окремим питанням.';
+const SPLIT_READ_RESULT =
+  'Результат завеликий, щоб завантажити його разом з іншими в одному кроці. Прочитай цей файл ' +
+  'частинами — read_file з range (сторінки "1-10", "11-20" або символи "0-100000").';
 
-/** Replaces the largest tool results with a stub until the batch fits `budget` tokens. */
-function shrinkToolResults(blocks: ChatContentBlockParam[], budget: number): void {
+/** Replaces the largest tool results with a "read it in parts" note until the step fits `budget`. */
+function splitOversizedResults(blocks: ChatContentBlockParam[], budget: number): void {
   const order = blocks
     .map((b, i) => ({ i, size: JSON.stringify(b).length }))
     .sort((a, b) => b.size - a.size);
   for (const { i } of order) {
     if (estimateTokens(blocks) < budget) return;
     const b = blocks[i];
-    if (b && b.type === 'tool_result') blocks[i] = { ...b, content: UNLOADED_RESULT };
+    if (b && b.type === 'tool_result') blocks[i] = { ...b, content: SPLIT_READ_RESULT, is_error: true };
   }
+}
+
+type StreamBase = { system: ChatSystem; messages: ChatMessageParam[]; tools: ChatTool[]; signal?: AbortSignal };
+type StreamExtra = { tool_choice?: { type: 'none' } };
+type ModelMessage = Anthropic.Beta.Messages.BetaMessage;
+
+// Set once the API rejects the beta context features (unsupported model/account):
+// later calls go out as plain requests instead of failing every chat turn.
+let betaFeaturesRejected = false;
+const BETA_FIELD_ERROR = /context_management|clear_tool_uses|block_binding|thinking-binding|context-management|anthropic-beta/i;
+
+/**
+ * One streamed model call with the shared request settings: server-side clearing
+ * of old tool results + (on preserved-thinking models) drop_block. If the API
+ * rejects those beta fields with a 400 before any text streamed, the call is
+ * retried once as a plain request and the features stay off for the process.
+ */
+async function callModel(
+  base: StreamBase,
+  extra: StreamExtra,
+  onStream: (s: { on(ev: 'contentBlock', cb: () => void): unknown; on(ev: 'text', cb: (t: string) => void): unknown }) => void,
+): Promise<ModelMessage> {
+  if (!betaFeaturesRejected) {
+    let streamed = false;
+    try {
+      const stream = anthropic.beta.messages.stream(
+        {
+          model: MODEL,
+          max_tokens: MAX_TOKENS,
+          thinking: THINKING,
+          output_config: { effort: config.AGENT_EFFORT },
+          system: base.system as never,
+          messages: base.messages as never,
+          tools: base.tools as never,
+          context_management: CONTEXT_MANAGEMENT,
+          betas: BETAS,
+          ...extra,
+        },
+        { signal: base.signal },
+      );
+      stream.on('text', () => {
+        streamed = true;
+      });
+      onStream(stream);
+      return await stream.finalMessage();
+    } catch (err) {
+      const rejected =
+        !streamed && err instanceof Anthropic.BadRequestError && BETA_FIELD_ERROR.test(err.message);
+      if (!rejected) throw err;
+      betaFeaturesRejected = true;
+      // eslint-disable-next-line no-console
+      console.error(`Agent: beta context features rejected, falling back to plain requests: ${err.message}`);
+    }
+  }
+  const stream = anthropic.beta.messages.stream(
+    {
+      model: MODEL,
+      max_tokens: MAX_TOKENS,
+      thinking: { type: 'adaptive' },
+      output_config: { effort: config.AGENT_EFFORT },
+      system: base.system as never,
+      messages: base.messages as never,
+      tools: base.tools as never,
+      ...extra,
+    },
+    { signal: base.signal },
+  );
+  onStream(stream);
+  return stream.finalMessage();
 }
 
 /**
@@ -163,6 +282,20 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
   const toolsParam = cachedTools(tools);
   const historyEnd = seedLen - 2; // last message of prior history (−1 = none)
   const usage = { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 };
+  const ctxStats = { last: 0, peak: 0, clearedTokens: 0, clearedToolUses: 0 };
+  const noteContext = (m: {
+    usage: { input_tokens: number; cache_read_input_tokens?: number | null; cache_creation_input_tokens?: number | null };
+    context_management?: { applied_edits?: { type: string; cleared_input_tokens?: number; cleared_tool_uses?: number }[] } | null;
+  }): void => {
+    const inCtx =
+      m.usage.input_tokens + (m.usage.cache_read_input_tokens ?? 0) + (m.usage.cache_creation_input_tokens ?? 0);
+    ctxStats.last = inCtx;
+    ctxStats.peak = Math.max(ctxStats.peak, inCtx);
+    for (const e of m.context_management?.applied_edits ?? []) {
+      ctxStats.clearedTokens += e.cleared_input_tokens ?? 0;
+      ctxStats.clearedToolUses += e.cleared_tool_uses ?? 0;
+    }
+  };
   const request = (): ChatMessageParam[] =>
     withBreakpoints(messages, historyEnd >= 0 ? [historyEnd, messages.length - 1] : [messages.length - 1]);
   const track = (u: {
@@ -191,6 +324,13 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
     text += out;
     sse.send('token', { text: out });
   };
+  // Paragraph breaks between text blocks + streaming tokens to the client.
+  const wireStream: Parameters<typeof callModel>[2] = (stream) => {
+    stream.on('contentBlock', () => {
+      blockBreak = true;
+    });
+    stream.on('text', emitText);
+  };
   const citations: Citation[] = [];
   const toolCalls: ToolCallRecord[] = [];
   let toolsStillPending = false;
@@ -199,25 +339,16 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
   try {
     for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
       if (params.signal?.aborted) throw new Error('client_disconnected');
-      const stream = anthropic.messages.stream({
-        model: MODEL,
-        max_tokens: MAX_TOKENS,
-        thinking: { type: 'adaptive' },
-        system: systemParam,
-        messages: request(),
-        tools: toolsParam,
-      }, { signal: params.signal });
-
       blockBreak = true;
-      stream.on('contentBlock', () => {
-        blockBreak = true;
-      });
-      stream.on('text', emitText);
-
-      const msg = await stream.finalMessage();
+      const msg = await callModel(
+        { system: systemParam, messages: request(), tools: toolsParam, signal: params.signal },
+        {},
+        wireStream,
+      );
       track(msg.usage);
+      noteContext(msg);
       // Preserve the full assistant content (incl. thinking + tool_use blocks).
-      messages.push({ role: 'assistant', content: msg.content });
+      messages.push({ role: 'assistant', content: msg.content as ChatMessageParam['content'] });
 
       // Output cap hit mid tool call: the tool input is truncated JSON — don't run
       // it; answer with an error result so the model retries instead of the turn
@@ -263,20 +394,16 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
 
       messages.push({ role: 'user', content: toolResults });
 
-      // Iterations exhausted, or the next request would come close to the context
-      // window (this call's input + its output + the new tool results, ~3 chars per
-      // token): stop reading and answer from what has been gathered.
-      const priorInput =
+      // One step's new results alone must not overflow the window (older results
+      // are cleared server-side; these are the newest and are kept). If they would,
+      // the largest are swapped for "read it in parts" notes and the loop goes on.
+      const contextBefore =
         msg.usage.input_tokens +
         (msg.usage.cache_read_input_tokens ?? 0) +
         (msg.usage.cache_creation_input_tokens ?? 0) +
         msg.usage.output_tokens;
-      if (priorInput + estimateTokens(toolResults) >= CONTEXT_GUARD_TOKENS) {
-        // Several big reads in one step can overshoot the window by themselves —
-        // unload the largest results so the closing request still fits.
-        shrinkToolResults(toolResults, CONTEXT_GUARD_TOKENS - priorInput);
-        toolsStillPending = true;
-        break;
+      if (contextBefore + estimateTokens(toolResults) >= STEP_CEILING_TOKENS) {
+        splitOversizedResults(toolResults, STEP_CEILING_TOKENS - contextBefore);
       }
       if (iteration === MAX_ITERATIONS - 1) {
         toolsStillPending = true;
@@ -285,7 +412,7 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
     }
 
     // Closing pass that may NOT use tools, when (a) tools are still pending
-    // (iterations or context budget exhausted), or (b) the turn produced no
+    // (iterations exhausted), or (b) the turn produced no
     // visible text at all — e.g. adaptive thinking used the whole output budget, or
     // the model ended on thinking only. Without (b) the user got an empty answer.
     // `tools` must still be sent (history holds tool blocks — the API 400s without
@@ -300,26 +427,18 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
       // block for replay — drop it before asking for the answer.
       if (endedWithoutAnswer) messages.pop();
       const nudgeIdx = messages.push({ role: 'user', content: FINAL_ANSWER_NUDGE }) - 1;
-      const stream = anthropic.messages.stream({
-        model: MODEL,
-        max_tokens: MAX_TOKENS,
-        thinking: { type: 'adaptive' },
-        system: systemParam,
-        messages: request(),
-        tools: toolsParam,
-        ...(toolsParam.length > 0 ? { tool_choice: { type: 'none' as const } } : {}),
-      }, { signal: params.signal });
       blockBreak = true;
-      stream.on('contentBlock', () => {
-        blockBreak = true;
-      });
-      stream.on('text', emitText);
-      const msg = await stream.finalMessage();
+      const msg = await callModel(
+        { system: systemParam, messages: request(), tools: toolsParam, signal: params.signal },
+        toolsParam.length > 0 ? { tool_choice: { type: 'none' } } : {},
+        wireStream,
+      );
       track(msg.usage);
+      noteContext(msg);
       // The nudge is a one-off steer for this call — keep it out of the replayed
       // history (user(tool_results) → assistant(answer) is a valid sequence).
       messages.splice(nudgeIdx, 1);
-      messages.push({ role: 'assistant', content: msg.content });
+      messages.push({ role: 'assistant', content: msg.content as ChatMessageParam['content'] });
     }
 
     // Never end a turn silently: the UI would show an empty bubble.
@@ -341,7 +460,22 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
   // by max_tokens mid-tool-call, or a thinking-only message, would otherwise be
   // an unpaired/empty block that 400s every later turn).
   const turnBlocks = error ? [] : repairBlocks(messages.slice(seedLen), { requireUserStart: false });
-  return { text, citations: dedupe(citations), toolCalls, turnBlocks, error };
+  return {
+    text,
+    citations: dedupe(citations),
+    toolCalls,
+    turnBlocks,
+    error,
+    usage: {
+      contextTokens: ctxStats.last,
+      peakContextTokens: ctxStats.peak,
+      contextWindow: config.AGENT_CONTEXT_TOKENS,
+      clearedTokens: ctxStats.clearedTokens,
+      clearedToolUses: ctxStats.clearedToolUses,
+      outputTokens: usage.output,
+      model: MODEL,
+    },
+  };
 }
 
 function dedupe(citations: Citation[]): Citation[] {
