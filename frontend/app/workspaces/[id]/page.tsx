@@ -98,7 +98,7 @@ function applyFileStatus(prev: FileItem[], ev: FileStatusEvent): FileItem[] {
 
 // Upload limits — mirror the backend (MAX_UPLOAD_BYTES / MAX_ZIP_BYTES) so an
 // oversize file is refused up front instead of after a long upload.
-const MAX_FILE_BYTES = 25 * 1024 * 1024;
+const MAX_FILE_BYTES = 100 * 1024 * 1024;
 const MAX_ZIP_BYTES = 200 * 1024 * 1024;
 // Batching: well under the backend MAX_UPLOAD_FILES, and ~100 MB per request.
 const CLIENT_BATCH_FILES = 40;
@@ -439,7 +439,7 @@ export default function WorkspacePage() {
       fileList: FileList | File[],
       replacesFileId?: string
     ): Promise<FileItem[]> => {
-      // Oversize files (>25 MB, or >200 MB for a .zip) are skipped up front and
+      // Oversize files (>100 MB, or >200 MB for a .zip) are skipped up front and
       // reported. The rest is split into batches bounded by count (40) AND
       // bytes (~100 MB) and POSTed sequentially, so a big drag-drop never trips
       // the server's per-request caps and nothing is silently dropped. A .zip
@@ -453,7 +453,7 @@ export default function WorkspacePage() {
       const qs = sp.toString() ? `?${sp.toString()}` : "";
 
       const skippedText = skipped.length
-        ? "Пропущено — файл завеликий (макс. 25 МБ, архів .zip — 200 МБ):\n" +
+        ? "Пропущено — файл завеликий (макс. 100 МБ, архів .zip — 200 МБ):\n" +
           skipped.map((f) => `• ${f.name} — ${fmtMb(f.size)}`).join("\n")
         : "";
       if (batches.length === 0) {

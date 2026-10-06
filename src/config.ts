@@ -43,7 +43,10 @@ const envSchema = z.object({
 
   // File storage
   STORAGE_DIR: z.string().default('./storage'),
-  MAX_UPLOAD_BYTES: z.coerce.number().int().positive().default(25 * 1024 * 1024),
+  // Per-document cap. 100 MB: signed contracts scanned at high DPI reach ~50 MB
+  // (live test «Сборник 18»). Vision reads PDFs in byte-bounded page windows, so
+  // a large scan never becomes one oversized API request.
+  MAX_UPLOAD_BYTES: z.coerce.number().int().positive().default(100 * 1024 * 1024),
   // Max files accepted in a SINGLE multipart upload request. The frontend sends
   // large selections in batches, so this caps ONE request, not the whole
   // shipment. Raised from the old hardcoded 20 so a big drag-and-drop batch is
@@ -66,7 +69,30 @@ const envSchema = z.object({
     .default(300 * 1024 * 1024),
 
   // Model / embeddings
-  ANTHROPIC_MODEL: z.string().default('claude-opus-4-8'),
+  ANTHROPIC_MODEL: z.string().default('claude-sonnet-5-5'),
+  // Chat agent budgets. The current Claude models have a 1M-token context window;
+  // these let a big consolidated shipment (hundreds of files) use it instead of
+  // the old ~100k-token history window.
+  // - AGENT_CONTEXT_TOKENS: the model's context window (shown in the UI widget;
+  //   one step's new tool results are kept under 95% of it).
+  // - AGENT_MAX_TOKENS: output cap per model call (adaptive thinking counts too —
+  //   the old 12k let a long reasoning pass eat the whole budget → empty answer).
+  // - AGENT_HISTORY_CHAR_BUDGET: replayed prior turns (incl. documents read), in
+  //   chars (~3 chars/token for Cyrillic/Latin → ~400k tokens by default; CJK is
+  //   denser, so this keeps headroom under the 1M window).
+  // - READ_FILE_MAX_CHARS: one read_file result before it asks to page further.
+  AGENT_CONTEXT_TOKENS: z.coerce.number().int().positive().default(1_000_000),
+  // Server-side clearing of old tool results (documents read earlier) once a
+  // request passes this many input tokens; the newest AGENT_CLEAR_KEEP_TOOL_USES
+  // results stay word for word. Reading never stops because the context is full.
+  AGENT_CLEAR_TRIGGER_TOKENS: z.coerce.number().int().positive().default(500_000),
+  AGENT_CLEAR_KEEP_TOOL_USES: z.coerce.number().int().positive().default(8),
+  // Reasoning effort for the chat agent (Sonnet 5.5 levels are recalibrated;
+  // multistep document work → high).
+  AGENT_EFFORT: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).default('high'),
+  AGENT_MAX_TOKENS: z.coerce.number().int().positive().default(64_000),
+  AGENT_HISTORY_CHAR_BUDGET: z.coerce.number().int().positive().default(1_200_000),
+  READ_FILE_MAX_CHARS: z.coerce.number().int().positive().default(200_000),
   // Anthropic SDK resilience (shared client). The SDK auto-retries 408/409/429/
   // 5xx + connection errors with exponential backoff and honours Retry-After;
   // the default of 2 is too low for a burst of indexing jobs that each make
@@ -123,8 +149,8 @@ const envSchema = z.object({
     .transform((v) => v === 'true'),
   // Model for vision transcription (PDF/scan/photo → Markdown). Verbatim
   // transcription doesn't need Opus-level reasoning; Sonnet 5.5 reads as well at
-  // ~2.5x lower cost. (Structured extraction stays on ANTHROPIC_MODEL — it uses a
-  // forced tool_choice, which Sonnet 5.5 rejects.)
+  // lower cost. (Structured extraction runs on ANTHROPIC_MODEL with tool_choice
+  // "auto" — forced tool_choice is a 400 on Sonnet 5.5.)
   OCR_MODEL: z.string().default('claude-sonnet-5-5'),
   // Tiny doc-type classifier used only for files without a structured extraction.
   CLASSIFY_MODEL: z.string().default('claude-haiku-4-5'),

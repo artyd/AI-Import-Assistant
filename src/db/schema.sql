@@ -552,6 +552,9 @@ ALTER TABLE files ADD CONSTRAINT files_extraction_status_check
 -- agent replays what it actually read/extracted on prior turns, not just its text
 -- answers. NULL for legacy rows (they replay as plain text). See conversations.ts.
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS blocks JSONB;
+-- Context/chat-window usage of an assistant turn, for the widgets under the chat
+-- input (context tokens vs the model window, server-side clearing, history fit).
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS usage JSONB;
 
 -- ── Claude-only Markdown pipeline (replaces Voyage embeddings + Qdrant) ──
 

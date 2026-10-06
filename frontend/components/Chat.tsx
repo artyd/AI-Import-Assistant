@@ -1,7 +1,8 @@
 "use client";
 
 import { memo, useCallback, useEffect, useRef, useState } from "react";
-import type { ChatKind, Citation, Folder, Message } from "@/lib/types";
+import type { ChatKind, ChatUsage, Citation, Folder, Message } from "@/lib/types";
+import { ContextMeters } from "./ContextMeters";
 import { streamChat } from "@/lib/sse";
 import { Notice } from "./ui/Notice";
 import { folderLabel } from "@/lib/folderLabels";
@@ -199,6 +200,8 @@ function labelToolCall(tool: string, input: Record<string, unknown>): string {
   if (tool === "read_file")
     return `Читаю: ${String(input.path ?? input.file ?? input.fileName ?? "")}`;
   if (tool === "list_files") return "Перелік файлів";
+  if (tool === "find_files")
+    return `Шукаю файли: «${String(input.query ?? "")}»`;
   return `Інструмент: ${tool}`;
 }
 
@@ -233,6 +236,8 @@ export function Chat({
   // NB: the composer's text lives inside <Composer> (F5) so typing re-renders
   // only the composer, never the message list.
   const [streaming, setStreaming] = useState(false);
+  // Context / chat-window usage of the latest reply (meters under the input).
+  const [usage, setUsage] = useState<ChatUsage | null>(() => lastUsage(initialMessages));
   // The in-flight chat stream; aborted on stop / unmount / conversation or
   // endpoint (workspace, collection) change.
   const abortRef = useRef<AbortController | null>(null);
@@ -264,6 +269,7 @@ export function Chat({
     // Another conversation was loaded → stop streaming into the old thread.
     abortRef.current?.abort();
     setItems(initialMessages.map((m) => ({ kind: "message" as const, ...m })));
+    setUsage(lastUsage(initialMessages));
     convRef.current = conversationId;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialMessages]);
@@ -532,6 +538,7 @@ export function Chat({
               content: e.message || streamTextRef.current,
               citations: e.citations,
             });
+            if (e.usage) setUsage(e.usage);
             if (e.conversationId && convRef.current !== e.conversationId) {
               convRef.current = e.conversationId;
               onConversationStarted(e.conversationId);
@@ -1022,22 +1029,22 @@ export function Chat({
                 quote={quote}
                 onClearQuote={clearQuote}
               />
-              <div
-                style={{
-                  textAlign: "center",
-                  color: "var(--muted)",
-                  fontSize: 12,
-                  marginTop: 8,
-                }}
-              >
-                Штурман читає документи інструментами та посилається на джерело. Enter — надіслати.
-              </div>
+              <ContextMeters usage={usage} streaming={streaming} />
             </div>
           </div>
         </>
       )}
     </div>
   );
+}
+
+/** Usage of the newest assistant message that carries one (older turns have none). */
+function lastUsage(messages: Message[]): ChatUsage | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const u = messages[i]!.usage;
+    if (messages[i]!.role === "assistant" && u) return u;
+  }
+  return null;
 }
 
 const STARTERS: { text: string; icon: React.ReactNode }[] = [

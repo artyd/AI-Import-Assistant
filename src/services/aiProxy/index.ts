@@ -65,6 +65,9 @@ async function callBuiltin(req: AnalysisAiRequest): Promise<string> {
   const resp = await anthropic.messages.create({
     model: MODEL,
     max_tokens: req.maxTokens,
+    // Structured JSON classification: keep the (default-on, adaptive) thinking
+    // short so it can't eat the output budget meant for the JSON.
+    output_config: { effort: 'low' },
     system: req.system,
     messages: [{ role: 'user', content: `${req.user}${JSON_SUFFIX}` }],
   });

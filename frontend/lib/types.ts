@@ -269,6 +269,27 @@ export interface Message {
   citations?: Citation[];
   tool_calls?: ToolCall[];
   created_at?: string;
+  /** Assistant turns: context/chat-window usage (null for older turns). */
+  usage?: ChatUsage | null;
+}
+
+/** Context window + chat window usage of an assistant turn (`done.usage`). */
+export interface ChatUsage {
+  /** Tokens in the model's context on the turn's last call (after server-side clearing). */
+  contextTokens: number;
+  peakContextTokens: number;
+  contextWindow: number;
+  /** Old tool results the API cleared so the agent could keep reading. */
+  clearedTokens: number;
+  clearedToolUses: number;
+  outputTokens: number;
+  model: string;
+  history: {
+    totalTurns: number;
+    keptTurns: number;
+    historyChars: number;
+    historyBudgetChars: number;
+  };
 }
 
 export interface ConversationMeta {
@@ -295,6 +316,8 @@ export interface DoneEvent {
   citations: Citation[];
   conversationId: string;
   messageId: string;
+  /** Present on current backends; absent on older ones. */
+  usage?: ChatUsage;
 }
 export interface ErrorEvent {
   message: string;

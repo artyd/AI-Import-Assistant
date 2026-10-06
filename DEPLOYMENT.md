@@ -188,8 +188,15 @@ tunes how long to wait for indexing. Exit code is non-zero if any check fails.
 | `TRUST_PROXY` | — | `loopback,uniquelocal` | Proxies trusted for `X-Forwarded-For` (real client IP for login throttling) |
 | `CORS_ORIGIN` | — | `` (empty) | Comma-separated exact origins to allow. Same-origin behind Caddy needs none; set only if the API is served cross-origin |
 | `STORAGE_DIR` | — | `./storage` | On-disk file storage root |
-| `ANTHROPIC_MODEL` | — | `claude-opus-4-8` | Chat model |
-| `MAX_UPLOAD_BYTES` | — | `26214400` | Per-file upload cap (25 MB) |
+| `ANTHROPIC_MODEL` | — | `claude-sonnet-5-5` | Chat agent + structured extraction (backend AND worker) |
+| `AGENT_CONTEXT_TOKENS` | — | `1000000` | Chat model context window (shown in the context widget) |
+| `AGENT_CLEAR_TRIGGER_TOKENS` | — | `500000` | Above this request size the API clears the oldest tool results (documents read earlier) so reading continues |
+| `AGENT_CLEAR_KEEP_TOOL_USES` | — | `8` | Newest tool results always kept word for word |
+| `AGENT_EFFORT` | — | `high` | Chat agent reasoning effort (`low`…`max`) |
+| `AGENT_MAX_TOKENS` | — | `64000` | Output cap per chat model call (adaptive thinking counts against it) |
+| `AGENT_HISTORY_CHAR_BUDGET` | — | `1200000` | Prior turns replayed into a chat (incl. documents read), in chars (~400k tokens) |
+| `READ_FILE_MAX_CHARS` | — | `200000` | One `read_file` result before the agent pages on with `range` |
+| `MAX_UPLOAD_BYTES` | — | `104857600` | Per-file upload cap (100 MB) |
 | `CHAT_RATE_MAX` / `CHAT_RATE_WINDOW` | — | `30` / `1 minute` | Per-user chat rate limit |
 | `OCR_ENABLED` | — | `true` | Worker OCR fallback for scanned PDFs / images via Claude vision (`true`/`false`) |
 | `OCR_MODEL` | — | `claude-sonnet-5-5` | Vision model for OCR / Markdown transcription (no forced tools/temperature needed) |

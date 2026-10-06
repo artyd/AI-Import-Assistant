@@ -129,12 +129,12 @@ test("oversize files are skipped before upload and reported", async ({ page }) =
   const chat = page.getByTestId("chat-root");
   await expect(chat).toBeVisible();
 
-  // Drop a small PDF plus a 26 MB PDF (over the 25 MB per-file limit).
+  // Drop a small PDF plus a 101 MB PDF (over the 100 MB per-file limit).
   const dt = await page.evaluateHandle(() => {
     const d = new DataTransfer();
     d.items.add(new File([new Uint8Array([1, 2, 3])], "small.pdf", { type: "application/pdf" }));
     d.items.add(
-      new File([new Uint8Array(26 * 1024 * 1024)], "huge.pdf", { type: "application/pdf" })
+      new File([new Uint8Array(101 * 1024 * 1024)], "huge.pdf", { type: "application/pdf" })
     );
     return d;
   });

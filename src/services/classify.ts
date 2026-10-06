@@ -25,6 +25,12 @@ export const DOC_TYPE_TO_FOLDER: Record<string, string> = {
   quality_certificate: '03_Certificates',
   customs_declaration: '04_Customs',
   transport: '05_Transport',
+  // Filename-only categories (never produced by the structured extraction): vet /
+  // sanitary documents and permits sit with the certificates, shipping
+  // instructions with the contract, labels/marking with the cargo photos.
+  veterinary: '03_Certificates',
+  instruction: '01_Contract_Invoice_PackingList',
+  label: '06_Photos',
 };
 
 export type Confidence = 'high' | 'medium' | 'low';
@@ -60,6 +66,10 @@ interface FileRow {
 // This is deterministic and free, classifies scans that have no text layer, and
 // avoids an LLM call for the many clearly-named customs documents.
 const FILENAME_RULES: { type: string; patterns: string[] }[] = [
+  // Vet-specific first: "CHEDP.PL.2026…" must not fall through to the 'pl'
+  // packing-list token, nor "BSE_Declaration" to customs.
+  { type: 'veterinary', patterns: ['ched', 'chedp', 'health certificate', 'veterinar', 'ветерин', 'ветсерт', 'bse', 'deklaracja', 'rozdzia'] },
+  { type: 'instruction', patterns: ['инструкц', 'інструкц', 'instruction'] },
   { type: 'transport', patterns: ['cmr', 'awb', 'hawb', 'mawb', 'airway', 'air way', 'waybill', 'bill of lading', 'b/l', 'consignee', 'коносамент'] },
   { type: 'customs_declaration', patterns: ['customs', 'declaration', 'декларац', 'митн', 'таможен'] },
   { type: 'certificate_of_origin', patterns: ['certificate of origin', 'coo', 'походженн', 'происхожден', 'form a', 'eur.1', 'eur1'] },
@@ -67,7 +77,13 @@ const FILENAME_RULES: { type: string; patterns: string[] }[] = [
   { type: 'invoice', patterns: ['invoice', 'inv', 'рахуно', 'счет', 'счёт', 'facture', 'факт'] },
   { type: 'packing_list', patterns: ['packing', 'plist', 'pack list', 'специфікац', 'пакувальн', 'упаковочн', 'pl'] },
   { type: 'contract', patterns: ['contract', 'контракт', 'договір', 'договор', 'agreement', 'угода'] },
+  // Generic words last, so a customs/transport/contract name wins over them.
+  { type: 'label', patterns: ['label', 'маркировк', 'маркуванн', 'этикет', 'етикет'] },
+  { type: 'veterinary', patterns: ['statement', 'реєстраційне посвідчення', 'posvidchen', 'регистрац', 'registration certificate'] },
 ];
+
+/** Categories only the filename rules produce (the structured extraction can't). */
+const FILENAME_ONLY_TYPES = new Set(['veterinary', 'instruction', 'label']);
 
 // Short/ambiguous Latin tokens must match as whole words so they don't fire
 // inside a longer word (e.g. 'po' in 'report', 'pl' in 'sample'). Everything
@@ -75,7 +91,7 @@ const FILENAME_RULES: { type: string; patterns: string[] }[] = [
 // forms are caught (рахуно→рахунок, декларац→декларація, походженн→походження).
 const BOUNDARY_TOKENS = new Set([
   'po', 'pl', 'inv', 'coo', 'coa', 'sds', 'msds', 'awb', 'cmr', 'hawb', 'mawb',
-  'order', 'eur1', 'eur 1', 'b l', 'form a', 'air way',
+  'order', 'eur1', 'eur 1', 'b l', 'form a', 'air way', 'ched', 'chedp', 'bse',
 ]);
 
 /** Normalize to lowercase with every non-alphanumeric run collapsed to a single
@@ -84,7 +100,7 @@ function normalizeName(s: string): string {
   return ` ${s.toLowerCase().replace(/[^0-9a-zа-яёіїєґ]+/gi, ' ').trim()} `;
 }
 
-function classifyByFilename(name: string): string | null {
+export function classifyByFilename(name: string): string | null {
   const n = normalizeName(name);
   for (const rule of FILENAME_RULES) {
     for (const p of rule.patterns) {
@@ -123,7 +139,10 @@ async function resolveDocType(file: FileRow): Promise<DocTypeResolution> {
   //    with a suggestion instead of being filed into the customs package.
   const byName = classifyByFilename(file.name);
   if (byName) {
-    return { docType: byName, method: 'filename', confidence: alreadyExtracted ? 'low' : 'medium' };
+    // The extraction's 'other' only contradicts a filename hit for the shipment
+    // doc types it knows; the filename-only categories are 'other' to it by design.
+    const filenameOnly = FILENAME_ONLY_TYPES.has(byName);
+    return { docType: byName, method: 'filename', confidence: alreadyExtracted && !filenameOnly ? 'low' : 'medium' };
   }
 
   // 4. Fall back to the text-based classifier, but skip the LLM entirely when

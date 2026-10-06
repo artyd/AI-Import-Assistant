@@ -5,7 +5,7 @@ import { getOwnedCollection } from '../services/collectionAccess.js';
 import {
   ensureConversationScoped,
   appendMessage,
-  getConversationHistory,
+  getConversationHistoryWithStats,
   listConversationsByCollection,
   getConversationMessagesByCollection,
 } from '../services/conversations.js';
@@ -19,7 +19,7 @@ import { chatRateLimitConfig } from './chatRateLimit.js';
 // customs/logistics reference tools (УКТ ЗЕД / dual-use / НБУ / PubChem, when
 // enabled). Shipment tools (checklist/discrepancies/…) are workspace-scoped and
 // intentionally excluded here.
-const analysisTool = toolDefinitions.filter((t) => t.name === 'run_consolidated_analysis');
+const analysisTool = toolDefinitions.filter((t) => 'name' in t && t.name === 'run_consolidated_analysis');
 function consolidatedTools() {
   return [...analysisTool, ...logistTools()];
 }
@@ -63,7 +63,7 @@ export async function chatConsolidatedRoutes(app: FastifyInstance): Promise<void
           incomingConvId,
           message,
         );
-        const history = await getConversationHistory(conversationId);
+        const { history, stats: historyStats } = await getConversationHistoryWithStats(conversationId);
         await appendMessage(conversationId, 'user', message);
 
         const result = await runAgentTurn({
@@ -84,6 +84,7 @@ export async function chatConsolidatedRoutes(app: FastifyInstance): Promise<void
           result.citations,
           result.toolCalls,
           result.turnBlocks,
+          { ...result.usage, history: historyStats },
         );
 
         if (result.error) {
@@ -95,6 +96,7 @@ export async function chatConsolidatedRoutes(app: FastifyInstance): Promise<void
             citations: result.citations,
             conversationId,
             messageId,
+            usage: { ...result.usage, history: historyStats },
           });
         }
       } catch (err) {

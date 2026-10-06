@@ -4,7 +4,7 @@ import { authenticate } from '../auth/hook.js';
 import {
   ensureConversationScoped,
   appendMessage,
-  getConversationHistory,
+  getConversationHistoryWithStats,
   listConversationsByOwner,
   getConversationMessagesByOwner,
 } from '../services/conversations.js';
@@ -47,7 +47,7 @@ export async function chatNormalRoutes(app: FastifyInstance): Promise<void> {
         incomingConvId,
         message,
       );
-      const history = await getConversationHistory(conversationId);
+      const { history, stats: historyStats } = await getConversationHistoryWithStats(conversationId);
       await appendMessage(conversationId, 'user', message);
 
       const result = await runAgentTurn({
@@ -68,6 +68,7 @@ export async function chatNormalRoutes(app: FastifyInstance): Promise<void> {
         result.citations,
         result.toolCalls,
         result.turnBlocks,
+        { ...result.usage, history: historyStats },
       );
 
       if (result.error) {
@@ -79,6 +80,7 @@ export async function chatNormalRoutes(app: FastifyInstance): Promise<void> {
           citations: result.citations,
           conversationId,
           messageId,
+          usage: { ...result.usage, history: historyStats },
         });
       }
     } catch (err) {

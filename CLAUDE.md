@@ -27,7 +27,8 @@ is not used.
   docx/xlsx/csv locally, legacy .doc via LibreOffice — and everything reads that.
 - **Anthropic key server-side only** (`src/anthropic/client.ts`). The browser
   never calls Anthropic directly.
-- **Model:** `claude-opus-4-8` with `thinking: { type: 'adaptive' }`.
+- **Model:** `claude-sonnet-5-5` (env `ANTHROPIC_MODEL`, backend + worker) with `thinking: { type: 'adaptive' }`;
+  no forced `tool_choice` (400 on Sonnet 5.5), `block_binding: drop_block` on preserved-thinking models.
 
 ## Штурман grounding rules (Phase 4 — enforced in `src/agent/systemPrompt.ts`)
 
@@ -77,7 +78,7 @@ src/
   auth/                passwords (bcrypt), jwt, authenticate hook, seed script
   routes/              auth, workspaces, files, chat (SSE), conversations, events (SSE),
                        checklist, discrepancies, supplierInstruction, parties, report, export, users, notifications
-  agent/               loop.ts (tool-use loop), tools.ts (11 tools), systemPrompt.ts
+  agent/               loop.ts (tool-use loop), tools.ts (agent tools), systemPrompt.ts
   services/            storage, extract/ (raw text + chunking), markdown/ (convert, vision, store/FTS), conversations, workspaceAccess,
                        checklist, discrepancies, status, parties, classify, extraction/, artifacts, supplierInstruction, notifications, report, export
   queue/               BullMQ queue + Redis connection
