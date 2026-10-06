@@ -49,7 +49,7 @@ export async function unpackZip(buf: Buffer): Promise<ZipEntry[]> {
   let remaining = config.MAX_ZIP_UNCOMPRESSED_BYTES;
   const out: ZipEntry[] = [];
   for (const f of fileEntries) {
-    const p = f.path.replace(/\\/g, '/');
+    const p = decodeEntryName(f).replace(/\\/g, '/');
     const segments = p.split('/').filter(Boolean);
     const base = segments[segments.length - 1] ?? '';
     // Skip junk: macOS resource forks, hidden/dotfiles, empty names.
@@ -60,6 +60,49 @@ export async function unpackZip(buf: Buffer): Promise<ZipEntry[]> {
     out.push({ path: p, name: base, folderName, buffer });
   }
   return out;
+}
+
+interface EntryNameInfo {
+  path: string;
+  pathBuffer?: Buffer;
+  isUnicode?: boolean | number;
+}
+
+const CJK = /[㐀-鿿]/g;
+const CYRILLIC = /[Ѐ-ӿ]/g;
+const BOX_DRAWING = /[─-◿]/; // cp866 0xB0–0xDF
+
+/**
+ * Entry names in zips made on non-UTF-8 Windows are stored in the OEM code page
+ * without the UTF-8 flag, and unzipper decodes them as UTF-8 → «DL-��SPARTIC»
+ * (live test «Сборник 18»: a Chinese supplier's archive, Cyrillic «А» stored in
+ * GBK as A7 A1). Decode such names as GBK (Chinese Windows) or CP866
+ * (Russian/Ukrainian Windows), choosing by which reading looks like text:
+ * - valid UTF-8 → keep it;
+ * - GBK decodes cleanly with no CJK (only Latin/Cyrillic) → GBK;
+ * - CP866 reading contains box-drawing chars → the bytes are GBK lead bytes → GBK;
+ * - otherwise CP866 (Cyrillic names from a Russian/Ukrainian archiver).
+ */
+export function decodeEntryName(e: EntryNameInfo): string {
+  const buf = e.pathBuffer;
+  if (!buf || e.isUnicode || buf.every((b) => b < 0x80)) return e.path;
+  const utf8 = tryDecode('utf-8', buf);
+  if (utf8 !== null) return utf8;
+  const gbk = tryDecode('gbk', buf);
+  const cp866 = tryDecode('ibm866', buf) ?? e.path;
+  if (gbk === null) return cp866;
+  const gbkCjk = (gbk.match(CJK) ?? []).length;
+  if (gbkCjk === 0 && (gbk.match(CYRILLIC) ?? []).length > 0) return gbk;
+  if (BOX_DRAWING.test(cp866)) return gbk;
+  return gbkCjk > 0 && (cp866.match(CYRILLIC) ?? []).length === 0 ? gbk : cp866;
+}
+
+function tryDecode(encoding: string, buf: Buffer): string | null {
+  try {
+    return new TextDecoder(encoding, { fatal: true }).decode(buf);
+  } catch {
+    return null;
+  }
 }
 
 /** Reads a stream into memory, aborting once more than `limit` bytes arrive. */

@@ -199,6 +199,8 @@ function labelToolCall(tool: string, input: Record<string, unknown>): string {
   if (tool === "read_file")
     return `Читаю: ${String(input.path ?? input.file ?? input.fileName ?? "")}`;
   if (tool === "list_files") return "Перелік файлів";
+  if (tool === "find_files")
+    return `Шукаю файли: «${String(input.query ?? "")}»`;
   return `Інструмент: ${tool}`;
 }
 

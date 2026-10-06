@@ -77,7 +77,7 @@ src/
   auth/                passwords (bcrypt), jwt, authenticate hook, seed script
   routes/              auth, workspaces, files, chat (SSE), conversations, events (SSE),
                        checklist, discrepancies, supplierInstruction, parties, report, export, users, notifications
-  agent/               loop.ts (tool-use loop), tools.ts (11 tools), systemPrompt.ts
+  agent/               loop.ts (tool-use loop), tools.ts (agent tools), systemPrompt.ts
   services/            storage, extract/ (raw text + chunking), markdown/ (convert, vision, store/FTS), conversations, workspaceAccess,
                        checklist, discrepancies, status, parties, classify, extraction/, artifacts, supplierInstruction, notifications, report, export
   queue/               BullMQ queue + Redis connection

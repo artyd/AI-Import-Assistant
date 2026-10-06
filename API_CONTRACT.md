@@ -238,7 +238,7 @@ the mode could not be decided),
   previous file's `is_latest` flips to false. Applies to the first accepted file.
   `400 invalid_replaces` if the id isn't in this workspace.
 - Allow-list: `pdf, docx, xlsx, csv, png, jpg/jpeg`. Anything else (incl.
-  executables) is rejected. Per-file size limit `MAX_UPLOAD_BYTES` (default 25 MB).
+  executables) is rejected. Per-file size limit `MAX_UPLOAD_BYTES` (default 100 MB).
 - **Content dedup:** an exact-content match (SHA-256 of the bytes, scoped to the
   workspace's `is_latest` files, and within the same upload batch) is skipped and
   reported in `rejected` with `reason: "duplicate_of:<existing name>"`. Skipped when
@@ -421,7 +421,7 @@ Request: `{ "message": string, "conversationId"?: string(uuid) }`
 Omitting `conversationId` starts a new conversation.
 
 Response: `Content-Type: text/event-stream`. The single agent ("Штурман") runs a
-tool-use loop over the tools it chooses at runtime — retrieval (`search_documents`,
+tool-use loop over the tools it chooses at runtime — retrieval (`find_files`, `search_documents`,
 `read_file`, `list_files`) plus shipment tools (`get_checklist`,
 `get_discrepancies`, `get_risks`, `generate_supplier_instruction`, `generate_report`,
 `get_missing_context`, `save_workspace_context`, `classify_and_file`,

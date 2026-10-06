@@ -169,8 +169,9 @@ export interface ExtractedFields {
 const MAX_INPUT_CHARS = 120_000;
 // Max extraction passes per document (~1M chars of Markdown).
 const MAX_EXTRACTION_PARTS = 8;
-// Anthropic PDF request limit (same bound as the OCR path).
-const PDF_MAX_BYTES = 32 * 1024 * 1024;
+// Anthropic request limit is 32 MB AFTER base64 (+4/3), so a whole-PDF vision
+// call fits only up to ~22 MB raw; bigger files take the Markdown text path.
+const PDF_MAX_BYTES = 22 * 1024 * 1024;
 
 const EXTRACTION_TOOL: ChatTool = {
   name: 'record_extraction',

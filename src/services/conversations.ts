@@ -1,4 +1,5 @@
 import { query } from '../db/pool.js';
+import { config } from '../config.js';
 import { repairBlocks, stableWindowStart } from '../agent/historyRepair.js';
 import type { ChatMessageParam } from '../anthropic/client.js';
 
@@ -216,8 +217,9 @@ export async function getConversationMessagesByOwner(
 // Windowing budget for replayed history. Prior turns' full content blocks (incl.
 // tool_result document text) are replayed so the agent remembers what it read;
 // this caps how much, keeping room for the system prompt, the current turn's
-// tool results, and the output. ~400k chars ≈ ~100k tokens.
-const HISTORY_CHAR_BUDGET = 400_000;
+// tool results, and the output. Default 1.2M chars ≈ ~400k tokens — under half of the
+// 1M context window (AGENT_HISTORY_CHAR_BUDGET).
+const HISTORY_CHAR_BUDGET = config.AGENT_HISTORY_CHAR_BUDGET;
 
 function approxSize(msgs: ChatMessageParam[]): number {
   try {

@@ -57,6 +57,11 @@ services:
       REDIS_URL: redis://redis:6379
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-4-8}
+      # Chat agent budgets (1M-token context window; see DEPLOYMENT.md).
+      AGENT_CONTEXT_TOKENS: ${AGENT_CONTEXT_TOKENS:-1000000}
+      AGENT_MAX_TOKENS: ${AGENT_MAX_TOKENS:-64000}
+      AGENT_HISTORY_CHAR_BUDGET: ${AGENT_HISTORY_CHAR_BUDGET:-1200000}
+      READ_FILE_MAX_CHARS: ${READ_FILE_MAX_CHARS:-200000}
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-12h}
       # Quick PIN login (off unless set): 6–8 digits, bound to ACCESS_CODE_EMAIL.
@@ -64,7 +69,7 @@ services:
       ACCESS_CODE_EMAIL: ${ACCESS_CODE_EMAIL:-}
       CORS_ORIGIN: ${CORS_ORIGIN}
       STORAGE_DIR: /data/storage
-      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-26214400}
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-104857600}
       # Internal logist-mcp URL (Phase 1). Empty disables the Phase-2 tools.
       LOGIST_MCP_URL: ${LOGIST_MCP_URL:-http://logist-mcp:8015}
     volumes:

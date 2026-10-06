@@ -14,6 +14,14 @@ import { splitVisionPages, type MarkdownPage } from './format.js';
 
 // Anthropic PDF request limit.
 const PDF_MAX_BYTES = 32 * 1024 * 1024;
+// Raw bytes allowed in ONE vision window. Base64 inflates by 4/3, so 22 MB raw ≈
+// 29 MB on the wire — under the 32 MB request cap. A high-DPI scan (~5 MB/page,
+// e.g. a 51 MB signed contract) would otherwise make a 5-page window ~25 MB raw
+// → ~33 MB request → rejected, and those pages silently lost.
+const WINDOW_MAX_BYTES = 22 * 1024 * 1024;
+
+/** A page window too large for one request — split it and retry. */
+class WindowTooLarge extends Error {}
 
 const RULES =
   'Правила: переписуй ДОСЛІВНО, нічого не перекладай, не скорочуй і не вигадуй. ' +
@@ -135,21 +143,29 @@ export async function pdfToMarkdown(buf: Buffer): Promise<VisionResult> {
   };
 
   const runWindow = async (from: number, to: number): Promise<{ pages: MarkdownPage[]; partial: boolean; failed: number[] }> => {
+    const perPage = async () => {
+      const per = await Promise.all(
+        Array.from({ length: to - from + 1 }, (_, i) => runWindow(from + i, from + i)),
+      );
+      return {
+        pages: per.flatMap((r) => r.pages),
+        partial: per.some((r) => r.partial),
+        failed: per.flatMap((r) => r.failed),
+      };
+    };
     try {
-      const { text, truncated } = await transcribe(async () => pdfBlock(await slice(from, to)), batchPrompt(from, to));
-      if (truncated && to > from) {
-        // Output cap hit for the window → redo one page per call.
-        const per = await Promise.all(
-          Array.from({ length: to - from + 1 }, (_, i) => runWindow(from + i, from + i)),
-        );
-        return {
-          pages: per.flatMap((r) => r.pages),
-          partial: per.some((r) => r.partial),
-          failed: per.flatMap((r) => r.failed),
-        };
-      }
+      const { text, truncated } = await transcribe(async () => {
+        const bytes = await slice(from, to);
+        if (bytes.length > WINDOW_MAX_BYTES) throw new WindowTooLarge(`${bytes.length}`);
+        return pdfBlock(bytes);
+      }, batchPrompt(from, to));
+      // Output cap hit for the window → redo one page per call.
+      if (truncated && to > from) return await perPage();
       return { pages: splitVisionPages(text, from, to), partial: truncated, failed: [] };
     } catch (err) {
+      // Too many bytes for one request (high-DPI scan) → one page per call. A
+      // single page still over the cap is recorded as failed (text-layer fallback).
+      if (err instanceof WindowTooLarge && to > from) return perPage();
       // eslint-disable-next-line no-console
       console.error(`Vision transcription failed for pages ${from}-${to}: ${(err as Error).message}`);
       return { pages: [], partial: false, failed: Array.from({ length: to - from + 1 }, (_, i) => from + i) };

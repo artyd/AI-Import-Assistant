@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import type { ChatTool } from '../anthropic/client.js';
 import { query } from '../db/pool.js';
+import { config } from '../config.js';
+import { versionHints, baseNameKey, pdfProvenance, formatProvenance } from '../services/fileHints.js';
 import * as logist from '../services/logist/index.js';
 import { digestUktzedSections } from '../services/logist/uktzedDigest.js';
 import { readStoredFile, contentHashOf } from '../services/storage.js';
@@ -106,6 +108,22 @@ export const toolDefinitions: ChatTool[] = [
       '(інвойс/пакувальний/контракт/…), статус індексації та чи вже оброблений (перетворений на Markdown). ' +
       'Використовуй, щоб зорієнтуватися, які документи є, і взяти ID/назву для read_file.',
     input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'find_files',
+    description:
+      'Шукає ФАЙЛИ постачання за назвою, номером документа, типом або словом із вмісту (напр. ' +
+      '"export declaration", "报关单", "10122025/PVS", "HBL-C", "CHED", "контракт", "інструкц"). ' +
+      'Повертає до 30 файлів із текою, типом, ознаками версії (чернетка / COPY / telex / переклад / ' +
+      'дублікат) і ID. ОБОВʼЯЗКОВО виклич перед тим, як сказати, що документа в постачанні немає; ' +
+      'пробуй кілька варіантів (номер, тип англійською/українською/мовою документа).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Частина назви файлу, номер документа, тип або слово з вмісту.' },
+      },
+      required: ['query'],
+    },
   },
   {
     name: 'get_checklist',
@@ -450,6 +468,8 @@ interface FileRow {
   status: string;
   folder_name: string | null;
   doc_type?: string | null;
+  /** First page of the stored Markdown (for version hints). */
+  md_head?: string | null;
 }
 
 export async function executeTool(
@@ -464,6 +484,8 @@ export async function executeTool(
       return runReadFile(input, ctx);
     case 'list_files':
       return runListFiles(ctx);
+    case 'find_files':
+      return runFindFiles(input, ctx);
     case 'get_checklist':
       return runChecklist(ctx);
     case 'get_discrepancies':
@@ -1355,8 +1377,9 @@ async function runReadFile(input: unknown, ctx: ToolContext): Promise<ToolOutcom
     text = text.slice(from, to);
   }
 
-  // Raised from 12000: the agent used to see only ~4-5 pages of any file and stop.
-  const MAX = 50000;
+  // One read returns up to READ_FILE_MAX_CHARS (default 200k ≈ a 60-page contract);
+  // longer files ask the agent to page on with `range`.
+  const MAX = config.READ_FILE_MAX_CHARS;
   const fullLen = text.length;
   const truncated = fullLen > MAX;
   if (truncated) {
@@ -1369,12 +1392,30 @@ async function runReadFile(input: unknown, ctx: ToolContext): Promise<ToolOutcom
 
   const citations = dedupeCitations(pages.map((p) => ({ file: file.name, page: p.page })));
   const quality = stored.partial || stored.note ? `\n(Увага: ${stored.note ?? 'документ розпізнано не повністю'}.)` : '';
+  // Version / provenance hints: draft vs final, translation, a PDF re-saved later.
+  const hints = versionHints(file.name, stored.pages[0]?.markdown ?? '');
+  // PDF metadata only on a whole-file read (not on every paging call) and only for
+  // files small enough to parse cheaply in the API process.
+  let provenance = '';
+  if (file.type === 'pdf' && typeof range !== 'string') {
+    const buf = await readStoredFile(file.disk_path).catch(() => null);
+    provenance = buf && buf.length <= PROVENANCE_MAX_BYTES ? formatProvenance(await pdfProvenance(buf)) : '';
+  }
+  const meta = [
+    `Тека: ${file.folder_name ?? '(корінь)'}`,
+    hints.length ? `Ознаки версії: ${hints.join('; ')}` : '',
+    provenance,
+  ]
+    .filter(Boolean)
+    .join('\n');
   return {
-    result: `Файл: ${file.name} (Markdown${stored.pageCount ? `, ${stored.pageCount} стор.` : ''})${quality}\n${wrapDoc(file.name, text)}`,
+    result: `Файл: ${file.name} (Markdown${stored.pageCount ? `, ${stored.pageCount} стор.` : ''})${quality}\n${meta}\n${wrapDoc(file.name, text)}`,
     summary: `Прочитано: ${file.name}${truncated ? ' (частково)' : ''}`,
     citations: citations.length ? citations : [{ file: file.name, page: null }],
   };
 }
+
+const PROVENANCE_MAX_BYTES = 40 * 1024 * 1024;
 
 async function runListFiles(ctx: ToolContext): Promise<ToolOutcome> {
   const files = await listFiles(requireWorkspace(ctx));
@@ -1386,15 +1427,95 @@ async function runListFiles(ctx: ToolContext): Promise<ToolOutcome> {
     const key = f.folder_name ?? '(корінь)';
     (byFolder.get(key) ?? byFolder.set(key, []).get(key)!).push(f);
   }
-  const lines: string[] = [];
+  const sameName = sameNameCounts(files);
+  const lines: string[] = [
+    `Усього файлів: ${files.length}. Ознаки версії — підказки з назви/першої сторінки, не вердикт.`,
+  ];
   for (const [folder, group] of byFolder) {
     lines.push(`${folder}:`);
-    for (const f of group) {
-      const dt = f.doc_type ? `, тип: ${f.doc_type}` : '';
-      lines.push(`  - ${f.name} [${statusLabel(f.status)}${dt}] (id: ${f.id})`);
-    }
+    for (const f of group) lines.push(`  - ${fileLine(f, sameName)}`);
   }
   return { result: lines.join('\n'), summary: `Список файлів: ${files.length}`, citations: [] };
+}
+
+/** Escapes LIKE wildcards so "HBL_C" or "100%" match literally. */
+function escapeLike(t: string): string {
+  return t.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
+
+/** How many files share each base name ("HBL-C.pdf" / "HBL-C (1).pdf"). */
+function sameNameCounts(files: FileRow[]): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const f of files) m.set(baseNameKey(f.name), (m.get(baseNameKey(f.name)) ?? 0) + 1);
+  return m;
+}
+
+function fileLine(f: FileRow, sameName: Map<string, number>): string {
+  const dt = f.doc_type ? `, тип: ${f.doc_type}` : '';
+  const hints = versionHints(f.name, f.md_head ?? '');
+  const twins = sameName.get(baseNameKey(f.name)) ?? 1;
+  if (twins > 1) hints.push(`ще ${twins - 1} файл(и) з такою ж назвою — звір версії`);
+  const h = hints.length ? ` {${hints.join('; ')}}` : '';
+  return `${f.name} [${statusLabel(f.status)}${dt}]${h} (id: ${f.id})`;
+}
+
+/**
+ * find_files — locate files by name / document number / type / a word from the
+ * content. Live test «Сборник 18»: the agent read 2–9 of 196 files and declared an
+ * export declaration and a contract "absent" although both were uploaded. This
+ * gives it a cheap, exhaustive way to check before saying a document is missing.
+ */
+async function runFindFiles(input: unknown, ctx: ToolContext): Promise<ToolOutcome> {
+  const raw = (input as { query?: unknown } | null)?.query;
+  const q = typeof raw === 'string' ? raw.trim() : '';
+  if (!q) {
+    return { result: 'Вкажи query — частину назви, номер або тип документа.', summary: 'Пошук файлів: порожній запит', citations: [] };
+  }
+  const workspaceId = requireWorkspace(ctx);
+  const files = await listFiles(workspaceId);
+  const full = q.toLowerCase();
+  const tokens = full.split(/[\s,;]+/).filter((t) => t.length >= 2);
+  // Content match over the indexed section text (not the raw JSONB, whose keys
+  // would match everything); short tokens are too noisy for content search.
+  const contentTokens = (tokens.length ? tokens : [full]).filter((t) => t.length >= 3).map(escapeLike);
+  const { rows: content } = contentTokens.length
+    ? await query<{ file_id: string; hits: number }>(
+        `SELECT ds.file_id, count(DISTINCT t)::int AS hits
+         FROM document_sections ds CROSS JOIN unnest($2::text[]) AS t
+         WHERE ds.workspace_id = $1 AND ds.text ILIKE '%' || t || '%' ESCAPE '\\'
+         GROUP BY ds.file_id`,
+        [workspaceId, contentTokens],
+      )
+    : { rows: [] as { file_id: string; hits: number }[] };
+  const contentHits = new Map(content.map((r) => [r.file_id, r.hits]));
+  const scored = files
+    .map((f) => {
+      const name = f.name.toLowerCase();
+      const meta = `${name} ${f.folder_name ?? ''} ${f.doc_type ?? ''}`.toLowerCase();
+      let score = name.includes(full) ? 10 : 0;
+      for (const t of tokens) if (meta.includes(t)) score += 4;
+      score += contentHits.get(f.id) ?? 0;
+      return { f, score };
+    })
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 30);
+  if (scored.length === 0) {
+    return {
+      result:
+        `Файлів за запитом «${q}» не знайдено (ні в назвах, ні в типах, ні у вмісті ${files.length} файлів). ` +
+        'Спробуй інші формулювання (номер, тип англійською/китайською) або list_files.',
+      summary: `Пошук файлів «${q}»: 0`,
+      citations: [],
+    };
+  }
+  const sameName = sameNameCounts(files);
+  const lines = scored.map(({ f }) => `- [${f.folder_name ?? '(корінь)'}] ${fileLine(f, sameName)}`);
+  return {
+    result: `Знайдено файлів: ${scored.length} (найрелевантніші першими):\n${lines.join('\n')}`,
+    summary: `Пошук файлів «${q}»: ${scored.length}`,
+    citations: [],
+  };
 }
 
 function statusLabel(status: string): string {
@@ -1449,7 +1570,9 @@ async function findFile(
 async function listFiles(workspaceId: string): Promise<FileRow[]> {
   const { rows } = await query<FileRow>(
     `SELECT f.id, f.name, f.type, f.disk_path, f.status, fo.name AS folder_name,
-            de.extracted_fields->>'doc_type' AS doc_type
+            de.extracted_fields->>'doc_type' AS doc_type,
+            (SELECT left(ds.text, 3000) FROM document_sections ds
+             WHERE ds.file_id = f.id ORDER BY ds.seq LIMIT 1) AS md_head
      FROM files f
      LEFT JOIN folders fo ON fo.id = f.folder_id
      LEFT JOIN LATERAL (

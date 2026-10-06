@@ -6,6 +6,7 @@ import {
   type ChatSystem,
   type ChatTool,
 } from '../anthropic/client.js';
+import { config } from '../config.js';
 import type { SseStream } from '../sse/sse.js';
 import type { Citation, ToolCallRecord } from '../services/conversations.js';
 import { toolDefinitions, executeTool, type ToolContext } from './tools.js';
@@ -89,11 +90,47 @@ function withBreakpoints(messages: ChatMessageParam[], indexes: number[]): ChatM
 }
 
 const MAX_ITERATIONS = 14;
-// Generous completion budget. The old 4096 truncated long answers (consolidated
-// per-line tables, reports, multi-doc write-ups) — especially with adaptive
-// thinking, whose tokens also count against this. 12k leaves ample room for the
-// visible answer after thinking.
-const MAX_TOKENS = 12000;
+// Completion budget per model call. Adaptive thinking counts against it: at the
+// old 12k a long reasoning pass (customs-declaration arithmetic over 5 lines) used
+// the whole budget and the turn ended with NO visible text. Streaming, so a large
+// cap doesn't risk HTTP timeouts.
+const MAX_TOKENS = config.AGENT_MAX_TOKENS;
+// Input size at which a turn stops calling tools and answers from what it has —
+// so a reading spree over a big shipment can't overflow the context window.
+const CONTEXT_GUARD_TOKENS = Math.floor(config.AGENT_CONTEXT_TOKENS * config.AGENT_CONTEXT_GUARD);
+
+const FINAL_ANSWER_NUDGE =
+  'Сформулюй відповідь користувачу на основі вже зібраних даних (без нових викликів інструментів). ' +
+  'Якщо чогось не встиг перевірити — прямо скажи, що саме.';
+const EMPTY_ANSWER_FALLBACK =
+  'Не вдалося сформувати відповідь на це питання. Спробуйте переформулювати або звузити його ' +
+  '(наприклад, до одного документа чи одного товару).';
+
+function hasText(content: readonly { type: string; text?: string }[]): boolean {
+  return content.some((b) => b.type === 'text' && (b.text ?? '').trim().length > 0);
+}
+
+// Conservative token estimate for tool results: ~2 chars/token covers Cyrillic
+// and leaves margin for CJK-heavy documents (Chinese export declarations).
+function estimateTokens(blocks: ChatContentBlockParam[]): number {
+  return Math.ceil(JSON.stringify(blocks).length / 2);
+}
+
+const UNLOADED_RESULT =
+  'Результат не завантажено: вичерпано бюджет контексту цього ходу. Відповідай за вже прочитаним; ' +
+  'якщо цих даних бракує — скажи користувачу, що файл варто розглянути окремим питанням.';
+
+/** Replaces the largest tool results with a stub until the batch fits `budget` tokens. */
+function shrinkToolResults(blocks: ChatContentBlockParam[], budget: number): void {
+  const order = blocks
+    .map((b, i) => ({ i, size: JSON.stringify(b).length }))
+    .sort((a, b) => b.size - a.size);
+  for (const { i } of order) {
+    if (estimateTokens(blocks) < budget) return;
+    const b = blocks[i];
+    if (b && b.type === 'tool_result') blocks[i] = { ...b, content: UNLOADED_RESULT };
+  }
+}
 
 /**
  * Single-agent, hybrid-retrieval tool-use loop. One Claude conversation with the
@@ -225,14 +262,44 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
       }
 
       messages.push({ role: 'user', content: toolResults });
-      if (iteration === MAX_ITERATIONS - 1) toolsStillPending = true;
+
+      // Iterations exhausted, or the next request would come close to the context
+      // window (this call's input + its output + the new tool results, ~3 chars per
+      // token): stop reading and answer from what has been gathered.
+      const priorInput =
+        msg.usage.input_tokens +
+        (msg.usage.cache_read_input_tokens ?? 0) +
+        (msg.usage.cache_creation_input_tokens ?? 0) +
+        msg.usage.output_tokens;
+      if (priorInput + estimateTokens(toolResults) >= CONTEXT_GUARD_TOKENS) {
+        // Several big reads in one step can overshoot the window by themselves —
+        // unload the largest results so the closing request still fits.
+        shrinkToolResults(toolResults, CONTEXT_GUARD_TOKENS - priorInput);
+        toolsStillPending = true;
+        break;
+      }
+      if (iteration === MAX_ITERATIONS - 1) {
+        toolsStillPending = true;
+        break;
+      }
     }
 
-    // Iterations exhausted mid-tool-use: one final call that may NOT use tools, so
-    // the model synthesizes a closing answer. `tools` must still be sent (history
-    // holds tool blocks — the API 400s without a definition); tool_choice none
-    // forbids new calls.
-    if (toolsStillPending && !params.signal?.aborted) {
+    // Closing pass that may NOT use tools, when (a) tools are still pending
+    // (iterations or context budget exhausted), or (b) the turn produced no
+    // visible text at all — e.g. adaptive thinking used the whole output budget, or
+    // the model ended on thinking only. Without (b) the user got an empty answer.
+    // `tools` must still be sent (history holds tool blocks — the API 400s without
+    // a definition); tool_choice none forbids new calls.
+    // (b) is judged on the LAST model message: earlier iterations' progress lines
+    // («Читаю файл…») are not an answer.
+    const last = messages[messages.length - 1];
+    const endedWithoutAnswer =
+      !!last && last.role === 'assistant' && Array.isArray(last.content) && !hasText(last.content);
+    if (!params.signal?.aborted && (toolsStillPending || endedWithoutAnswer || !text.trim())) {
+      // A trailing assistant message with no text and no tool_use is an empty
+      // block for replay — drop it before asking for the answer.
+      if (endedWithoutAnswer) messages.pop();
+      const nudgeIdx = messages.push({ role: 'user', content: FINAL_ANSWER_NUDGE }) - 1;
       const stream = anthropic.messages.stream({
         model: MODEL,
         max_tokens: MAX_TOKENS,
@@ -240,7 +307,7 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
         system: systemParam,
         messages: request(),
         tools: toolsParam,
-        tool_choice: { type: 'none' },
+        ...(toolsParam.length > 0 ? { tool_choice: { type: 'none' as const } } : {}),
       }, { signal: params.signal });
       blockBreak = true;
       stream.on('contentBlock', () => {
@@ -249,8 +316,14 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
       stream.on('text', emitText);
       const msg = await stream.finalMessage();
       track(msg.usage);
+      // The nudge is a one-off steer for this call — keep it out of the replayed
+      // history (user(tool_results) → assistant(answer) is a valid sequence).
+      messages.splice(nudgeIdx, 1);
       messages.push({ role: 'assistant', content: msg.content });
     }
+
+    // Never end a turn silently: the UI would show an empty bubble.
+    if (!params.signal?.aborted && !text.trim()) emitText(EMPTY_ANSWER_FALLBACK);
   } catch (err) {
     // Stream/model failure: keep whatever text streamed so the caller can persist a
     // partial answer (survives reload) instead of losing it.
