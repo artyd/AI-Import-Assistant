@@ -90,7 +90,8 @@ async function autoFillLocked(workspaceId: string): Promise<void> {
     incoterm_in: incoterms.incoterm_in,
     incoterm_out: incoterms.incoterm_out,
     transport_mode: deriveTransportMode(docs),
-    origin_country: deriveOriginCountry(docs, sender?.country ?? null),
+    // Fallback origin = the manufacturer's country (a trader's country is not origin).
+    origin_country: deriveOriginCountry(docs, analysis.manufacturer?.country ?? sender?.country ?? null),
     destination_country: countryToUk(recipient?.country ?? null),
   };
 

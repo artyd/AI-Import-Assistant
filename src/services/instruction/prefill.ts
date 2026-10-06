@@ -61,6 +61,26 @@ function addressFromDocs(docs: DocRow[], name: string): { address: string; count
   return null;
 }
 
+const CONSIGNOR_ROLE = /consignor|shipper|вантажовідправ|грузоотправ|відправник|отправитель/i;
+const CONSIGNEE_ROLE = /consignee|вантажоодерж|грузополуч|одержувач|получатель/i;
+
+/**
+ * A party the contract names for a role (its parties[] entry), e.g. the
+ * consignor of clause 4.2 / the consignee of 4.3 — the contract's own words beat
+ * any slot inference.
+ */
+function contractParty(
+  doc: DocRow | undefined,
+  role: RegExp,
+): { name: string; address: string; country: string } | null {
+  if (!doc) return null;
+  const parties = Array.isArray(doc.fields.parties)
+    ? (doc.fields.parties as { name?: string; role?: string; address?: string; country?: string }[])
+    : [];
+  const hit = parties.find((p) => p.name && p.role && role.test(p.role));
+  return hit ? { name: str(hit.name), address: str(hit.address), country: str(hit.country) } : null;
+}
+
 /** "CPT - Bila Tserkva, Ukraine (INCOTERMS 2010)" → "Bila Tserkva, Ukraine" */
 function incotermPlace(term: string): string {
   return term
@@ -186,24 +206,42 @@ export async function prefillDraft(ws: WorkspaceRow, user?: { name: string } | n
   }
 
   // ── consignor / consignee ─────────────────────────────────────────────────
-  if (sender) {
-    const t = dirFind(['supplier'], sender);
-    const a = t ?? addressFromDocs(docs, sender);
-    d.consignor = { name: latinPart(sender), address: a?.address ?? '', country: a?.country ?? (parties.find((x) => x.role === 'sender')?.country ?? '') };
-    src['consignor.name'] = 'parties';
-    if (a?.address) src['consignor.address'] = t ? 'template' : 'documents';
+  // The supply contract's own consignor / consignee clauses win (e.g. 4.2 / 4.3);
+  // otherwise the supplier slot and the importer. The consignee defaults to the
+  // IMPORTER even in a trilateral deal — goods ship straight to Ukraine; the
+  // intermediary is the consignee only when the contract says so.
+  const cConsignor = contractParty(supplierContract, CONSIGNOR_ROLE);
+  const consignorName = cConsignor?.name || sender;
+  if (consignorName) {
+    const t = dirFind(['supplier'], consignorName);
+    const a = cConsignor?.address
+      ? { address: cConsignor.address, country: cConsignor.country }
+      : (t ?? addressFromDocs(docs, consignorName));
+    d.consignor = {
+      name: latinPart(consignorName),
+      address: a?.address ?? '',
+      country: a?.country || (parties.find((x) => x.role === 'sender')?.country ?? ''),
+    };
+    src['consignor.name'] = cConsignor ? 'contract' : 'parties';
+    if (a?.address) src['consignor.address'] = cConsignor?.address ? 'contract' : t ? 'template' : 'documents';
     if (t?.email) set('supplierEmail', t.email, 'template');
   }
-  const consigneeName = trilateral ? intermediary : recipient;
+  const cConsignee = contractParty(supplierContract, CONSIGNEE_ROLE);
+  const consigneeIsIntermediary =
+    trilateral && !!cConsignee && sameCompany(cConsignee.name, intermediary) && !sameCompany(cConsignee.name, recipient);
+  const consigneeName = cConsignee?.name || recipient || (trilateral ? intermediary : '');
   if (consigneeName) {
-    d.consigneeChoice = trilateral ? 'intermediary' : 'recipient';
+    d.consigneeChoice = consigneeIsIntermediary || (!recipient && trilateral) ? 'intermediary' : 'recipient';
     const t = dirFind(['consignee', 'own_company'], consigneeName);
-    const a = t ?? addressFromDocs(docs, consigneeName);
+    const a = cConsignee?.address
+      ? { address: cConsignee.address, country: cConsignee.country }
+      : (t ?? addressFromDocs(docs, consigneeName));
     d.consignee = { name: latinPart(consigneeName), address: a?.address ?? '', country: a?.country ?? '' };
-    src['consignee.name'] = 'parties';
-    if (a?.address) src['consignee.address'] = t ? 'template' : 'documents';
+    src['consignee.name'] = cConsignee ? 'contract' : 'parties';
+    if (a?.address) src['consignee.address'] = cConsignee?.address ? 'contract' : t ? 'template' : 'documents';
   }
-  if (trilateral && recipient) {
+  // The end buyer is a separate line only when the goods are consigned to the intermediary.
+  if (d.consigneeChoice === 'intermediary' && recipient) {
     const a = dirFind(['own_company', 'consignee'], recipient) ?? addressFromDocs(docs, recipient);
     set('finalConsignee', [latinPart(recipient), a?.address].filter(Boolean).join(', '), 'parties');
   }

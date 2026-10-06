@@ -7,6 +7,7 @@ import { FOLDER_SKELETON } from '../domain/folders.js';
 import { refreshWorkspaceState } from '../services/status.js';
 import { deleteWorkspaceStorage } from '../services/storage.js';
 import { changedFields, stampManualEdit } from '../services/autoContext.js';
+import { proposePartyFieldsForMode, realignPartiesForMode } from '../services/instruction/realign.js';
 
 const createSchema = z.object({
   number: z.string().min(1).optional(),
@@ -264,6 +265,13 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
     // Keep the legacy `incoterm` column in sync with the incoming Incoterm.
     if (parsed.data.incoterm_in !== undefined) {
       await query('UPDATE workspaces SET incoterm = incoterm_in WHERE id = $1', [ws.id]);
+    }
+    // A mode the user picked by hand also realigns the parties card and proposes
+    // the matching consignor/consignee in an open instruction draft.
+    const mode = parsed.data.contract_type;
+    if (mode && mode !== ws.contract_type) {
+      await realignPartiesForMode(ws.id, mode);
+      await proposePartyFieldsForMode(ws.id, mode);
     }
 
     const updated = (await getOwnedWorkspace(req.user!.sub, req.params.id))!;
