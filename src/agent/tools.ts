@@ -21,6 +21,7 @@ import { getWorkspaceById } from '../services/workspaceAccess.js';
 import { buildSupplierInstruction } from '../services/supplierInstruction.js';
 import { ensureDraftVersion, listVersions, setProposals } from '../services/instruction/store.js';
 import { prefillDraft } from '../services/instruction/prefill.js';
+import { proposePartyFieldsForMode, realignPartiesForMode } from '../services/instruction/realign.js';
 import { getPath, isProposablePath, missingFields, REQUIRED_FIELDS } from '../services/instruction/types.js';
 import { computeDiscrepancies } from '../services/discrepancies.js';
 import { computeRegistryChecks } from '../services/drugRegistry.js';
@@ -268,7 +269,10 @@ export const toolDefinitions: ChatTool[] = [
       'режим у розмові (перезаписує будь-яке значення, зокрема автоматичне). source="auto" — ' +
       'коли фіксуєш автоматичний висновок: режим і впевненість беруться з детермінованого ' +
       'аналізу документів (твій contract_type ігнорується), і воно НЕ перезаписує значення, ' +
-      'встановлене вручну. Спершу виклич get_contract_mode.',
+      'встановлене вручну. Спершу виклич get_contract_mode. Після source="survey" сторони й ' +
+      'конструктор інструкції вирівнюються автоматично (двосторонній: продавець стає «Хто», ' +
+      '«Через кого» очищається; у чернетці інструкції зʼявляються пропозиції відправника/одержувача) — ' +
+      'перекажи користувачу результат інструмента, а не проси правити поля вручну.',
     input_schema: {
       type: 'object',
       properties: {
@@ -749,7 +753,11 @@ async function runGetInstructionDraft(ctx: ToolContext): Promise<ToolOutcome> {
   const missing = missingFields(d);
   const fields = Object.keys(REQUIRED_FIELDS)
     .concat(['product.cas', 'product.hsCode', 'consignor.address', 'consignee.address', 'finalConsignee', 'terms.destination', 'terms.finalDestination', 'supplierEmail'])
-    .map((p) => `${p} = ${JSON.stringify(getPath(d, p) ?? '')}${d.sources[p] ? ` [${d.sources[p]}]` : ''}`)
+    .map((p) => {
+      // Quantity is stored as number + unit — show both, or "1" reads as unitless.
+      const v = p === 'product.quantity' && d.product.quantity ? `${d.product.quantity} ${d.product.unit}` : (getPath(d, p) ?? '');
+      return `${p} = ${JSON.stringify(v)}${d.sources[p] ? ` [${d.sources[p]}]` : ''}`;
+    })
     .join('\n');
   const docs = d.docs.filter((x) => x.checked).map((x) => x.labelUk || x.label).join(', ');
   const result = [
@@ -1049,10 +1057,20 @@ async function runSetContractMode(input: unknown, ctx: ToolContext): Promise<Too
        contract_type_confidence = NULL, contract_type_reason = $3 WHERE id = $1`,
     [wsId, ct, 'Підтверджено користувачем у розмові.'],
   );
+  // Keep the parties card and the open instruction draft in line with the mode,
+  // so the user doesn't have to retype the consignor/consignee by hand.
+  const partiesNote = await realignPartiesForMode(wsId, ct);
+  const proposed = await proposePartyFieldsForMode(wsId, ct);
   await refreshAfterWorkspaceWrite(wsId);
   await notifyAgentContextChange(wsId, `режим контракту → ${CONTRACT_MODE_UK[ct]}`);
   return {
-    result: `Збережено режим (підтверджено користувачем): ${CONTRACT_MODE_UK[ct]}.`,
+    result:
+      `Збережено режим (підтверджено користувачем): ${CONTRACT_MODE_UK[ct]}.` +
+      (partiesNote ? ` ${partiesNote}` : '') +
+      (proposed > 0
+        ? ` У конструкторі інструкції запропоновано ${proposed} виправлень відправника/одержувача — ` +
+          'користувач приймає їх на екрані «Інструкція» (перемикач Consignee вже виставлено).'
+        : ''),
     summary: `Режим (survey): ${ct}`,
     citations: [],
   };
