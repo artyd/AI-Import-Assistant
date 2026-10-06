@@ -1,0 +1,705 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<title>Штурман — промо</title>
+<!--
+  Promo video for «Штурман». Every frame is a pure function of time: seek(t)
+  positions every element, so render.mjs can capture frame-exact output.
+  Open in a browser to preview (plays in real time; ?t=12.5 freezes a frame).
+-->
+<style>
+  :root {
+    --bg: #0a0c11;
+    --accent: #2f6feb;
+    --accent2: #5d96ff;
+    --ok: #33b98a;
+    --warn: #e7a54b;
+    --err: #ee6a70;
+    --text: #ececee;
+    --muted: #9a9aa2;
+    --faint: #6e6e76;
+    --win: #1c1d21;
+    --panel: #151619;
+    --surface: #26272c;
+    --border: rgba(236, 236, 238, 0.10);
+    --mono: "DejaVu Sans Mono", "Liberation Mono", monospace;
+    --display: "Inter Display", Inter, system-ui, sans-serif;
+  }
+  html, body { margin: 0; background: #000; }
+  #stage {
+    position: relative; width: 1920px; height: 1080px; overflow: hidden;
+    background: var(--bg); color: var(--text);
+    font-family: Inter, system-ui, sans-serif;
+    font-feature-settings: "cv11" 1;
+    -webkit-font-smoothing: antialiased;
+  }
+  .abs { position: absolute; left: 0; top: 0; }
+  .layer { position: absolute; inset: 0; }
+
+  /* background */
+  #grid {
+    position: absolute; inset: -40px;
+    background-image: radial-gradient(rgba(236,236,238,0.13) 1.2px, transparent 1.3px);
+    background-size: 44px 44px;
+    -webkit-mask-image: radial-gradient(ellipse at 50% 50%, #000 20%, transparent 75%);
+  }
+  .glow { position: absolute; border-radius: 50%; }
+  .excerpt, .trow, #ringNum, .paneHead .sub, .cnote, .quote .q { font-variant-numeric: tabular-nums; }
+  #vignette { position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 50%, transparent 55%, rgba(0,0,0,0.55) 100%); }
+
+  /* scene 1: document chaos */
+  .doc {
+    position: absolute; width: 230px; height: 300px; border-radius: 12px;
+    background: #f4f4f6; color: #16171b; box-shadow: 0 24px 60px rgba(0,0,0,0.5);
+    padding: 22px 20px; box-sizing: border-box; overflow: hidden;
+  }
+  .doc .tag { font-size: 11px; letter-spacing: 1.6px; color: #8b8b94; font-weight: 600; }
+  .doc .ttl { font-size: 21px; font-weight: 700; margin-top: 6px; line-height: 1.15; }
+  .doc .bar { height: 7px; border-radius: 4px; background: #dcdce2; margin-top: 11px; }
+  .doc .stripe { position: absolute; left: 0; top: 0; right: 0; height: 6px; }
+  .doc .stamp { position: absolute; right: 18px; bottom: 18px; width: 58px; height: 58px; border-radius: 50%; border: 3px solid rgba(47,111,235,0.45); }
+
+  .headline { font-family: var(--display); font-weight: 700; letter-spacing: -1.5px; white-space: nowrap; }
+  .overline { font-size: 22px; letter-spacing: 6px; font-weight: 600; color: var(--accent2); }
+
+  /* scene 2: mismatch */
+  .excerpt {
+    position: absolute; width: 640px; border-radius: 16px; background: #f4f4f6; color: #16171b;
+    padding: 30px 34px; box-sizing: border-box; box-shadow: 0 30px 80px rgba(0,0,0,0.55);
+  }
+  .excerpt .head { font-size: 15px; letter-spacing: 2px; font-weight: 700; color: #6d6d76; }
+  .excerpt .row { display: flex; justify-content: space-between; font-size: 25px; padding: 13px 14px; margin: 8px -14px 0; border-radius: 8px; position: relative; }
+  .excerpt .row span:first-child { color: #6d6d76; }
+  .excerpt .row b { font-weight: 700; }
+  .hl { position: absolute; inset: 0; border-radius: 8px; border: 3px solid var(--err); background: rgba(238,106,112,0.13); }
+  #neq {
+    position: absolute; width: 120px; height: 120px; border-radius: 50%; background: var(--err);
+    display: flex; align-items: center; justify-content: center; color: #fff; font-size: 70px; font-weight: 800;
+    box-shadow: 0 0 0 0 rgba(238,106,112,0.5), 0 20px 50px rgba(238,106,112,0.45);
+  }
+
+  /* brand */
+  .mark {
+    border-radius: 30%; background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-family: var(--display);
+  }
+  .wordmark { font-family: var(--display); font-weight: 800; color: #fff; white-space: nowrap; }
+
+  /* app window */
+  #win {
+    position: absolute; left: 800px; top: 150px; width: 1000px; height: 780px; border-radius: 22px;
+    background: var(--win); border: 1px solid rgba(236,236,238,0.12); overflow: hidden;
+    box-shadow: 0 40px 120px rgba(0,0,0,0.6), 0 0 0 1px rgba(0,0,0,0.4);
+  }
+  #win .titlebar { height: 66px; display: flex; align-items: center; gap: 14px; padding: 0 24px; border-bottom: 1px solid var(--border); background: #18191c; }
+  .dots { display: flex; gap: 8px; margin-right: 10px; }
+  .dots i { width: 12px; height: 12px; border-radius: 50%; background: #3a3b40; display: block; }
+  .pill { font-size: 15px; font-weight: 600; padding: 6px 12px; border-radius: 999px; white-space: nowrap; }
+  #tabs { position: relative; display: flex; gap: 6px; padding: 0 24px; height: 54px; align-items: center; border-bottom: 1px solid var(--border); }
+  #tabs .tab { font-size: 17px; font-weight: 600; color: var(--muted); padding: 0 16px; height: 54px; display: flex; align-items: center; }
+  #tabline { position: absolute; bottom: -1px; height: 3px; border-radius: 3px; background: var(--accent2); }
+  #content { position: absolute; left: 0; right: 0; top: 121px; bottom: 0; }
+  .pane { position: absolute; inset: 0; padding: 28px 32px; box-sizing: border-box; }
+  .paneHead { display: flex; justify-content: space-between; align-items: center; font-size: 20px; font-weight: 700; margin-bottom: 18px; }
+  .paneHead .sub { font-size: 16px; font-weight: 600; color: var(--muted); }
+
+  .frow { position: absolute; left: 32px; right: 32px; height: 70px; display: flex; align-items: center; gap: 16px; border-radius: 12px; background: var(--panel); padding: 0 18px; box-sizing: border-box; }
+  .ftype { width: 46px; height: 46px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; color: #fff; letter-spacing: 0.5px; flex: none; }
+  .fname { font-size: 19px; font-weight: 600; }
+  .fsub { font-size: 15px; color: var(--muted); margin-top: 3px; height: 18px; position: relative; }
+  .fsub span { position: absolute; left: 0; top: 0; white-space: nowrap; }
+  .status { margin-left: auto; position: relative; width: 150px; height: 34px; flex: none; }
+  .status > div { position: absolute; right: 0; top: 0; height: 34px; padding: 0 14px; border-radius: 999px; display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 700; white-space: nowrap; }
+  .spin { width: 14px; height: 14px; border-radius: 50%; border: 2.5px solid rgba(231,165,75,0.3); border-top-color: var(--warn); box-sizing: border-box; }
+  .prog { position: absolute; left: 80px; right: 190px; bottom: 9px; height: 3px; border-radius: 3px; background: rgba(236,236,238,0.08); overflow: hidden; }
+  .prog i { display: block; height: 100%; background: var(--warn); }
+
+  .crow { position: absolute; left: 330px; right: 32px; height: 54px; display: flex; align-items: center; gap: 14px; font-size: 19px; font-weight: 600; border-bottom: 1px solid var(--border); }
+  .cicon { width: 28px; height: 28px; border-radius: 50%; position: relative; flex: none; }
+  .cicon > * { position: absolute; inset: 0; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 17px; font-weight: 800; }
+  .cnote { margin-left: auto; font-size: 14px; color: var(--muted); font-family: var(--mono); white-space: nowrap; }
+  .missing { margin-left: auto; font-size: 14px; font-weight: 700; color: var(--err); background: rgba(238,106,112,0.15); padding: 5px 12px; border-radius: 999px; }
+
+  .trow { position: absolute; left: 32px; right: 32px; height: 56px; display: grid; grid-template-columns: 250px 1fr 1fr 130px; align-items: center; font-size: 19px; border-bottom: 1px solid var(--border); padding: 0 14px; box-sizing: border-box; border-radius: 10px; }
+  .trow.th { font-size: 14px; font-weight: 700; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; border-bottom: 1px solid rgba(236,236,238,0.18); border-radius: 0; }
+  .trow .k { color: var(--muted); font-weight: 600; }
+  .trow .v { font-weight: 600; }
+  .verdict { justify-self: end; font-size: 14px; font-weight: 800; padding: 5px 12px; border-radius: 999px; }
+  #cite { position: absolute; left: 32px; right: 32px; top: 410px; border-radius: 14px; background: var(--panel); border: 1px solid rgba(238,106,112,0.35); padding: 22px 24px; box-sizing: border-box; }
+  #cite .t { font-size: 21px; font-weight: 700; display: flex; align-items: center; gap: 12px; }
+  .dot { width: 14px; height: 14px; border-radius: 50%; background: var(--err); box-shadow: 0 0 12px rgba(238,106,112,0.8); flex: none; }
+  .quotes { display: flex; gap: 16px; margin-top: 16px; }
+  .quote { flex: 1; border-left: 3px solid var(--err); background: rgba(238,106,112,0.07); border-radius: 6px; padding: 12px 16px; }
+  .quote .q { font-family: var(--mono); font-size: 18px; }
+  .quote .src { font-size: 14px; color: var(--muted); margin-top: 8px; }
+
+  .bubble { position: absolute; right: 32px; top: 28px; max-width: 600px; background: var(--accent); color: #fff; font-size: 20px; font-weight: 500; padding: 16px 20px; border-radius: 18px 18px 4px 18px; }
+  .tool { position: absolute; left: 92px; height: 40px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-radius: 10px; background: var(--panel); border: 1px solid var(--border); font-family: var(--mono); font-size: 15px; white-space: nowrap; }
+  .tool .ti { width: 16px; height: 16px; position: relative; }
+  .tool .ti > * { position: absolute; inset: 0; }
+  .tool .ok { color: var(--ok); font-weight: 800; font-family: Inter, sans-serif; font-size: 16px; line-height: 16px; text-align: center; }
+  .tool .meta { color: var(--muted); font-family: Inter, sans-serif; font-size: 14px; }
+  .avatar { position: absolute; left: 32px; width: 42px; height: 42px; font-size: 22px; }
+  #answer { position: absolute; left: 92px; right: 40px; top: 300px; font-size: 20px; line-height: 1.6; white-space: pre-wrap; color: var(--text); }
+  #answer .b { font-weight: 700; color: #fff; }
+  #answer .code { font-family: var(--mono); font-size: 18px; background: rgba(93,150,255,0.16); color: #a9c6ff; padding: 2px 8px; border-radius: 6px; }
+  #answer .m { color: var(--muted); }
+  #answer .src { color: var(--ok); font-weight: 600; }
+  .caret { display: inline-block; width: 10px; height: 22px; background: var(--accent2); vertical-align: -3px; margin-left: 2px; }
+  .inputbox { position: absolute; left: 32px; right: 32px; bottom: 26px; height: 56px; border-radius: 14px; background: var(--panel); border: 1px solid var(--border); display: flex; align-items: center; padding: 0 20px; font-size: 18px; color: var(--faint); }
+
+  /* captions */
+  .cap { position: absolute; left: 130px; top: 0; width: 640px; }
+  .cap .num { font-family: var(--mono); font-size: 22px; color: var(--accent2); letter-spacing: 2px; }
+  .cap .num b { color: var(--muted); font-family: Inter, sans-serif; font-weight: 600; letter-spacing: 3px; font-size: 18px; margin-left: 12px; }
+  .cap h2 { font-family: var(--display); font-size: 62px; line-height: 1.08; letter-spacing: -1.5px; margin: 22px 0 0; font-weight: 700; }
+  .cap p { font-size: 26px; line-height: 1.45; color: var(--muted); margin: 26px 0 0; }
+
+  /* trust */
+  .trust { position: absolute; left: 0; display: flex; align-items: center; gap: 28px; font-size: 40px; font-weight: 600; white-space: nowrap; }
+  .trust .ic { width: 64px; height: 64px; border-radius: 18px; background: rgba(51,185,138,0.16); color: var(--ok); display: flex; align-items: center; justify-content: center; font-size: 34px; font-weight: 800; flex: none; }
+  .cta { display: inline-flex; align-items: center; gap: 14px; height: 70px; padding: 0 36px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 28px; font-weight: 700; box-shadow: 0 20px 60px rgba(47,111,235,0.45); }
+  #black { position: absolute; inset: 0; background: #000; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <!-- background -->
+  <div class="layer" id="bg">
+    <div class="glow" id="g1" style="width:1200px;height:1200px;background:radial-gradient(circle, rgba(47,111,235,0.30), rgba(47,111,235,0.10) 40%, transparent 70%)"></div>
+    <div class="glow" id="g2" style="width:1000px;height:1000px;background:radial-gradient(circle, rgba(93,150,255,0.16), transparent 68%)"></div>
+    <div class="glow" id="g3" style="width:1000px;height:1000px;background:radial-gradient(circle, rgba(238,106,112,0.26), transparent 68%)"></div>
+    <div id="grid"></div>
+    <svg class="layer" width="1920" height="1080" id="routeSvg">
+      <path id="route" d="M -60 930 C 260 860, 420 1000, 700 880 S 1080 620, 1300 660 S 1660 420, 1990 300"
+            fill="none" stroke="rgba(93,150,255,0.35)" stroke-width="2.5" stroke-linecap="round"/>
+      <g id="waypoints"></g>
+      <circle id="routeHead" r="7" fill="#9ec0ff"/>
+      <circle id="routeHalo" r="22" fill="rgba(93,150,255,0.25)"/>
+    </svg>
+  </div>
+
+  <!-- S1: documents -->
+  <div class="layer" id="s1">
+    <div class="layer" id="docs"></div>
+    <div class="layer" style="background:radial-gradient(ellipse 760px 300px at 50% 52%, rgba(10,12,17,0.92), transparent)"></div>
+    <div class="abs overline" id="s1over" style="width:1920px;text-align:center;top:400px">ІМПОРТ В УКРАЇНУ</div>
+    <div class="abs headline" id="s1l1" style="width:1920px;text-align:center;top:450px;font-size:96px">Одна поставка —</div>
+    <div class="abs headline" id="s1l2" style="width:1920px;text-align:center;top:560px;font-size:96px;color:var(--accent2)">десятки документів.</div>
+  </div>
+
+  <!-- S2: one mismatch -->
+  <div class="layer" id="s2">
+    <div class="abs headline" id="s2l1" style="width:1920px;text-align:center;top:150px;font-size:70px">Одна розбіжність у цифрах —</div>
+    <div class="abs headline" id="s2l2" style="width:1920px;text-align:center;top:240px;font-size:70px;color:var(--err)">і вантаж стоїть на митниці.</div>
+    <div class="excerpt" id="exA" style="left:200px;top:450px">
+      <div class="head">COMMERCIAL INVOICE · № 2026/114</div>
+      <div class="row"><span>Description</span><b>Methoprene, technical</b></div>
+      <div class="row"><span>Packages</span><b>50 drums</b></div>
+      <div class="row"><div class="hl" id="hlA"></div><span>Net weight</span><b>1 250,00 kg</b></div>
+    </div>
+    <div class="excerpt" id="exB" style="left:1080px;top:450px">
+      <div class="head">PACKING LIST · № 2026/114</div>
+      <div class="row"><span>Packages</span><b>50 drums</b></div>
+      <div class="row"><span>Gross weight</span><b>1 340,00 kg</b></div>
+      <div class="row"><div class="hl" id="hlB"></div><span>Net weight</span><b>1 200,00 kg</b></div>
+    </div>
+    <div id="neq" style="left:900px;top:560px">≠</div>
+  </div>
+
+  <!-- S3: brand reveal -->
+  <div class="layer" id="s3">
+    <div class="abs" id="s3ring" style="left:870px;top:330px;width:180px;height:180px;border-radius:30%;border:3px solid var(--accent2)"></div>
+    <div class="abs mark" id="s3mark" style="left:870px;top:330px;width:180px;height:180px;font-size:100px;box-shadow:0 30px 90px rgba(47,111,235,0.55)">Ш</div>
+    <div class="abs wordmark" id="s3word" style="width:1920px;text-align:center;top:560px;font-size:120px">ШТУРМАН</div>
+    <div class="abs" id="s3tag" style="width:1920px;text-align:center;top:720px;font-size:36px;color:var(--muted)">AI-асистент декларанта для імпорту в Україну</div>
+  </div>
+
+  <!-- S4–S7: product -->
+  <div class="layer" id="caps">
+    <div class="cap" id="c1">
+      <div class="num">01<b>ЗАВАНТАЖЕННЯ</b></div>
+      <h2>Кидайте пакет —<br>Штурман розбере</h2>
+      <p>PDF, скани, фото, Word, Excel. Кожен файл стає текстом, який можна шукати й цитувати.</p>
+    </div>
+    <div class="cap" id="c2">
+      <div class="num">02<b>ПОВНОТА ПАКЕТА</b></div>
+      <h2>Чого бракує —<br>видно одразу</h2>
+      <p>Чек-лист документів по кожній поставці: що вже є, з якого файлу, і чого ще немає.</p>
+    </div>
+    <div class="cap" id="c3">
+      <div class="num">03<b>ЗВІРКА</b></div>
+      <h2>Інвойс не б'ється<br>з пакувальним?</h2>
+      <p>Штурман помітить. Кожна розбіжність — з двома цитатами: де і що саме написано.</p>
+    </div>
+    <div class="cap" id="c4">
+      <div class="num">04<b>КОДИ УКТ ЗЕД</b></div>
+      <h2>Кандидати коду —<br>з офіційної довідки</h2>
+      <p>Кілька варіантів з поясненням. Мито, ПДВ і документи звірені з qdpro. Остаточно — за митним брокером.</p>
+    </div>
+  </div>
+
+  <div id="win">
+    <div class="titlebar">
+      <div class="dots"><i></i><i></i><i></i></div>
+      <div class="mark" style="width:32px;height:32px;font-size:17px">Ш</div>
+      <div style="font-weight:700;font-size:18px;letter-spacing:1.6px">ШТУРМАН</div>
+      <div style="width:1px;height:24px;background:var(--border);margin:0 6px"></div>
+      <div style="font-size:17px;font-weight:600">Постачання № 114 · Метопрен</div>
+      <div style="margin-left:auto;position:relative;width:220px;height:32px">
+        <div class="pill abs" id="pillWarn" style="right:0;left:auto;background:rgba(231,165,75,0.16);color:var(--warn)">Документи в роботі</div>
+        <div class="pill abs" id="pillOk" style="right:0;left:auto;background:rgba(51,185,138,0.16);color:var(--ok)">Перевірено Штурманом</div>
+      </div>
+    </div>
+    <div id="tabs">
+      <div class="tab">Файли</div><div class="tab">Чек-лист</div><div class="tab">Звірка</div><div class="tab">Чат</div>
+      <div id="tabline"></div>
+    </div>
+    <div id="content">
+      <div class="pane" id="p1">
+        <div class="paneHead"><span>Файли поставки</span><span class="sub" id="fcount">Готово 0 / 7</span></div>
+        <div id="files"></div>
+      </div>
+      <div class="pane" id="p2">
+        <div class="paneHead"><span>Пакет документів · імпорт, субстанція</span><span class="sub">Метопрен</span></div>
+        <svg class="abs" style="left:40px;top:110px" width="250" height="250" viewBox="0 0 250 250">
+          <circle cx="125" cy="125" r="104" fill="none" stroke="rgba(236,236,238,0.08)" stroke-width="18"/>
+          <circle id="ring" cx="125" cy="125" r="104" fill="none" stroke="var(--ok)" stroke-width="18" stroke-linecap="round" transform="rotate(-90 125 125)"/>
+        </svg>
+        <div class="abs" style="left:40px;top:180px;width:250px;text-align:center">
+          <div id="ringNum" style="font-family:var(--display);font-size:72px;font-weight:800;line-height:1">0/9</div>
+          <div style="font-size:17px;color:var(--muted);margin-top:8px">документів у пакеті</div>
+        </div>
+        <div class="abs" id="ringMiss" style="left:40px;top:400px;width:250px;text-align:center;font-size:20px;font-weight:700;color:var(--err)">2 відсутні</div>
+        <div id="checks"></div>
+      </div>
+      <div class="pane" id="p3">
+        <div class="paneHead"><span>Звірка: Інвойс ↔ Пакувальний лист</span><span class="sub" id="dcount">1 розбіжність</span></div>
+        <div id="table"></div>
+        <div id="cite">
+          <div class="t"><span class="dot"></span>Вага нетто не збігається — різниця 50,00 кг</div>
+          <div class="quotes">
+            <div class="quote"><div class="q">«Net weight: 1 250,00 kg»</div><div class="src">Invoice_2026-114.pdf · стор. 1</div></div>
+            <div class="quote"><div class="q">«Net weight: 1 200,00 kg»</div><div class="src">Packing_List_114.pdf · стор. 2</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="pane" id="p4">
+        <div class="bubble" id="ubub">Підбери код УКТ ЗЕД для метопрену з інвойсу</div>
+        <div class="mark avatar" id="av" style="top:112px">Ш</div>
+        <div id="tools"></div>
+        <div id="answer"></div>
+        <div class="inputbox">Запитайте Штурмана…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- S8: trust -->
+  <div class="layer" id="s8">
+    <div class="abs headline" id="s8t" style="left:260px;top:250px;font-size:92px">Штурман не вгадує.</div>
+    <div class="trust" id="tr1" style="left:260px;top:450px"><div class="ic">✓</div>Відповідає з ваших документів, а не з пам'яті</div>
+    <div class="trust" id="tr2" style="left:260px;top:560px"><div class="ic">✓</div>Кожен висновок — з цитатою на джерело</div>
+    <div class="trust" id="tr3" style="left:260px;top:670px"><div class="ic">✓</div>Немає даних — так і скаже. Без вигадок</div>
+  </div>
+
+  <!-- S9: outro -->
+  <div class="layer" id="s9">
+    <div class="abs mark" id="s9mark" style="left:885px;top:250px;width:150px;height:150px;font-size:84px;box-shadow:0 30px 90px rgba(47,111,235,0.55)">Ш</div>
+    <div class="abs wordmark" id="s9word" style="width:1920px;text-align:center;top:440px;font-size:110px;letter-spacing:22px">ШТУРМАН</div>
+    <div class="abs headline" id="s9tag" style="width:1920px;text-align:center;top:600px;font-size:48px;font-weight:600;color:#dfe6f5">Тримає курс вашої поставки крізь митницю.</div>
+    <div class="abs" id="s9cta" style="width:1920px;text-align:center;top:720px"><span class="cta">Запросіть демо →</span></div>
+  </div>
+
+  <div id="vignette"></div>
+  <div id="black"></div>
+</div>
+
+<script>
+const DURATION = 54;
+const $ = (id) => document.getElementById(id);
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const p = (t, a, b) => clamp((t - a) / (b - a));
+const eo = (x) => 1 - Math.pow(1 - x, 3);
+const eio = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+const eback = (x) => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); };
+// Scene visibility envelope: fade in over [a, a+fi], out over [b-fo, b].
+const env = (t, a, b, fi = 0.5, fo = 0.5) => Math.min(eo(p(t, a, a + fi)), 1 - eio(p(t, b - fo, b)));
+function T(el, { o = 1, x = 0, y = 0, s = 1, r = 0, b = 0 } = {}) {
+  el.style.opacity = o.toFixed(4);
+  el.style.transform = `translate(${x.toFixed(2)}px, ${y.toFixed(2)}px) scale(${s.toFixed(4)}) rotate(${r.toFixed(2)}deg)`;
+  el.style.filter = b > 0.05 ? `blur(${b.toFixed(2)}px)` : 'none';
+}
+// Standard "rise in" for text: y 34→0, blur 10→0.
+const rise = (el, t, a, d = 0.7, extra = {}) => {
+  const k = eo(p(t, a, a + d));
+  T(el, { o: k * (extra.o ?? 1), y: (1 - k) * 34 + (extra.y ?? 0), b: (1 - k) * 10 + (extra.b ?? 0), s: extra.s ?? 1 });
+};
+const h = (tag, cls, html, style) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; if (style) e.style.cssText = style; return e; };
+
+/* ---------- build: S1 documents ---------- */
+const DOCS = [
+  ['COMMERCIAL INVOICE', 'Інвойс', 250, 250, -8, '#2f6feb'],
+  ['PACKING LIST', 'Пакувальний лист', 570, 180, 6, '#33b98a'],
+  ['PURCHASE ORDER', 'Замовлення (PO)', 960, 150, -3, '#e7a54b'],
+  ['CONTRACT', 'Контракт', 1360, 190, -5, '#8b8b94'],
+  ['CERTIFICATE OF ANALYSIS', 'Сертифікат якості', 1680, 300, 9, '#33b98a'],
+  ['EUR.1', 'Сертифікат походження', 220, 790, 7, '#5d96ff'],
+  ['CMR', 'Транспортна накладна', 580, 900, -6, '#ee6a70'],
+  ['SPECIFICATION', 'Специфікація', 1350, 900, 5, '#e7a54b'],
+  ['PROFORMA', 'Проформа-інвойс', 1700, 780, -9, '#2f6feb'],
+  ['SAFETY DATA SHEET', 'Паспорт безпеки', 960, 960, 3, '#8b8b94'],
+];
+const docEls = DOCS.map(([tag, ttl, cx, cy, r, c], i) => {
+  const bars = [0.9, 0.75, 0.85, 0.6, 0.8, 0.5].map((w) => `<div class="bar" style="width:${w * 100}%"></div>`).join('');
+  const e = h('div', 'doc', `<div class="stripe" style="background:${c}"></div><div class="tag">${tag}</div><div class="ttl">${ttl}</div>${bars}${i % 3 === 0 ? '<div class="stamp"></div>' : ''}`,
+    `left:${cx - 115}px;top:${cy - 150}px`);
+  $('docs').appendChild(e);
+  return { e, cx, cy, r, i };
+});
+
+/* ---------- build: route waypoints ---------- */
+const route = $('route');
+const RLEN = route.getTotalLength();
+route.style.strokeDasharray = `${RLEN} ${RLEN}`;
+const WAYS = [0.12, 0.27, 0.42, 0.55, 0.68, 0.82, 0.95];
+const wayEls = WAYS.map((f) => {
+  const pt = route.getPointAtLength(RLEN * f);
+  const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  c.setAttribute('cx', pt.x); c.setAttribute('cy', pt.y); c.setAttribute('r', 6);
+  c.setAttribute('fill', '#0a0c11'); c.setAttribute('stroke', '#5d96ff'); c.setAttribute('stroke-width', 2.5);
+  $('waypoints').appendChild(c);
+  return { c, f };
+});
+
+/* ---------- build: S4 files ---------- */
+const FILES = [
+  ['PDF', '#ee6a70', 'Invoice_2026-114.pdf', 'Інвойс · Комерційні документи'],
+  ['PDF', '#ee6a70', 'Packing_List_114.pdf', 'Пакувальний лист · Комерційні документи'],
+  ['DOCX', '#2f6feb', 'Contract_UA-DE_07.docx', 'Контракт · Договірні документи'],
+  ['XLSX', '#33b98a', 'PO_4471.xlsx', 'Замовлення (PO) · Комерційні документи'],
+  ['JPG', '#a46bf5', 'CoA_Methoprene_scan.jpg', 'Сертифікат якості · Якість'],
+  ['DOC', '#2f6feb', 'Proforma_114.doc', 'Проформа · Комерційні документи'],
+  ['PDF', '#ee6a70', 'Specification_07-1.pdf', 'Специфікація · Договірні документи'],
+];
+const FILE_T0 = 15.0;
+const fileEls = FILES.map(([ty, col, name, kind], i) => {
+  const row = h('div', 'frow', `
+    <div class="ftype" style="background:${col}">${ty}</div>
+    <div style="min-width:0"><div class="fname">${name}</div><div class="fsub"><span class="s-idx">розпізнавання тексту…</span><span class="s-ok">${kind}</span></div></div>
+    <div class="status">
+      <div class="st-q" style="background:rgba(236,236,238,0.08);color:var(--muted)">У черзі</div>
+      <div class="st-i" style="background:rgba(231,165,75,0.15);color:var(--warn)"><span class="spin"></span>Індексація</div>
+      <div class="st-r" style="background:rgba(51,185,138,0.16);color:var(--ok)">✓ Готово</div>
+    </div>
+    <div class="prog"><i></i></div>`, `top:${66 + i * 82}px`);
+  $('files').appendChild(row);
+  const a = FILE_T0 + 0.3 * i;
+  return { row, a, idx: a + 0.55, ready: a + 1.6 + 0.12 * i, q: (s) => row.querySelector(s) };
+});
+
+/* ---------- build: S5 checklist ---------- */
+const CHECKS = [
+  ['Контракт', 'Contract_UA-DE_07.docx'],
+  ['Специфікація', 'Specification_07-1.pdf'],
+  ['Замовлення (PO)', 'PO_4471.xlsx'],
+  ['Проформа-інвойс', 'Proforma_114.doc'],
+  ['Інвойс', 'Invoice_2026-114.pdf'],
+  ['Пакувальний лист', 'Packing_List_114.pdf'],
+  ['Сертифікат якості (CoA)', 'CoA_Methoprene_scan.jpg'],
+  ['Сертифікат походження', null],
+  ['Транспортний документ (CMR)', null],
+];
+const CHECK_T0 = 22.3;
+const checkEls = CHECKS.map(([label, src], k) => {
+  const ok = !!src;
+  const row = h('div', 'crow', `
+    <div class="cicon"><div class="ci-p" style="border:2.5px solid rgba(236,236,238,0.25);box-sizing:border-box"></div>
+      <div class="ci-d" style="background:${ok ? 'var(--ok)' : 'var(--err)'}">${ok ? '✓' : '×'}</div></div>
+    <span>${label}</span>${ok ? `<span class="cnote">${src}</span>` : '<span class="missing">Відсутній</span>'}`,
+    `top:${64 + k * 56}px`);
+  $('checks').appendChild(row);
+  const a = CHECK_T0 + 0.32 * k;
+  return { row, ok, a, done: a + 0.35, q: (s) => row.querySelector(s) };
+});
+
+/* ---------- build: S6 table ---------- */
+const TROWS = [
+  ['Номер документа', '2026/114', '2026/114', true],
+  ['Опис товару', 'Methoprene, tech.', 'Methoprene, tech.', true],
+  ['Кількість місць', '50 бочок', '50 бочок', true],
+  ['Вага нетто', '1 250,00 кг', '1 200,00 кг', false],
+  ['Отримувач', 'ТОВ «Агро-Імпорт»', 'ТОВ «Агро-Імпорт»', true],
+];
+const TABLE_T0 = 29.4;
+$('table').appendChild(h('div', 'trow th', '<span>Поле</span><span>Інвойс</span><span>Пакувальний</span><span style="justify-self:end">Статус</span>', 'top:64px'));
+const tEls = TROWS.map(([k, a, b, ok], i) => {
+  const row = h('div', 'trow', `<span class="k">${k}</span><span class="v">${a}</span><span class="v" style="${ok ? '' : 'color:var(--err)'}">${b}</span>
+    <span class="verdict" style="${ok ? 'background:rgba(51,185,138,0.16);color:var(--ok)' : 'background:var(--err);color:#fff'}">${ok ? '✓ Збіг' : '● Розбіжність'}</span>`,
+    `top:${122 + i * 56}px`);
+  $('table').appendChild(row);
+  const a0 = TABLE_T0 + 0.35 * i;
+  return { row, ok, a: a0, v: a0 + 0.45, verdict: row.querySelector('.verdict') };
+});
+
+/* ---------- build: S7 chat ---------- */
+const TOOLS = [
+  ['get_missing_context', 'контекст повний'],
+  ['uktzed_browse_classifier', 'qdpro'],
+  ['uktzed_lookup_code', 'qdpro · 2918 99 90 00'],
+];
+const TOOL_T0 = 38.0;
+const toolEls = TOOLS.map(([name, meta], i) => {
+  const e = h('div', 'tool', `<div class="ti"><span class="spin"></span><span class="ok">✓</span></div><span>${name}</span><span class="meta">${meta}</span>`, `top:${112 + i * 52}px`);
+  $('tools').appendChild(e);
+  const a = TOOL_T0 + 0.65 * i;
+  return { e, a, done: a + 0.55, spin: e.querySelector('.spin'), ok: e.querySelector('.ok'), meta: e.querySelector('.meta') };
+});
+const ANSWER = [
+  ['Форму ввезення приймаю як ', ''], ['субстанцію', 'b'], ['. Кандидати:\n', ''],
+  ['2918 99 90 00', 'code'], [' — ефір карбонової кислоти з додатковою\nкисневмісною функцією. Основний кандидат.\n', ''],
+  ['3808 91 90 00', 'code'], [' — лише якщо це готовий інсектицидний препарат.\n', ''],
+  ['✓ Мито, ПДВ і документи звірено з qdpro.\n', 'src'],
+  ['Остаточний код підтверджує митний брокер.', 'm'],
+];
+const ANSWER_LEN = ANSWER.reduce((n, [s]) => n + [...s].length, 0);
+const ANS_T0 = 40.2, ANS_T1 = 43.6;
+const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+let lastAnsN = -1;
+function renderAnswer(n, showCaret) {
+  const key = n * 2 + (showCaret ? 1 : 0);
+  if (key === lastAnsN) return;
+  lastAnsN = key;
+  let left = n, html = '';
+  for (const [s, c] of ANSWER) {
+    if (left <= 0) break;
+    const chars = [...s];
+    const part = chars.slice(0, left).join('');
+    left -= chars.length;
+    html += c ? `<span class="${c}">${esc(part)}</span>` : esc(part);
+  }
+  $('answer').innerHTML = html + (showCaret ? '<span class="caret"></span>' : '');
+}
+
+/* ---------- tabs ---------- */
+const tabs = [...document.querySelectorAll('#tabs .tab')];
+const tabBox = tabs.map((e) => ({ x: e.offsetLeft, w: e.offsetWidth }));
+
+/* ---------- seek(t): the whole film ---------- */
+function seek(t) {
+  /* background */
+  T($('g1'), { x: 150 + Math.sin(t * 0.15) * 260, y: -350 + Math.cos(t * 0.11) * 160 });
+  T($('g2'), { x: 1000 + Math.cos(t * 0.13) * 300, y: 400 + Math.sin(t * 0.17) * 180 });
+  const red = env(t, 5.6, 10.4, 1.2, 1.0);
+  T($('g3'), { x: 460, y: 80, o: red });
+  T($('grid'), { x: (t * 6) % 44, y: (t * 3) % 44, o: 0.9 });
+  const rf = clamp(t / (DURATION - 2));
+  route.style.strokeDashoffset = (RLEN * (1 - rf)).toFixed(1);
+  const head = route.getPointAtLength(RLEN * rf);
+  for (const k of ['routeHead', 'routeHalo']) { $(k).setAttribute('cx', head.x); $(k).setAttribute('cy', head.y); }
+  $('routeHalo').setAttribute('r', (20 + Math.sin(t * 4) * 5).toFixed(1));
+  wayEls.forEach(({ c, f }) => { const on = rf >= f; c.setAttribute('fill', on ? '#5d96ff' : '#0a0c11'); c.setAttribute('opacity', on ? 1 : 0.5); });
+  const inApp = env(t, 14.2, 44.6, 0.8, 0.8);
+  $('routeSvg').style.opacity = clamp(0.9 - 0.6 * inApp - 0.65 * env(t, 49.0, DURATION + 1, 0.8, 0.1)).toFixed(3);
+
+  /* S1 — documents fly in */
+  const s1 = env(t, 0, 6.2, 0.01, 1.2);
+  $('s1').style.opacity = s1.toFixed(4);
+  if (s1 > 0) {
+    const out = p(t, 4.9, 6.2);
+    for (const d of docEls) {
+      const a = 0.15 + 0.11 * d.i;
+      const k = eo(p(t, a, a + 0.85));
+      let dx = d.cx - 960, dy = d.cy - 540; const L = Math.hypot(dx, dy) || 1; dx /= L; dy /= L;
+      T(d.e, {
+        o: p(t, a, a + 0.25),
+        x: (1 - k) * dx * 900 + Math.sin(t * 0.6 + d.i) * 8 + dx * out * 120,
+        y: (1 - k) * dy * 900 + Math.cos(t * 0.5 + d.i * 1.3) * 8 + dy * out * 120,
+        r: d.r + (1 - k) * (d.i % 2 ? 35 : -35),
+        s: 1.3 - 0.3 * k + out * 0.08,
+        b: out * 10,
+      });
+    }
+    rise($('s1over'), t, 0.5);
+    rise($('s1l1'), t, 0.9, 0.8);
+    rise($('s1l2'), t, 1.35, 0.8);
+  }
+
+  /* S2 — the mismatch */
+  const s2 = env(t, 5.4, 10.6, 0.3, 0.7);
+  $('s2').style.opacity = s2.toFixed(4);
+  if (s2 > 0) {
+    const out = eio(p(t, 9.9, 10.6));
+    rise($('s2l1'), t, 5.6, 0.7, { y: -out * 40, b: out * 8 });
+    rise($('s2l2'), t, 6.05, 0.7, { y: -out * 40, b: out * 8 });
+    const ka = eo(p(t, 6.4, 7.2)), kb = eo(p(t, 6.6, 7.4));
+    T($('exA'), { o: ka, x: -(1 - ka) * 120 - out * 60, y: out * 30, r: -1.5 * ka, b: out * 8 });
+    T($('exB'), { o: kb, x: (1 - kb) * 120 + out * 60, y: out * 30, r: 1.5 * kb, b: out * 8 });
+    const hl = eo(p(t, 7.6, 8.0));
+    for (const k of ['hlA', 'hlB']) T($(k), { o: hl, s: 1.06 - 0.06 * hl });
+    const nq = eback(p(t, 8.0, 8.5));
+    const pulse = 1 + Math.sin(Math.max(0, t - 8.5) * 5) * 0.04 * p(t, 8.5, 8.8);
+    T($('neq'), { o: clamp(nq * 2), s: nq * pulse * (1 - out * 0.4), b: out * 8 });
+  }
+
+  /* S3 — brand reveal */
+  const s3 = env(t, 10.4, 14.6, 0.2, 0.6);
+  $('s3').style.opacity = s3.toFixed(4);
+  if (s3 > 0) {
+    const up = eio(p(t, 14.0, 14.6)) * -40;
+    const km = eback(p(t, 10.5, 11.25));
+    T($('s3mark'), { o: clamp(p(t, 10.5, 10.8)), s: km, y: up, r: (1 - clamp(km)) * -20 });
+    const rg = p(t, 10.75, 12.0);
+    T($('s3ring'), { o: (1 - rg) * 0.7 * (rg > 0 ? 1 : 0), s: 1 + eo(rg) * 1.6, y: up });
+    const kw = eo(p(t, 11.0, 12.1));
+    $('s3word').style.letterSpacing = `${(80 - 58 * kw).toFixed(1)}px`;
+    T($('s3word'), { o: kw, b: (1 - kw) * 14, y: up });
+    rise($('s3tag'), t, 11.9, 0.7, { y: up });
+  }
+
+  /* S4–S7 — product window */
+  const w = env(t, 14.4, 44.6, 0.9, 0.7);
+  if (w > 0) {
+    const kin = eo(p(t, 14.4, 15.3)), kout = eio(p(t, 43.9, 44.6));
+    T($('win'), { o: w, y: (1 - kin) * 80 - kout * 40, s: 0.96 + 0.04 * kin - kout * 0.03, b: kout * 6 });
+  } else T($('win'), { o: 0 });
+  $('caps').style.opacity = w > 0 ? 1 : 0;
+  const CAPS = [['c1', 14.6, 21.7], ['c2', 21.5, 28.7], ['c3', 28.5, 36.1], ['c4', 35.9, 44.5]];
+  for (const [id, a, b] of CAPS) {
+    const el = $(id);
+    const kin = eo(p(t, a, a + 0.8)), kout = eio(p(t, b - 0.5, b));
+    T(el, { o: Math.min(kin, 1 - kout), y: 300 + (1 - kin) * 40 - kout * 30, b: (1 - kin) * 10 + kout * 8 });
+  }
+  // tabs follow the scene
+  const tabF = [p(t, 21.3, 21.8), p(t, 28.3, 28.8), p(t, 35.7, 36.2)].reduce((s, v) => s + eio(v), 0);
+  const i0 = Math.floor(tabF), fr = tabF - i0, A = tabBox[i0], B = tabBox[Math.min(3, i0 + 1)];
+  if (A && B) {
+    $('tabline').style.left = `${A.x + (B.x - A.x) * fr}px`;
+    $('tabline').style.width = `${A.w + (B.w - A.w) * fr}px`;
+  }
+  tabs.forEach((e, i) => { e.style.color = Math.round(tabF) === i ? '#fff' : 'var(--muted)'; });
+  const verified = eo(p(t, 43.7, 44.1));
+  T($('pillWarn'), { o: 1 - verified }); T($('pillOk'), { o: verified });
+
+  const panes = [['p1', 14.4, 21.6], ['p2', 21.4, 28.6], ['p3', 28.4, 36.0], ['p4', 35.8, 45]];
+  for (const [id, a, b] of panes) {
+    const kin = eo(p(t, a, a + 0.5)), kout = eio(p(t, b - 0.4, b));
+    T($(id), { o: Math.min(kin, 1 - kout), y: (1 - kin) * 24 - kout * 16 });
+  }
+
+  // P1 files
+  let ready = 0;
+  for (const f of fileEls) {
+    const k = eo(p(t, f.a, f.a + 0.45));
+    T(f.row, { o: k, x: (1 - k) * 60 });
+    const iOn = t >= f.idx && t < f.ready, rOn = t >= f.ready;
+    if (rOn) ready++;
+    const rk = eo(p(t, f.ready, f.ready + 0.3));
+    T(f.q('.st-q'), { o: t < f.idx ? 1 : 0 });
+    T(f.q('.st-i'), { o: iOn ? 1 : 0 });
+    T(f.q('.st-r'), { o: rOn ? rk : 0, s: rOn ? 0.85 + 0.15 * eback(p(t, f.ready, f.ready + 0.35)) : 1 });
+    f.q('.spin').style.transform = `rotate(${(t * 540) % 360}deg)`;
+    T(f.q('.s-idx'), { o: iOn ? 1 : 0 });
+    T(f.q('.s-ok'), { o: rk, x: (1 - rk) * 10 });
+    T(f.q('.prog'), { o: iOn ? 1 : 0 });
+    f.q('.prog i').style.width = `${(eio(p(t, f.idx, f.ready)) * 100).toFixed(1)}%`;
+  }
+  $('fcount').textContent = `Готово ${ready} / ${FILES.length}`;
+  $('fcount').style.color = ready === FILES.length ? 'var(--ok)' : 'var(--muted)';
+
+  // P2 checklist
+  let have = 0;
+  for (const c of checkEls) {
+    const k = eo(p(t, c.a, c.a + 0.4));
+    T(c.row, { o: k, x: (1 - k) * 40 });
+    const dk = eback(p(t, c.done, c.done + 0.3));
+    T(c.q('.ci-d'), { o: clamp(dk * 3), s: dk });
+    if (c.ok) have += eio(p(t, c.done, c.done + 0.3));
+    else {
+      const mk = eo(p(t, c.done, c.done + 0.3));
+      T(c.q('.missing'), { o: mk, x: (1 - mk) * 16 });
+      c.row.style.background = `rgba(238,106,112,${(0.08 * mk).toFixed(3)})`;
+    }
+  }
+  const C = 2 * Math.PI * 104;
+  $('ring').style.strokeDasharray = `${C}`;
+  $('ring').style.strokeDashoffset = `${(C * (1 - have / CHECKS.length)).toFixed(2)}`;
+  $('ringNum').textContent = `${Math.round(have)}/${CHECKS.length}`;
+  const missAt = checkEls[8].done;
+  T($('ringMiss'), { o: eo(p(t, missAt, missAt + 0.4)), y: (1 - eo(p(t, missAt, missAt + 0.4))) * 10 });
+
+  // P3 discrepancies
+  for (const r of tEls) {
+    const k = eo(p(t, r.a, r.a + 0.4));
+    T(r.row, { o: k, x: (1 - k) * 40 });
+    const vk = eback(p(t, r.v, r.v + 0.3));
+    T(r.verdict, { o: clamp(vk * 3), s: vk });
+    if (!r.ok) {
+      const flash = p(t, r.v, r.v + 0.3) * (0.10 + 0.06 * Math.sin(Math.max(0, t - r.v) * 6));
+      r.row.style.background = `rgba(238,106,112,${flash.toFixed(3)})`;
+    }
+  }
+  T($('dcount'), { o: eo(p(t, tEls[3].v, tEls[3].v + 0.4)) });
+  $('dcount').style.color = 'var(--err)';
+  const ck = eo(p(t, 31.6, 32.3));
+  T($('cite'), { o: ck, y: (1 - ck) * 50 });
+
+  // P4 chat
+  const ub = eo(p(t, 36.9, 37.4));
+  T($('ubub'), { o: ub, y: (1 - ub) * 20, s: 0.95 + 0.05 * ub });
+  const av = eo(p(t, 37.8, 38.1));
+  T($('av'), { o: av, s: 0.8 + 0.2 * av });
+  for (const tl of toolEls) {
+    const k = eo(p(t, tl.a, tl.a + 0.35));
+    T(tl.e, { o: k, x: (1 - k) * 24 });
+    tl.spin.style.transform = `rotate(${(t * 540) % 360}deg)`;
+    T(tl.spin, { o: t < tl.done ? 1 : 0 });
+    const ok = eback(p(t, tl.done, tl.done + 0.3));
+    T(tl.ok, { o: clamp(ok * 3), s: ok });
+    T(tl.meta, { o: eo(p(t, tl.done, tl.done + 0.3)) });
+  }
+  const n = Math.round(ANSWER_LEN * p(t, ANS_T0, ANS_T1));
+  const caret = t >= ANS_T0 - 0.2 && (t < ANS_T1 || Math.floor(t * 2.4) % 2 === 0) && t < 44.2;
+  renderAnswer(n, caret);
+
+  /* S8 — trust */
+  const s8 = env(t, 44.4, 49.4, 0.3, 0.7);
+  $('s8').style.opacity = s8.toFixed(4);
+  if (s8 > 0) {
+    const out = eio(p(t, 48.8, 49.4));
+    rise($('s8t'), t, 44.6, 0.8, { y: -out * 30, b: out * 8 });
+    rise($('tr1'), t, 45.5, 0.7, { y: -out * 30, b: out * 8 });
+    rise($('tr2'), t, 46.2, 0.7, { y: -out * 30, b: out * 8 });
+    rise($('tr3'), t, 46.9, 0.7, { y: -out * 30, b: out * 8 });
+  }
+
+  /* S9 — outro */
+  const s9 = env(t, 49.2, DURATION + 1, 0.3, 0.1);
+  $('s9').style.opacity = s9.toFixed(4);
+  if (s9 > 0) {
+    const km = eback(p(t, 49.3, 50.0));
+    T($('s9mark'), { o: clamp(p(t, 49.3, 49.6)), s: km });
+    const kw = eo(p(t, 49.7, 50.6));
+    $('s9word').style.letterSpacing = `${(60 - 38 * kw).toFixed(1)}px`;
+    T($('s9word'), { o: kw, b: (1 - kw) * 12 });
+    rise($('s9tag'), t, 50.5, 0.8);
+    const kc = eback(p(t, 51.3, 51.9));
+    T($('s9cta'), { o: clamp(kc * 2), s: 0.9 + 0.1 * kc, y: (1 - clamp(kc)) * 20 });
+  }
+
+  /* fade from / to black */
+  $('black').style.opacity = Math.max(1 - p(t, 0, 0.4), p(t, DURATION - 0.8, DURATION)).toFixed(4);
+}
+
+window.seek = seek;
+window.DURATION = DURATION;
+const fixed = new URLSearchParams(location.search).get('t');
+if (fixed !== null) seek(parseFloat(fixed));
+else if (!navigator.webdriver) {
+  const t0 = performance.now();
+  const loop = () => { seek(((performance.now() - t0) / 1000) % DURATION); requestAnimationFrame(loop); };
+  requestAnimationFrame(loop);
+} else seek(0);
+</script>
+</body>
+</html>
