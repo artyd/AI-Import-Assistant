@@ -12,6 +12,7 @@ import type {
   ChecklistItem,
   Collection,
   ConversationMeta,
+  DocsStatus,
   FileItem,
   FileStatusEvent,
   Folder,
@@ -215,6 +216,22 @@ export default function WorkspacePage() {
 
   // Chat endpoints for the active (kind, entity). null = consolidated without a
   // selected collection (the UI then prompts to create/select one).
+  // «Документи» meter under the chat input: how much of the shipment the agent
+  // can already read. Follows the live file_status stream (files state).
+  const docsStatus = useMemo<DocsStatus | null>(() => {
+    const latest = files.filter((f) => f.isLatest !== false);
+    if (latest.length === 0) return null;
+    return {
+      total: latest.length,
+      ready: latest.filter((f) => f.status === "ready").length,
+      inProgress: latest.filter((f) => f.status === "queued" || f.status === "indexing").length,
+      errors: latest.filter((f) => f.status === "error").length,
+      needsAttention: latest.filter(
+        (f) => f.status === "ready" && (f.extractionStatus === "unreadable" || f.extractionStatus === "failed")
+      ).length,
+    };
+  }, [files]);
+
   const endpoints = useMemo(
     () => resolveChatEndpoints(chatKind, id, activeCollectionId),
     [chatKind, id, activeCollectionId]
@@ -1468,6 +1485,7 @@ export default function WorkspacePage() {
               folders={folders}
               onUploadAndClassify={uploadAndClassify}
               onMoveFile={moveFile}
+              docsStatus={chatKind === "supply" ? docsStatus : null}
               onTurnComplete={chatKind === "supply" ? onSupplyTurnComplete : undefined}
               onSurveyPersist={chatKind === "supply" ? persistSurvey : undefined}
               onSurveyIntake={chatKind === "supply" ? onSurveyIntake : undefined}

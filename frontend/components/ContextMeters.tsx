@@ -1,27 +1,79 @@
 "use client";
 
-import type { ChatUsage } from "@/lib/types";
+import type { ChatUsage, DocsStatus } from "@/lib/types";
 
 /**
- * Two compact meters under the chat input:
+ * Compact meters under the chat input:
+ * - «Документи» (shipment chat) — how many of the shipment's files are already
+ *   read and available to the agent, how many are still in the queue, how many
+ *   failed. Live: it follows the file_status events the page already receives.
  * - «Контекст» — how much of the model's context window the last reply used
  *   (tokens / window). When the API cleared old tool results to keep reading,
  *   it says so: reading never stops because the context is full.
  * - «Чат» — how much of this conversation is still given to the model
  *   (user turns replayed / total); older turns beyond the budget drop out.
- * Data comes from the `usage` field of the chat `done` event (and of stored
- * assistant messages), so the meters survive a page reload.
+ * Context/chat data comes from the `usage` field of the chat `done` event (and of
+ * stored assistant messages), so those meters survive a page reload.
  */
-export function ContextMeters({ usage, streaming }: { usage: ChatUsage | null; streaming: boolean }) {
-  if (!usage) {
-    return (
-      <div style={rowStyle} data-testid="context-meters">
+export function ContextMeters({
+  usage,
+  streaming,
+  docs,
+  docsOnly = false,
+}: {
+  usage: ChatUsage | null;
+  streaming: boolean;
+  docs?: DocsStatus | null;
+  /** New-chat screen: only the documents meter (no context yet to show). */
+  docsOnly?: boolean;
+}) {
+  if (docsOnly && !(docs && docs.total > 0)) return null;
+  return (
+    <div style={rowStyle} data-testid="context-meters" aria-busy={streaming}>
+      {docs && docs.total > 0 && <DocsMeter docs={docs} />}
+      {docsOnly ? null : usage ? (
+        <UsageMeters usage={usage} />
+      ) : (
         <span style={{ color: "var(--muted)" }}>
           Контекст і вікно чату зʼявляться після першої відповіді Штурмана.
         </span>
-      </div>
-    );
-  }
+      )}
+    </div>
+  );
+}
+
+function DocsMeter({ docs }: { docs: DocsStatus }) {
+  const done = docs.ready + docs.errors;
+  const percent = pct(done, docs.total);
+  const notes: string[] = [];
+  if (docs.inProgress > 0) notes.push(`${docs.inProgress} в обробці`);
+  if (docs.errors > 0) notes.push(`${docs.errors} з помилкою`);
+  if (docs.inProgress === 0 && docs.errors === 0) notes.push("усі прочитано");
+  const title =
+    `Файлів у постачанні: ${docs.total}.\n` +
+    `Прочитано й доступно Штурману: ${docs.ready}.\n` +
+    (docs.inProgress > 0
+      ? `Ще в черзі або читаються: ${docs.inProgress} — їхній вміст Штурман поки не бачить.\n`
+      : "") +
+    (docs.errors > 0 ? `Не вдалося прочитати: ${docs.errors} (кнопка «Проблемні файли»).\n` : "") +
+    (docs.needsAttention > 0
+      ? `Прочитано, але ключові поля не витягнуто: ${docs.needsAttention} — перевірте на екрані верифікації.`
+      : "");
+  return (
+    <Meter
+      label="Документи"
+      value={`${docs.ready}/${docs.total}`}
+      percent={percent}
+      // Here a FULL bar is good: colour by what is left, not by fill.
+      color={docs.errors > 0 ? "var(--err)" : docs.inProgress > 0 ? "var(--warn)" : "var(--ok)"}
+      note={notes.join(", ")}
+      title={title}
+      testId="meter-docs"
+    />
+  );
+}
+
+function UsageMeters({ usage }: { usage: ChatUsage }) {
   const ctxPct = pct(usage.contextTokens, usage.contextWindow);
   const h = usage.history;
   const chatPct = h.historyBudgetChars > 0 ? pct(h.historyChars, h.historyBudgetChars) : 0;
@@ -43,7 +95,7 @@ export function ContextMeters({ usage, streaming }: { usage: ChatUsage | null; s
     (dropped > 0 ? `\nНайстаріші ${dropped} запит. модель уже не бачить — повторіть важливе або почніть нову розмову.` : "");
 
   return (
-    <div style={rowStyle} data-testid="context-meters" aria-busy={streaming}>
+    <>
       <Meter
         label="Контекст"
         value={`${fmt(usage.contextTokens)} / ${fmt(usage.contextWindow)}`}
@@ -60,7 +112,7 @@ export function ContextMeters({ usage, streaming }: { usage: ChatUsage | null; s
         title={chatTitle}
         testId="meter-chat"
       />
-    </div>
+    </>
   );
 }
 
@@ -71,6 +123,7 @@ function Meter({
   note,
   title,
   testId,
+  color,
 }: {
   label: string;
   value: string;
@@ -78,8 +131,10 @@ function Meter({
   note?: string;
   title: string;
   testId: string;
+  /** Fill colour; default = by fill level (fuller is worse). */
+  color?: string;
 }) {
-  const color = percent >= 85 ? "var(--err)" : percent >= 60 ? "var(--warn)" : "var(--accent)";
+  const fill = color ?? (percent >= 85 ? "var(--err)" : percent >= 60 ? "var(--warn)" : "var(--accent)");
   return (
     <div
       title={title}
@@ -107,7 +162,7 @@ function Meter({
             display: "block",
             width: `${Math.max(percent, percent > 0 ? 3 : 0)}%`,
             height: "100%",
-            background: color,
+            background: fill,
             transition: "width .3s",
           }}
         />
