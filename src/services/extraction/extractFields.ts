@@ -151,6 +151,13 @@ export interface ExtractedFields {
   place_of_loading: string | null;
   place_of_discharge: string | null;
   final_destination: string | null;
+  /** Consignor / consignee exactly as the shipment clauses name them (e.g. a
+   *  contract's 4.2 / 4.3), with the address given FOR that role — often not the
+   *  company's legal address in the preamble. */
+  consignor_name: string | null;
+  consignor_address: string | null;
+  consignee_name: string | null;
+  consignee_address: string | null;
   /** Customs declaration (МД) money, UAH, and the NBU rate used. */
   customs_value_uah: number | null;
   duty_uah: number | null;
@@ -258,6 +265,26 @@ const EXTRACTION_TOOL: ChatTool = {
       place_of_loading: { type: 'string', description: 'Місце/аеропорт/порт відвантаження (звідки).' },
       place_of_discharge: { type: 'string', description: 'Місце/аеропорт/порт призначення цього перевезення (куди).' },
       final_destination: { type: 'string', description: 'Кінцевий пункт призначення вантажу, якщо вказано окремо.' },
+      consignor_name: {
+        type: 'string',
+        description:
+          'ВАНТАЖОВІДПРАВНИК (Consignor / Shipper) — як його називає пункт про відвантаження/поставку ' +
+          '(у контракті напр. «4.2. The Consignor of the Goods is …»), у B/L/CMR — графа Shipper/Consignor.',
+      },
+      consignor_address: {
+        type: 'string',
+        description:
+          'Адреса вантажовідправника САМЕ з цього пункту (напр. адреса складу в Китаї), а НЕ юридична ' +
+          'адреса компанії з преамбули, якщо вони різні.',
+      },
+      consignee_name: {
+        type: 'string',
+        description: 'ВАНТАЖООДЕРЖУВАЧ (Consignee) — як його називає пункт про поставку / графа Consignee.',
+      },
+      consignee_address: {
+        type: 'string',
+        description: 'Адреса вантажоодержувача саме з цього пункту / графи.',
+      },
       customs_value_uah: { type: 'number', description: 'ЛИШЕ МД: митна вартість, грн (графа 45).' },
       duty_uah: { type: 'number', description: 'ЛИШЕ МД: сума ввізного мита, грн (код 020).' },
       vat_uah: { type: 'number', description: 'ЛИШЕ МД: сума ПДВ, грн (код 028).' },
@@ -471,6 +498,10 @@ function normalize(input: Record<string, unknown>): ExtractedFields {
     place_of_loading: toStr(input.place_of_loading),
     place_of_discharge: toStr(input.place_of_discharge),
     final_destination: toStr(input.final_destination),
+    consignor_name: toStr(input.consignor_name),
+    consignor_address: toStr(input.consignor_address),
+    consignee_name: toStr(input.consignee_name),
+    consignee_address: toStr(input.consignee_address),
     customs_value_uah: toNum(input.customs_value_uah),
     duty_uah: toNum(input.duty_uah),
     vat_uah: toNum(input.vat_uah),
@@ -510,8 +541,9 @@ const INSTRUCTION =
   'Якщо це інвойс або пакувальний лист із таблицею товарів — заповни line_items ' +
   'по рядках. Витягуй виробника (manufacturer) та реєстраційний номер ' +
   '(registration_number, напр. UA/19603/01/01) ДОСЛІВНО, якщо вони є. ' +
-  'У parties окремо вкажи вантажовідправника (consignor) і вантажоодержувача (consignee), ' +
-  'якщо документ їх називає (у контракті — пункти про відвантаження/доставку), з адресами для цих ролей. ' +
+  'Якщо документ називає вантажовідправника і вантажоодержувача (у контракті — пункти про ' +
+  'відвантаження/поставку, у B/L/CMR — графи Shipper/Consignee), заповни consignor_name/consignor_address ' +
+  'і consignee_name/consignee_address адресами САМЕ з цих пунктів (не юридичною адресою з преамбули). ' +
   'Не вигадуй значень: якщо поля немає в документі — пропусти його. ' +
   'Числові поля повертай як число (крапка — десятковий роздільник, без роздільників ' +
   'тисяч): «12 500,00» → 12500, «1,234.50» → 1234.5; у line_items завжди вказуй unit. ' +

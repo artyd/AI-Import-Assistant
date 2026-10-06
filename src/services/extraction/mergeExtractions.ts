@@ -47,6 +47,10 @@ const HEADER_FIELDS = [
   'place_of_loading',
   'place_of_discharge',
   'final_destination',
+  'consignor_name',
+  'consignor_address',
+  'consignee_name',
+  'consignee_address',
   'exchange_rate',
   'service_kind',
 ] as const;
