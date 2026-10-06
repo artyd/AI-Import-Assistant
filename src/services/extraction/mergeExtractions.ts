@@ -71,12 +71,18 @@ export function mergeExtractions(parts: ExtractedFields[]): ExtractedFields | nu
   );
   merged.line_items = parts.flatMap((p) => p.line_items);
 
-  const seen = new Set<string>();
+  // Dedupe by name + role: the same company as seller (legal address) and as
+  // consignor (warehouse address) are two facts — deduping by name alone dropped
+  // the consignor. A role-less mention of an already-listed company adds nothing.
+  const seen = new Map<string, Set<string>>();
   const parties: ExtractedParty[] = [];
   for (const party of parts.flatMap((p) => p.parties)) {
-    const key = party.name.trim().toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
+    const name = party.name.trim().toLowerCase();
+    const role = (party.role ?? '').trim().toLowerCase();
+    const roles = seen.get(name);
+    if (roles && (!role || roles.has(role))) continue;
+    if (roles) roles.add(role);
+    else seen.set(name, new Set([role]));
     parties.push(party);
   }
   merged.parties = parties;
