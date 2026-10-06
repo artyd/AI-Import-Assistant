@@ -142,6 +142,12 @@ export async function appendMessage(
   blocks: ChatMessageParam[] | null = null,
   usage: ChatUsage | null = null,
 ): Promise<string> {
+  // PostgreSQL TEXT/JSONB reject the NUL character. Document text, tool results
+  // or PDF metadata can carry one (scanner drivers pad strings with it) — the
+  // INSERT used to fail AFTER the answer had streamed, so the turn was lost and
+  // the next question was answered without it.
+  const nul = (v: unknown): string => JSON.stringify(stripNul(v));
+  content = content.replace(/\u0000/g, '');
   const { rows } = await query<{ id: string }>(
     `INSERT INTO messages (conversation_id, role, content, citations, tool_calls, blocks, usage)
      VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7::jsonb) RETURNING id`,
@@ -149,14 +155,26 @@ export async function appendMessage(
       conversationId,
       role,
       content,
-      JSON.stringify(citations),
-      JSON.stringify(toolCalls),
-      blocks && blocks.length > 0 ? JSON.stringify(blocks) : null,
-      usage ? JSON.stringify(usage) : null,
+      nul(citations),
+      nul(toolCalls),
+      blocks && blocks.length > 0 ? nul(blocks) : null,
+      usage ? nul(usage) : null,
     ],
   );
   await query('UPDATE conversations SET updated_at = now() WHERE id = $1', [conversationId]);
   return rows[0]!.id;
+}
+
+/** Deep copy with every NUL character removed from strings (keys and values). */
+export function stripNul(v: unknown): unknown {
+  if (typeof v === 'string') return v.includes('\u0000') ? v.replace(/\u0000/g, '') : v;
+  if (Array.isArray(v)) return v.map(stripNul);
+  if (v && typeof v === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, x] of Object.entries(v)) out[stripNul(k) as string] = stripNul(x);
+    return out;
+  }
+  return v;
 }
 
 export interface ConversationSummary {

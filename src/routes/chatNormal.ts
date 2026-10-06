@@ -61,6 +61,8 @@ export async function chatNormalRoutes(app: FastifyInstance): Promise<void> {
         tools: logistTools(),
       });
 
+      // A failed save must not turn a streamed answer into an error: the user
+      // still gets done + conversationId, so the next question stays in this chat.
       const messageId = await appendMessage(
         conversationId,
         'assistant',
@@ -69,7 +71,10 @@ export async function chatNormalRoutes(app: FastifyInstance): Promise<void> {
         result.toolCalls,
         result.turnBlocks,
         { ...result.usage, history: historyStats },
-      );
+      ).catch((err: unknown) => {
+        req.log.error({ err }, 'assistant message not persisted');
+        return '';
+      });
 
       if (result.error) {
         req.log.error({ err: result.error }, 'normal chat turn errored (partial persisted)');

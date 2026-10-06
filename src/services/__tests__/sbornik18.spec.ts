@@ -104,3 +104,21 @@ describe('pdfProvenance', () => {
     expect(await pdfProvenance(Buffer.from('not a pdf'))).toBeNull();
   });
 });
+
+describe('NUL characters never reach PostgreSQL (lost chat turns)', () => {
+  it('cleans scanner-padded PDF metadata and drops encrypted garbage', async () => {
+    const { cleanMeta } = await import('../fileHints.js');
+    expect(cleanMeta('Canon MF410 Series / Adobe PSL 1.4e for Canon\u0000')).toBe('Canon MF410 Series / Adobe PSL 1.4e for Canon');
+    expect(cleanMeta('r3Ö¼ˇÏt�ùcÔ•ø.ð?Eﬁùèï†ÈµlŽ¾²(ñë⁄Êt\u0013Ú!\u0010„³ˆ-=H²')).toBeUndefined();
+    expect(cleanMeta('Microsoft® Word 2016')).toBe('Microsoft® Word 2016');
+  });
+
+  it('strips NUL from every string of a turn before it is stored', async () => {
+    const { stripNul } = await import('../conversations.js');
+    const nul = String.fromCharCode(0);
+    const blocks = [{ role: 'user', content: [{ type: 'tool_result', content: 'Метадані PDF: Canon' + nul }] }];
+    const out = JSON.stringify(stripNul(blocks));
+    expect(out.includes(String.fromCharCode(92) + 'u0000')).toBe(false); // no escaped NUL in the stored JSON
+    expect(JSON.parse(out)[0].content[0].content).toBe('Метадані PDF: Canon');
+  });
+});

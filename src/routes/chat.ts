@@ -74,6 +74,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
 
         // Persist the turn (partial text too, on error) with its replay blocks so
         // the next turn remembers what was read/extracted.
+        // A failed save must not turn a streamed answer into an error: the user
+        // still gets done + conversationId, so the next question stays in this chat.
         const messageId = await appendMessage(
           conversationId,
           'assistant',
@@ -82,7 +84,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           result.toolCalls,
           result.turnBlocks,
           { ...result.usage, history: historyStats },
-        );
+        ).catch((err: unknown) => {
+          req.log.error({ err }, 'assistant message not persisted');
+          return '';
+        });
 
         if (result.error) {
           req.log.error({ err: result.error }, 'chat turn errored (partial persisted)');
