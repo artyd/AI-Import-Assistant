@@ -77,8 +77,8 @@ export async function pdfProvenance(buf: Buffer): Promise<PdfProvenance | null> 
   }
   const created = safe(() => doc.getCreationDate());
   const modified = safe(() => doc.getModificationDate());
-  const producer = safe(() => doc.getProducer())?.trim() || undefined;
-  const creator = safe(() => doc.getCreator())?.trim() || undefined;
+  const producer = cleanMeta(safe(() => doc.getProducer()));
+  const creator = cleanMeta(safe(() => doc.getCreator()));
   const rawCreated = rawDate(doc, 'CreationDate');
   const rawModified = rawDate(doc, 'ModDate');
   const out: PdfProvenance = {
@@ -99,6 +99,21 @@ export async function pdfProvenance(buf: Buffer): Promise<PdfProvenance | null> 
   }
   if (!out.created && !out.modified && !out.producer && !out.creator) return null;
   return out;
+}
+
+/**
+ * A metadata string fit to show (and to store: PostgreSQL JSONB rejects \u0000).
+ * Scanner drivers pad strings with NUL ("…for Canon\u0000"); an encrypted PDF
+ * returns cipher bytes — those are dropped, not printed as garbage.
+ */
+export function cleanMeta(v: string | undefined): string | undefined {
+  if (!v) return undefined;
+  // eslint-disable-next-line no-control-regex
+  const s = v.replace(/[\u0000-\u001f\u007f\ufffd]/g, '').trim();
+  if (!s) return undefined;
+  const readable = (s.match(/[\p{L}\p{N}\s.,:;()\-_/+&'"]/gu) ?? []).length;
+  if (s.length > 200 || readable / s.length < 0.85) return undefined;
+  return s;
 }
 
 function safe<T>(fn: () => T): T | undefined {

@@ -74,13 +74,27 @@ async function autoFillLocked(workspaceId: string): Promise<void> {
   // contract_type — only if not manually set, currently null, and detectable.
   const manualMode =
     ws.contract_type_source === 'sidebar' || ws.contract_type_source === 'survey';
-  if (!manualMode && !ws.contract_type && analysis.contract_type) {
+  // An AUTO verdict follows the documents as they arrive: the first files read
+  // can say "bilateral" (10%) before the resale chain (supplier → Prime → buyer)
+  // is indexed — it used to stick forever because only an empty value was set.
+  // A manual (sidebar/survey) value is never touched.
+  const autoOwned = ws.contract_type === null || ws.contract_type_source === 'auto';
+  const autoChanged =
+    !!analysis.contract_type &&
+    (analysis.contract_type !== ws.contract_type ||
+      // REAL column: 0.7 reads back as 0.699999… — compare with a tolerance.
+      Math.abs(analysis.contract_type_confidence - (ws.contract_type_confidence ?? -1)) > 0.01);
+  if (!manualMode && autoOwned && autoChanged) {
     add('contract_type', analysis.contract_type);
     add('contract_type_source', 'auto');
     add('contract_type_confidence', analysis.contract_type_confidence);
     add('contract_type_reason', analysis.contract_type_reason);
   }
-  const mode = manualMode ? ws.contract_type : (ws.contract_type ?? analysis.contract_type);
+  const mode = manualMode
+    ? ws.contract_type
+    : autoOwned
+      ? (analysis.contract_type ?? ws.contract_type)
+      : (ws.contract_type ?? analysis.contract_type);
 
   const sender = analysis.suggestions.find((s) => s.role === 'sender');
   const intermediary = analysis.suggestions.find((s) => s.role === 'intermediary');
