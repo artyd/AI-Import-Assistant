@@ -1214,6 +1214,7 @@ export default function WorkspacePage() {
         collapsed={sidebarCollapsed}
         onToggleCollapsed={() => setSidebarCollapsed((v) => !v)}
         onNewChat={newChat}
+        onNewShipment={newShipment}
         onSelectShipment={selectShipment}
         onRenameShipment={renameShipment}
         onDeleteShipment={deleteShipment}

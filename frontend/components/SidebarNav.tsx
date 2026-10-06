@@ -27,6 +27,7 @@ interface Props {
   collapsed: boolean;
   onToggleCollapsed: () => void;
   onNewChat: () => void;
+  onNewShipment: () => void;
   onSelectShipment: (id: string) => void;
   onRenameShipment: () => void;
   onDeleteShipment: () => void;
@@ -68,6 +69,7 @@ export function SidebarNav(props: Props) {
     collapsed,
     onToggleCollapsed,
     onNewChat,
+    onNewShipment,
     onSelectShipment,
     onRenameShipment,
     onDeleteShipment,
@@ -119,6 +121,18 @@ export function SidebarNav(props: Props) {
           title="Новий чат"
         >
           <LnPencil size={17} />
+        </button>
+        <button
+          style={railBtn}
+          onClick={() => {
+            onSetView("chat");
+            onNewShipment();
+          }}
+          title="Нове постачання"
+          aria-label="Нове постачання"
+          data-testid="rail-new-shipment"
+        >
+          <LnFolderPlus size={17} />
         </button>
         <button style={railBtn} onClick={() => onSetView("news")} title="Новини">
           <LnList size={18} />
@@ -352,10 +366,16 @@ export function SidebarNav(props: Props) {
                 <LnChevronDown size={16} />
               </span>
             </div>
-            {chatKind === "consolidated" && (
+            {(chatKind === "consolidated" || chatKind === "supply") && (
               <button
-                onClick={onNewCollection}
-                title="Новий збірник"
+                onClick={() => {
+                  onSetView("chat");
+                  if (chatKind === "supply") onNewShipment();
+                  else onNewCollection();
+                }}
+                title={chatKind === "supply" ? "Нове постачання" : "Новий збірник"}
+                aria-label={chatKind === "supply" ? "Нове постачання" : "Новий збірник"}
+                data-testid={chatKind === "supply" ? "new-shipment" : "new-collection"}
                 style={{
                   flex: "none",
                   width: 40,
