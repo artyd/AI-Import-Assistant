@@ -44,7 +44,15 @@ export async function realignPartiesForMode(
 }
 
 // Fields the contract mode decides in the builder.
-const PARTY_PATHS = ['consignor.name', 'consignor.address', 'consignee.name', 'consignee.address', 'finalConsignee'] as const;
+const PARTY_PATHS = [
+  'consignor.name', 'consignor.address', 'consignor.country',
+  'consignee.name', 'consignee.address', 'consignee.country',
+  'finalConsignee',
+] as const;
+// Fields a mode change may need to EMPTY: the end-buyer line of a trilateral
+// letter, and a country left over from the previous party (Ukrainian address +
+// «Singapore» printed together).
+const CLEARABLE = new Set<string>(['finalConsignee', 'consignor.country', 'consignee.country']);
 
 /**
  * Re-runs the builder prefill and, for the party fields whose value changed,
@@ -64,7 +72,7 @@ export async function proposePartyFieldsForMode(workspaceId: string, mode: 'bila
     const want = String(getPath(fresh, path) ?? '');
     // Propose a change; an empty `want` clears a field the old mode filled
     // (e.g. the end buyer line, which a bilateral letter doesn't have).
-    if (now === want || (!want && path !== 'finalConsignee')) return [];
+    if (now === want || (!want && !CLEARABLE.has(path))) return [];
     return [{ path, value: want, reason }];
   });
   // The hints (mode, intermediary/recipient names behind the consignee toggle)
