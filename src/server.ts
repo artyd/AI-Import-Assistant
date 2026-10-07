@@ -48,14 +48,31 @@ async function buildServer() {
   const allowedOrigins = new Set(
     config.CORS_ORIGIN.split(',').map((s) => s.trim()).filter(Boolean),
   );
+  // The public MCP endpoint is called by third-party clients (claude.ai, IDEs —
+  // some send an Origin header). It authenticates by its own token, never by
+  // cookie, so any origin may call it (no credentials).
+  const isMcpEndpoint = (url: string): boolean => /^\/api\/mcp(?:[/?]|$)/.test(url);
   await app.register(cors, {
-    origin: (origin, cb) => {
-      if (!origin || allowedOrigins.has(origin)) return cb(null, true);
-      cb(new Error('Not allowed by CORS'), false);
+    delegator: (req, cb) => {
+      if (isMcpEndpoint(req.url ?? '')) {
+        return cb(null, {
+          origin: '*',
+          credentials: false,
+          methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+          allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Mcp-Session-Id', 'Mcp-Protocol-Version', 'Last-Event-ID'],
+          exposedHeaders: ['Mcp-Session-Id'],
+        });
+      }
+      cb(null, {
+        origin: (origin, done) => {
+          if (!origin || allowedOrigins.has(origin)) return done(null, true);
+          done(new Error('Not allowed by CORS'), false);
+        },
+        credentials: true,
+        methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+        allowedHeaders: ['Content-Type', 'Authorization'],
+      });
     },
-    credentials: true,
-    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
   });
 
   // Rate limiting is opt-in per route (chat + login).
