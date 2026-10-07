@@ -1,24 +1,12 @@
 "use client";
 
-// «Підключити MCP» — self-service link to Штурман's MCP server plus a step-by-step
-// guide for the common clients, in one window. The backend stores only a hash of
-// the token, so the full link is shown once (right after it is issued); after that
-// the user sees its tail and can re-issue (which revokes the old link) or revoke.
-//
-// Wire: GET/POST/DELETE /api/mcp-token → { exists, hint, createdAt, lastUsedAt }
-// (+ { token, path } on POST). The link is `${origin}${path}`.
+// «Підключити MCP» — the link to Штурман's MCP server plus a step-by-step guide
+// for the common clients, in one window. The endpoint is open (public reference
+// tools only, no shipment data), so the link is simply `${origin}/api/mcp` —
+// nothing to issue or keep secret.
 
 import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
-import { IconSpinner } from "./icons";
 import { LnCheck, LnCopy } from "./LineIcons";
-
-interface TokenStatus {
-  exists: boolean;
-  hint: string | null;
-  createdAt: string | null;
-  lastUsedAt: string | null;
-}
 
 type Client = "claude" | "claudeCode" | "cursor" | "vscode";
 
@@ -38,28 +26,12 @@ const TOOLS = [
   "Перевірка реєстрації лікарського засобу в Держреєстрі",
 ];
 
-const PLACEHOLDER = "https://…/api/mcp/<ваш-токен>";
-
-function fmt(iso: string | null): string {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString("uk-UA", { dateStyle: "medium", timeStyle: "short" });
-}
-
 export function McpConnectModal({ onClose }: { onClose: () => void }) {
-  const [status, setStatus] = useState<TokenStatus | null>(null);
-  const [url, setUrl] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [link, setLink] = useState("/api/mcp");
   const [client, setClient] = useState<Client>("claude");
 
   useEffect(() => {
-    let alive = true;
-    api<TokenStatus>("/api/mcp-token")
-      .then((s) => alive && setStatus(s))
-      .catch(() => alive && setError("Не вдалося завантажити стан підключення."));
-    return () => {
-      alive = false;
-    };
+    setLink(`${window.location.origin}/api/mcp`);
   }, []);
 
   useEffect(() => {
@@ -69,37 +41,6 @@ export function McpConnectModal({ onClose }: { onClose: () => void }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
-
-  const issue = async () => {
-    if (status?.exists && !window.confirm("Старе посилання перестане працювати. Згенерувати нове?")) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const r = await api<TokenStatus & { path: string }>("/api/mcp-token", { method: "POST" });
-      setStatus(r);
-      setUrl(`${window.location.origin}${r.path}`);
-    } catch {
-      setError("Не вдалося отримати посилання. Спробуйте ще раз.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const revoke = async () => {
-    if (!window.confirm("Відкликати посилання? Підключені клієнти втратять доступ.")) return;
-    setBusy(true);
-    setError(null);
-    try {
-      setStatus(await api<TokenStatus>("/api/mcp-token", { method: "DELETE" }));
-      setUrl(null);
-    } catch {
-      setError("Не вдалося відкликати посилання.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const link = url ?? PLACEHOLDER;
 
   return (
     <div
@@ -129,45 +70,9 @@ export function McpConnectModal({ onClose }: { onClose: () => void }) {
         </div>
 
         {/* Step 1 — the link */}
-        <Step n={1} title="Отримайте посилання">
-          {status === null && !error ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--muted)" }}>
-              <IconSpinner size={16} /> Завантаження…
-            </div>
-          ) : url ? (
-            <>
-              <CopyField value={url} />
-              <Note>
-                Збережіть посилання зараз — повністю воно показується лише один раз. Це ваш особистий
-                ключ доступу: не публікуйте його.
-              </Note>
-            </>
-          ) : status?.exists ? (
-            <Note>
-              Посилання вже видано (закінчується на <b>…{status.hint}</b>, створено {fmt(status.createdAt)},
-              востаннє використано {fmt(status.lastUsedAt)}). Повністю воно показується лише при створенні —
-              якщо ви його не зберегли, згенеруйте нове.
-            </Note>
-          ) : (
-            <Note>У вас ще немає посилання. Натисніть кнопку — воно зʼявиться тут.</Note>
-          )}
-
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button className="btn btn-primary" onClick={issue} disabled={busy || status === null}>
-              {busy ? <IconSpinner size={15} /> : null}
-              {status?.exists ? "Згенерувати нове посилання" : "Отримати посилання"}
-            </button>
-            {status?.exists && (
-              <button className="btn" onClick={revoke} disabled={busy}>
-                Відкликати
-              </button>
-            )}
-          </div>
-          {error && (
-            <div style={{ padding: "8px 12px", background: "var(--errBg)", color: "var(--err)", borderRadius: 9, fontSize: 12.5 }}>
-              {error}
-            </div>
-          )}
+        <Step n={1} title="Скопіюйте посилання">
+          <CopyField value={link} />
+          <Note>Вхід і ключі доступу не потрібні — посилання однакове для всіх.</Note>
         </Step>
 
         {/* Step 2 — client-specific guide */}
