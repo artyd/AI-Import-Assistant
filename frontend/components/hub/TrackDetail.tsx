@@ -202,13 +202,21 @@ export function TrackDetail({
         )}
       </div>
 
-      <div style={{ padding: 12, borderTop: "1px solid var(--border)", display: "flex", gap: 6, flexWrap: "wrap" }}>
+      <div
+        style={{
+          padding: 12,
+          borderTop: "1px solid var(--border)",
+          display: "grid",
+          gridTemplateColumns: `repeat(${track.trackUrl ? 3 : 2}, minmax(0, 1fr))`,
+          gap: 6,
+        }}
+      >
         <button type="button" className="btn btn-primary" style={actionBtn} disabled={busy !== null} onClick={() => void act("refresh", () => hubApi.refresh(track.id))}>
           {busy === "refresh" ? "Перевіряю…" : "↻ Оновити"}
         </button>
         {track.trackUrl && (
-          <a className="btn" style={{ ...actionBtn, textDecoration: "none", display: "inline-flex", alignItems: "center" }} href={track.trackUrl} target="_blank" rel="noreferrer noopener">
-            Сайт перевізника ↗
+          <a className="btn" style={{ ...actionBtn, textDecoration: "none" }} href={track.trackUrl} target="_blank" rel="noreferrer noopener" title="Сайт перевізника">
+            Сайт ↗
           </a>
         )}
         <button type="button" className="btn" style={actionBtn} disabled={busy !== null} onClick={() => void act("archive", () => hubApi.patch(track.id, { archived: true })).then((ok) => ok && onRemoved())}>
@@ -217,7 +225,7 @@ export function TrackDetail({
         <button
           type="button"
           className="btn"
-          style={{ ...actionBtn, color: "var(--err)" }}
+          style={{ ...actionBtn, gridColumn: "1 / -1", color: "var(--err)" }}
           disabled={busy !== null}
           onClick={() => {
             if (!confirmDel) return setConfirmDel(true);
@@ -291,4 +299,15 @@ const closeBtn: React.CSSProperties = {
   cursor: "pointer",
 };
 
-const actionBtn: React.CSSProperties = { height: 32, padding: "0 12px", fontSize: 12.5 };
+const actionBtn: React.CSSProperties = {
+  height: 34,
+  padding: "0 6px",
+  fontSize: 12.5,
+  width: "100%",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  whiteSpace: "nowrap",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+};

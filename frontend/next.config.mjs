@@ -9,7 +9,7 @@ const isDev = process.env.NODE_ENV !== "production";
 // bootstrap and the pre-hydration theme script in app/layout.tsx; 'unsafe-eval'
 // only in dev (React Refresh). External hosts actually used by the app:
 //   • Google Fonts (layout.tsx): fonts.googleapis.com CSS + fonts.gstatic.com files
-//   • Leaflet map tiles (MapCanvas): server.arcgisonline.com → img-src https:
+//   • Leaflet map tiles (hub): arcgisonline.com → img-src https:
 //   • Place geocoding (MapCanvas): nominatim.openstreetmap.org → connect-src
 //   • PDF preview (FilePreviewModal): <object data="blob:…"> → object-src blob:
 const csp = [
