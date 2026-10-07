@@ -13,6 +13,7 @@ import { mockWorkspace, WSID } from "./mocks";
 
 const LIVE = JSON.parse(readFileSync(join(__dirname, "fixtures", "hub-live.json"), "utf8"));
 const PORTS = JSON.parse(readFileSync(join(__dirname, "fixtures", "hub-ports.json"), "utf8"));
+const LINES = JSON.parse(readFileSync(join(__dirname, "fixtures", "hub-lines.json"), "utf8"));
 
 const EVENTS = [
   { id: "e1", at: "2026-09-16T08:00:00Z", location: "Ningbo, CN", lat: 29.93, lng: 121.85, description: "Завантажено на судно", planned: false },
@@ -25,6 +26,8 @@ interface HubMockState {
   added: unknown[];
   marks?: unknown[];
   favs?: string[];
+  services?: unknown[];
+  carrierMarks?: unknown[];
 }
 
 async function mockHub(page: Page, state: HubMockState = { added: [] }) {
@@ -34,6 +37,13 @@ async function mockHub(page: Page, state: HubMockState = { added: [] }) {
     if (pathname === "/api/hub/live") return (await json(LIVE), true);
     if (pathname === "/api/map/ports") return (await json({ ports: [] }), true);
     if (pathname === "/api/hub/ports") return (await json(PORTS), true);
+    if (pathname === "/api/hub/lines") return (await json({ carriers: LINES.carriers, lanes: LINES.lanes }), true);
+    const lm = pathname.match(/^\/api\/hub\/lines\/([a-z-]+)(\/.*)?$/);
+    if (lm) {
+      if (lm[2] === "/services" && method === "POST") state.services?.push(route.request().postDataJSON());
+      if (lm[2] === "/status" && method === "POST") state.carrierMarks?.push(route.request().postDataJSON());
+      return (await json(LINES.detail, method === "POST" && lm[2] === "/services" ? 201 : 200), true);
+    }
     const pm = pathname.match(/^\/api\/hub\/ports\/([A-Z]+)(\/.*)?$/);
     if (pm) {
       const port = PORTS.ports.find((x: { code: string }) => x.code === pm[1]);
@@ -221,5 +231,46 @@ test.describe("Logistics hub", () => {
     expect(state.marks![0]).toEqual({ status: "congested", note: "черга 2 доби" });
     await card.getByRole("button", { name: "Прибрати з обраних" }).click();
     await expect.poll(() => state.favs!).toContain("DELETE:UAODS");
+  });
+
+  test("lines tab: carrier statuses, corridors, services", async ({ page }, info) => {
+    const state: HubMockState = { added: [], services: [], carrierMarks: [] };
+    await mockHub(page, state);
+    await openHub(page);
+    await page.getByRole("tab", { name: /Лінії/ }).click();
+    const rows = page.getByTestId("hub-carrier-row");
+    await expect(rows.first()).toContainText("Maersk");
+    await expect(rows.first()).toContainText("Приймає на Україну");
+    await expect(rows.first()).toContainText("вчасно 71%");
+    // Corridors with computed transit, war-risk zones on the map.
+    await expect(page.getByTestId("hub-lane-row")).toHaveCount(LINES.lanes.length);
+    expect(await page.locator("path.leaflet-interactive").count()).toBeGreaterThan(LINES.lanes.length);
+    await page.getByTestId("hub-lane-row").filter({ hasText: "Китай → Одеса (в обхід Африки)" }).click();
+    await page.waitForTimeout(1300);
+    await page.screenshot({ path: `test-results/hub-lanes-${info.project.name}.png` });
+
+    await rows.first().click();
+    const card = page.getByTestId("hub-carrier-detail");
+    await expect(card).toBeVisible();
+    await expect(card.getByTestId("hub-carrier-field").first()).toContainText("ШІ з новини");
+    await expect(card).toContainText("AE-12 / Black Sea feeder");
+    await expect(card).toContainText("WRS $150/TEU на Одесу");
+    await page.waitForTimeout(1300);
+    await page.screenshot({ path: `test-results/hub-carrier-${info.project.name}.png` });
+
+    // Team mark + add a service.
+    await card.getByLabel("Україна").selectOption("limited");
+    await card.getByLabel("Коментар").fill("лише через Констанцу");
+    await card.getByRole("button", { name: "Зберегти позначку" }).click();
+    await expect.poll(() => state.carrierMarks!.length).toBe(1);
+    expect(state.carrierMarks![0]).toMatchObject({ uaStatus: "limited", note: "лише через Констанцу" });
+
+    await card.getByRole("button", { name: "+ Додати сервіс" }).click();
+    await card.getByLabel("Назва сервісу").fill("ME-3");
+    await card.getByLabel("Ротація").fill("INNSA, TRAMR, UAODS");
+    await card.getByLabel("Транзит від").fill("24");
+    await card.getByRole("button", { name: "Зберегти сервіс" }).click();
+    await expect.poll(() => state.services!.length).toBe(1);
+    expect(state.services![0]).toMatchObject({ name: "ME-3", rotation: ["INNSA", "TRAMR", "UAODS"], transitDaysMin: 24 });
   });
 });

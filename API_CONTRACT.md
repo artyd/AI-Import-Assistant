@@ -805,6 +805,29 @@ logist 72 h; confirming extends). No mark ⇒ `status: null` ("немає дан
 Users who starred a place get an in-app notification (`type = 'port:<code>:<status>'`)
 when it becomes disrupted/closed or returns to ok. Agent/MCP tool: `get_port_status`.
 
+### Sea lines (hub phase 3)
+
+Per ocean carrier (registry ids: maersk, msc, cma, cosco, oocl, hapag, one,
+evergreen, hmm, yangming, zim, wanhai, pil, turkon, arkas) — team-wide marks,
+AI from news (with link) or logist; each field = newest non-expired non-null
+value (AI 10 days, logist 14 days):
+- `uaStatus ∈ accepting|limited|suspended` (bookings to Ukraine / Odesa / Danube)
+- `redSea ∈ suez|cape|mixed` (Asia–Europe routing)
+- `warRisk` free text (war-risk surcharge)
+- `reliability = { delivered, onTimeShare|null, avgDelayDays|null, inTransit }` —
+  from the team's own sea deliveries (arrival vs first ETA); `null` when < 3.
+- Reference `lanes` (Asia / India / Turkey / North Europe → Black Sea), transit
+  computed from sea-lane distance at 15 kn + port calls — labelled "орієнтовно".
+
+#### `GET /api/hub/lines` → `{ carriers: CarrierSummary[], lanes: Lane[] }`
+#### `GET /api/hub/lines/:carrier` → `{ carrier, services: Service[], history }`
+#### `POST /api/hub/lines/:carrier/status` — `{ uaStatus?, redSea?, warRisk?, note? }` (≥ 1 field)
+#### `POST /api/hub/lines/:carrier/status/:markId/confirm`
+#### `POST /api/hub/lines/:carrier/services` — `{ name, rotation: portCode[] (≥2), transitDaysMin?, transitDaysMax?, frequency?, via?: ''|'suez'|'cape', note? }` → `201`
+#### `PATCH | DELETE /api/hub/lines/:carrier/services/:id`
+
+Agent tool (chat only, not public MCP): `get_carrier_status`.
+
 Notifications: in-app only (`notifications.type = 'hub:<trackId>:<event>'`) — on
 arrival at port/hub, customs, out for delivery, delivered, exception, or an ETA
 shift ≥ 24 h. Agent tools: `track_shipment`, `list_tracked_shipments`,

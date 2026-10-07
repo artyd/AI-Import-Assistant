@@ -13,6 +13,7 @@ import {
 } from '../services/hub/track.js';
 import { STATUS_LABEL_UK, type TrackResult } from '../services/hub/types.js';
 import { findPorts, getPort, serializePort } from '../services/hub/ports.js';
+import { getCarrierDetail, listCarriers, SEA_CARRIERS } from '../services/hub/lines.js';
 
 /**
  * Logistics-hub tools for the Штурман agent (chat) and the public MCP server.
@@ -59,6 +60,19 @@ export const portStatusTool: ChatTool = {
   },
 };
 
+export const carrierStatusTool: ChatTool = {
+  name: 'get_carrier_status',
+  description:
+    'Стан морської лінії (Maersk, MSC, CMA CGM, COSCO, Hapag-Lloyd, ONE, Evergreen, HMM, Yang Ming, ZIM…): чи приймає ' +
+    'вантажі на Україну (Одеса/Дунай), як ходить Азія–Європа (Суец чи в обхід Африки), надбавки за воєнний ризик — ' +
+    'з джерелом і датою; сервіси, які використовує команда; пунктуальність за нашими доставками. Без carrier — ' +
+    'короткий огляд усіх ліній. Невідоме лишається невідомим.',
+  input_schema: {
+    type: 'object',
+    properties: { carrier: { type: 'string', description: 'id або назва лінії: maersk, msc, cma, cosco, hapag, one, zim…' } },
+  },
+};
+
 export const hubToolDefinitions: ChatTool[] = [
   {
     name: 'track_shipment',
@@ -84,6 +98,7 @@ export const hubToolDefinitions: ChatTool[] = [
     input_schema: { type: 'object', properties: {} },
   },
   portStatusTool,
+  carrierStatusTool,
   {
     name: 'find_tracking_numbers',
     description:
@@ -106,7 +121,7 @@ export const publicTrackTool: ChatTool = {
   },
 };
 
-const HUB_NAMES = new Set(['track_shipment', 'list_tracked_shipments', 'find_tracking_numbers', 'track_by_number', 'get_port_status']);
+const HUB_NAMES = new Set(['track_shipment', 'list_tracked_shipments', 'find_tracking_numbers', 'track_by_number', 'get_port_status', 'get_carrier_status']);
 export function isHubTool(name: string): boolean {
   return HUB_NAMES.has(name);
 }
@@ -263,7 +278,8 @@ export async function executeHubTool(name: string, input: unknown, ctx: HubToolC
           continue;
         }
         const s = p.status;
-        const who = s.by === 'ai' ? `ШІ з новини «${s.sourceTitle}» ${s.sourceUrl}` : `позначка логіста${s.userName ? ` (${s.userName})` : ''}`;
+        // The public MCP (no ownerId) never sees team members' names.
+        const who = s.by === 'ai' ? `ШІ з новини «${s.sourceTitle}» ${s.sourceUrl}` : `позначка логіста${ctx.ownerId && s.userName ? ` (${s.userName})` : ''}`;
         const detail = ctx.ownerId ? await getPort(ctx.ownerId, p.code) : null;
         const hist = (detail?.history ?? [])
           .slice(1, 4)
@@ -276,6 +292,47 @@ export async function executeHubTool(name: string, input: unknown, ctx: HubToolC
         );
       }
       return { result: blocks.join('\n\n'), summary: `Порти: ${found[0]!.name}` };
+    }
+    case 'get_carrier_status': {
+      const raw = String((input as { carrier?: unknown })?.carrier ?? '').trim().toLowerCase();
+      const fmtField = (f: { label: string; by: string; userName: string; sourceTitle: string; sourceUrl: string; updatedAt: string } | null) =>
+        f ? `${f.label} (${f.by === 'ai' ? `ШІ з новини «${f.sourceTitle}» ${f.sourceUrl}` : `логіст ${f.userName}`.trim()}, ${d(f.updatedAt)})` : 'невідомо';
+      const rel = (r: { delivered: number; onTimeShare: number | null; avgDelayDays: number | null; inTransit: number }) =>
+        r.onTimeShare == null
+          ? `пунктуальність: замало наших доставок (${r.delivered})`
+          : `вчасно ${Math.round(r.onTimeShare * 100)}% з ${r.delivered}, середня затримка ${r.avgDelayDays} дн.`;
+      if (!raw) {
+        const all = await listCarriers();
+        return {
+          result: all
+            .map((c) => `- ${c.name}: Україна — ${c.uaStatus?.label ?? 'невідомо'}; Азія–Європа — ${c.redSea?.label ?? 'невідомо'}; ${rel(c.reliability)}`)
+            .join('\n'),
+          summary: 'Лінії: огляд',
+        };
+      }
+      const match = SEA_CARRIERS.find((c) => c.id === raw || c.name.toLowerCase().includes(raw));
+      if (!match) return { result: `Лінію «${raw}» не знайдено в довіднику хабу.`, summary: 'Лінії: не знайдено' };
+      const det = await getCarrierDetail(match.id);
+      if (!det) return { result: 'Даних немає.', summary: 'Лінії: немає даних' };
+      const c = det.carrier;
+      const lines = [
+        `${c.name}`,
+        `Україна: ${fmtField(c.uaStatus)}`,
+        `Азія–Європа: ${fmtField(c.redSea)}`,
+        `Надбавка за воєнний ризик: ${c.warRisk ? `${c.warRisk.value} (${d(c.warRisk.updatedAt)})` : 'невідомо'}`,
+        rel(c.reliability) + (c.reliability.inTransit ? `; зараз у дорозі: ${c.reliability.inTransit}` : ''),
+      ];
+      if (det.services.length) {
+        lines.push('Сервіси команди:');
+        for (const s of det.services) {
+          lines.push(
+            `- ${s.name}: ${s.rotation.map((r) => r.name).join(' → ')}` +
+              `${s.transitDaysMin ? `; транзит ${s.transitDaysMin}${s.transitDaysMax ? `–${s.transitDaysMax}` : ''} дн.` : ''}` +
+              `${s.frequency ? `; ${s.frequency}` : ''}${s.via ? `; ${s.via === 'cape' ? 'в обхід Африки' : 'через Суец'}` : ''}`,
+          );
+        }
+      }
+      return { result: lines.join('\n'), summary: `Лінії: ${c.name}` };
     }
     default:
       return { result: `Невідомий інструмент: ${name}`, summary: 'Невідомий інструмент' };

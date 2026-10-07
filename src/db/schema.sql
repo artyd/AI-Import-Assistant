@@ -797,3 +797,42 @@ CREATE TABLE IF NOT EXISTS news_hub_scans (
   news_id    UUID PRIMARY KEY REFERENCES news_items(id) ON DELETE CASCADE,
   scanned_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- ── Logistics hub · Phase 3: sea lines ───────────────────────────────────────
+-- Per ocean carrier (id from src/services/hub/carriers.ts): is it taking
+-- bookings to Ukraine (Odesa / Danube), how it routes Asia–Europe (Suez / Cape),
+-- war-risk surcharge notes. Same provenance model as port marks: AI from a news
+-- item (with its link) or a logist; each field is "latest non-expired non-null".
+CREATE TABLE IF NOT EXISTS carrier_status_marks (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  carrier       TEXT NOT NULL,
+  ua_status     TEXT CHECK (ua_status IN ('accepting', 'limited', 'suspended')),
+  red_sea       TEXT CHECK (red_sea IN ('suez', 'cape', 'mixed')),
+  war_risk      TEXT NOT NULL DEFAULT '',
+  note          TEXT NOT NULL DEFAULT '',
+  source        TEXT NOT NULL CHECK (source IN ('ai', 'user')),
+  source_url    TEXT NOT NULL DEFAULT '',
+  source_title  TEXT NOT NULL DEFAULT '',
+  confidence    REAL,
+  user_id       UUID REFERENCES users(id) ON DELETE SET NULL,
+  confirmed_by  UUID[] NOT NULL DEFAULT '{}',
+  valid_until   TIMESTAMPTZ NOT NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_carrier_marks ON carrier_status_marks(carrier, created_at DESC);
+
+-- Services / schedules the team actually uses (rotation = ordered port codes).
+CREATE TABLE IF NOT EXISTS carrier_services (
+  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  carrier           TEXT NOT NULL,
+  name              TEXT NOT NULL,
+  rotation          TEXT[] NOT NULL DEFAULT '{}',
+  transit_days_min  INT,
+  transit_days_max  INT,
+  frequency         TEXT NOT NULL DEFAULT '',
+  via               TEXT NOT NULL DEFAULT '' CHECK (via IN ('', 'suez', 'cape')),
+  note              TEXT NOT NULL DEFAULT '',
+  created_by        UUID REFERENCES users(id) ON DELETE SET NULL,
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_carrier_services ON carrier_services(carrier);

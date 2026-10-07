@@ -4,9 +4,12 @@ import { config } from '../../config.js';
 import { query } from '../../db/pool.js';
 import { PLACES, type Place } from './places.js';
 import { addMark, PORT_STATUSES, type PortStatus } from './ports.js';
+import { addCarrierMark, type RedSea, type UaStatus } from './lines.js';
 
 /**
- * AI port-status reader. After each news ingest the worker passes fresh,
+ * AI hub-status reader (ports AND ocean carriers).
+ *
+ * Ports: After each news ingest the worker passes fresh,
  * not-yet-read news items that MENTION a known port / airport / border crossing
  * (gazetteer name or alias match — cheap, offline) to Claude, which decides per
  * mentioned place whether the item says anything about it operating:
@@ -47,6 +50,35 @@ const NAME_KEYS: Array<{ re: RegExp; place: Place }> = PLACES.filter((p) => p.ki
     }),
 );
 
+const CARRIER_NAMES: Array<{ id: string; re: RegExp }> = [
+  ['maersk', ['maersk', 'маерськ', 'мерск', 'маерск']],
+  ['msc', ['msc', 'mediterranean shipping']],
+  ['cma', ['cma cgm', 'cma-cgm']],
+  ['cosco', ['cosco']],
+  ['oocl', ['oocl']],
+  ['hapag', ['hapag-lloyd', 'hapag lloyd', 'hapag']],
+  ['one', ['ocean network express']],
+  ['evergreen', ['evergreen']],
+  ['hmm', ['hmm', 'hyundai merchant']],
+  ['yangming', ['yang ming']],
+  ['zim', ['zim']],
+  ['wanhai', ['wan hai']],
+  ['pil', ['pacific international lines']],
+  ['turkon', ['turkon']],
+  ['arkas', ['arkas']],
+].flatMap(([id, names]) =>
+  (names as string[]).map((n) => ({
+    id: id as string,
+    re: new RegExp(`(^|[^\\p{L}])${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=$|[^\\p{L}])`, 'u'),
+  })),
+);
+
+/** Ocean carriers named in a text. */
+export function carriersMentioned(text: string): string[] {
+  const f = fold(text);
+  return [...new Set(CARRIER_NAMES.filter((c) => c.re.test(f)).map((c) => c.id))];
+}
+
 /** Gazetteer places named in a text (ports, airports, crossings — not inland cities). */
 export function placesMentioned(text: string): Place[] {
   const f = fold(text);
@@ -59,7 +91,8 @@ export function placesMentioned(text: string): Place[] {
 
 const TOOL = {
   name: 'record_port_statuses',
-  description: 'Записати статуси роботи портів/аеропортів/пунктів пропуску, прямо згадані в новинах.',
+  description:
+    'Записати статуси роботи портів/аеропортів/пунктів пропуску та морських ліній, прямо згадані в новинах.',
   input_schema: {
     type: 'object' as const,
     properties: {
@@ -77,6 +110,30 @@ const TOOL = {
           required: ['news', 'code', 'status', 'note', 'confidence'],
         },
       },
+      carrier_marks: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            news: { type: 'integer' },
+            carrier: { type: 'string', description: 'id лінії зі списку кандидатів цієї новини.' },
+            ua_status: {
+              type: 'string',
+              enum: ['accepting', 'limited', 'suspended'],
+              description: 'Лише якщо новина прямо каже про прийом вантажів на Україну (Одеса/Дунай).',
+            },
+            red_sea: {
+              type: 'string',
+              enum: ['suez', 'cape', 'mixed'],
+              description: 'Лише якщо новина прямо каже, як лінія ходить Азія–Європа (Суец / в обхід Африки).',
+            },
+            war_risk: { type: 'string', description: 'Надбавка за воєнний ризик, якщо названа (сума/умови).' },
+            note: { type: 'string', description: 'Коротко українською (≤ 140 символів).' },
+            confidence: { type: 'number' },
+          },
+          required: ['news', 'carrier', 'note', 'confidence'],
+        },
+      },
     },
     required: ['marks'],
   },
@@ -91,7 +148,7 @@ interface NewsRow {
 }
 
 /** Read new news items once; returns how many marks were created. */
-export async function scanNewsForPortStatus(): Promise<{ scanned: number; marks: number }> {
+export async function scanNewsForHubStatus(): Promise<{ scanned: number; marks: number }> {
   const { rows } = await query<NewsRow>(
     `SELECT n.id, n.title, n.summary, n.url, n.source FROM news_items n
      WHERE n.rubric = ANY($1) AND n.published_at > now() - interval '4 days'
@@ -102,8 +159,11 @@ export async function scanNewsForPortStatus(): Promise<{ scanned: number; marks:
   if (rows.length === 0) return { scanned: 0, marks: 0 };
 
   const candidates = rows
-    .map((n) => ({ n, places: placesMentioned(`${n.title ?? ''} ${n.summary ?? ''}`) }))
-    .filter((c) => c.places.length > 0);
+    .map((n) => {
+      const text = `${n.title ?? ''} ${n.summary ?? ''}`;
+      return { n, places: placesMentioned(text), carriers: carriersMentioned(text) };
+    })
+    .filter((c) => c.places.length > 0 || c.carriers.length > 0);
 
   let marks = 0;
   for (let i = 0; i < candidates.length; i += BATCH) {
@@ -112,7 +172,8 @@ export async function scanNewsForPortStatus(): Promise<{ scanned: number; marks:
       .map(
         (c, k) =>
           `#${k + 1} ${c.n.title ?? ''}\n${(c.n.summary ?? '').slice(0, 900)}\n` +
-          `Кандидати: ${c.places.map((p) => `${p.code} (${p.name}, ${p.kind === 'air' ? 'аеропорт' : p.kind === 'customs' ? 'пункт пропуску' : 'порт'})`).join('; ')}`,
+          `Кандидати-обʼєкти: ${c.places.map((p) => `${p.code} (${p.name}, ${p.kind === 'air' ? 'аеропорт' : p.kind === 'customs' ? 'пункт пропуску' : 'порт'})`).join('; ') || '—'}\n` +
+          `Кандидати-лінії: ${c.carriers.join(', ') || '—'}`,
       )
       .join('\n\n');
     try {
@@ -130,7 +191,10 @@ export async function scanNewsForPortStatus(): Promise<{ scanned: number; marks:
                 'роботу цього порту/аеропорту/пункту пропуску ЗАРАЗ. ok — працює/відновив роботу; congested — черги, ' +
                 'перевантаження, затримки обробки; disrupted — часткові збої, страйк, обстріл, погода, обмеження; ' +
                 'closed — закритий/зупинений. Якщо новина про інше (тарифи, статистика, плани) — НЕ додавай запис. ' +
-                'Не вигадуй. Виклич record_port_statuses (marks може бути порожнім).\n\n' +
+                'Для ЛІНІЙ (carrier_marks): ua_status — лише якщо прямо сказано, чи лінія приймає вантажі на ' +
+                'Україну/Одесу/Дунай; red_sea — лише якщо прямо сказано про маршрут через Суец або в обхід Африки; ' +
+                'war_risk — лише назва/сума надбавки. Не вигадуй. Виклич record_port_statuses ' +
+                '(marks і carrier_marks можуть бути порожніми).\n\n' +
                 listing,
             },
           ],
@@ -159,9 +223,35 @@ export async function scanNewsForPortStatus(): Promise<{ scanned: number; marks:
         });
         if (ok) marks += 1;
       }
+      const clist =
+        block && block.type === 'tool_use' && Array.isArray((block.input as { carrier_marks?: unknown }).carrier_marks)
+          ? ((block.input as { carrier_marks: unknown[] }).carrier_marks as Array<Record<string, unknown>>)
+          : [];
+      for (const m of clist) {
+        const c = batch[Number(m.news) - 1];
+        const carrier = String(m.carrier ?? '');
+        const confidence = Number(m.confidence ?? 0);
+        if (!c || !c.carriers.includes(carrier) || confidence < MIN_CONFIDENCE) continue;
+        const ua = ['accepting', 'limited', 'suspended'].includes(String(m.ua_status)) ? (m.ua_status as UaStatus) : null;
+        const rs = ['suez', 'cape', 'mixed'].includes(String(m.red_sea)) ? (m.red_sea as RedSea) : null;
+        const wr = typeof m.war_risk === 'string' ? m.war_risk : '';
+        if (!ua && !rs && !wr) continue;
+        const ok = await addCarrierMark({
+          carrier,
+          uaStatus: ua,
+          redSea: rs,
+          warRisk: wr,
+          note: String(m.note ?? ''),
+          source: 'ai',
+          sourceUrl: c.n.url ?? '',
+          sourceTitle: `${c.n.source ? `${c.n.source}: ` : ''}${c.n.title ?? ''}`,
+          confidence,
+        });
+        if (ok) marks += 1;
+      }
     } catch (err) {
       // eslint-disable-next-line no-console
-      console.error('Port-status news scan batch failed:', (err as Error).message);
+      console.error('Hub-status news scan batch failed:', (err as Error).message);
       // Leave these unscanned so the next run retries them.
       continue;
     }

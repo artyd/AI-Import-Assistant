@@ -7,6 +7,16 @@ import { CARRIERS, getCarrier } from '../services/hub/carriers.js';
 import { detectNumber } from '../services/hub/detect.js';
 import { trackingSuggestions } from '../services/hub/suggest.js';
 import { addMark, confirmMark, getPort, listPorts, PORT_STATUSES, setFavorite } from '../services/hub/ports.js';
+import {
+  addCarrierMark,
+  confirmCarrierMark,
+  deleteService,
+  getCarrierDetail,
+  listCarriers,
+  referenceLanes,
+  upsertService,
+  validRotation,
+} from '../services/hub/lines.js';
 import { liveSnapshot } from '../services/hub/live.js';
 import {
   addTracked,
@@ -235,6 +245,91 @@ export async function hubRoutes(app: FastifyInstance): Promise<void> {
     if (!p.success || !(await setFavorite(req.user!.sub, p.data.code, false))) {
       return reply.status(404).send({ error: 'Not found' });
     }
+    return reply.status(204).send();
+  });
+
+  // ── Phase 3: sea lines ───────────────────────────────────────────────────
+
+  const carrierParams = z.object({ carrier: z.string().trim().min(2).max(20) });
+  const serviceBody = z.object({
+    name: z.string().trim().min(2).max(120),
+    rotation: z.array(z.string().trim().min(3).max(8)).min(2).max(20),
+    transitDaysMin: z.number().int().min(1).max(120).nullable().optional(),
+    transitDaysMax: z.number().int().min(1).max(150).nullable().optional(),
+    frequency: z.string().trim().max(60).optional(),
+    via: z.enum(['', 'suez', 'cape']).optional(),
+    note: z.string().trim().max(500).optional(),
+  });
+
+  // GET /api/hub/lines — sea carriers with status + reliability, and reference lanes.
+  app.get('/api/hub/lines', async (_req, reply) =>
+    reply.send({ carriers: await listCarriers(), lanes: referenceLanes() }),
+  );
+
+  // GET /api/hub/lines/:carrier — detail: statuses, services, history.
+  app.get('/api/hub/lines/:carrier', async (req, reply) => {
+    const p = carrierParams.safeParse(req.params);
+    if (!p.success) return reply.status(404).send({ error: 'Not found' });
+    const d = await getCarrierDetail(p.data.carrier);
+    if (!d) return reply.status(404).send({ error: 'Not found' });
+    return reply.send(d);
+  });
+
+  // POST /api/hub/lines/:carrier/status — a logist's mark (team-wide, 14 days).
+  app.post('/api/hub/lines/:carrier/status', async (req, reply) => {
+    const p = carrierParams.safeParse(req.params);
+    const b = z
+      .object({
+        uaStatus: z.enum(['accepting', 'limited', 'suspended']).nullable().optional(),
+        redSea: z.enum(['suez', 'cape', 'mixed']).nullable().optional(),
+        warRisk: z.string().trim().max(200).optional(),
+        note: z.string().trim().max(500).optional(),
+      })
+      .safeParse(req.body);
+    if (!p.success) return reply.status(404).send({ error: 'Not found' });
+    if (!b.success) return reply.status(400).send({ error: 'Invalid body' });
+    const ok = await addCarrierMark({ carrier: p.data.carrier, ...b.data, source: 'user', userId: req.user!.sub });
+    if (!ok) return reply.status(400).send({ error: 'Вкажіть хоча б одне поле.' });
+    return reply.send(await getCarrierDetail(p.data.carrier));
+  });
+
+  // POST /api/hub/lines/:carrier/status/:markId/confirm
+  app.post('/api/hub/lines/:carrier/status/:markId/confirm', async (req, reply) => {
+    const p = z.object({ carrier: z.string().min(2).max(20), markId: z.string().uuid() }).safeParse(req.params);
+    if (!p.success) return reply.status(404).send({ error: 'Not found' });
+    if (!(await confirmCarrierMark(req.user!.sub, p.data.carrier, p.data.markId))) {
+      return reply.status(404).send({ error: 'Позначка вже неактуальна.' });
+    }
+    return reply.send(await getCarrierDetail(p.data.carrier));
+  });
+
+  // POST /api/hub/lines/:carrier/services — add a service the team uses.
+  app.post('/api/hub/lines/:carrier/services', async (req, reply) => {
+    const p = carrierParams.safeParse(req.params);
+    const b = serviceBody.safeParse(req.body);
+    if (!p.success) return reply.status(404).send({ error: 'Not found' });
+    if (!b.success) return reply.status(400).send({ error: 'Вкажіть назву і щонайменше два порти ротації.' });
+    if (validRotation(b.data.rotation).length < 2) {
+      return reply.status(400).send({ error: 'Невідомі коди портів у ротації.' });
+    }
+    const id = await upsertService(req.user!.sub, { carrier: p.data.carrier, ...b.data });
+    if (!id) return reply.status(404).send({ error: 'Not found' });
+    return reply.status(201).send(await getCarrierDetail(p.data.carrier));
+  });
+
+  // PATCH /api/hub/lines/:carrier/services/:id · DELETE …/:id
+  app.patch('/api/hub/lines/:carrier/services/:id', async (req, reply) => {
+    const p = z.object({ carrier: z.string().min(2).max(20), id: z.string().uuid() }).safeParse(req.params);
+    const b = serviceBody.safeParse(req.body);
+    if (!p.success) return reply.status(404).send({ error: 'Not found' });
+    if (!b.success) return reply.status(400).send({ error: 'Invalid body' });
+    const id = await upsertService(req.user!.sub, { carrier: p.data.carrier, ...b.data }, p.data.id);
+    if (!id) return reply.status(404).send({ error: 'Not found' });
+    return reply.send(await getCarrierDetail(p.data.carrier));
+  });
+  app.delete('/api/hub/lines/:carrier/services/:id', async (req, reply) => {
+    const p = z.object({ carrier: z.string().min(2).max(20), id: z.string().uuid() }).safeParse(req.params);
+    if (!p.success || !(await deleteService(p.data.id))) return reply.status(404).send({ error: 'Not found' });
     return reply.status(204).send();
   });
 
