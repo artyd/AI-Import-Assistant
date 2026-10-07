@@ -720,6 +720,35 @@ shipments, no seeded routes, or the live provider has no fix).
 
 ---
 
+## MCP server (public reference tools)
+
+Штурман is also a remote MCP server so users can connect it to their own AI client
+(Claude, Claude Code, Cursor, VS Code). Only scope-less **read-only reference
+tools** are exposed — no shipment data: `uktzed_lookup_code`,
+`uktzed_browse_classifier`, `dualuse_browse_classifier`, `get_exchange_rate`,
+`pubchem_identify_substance` (only when `LOGIST_MCP_URL` is set) and
+`check_drug_registration` (`{ reg_number }`, local Держреєстр mirror).
+
+### `GET /api/mcp-token`  (auth)
+Response `200`: `{ "exists": bool, "hint": string|null, "createdAt": ISO|null, "lastUsedAt": ISO|null }`.
+
+### `POST /api/mcp-token`  (auth, 10/min)
+Issues a personal token, **rotating** (revoking) any previous one. The raw token
+is returned only here (the DB keeps its SHA-256): `{ ...status, "token": "shm_…", "path": "/api/mcp/shm_…" }`.
+The connector URL is `origin + path`.
+
+### `DELETE /api/mcp-token`  (auth) → status with `exists: false`.
+
+### `POST /api/mcp/:token`  ·  `POST /api/mcp` + `Authorization: Bearer <token>`
+MCP Streamable HTTP, **stateless, JSON-only** (no `Mcp-Session-Id`, no SSE).
+Body = one JSON-RPC message (legacy batch arrays also accepted). Methods:
+`initialize` (negotiates `2025-11-25|2025-06-18|2025-03-26|2024-11-05`), `ping`,
+`tools/list`, `tools/call`, empty `resources/list`/`prompts/list`. Requests →
+`200` JSON-RPC response; notifications only → `202`. Bad/revoked token → `401`.
+`GET`/`DELETE` → `405`. Rate limit 60/min per token.
+
+---
+
 ## Health
 
 ### `GET /health`  (no auth) → `{ "status": "ok" }`

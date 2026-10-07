@@ -669,3 +669,15 @@ CREATE TABLE IF NOT EXISTS supplier_instructions (
   updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (workspace_id, version)
 );
+
+-- Personal MCP access tokens: one active token per user lets an external MCP
+-- client (Claude, Cursor, …) call Штурман's reference tools at
+-- /api/mcp/<token>. Only the SHA-256 hash is stored; the raw token is shown to
+-- the user once, at creation (re-issuing rotates it).
+CREATE TABLE IF NOT EXISTS mcp_tokens (
+  user_id      UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  token_hash   TEXT NOT NULL UNIQUE,
+  token_hint   TEXT NOT NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_used_at TIMESTAMPTZ
+);
