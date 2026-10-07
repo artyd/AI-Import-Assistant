@@ -1,0 +1,2005 @@
+{
+ "carriers": [
+  {
+   "id": "maersk",
+   "name": "Maersk",
+   "uaStatus": {
+    "value": "accepting",
+    "label": "Приймає букінги на Україну",
+    "markId": "00000000-0000-4000-8000-000000000100",
+    "by": "ai",
+    "userName": "",
+    "sourceUrl": "https://example.com/news/lines",
+    "sourceTitle": "Splash247: carrier update",
+    "note": "Відновлено букінги на Одесу через фідер з Амбарлі",
+    "updatedAt": "2026-10-07T00:00:00.000Z",
+    "confirmations": 0
+   },
+   "redSea": {
+    "value": "cape",
+    "label": "В обхід Африки",
+    "markId": "00000000-0000-4000-8000-000000000101",
+    "by": "ai",
+    "userName": "",
+    "sourceUrl": "https://example.com/news/lines",
+    "sourceTitle": "Splash247: carrier update",
+    "note": "",
+    "updatedAt": "2026-10-07T00:00:00.000Z",
+    "confirmations": 0
+   },
+   "warRisk": {
+    "value": "WRS $150/TEU на Одесу",
+    "label": "",
+    "markId": "00000000-0000-4000-8000-000000000102",
+    "by": "user",
+    "userName": "Олена",
+    "sourceUrl": "",
+    "sourceTitle": "",
+    "note": "",
+    "updatedAt": "2026-10-07T00:00:00.000Z",
+    "confirmations": 0
+   },
+   "reliability": {
+    "delivered": 7,
+    "onTimeShare": 0.71,
+    "avgDelayDays": 2.4,
+    "inTransit": 1
+   },
+   "updatedAt": null
+  },
+  {
+   "id": "msc",
+   "name": "MSC",
+   "uaStatus": {
+    "value": "limited",
+    "label": "Обмежено / з умовами",
+    "markId": "00000000-0000-4000-8000-000000000103",
+    "by": "user",
+    "userName": "Олена",
+    "sourceUrl": "",
+    "sourceTitle": "",
+    "note": "Лише через Констанцу",
+    "updatedAt": "2026-10-07T00:00:00.000Z",
+    "confirmations": 0
+   },
+   "redSea": {
+    "value": "cape",
+    "label": "В обхід Африки",
+    "markId": "00000000-0000-4000-8000-000000000104",
+    "by": "ai",
+    "userName": "",
+    "sourceUrl": "https://example.com/news/lines",
+    "sourceTitle": "Splash247: carrier update",
+    "note": "",
+    "updatedAt": "2026-10-07T00:00:00.000Z",
+    "confirmations": 0
+   },
+   "warRisk": null,
+   "reliability": {
+    "delivered": 4,
+    "onTimeShare": 0.5,
+    "avgDelayDays": 4.1,
+    "inTransit": 1
+   },
+   "updatedAt": null
+  },
+  {
+   "id": "cma",
+   "name": "CMA CGM",
+   "uaStatus": {
+    "value": "accepting",
+    "label": "Приймає букінги на Україну",
+    "markId": "00000000-0000-4000-8000-000000000105",
+    "by": "user",
+    "userName": "Олена",
+    "sourceUrl": "",
+    "sourceTitle": "",
+    "note": "",
+    "updatedAt": "2026-10-07T00:00:00.000Z",
+    "confirmations": 0
+   },
+   "redSea": {
+    "value": "mixed",
+    "label": "Змішано",
+    "markId": "00000000-0000-4000-8000-000000000106",
+    "by": "ai",
+    "userName": "",
+    "sourceUrl": "https://example.com/news/lines",
+    "sourceTitle": "Splash247: carrier update",
+    "note": "",
+    "updatedAt": "2026-10-07T00:00:00.000Z",
+    "confirmations": 0
+   },
+   "warRisk": null,
+   "reliability": {
+    "delivered": 0,
+    "onTimeShare": null,
+    "avgDelayDays": null,
+    "inTransit": 0
+   },
+   "updatedAt": null
+  },
+  {
+   "id": "cosco",
+   "name": "COSCO",
+   "uaStatus": null,
+   "redSea": null,
+   "warRisk": null,
+   "reliability": {
+    "delivered": 0,
+    "onTimeShare": null,
+    "avgDelayDays": null,
+    "inTransit": 0
+   },
+   "updatedAt": null
+  },
+  {
+   "id": "oocl",
+   "name": "OOCL",
+   "uaStatus": null,
+   "redSea": null,
+   "warRisk": null,
+   "reliability": {
+    "delivered": 0,
+    "onTimeShare": null,
+    "avgDelayDays": null,
+    "inTransit": 0
+   },
+   "updatedAt": null
+  },
+  {
+   "id": "hapag",
+   "name": "Hapag-Lloyd",
+   "uaStatus": {
+    "value": "suspended",
+    "label": "Не приймає на Україну",
+    "markId": "00000000-0000-4000-8000-000000000107",
+    "by": "ai",
+    "userName": "",
+    "sourceUrl": "https://example.com/news/lines",
+    "sourceTitle": "Splash247: carrier update",
+    "note": "",
+    "updatedAt": "2026-10-07T00:00:00.000Z",
+    "confirmations": 0
+   },
+   "redSea": null,
+   "warRisk": null,
+   "reliability": {
+    "delivered": 0,
+    "onTimeShare": null,
+    "avgDelayDays": null,
+    "inTransit": 0
+   },
+   "updatedAt": null
+  },
+  {
+   "id": "one",
+   "name": "ONE (Ocean Network Express)",
+   "uaStatus": null,
+   "redSea": null,
+   "warRisk": null,
+   "reliability": {
+    "delivered": 0,
+    "onTimeShare": null,
+    "avgDelayDays": null,
+    "inTransit": 0
+   },
+   "updatedAt": null
+  },
+  {
+   "id": "evergreen",
+   "name": "Evergreen",
+   "uaStatus": null,
+   "redSea": null,
+   "warRisk": null,
+   "reliability": {
+    "delivered": 0,
+    "onTimeShare": null,
+    "avgDelayDays": null,
+    "inTransit": 0
+   },
+   "updatedAt": null
+  },
+  {
+   "id": "hmm",
+   "name": "HMM",
+   "uaStatus": null,
+   "redSea": null,
+   "warRisk": null,
+   "reliability": {
+    "delivered": 0,
+    "onTimeShare": null,
+    "avgDelayDays": null,
+    "inTransit": 0
+   },
+   "updatedAt": null
+  },
+  {
+   "id": "yangming",
+   "name": "Yang Ming",
+   "uaStatus": null,
+   "redSea": null,
+   "warRisk": null,
+   "reliability": {
+    "delivered": 0,
+    "onTimeShare": null,
+    "avgDelayDays": null,
+    "inTransit": 0
+   },
+   "updatedAt": null
+  },
+  {
+   "id": "zim",
+   "name": "ZIM",
+   "uaStatus": null,
+   "redSea": null,
+   "warRisk": null,
+   "reliability": {
+    "delivered": 0,
+    "onTimeShare": null,
+    "avgDelayDays": null,
+    "inTransit": 0
+   },
+   "updatedAt": null
+  },
+  {
+   "id": "wanhai",
+   "name": "Wan Hai",
+   "uaStatus": null,
+   "redSea": null,
+   "warRisk": null,
+   "reliability": {
+    "delivered": 0,
+    "onTimeShare": null,
+    "avgDelayDays": null,
+    "inTransit": 0
+   },
+   "updatedAt": null
+  },
+  {
+   "id": "pil",
+   "name": "PIL",
+   "uaStatus": null,
+   "redSea": null,
+   "warRisk": null,
+   "reliability": {
+    "delivered": 0,
+    "onTimeShare": null,
+    "avgDelayDays": null,
+    "inTransit": 0
+   },
+   "updatedAt": null
+  },
+  {
+   "id": "turkon",
+   "name": "Turkon Line",
+   "uaStatus": null,
+   "redSea": null,
+   "warRisk": null,
+   "reliability": {
+    "delivered": 0,
+    "onTimeShare": null,
+    "avgDelayDays": null,
+    "inTransit": 0
+   },
+   "updatedAt": null
+  },
+  {
+   "id": "arkas",
+   "name": "Arkas Line",
+   "uaStatus": null,
+   "redSea": null,
+   "warRisk": null,
+   "reliability": {
+    "delivered": 0,
+    "onTimeShare": null,
+    "avgDelayDays": null,
+    "inTransit": 0
+   },
+   "updatedAt": null
+  }
+ ],
+ "lanes": [
+  {
+   "id": "cn-ods-suez",
+   "name": "Китай → Одеса (через Суец)",
+   "via": "suez",
+   "rotation": [
+    {
+     "code": "CNSHA",
+     "name": "Шанхай"
+    },
+    {
+     "code": "CNNGB",
+     "name": "Нінбо"
+    },
+    {
+     "code": "SGSIN",
+     "name": "Сингапур"
+    },
+    {
+     "code": "TRAMR",
+     "name": "Амбарли"
+    },
+    {
+     "code": "UAODS",
+     "name": "Одеса"
+    }
+   ],
+   "transitDaysMin": 28,
+   "transitDaysMax": 35,
+   "distanceNm": 8742,
+   "path": [
+    [
+     31.23,
+     121.47
+    ],
+    [
+     29.93,
+     121.85
+    ],
+    [
+     30.6,
+     123.4
+    ],
+    [
+     24.2,
+     119.6
+    ],
+    [
+     21.9,
+     114.6
+    ],
+    [
+     17,
+     113
+    ],
+    [
+     8,
+     109.5
+    ],
+    [
+     1.15,
+     104.1
+    ],
+    [
+     1.26,
+     103.82
+    ],
+    [
+     1.15,
+     104.1
+    ],
+    [
+     2.6,
+     101
+    ],
+    [
+     5.8,
+     97.8
+    ],
+    [
+     6.2,
+     94.3
+    ],
+    [
+     5.4,
+     80.6
+    ],
+    [
+     13.2,
+     53
+    ],
+    [
+     12.3,
+     45.8
+    ],
+    [
+     12.6,
+     43.4
+    ],
+    [
+     16.5,
+     41
+    ],
+    [
+     21,
+     38
+    ],
+    [
+     27,
+     34.5
+    ],
+    [
+     29.6,
+     32.6
+    ],
+    [
+     31.5,
+     32.35
+    ],
+    [
+     33.8,
+     28
+    ],
+    [
+     34.6,
+     24.5
+    ],
+    [
+     36.6,
+     24.8
+    ],
+    [
+     39.6,
+     25.2
+    ],
+    [
+     40.15,
+     26.35
+    ],
+    [
+     40.8,
+     28.4
+    ],
+    [
+     40.97,
+     28.68
+    ],
+    [
+     40.8,
+     28.4
+    ],
+    [
+     41.35,
+     29.15
+    ],
+    [
+     42.5,
+     29
+    ],
+    [
+     43.6,
+     29.6
+    ],
+    [
+     45,
+     30.2
+    ],
+    [
+     46.2,
+     30.9
+    ],
+    [
+     46.49,
+     30.75
+    ]
+   ]
+  },
+  {
+   "id": "cn-ods-cape",
+   "name": "Китай → Одеса (в обхід Африки)",
+   "via": "cape",
+   "rotation": [
+    {
+     "code": "CNSHA",
+     "name": "Шанхай"
+    },
+    {
+     "code": "CNNGB",
+     "name": "Нінбо"
+    },
+    {
+     "code": "SGSIN",
+     "name": "Сингапур"
+    },
+    {
+     "code": "TRAMR",
+     "name": "Амбарли"
+    },
+    {
+     "code": "UAODS",
+     "name": "Одеса"
+    }
+   ],
+   "transitDaysMin": 46,
+   "transitDaysMax": 58,
+   "distanceNm": 15850,
+   "path": [
+    [
+     31.23,
+     121.47
+    ],
+    [
+     29.93,
+     121.85
+    ],
+    [
+     30.6,
+     123.4
+    ],
+    [
+     24.2,
+     119.6
+    ],
+    [
+     21.9,
+     114.6
+    ],
+    [
+     17,
+     113
+    ],
+    [
+     8,
+     109.5
+    ],
+    [
+     1.15,
+     104.1
+    ],
+    [
+     1.26,
+     103.82
+    ],
+    [
+     1.15,
+     104.1
+    ],
+    [
+     2.6,
+     101
+    ],
+    [
+     5.8,
+     97.8
+    ],
+    [
+     6.2,
+     94.3
+    ],
+    [
+     -3,
+     82
+    ],
+    [
+     -15,
+     55
+    ],
+    [
+     -35.2,
+     19
+    ],
+    [
+     -26,
+     12.5
+    ],
+    [
+     -12,
+     10
+    ],
+    [
+     3,
+     2.5
+    ],
+    [
+     14.5,
+     -18.5
+    ],
+    [
+     28.5,
+     -16
+    ],
+    [
+     35.95,
+     -5.75
+    ],
+    [
+     36.2,
+     -3
+    ],
+    [
+     38.2,
+     4.5
+    ],
+    [
+     37.3,
+     11.8
+    ],
+    [
+     36.8,
+     20
+    ],
+    [
+     34.6,
+     24.5
+    ],
+    [
+     36.6,
+     24.8
+    ],
+    [
+     39.6,
+     25.2
+    ],
+    [
+     40.15,
+     26.35
+    ],
+    [
+     40.8,
+     28.4
+    ],
+    [
+     40.97,
+     28.68
+    ],
+    [
+     40.8,
+     28.4
+    ],
+    [
+     41.35,
+     29.15
+    ],
+    [
+     42.5,
+     29
+    ],
+    [
+     43.6,
+     29.6
+    ],
+    [
+     45,
+     30.2
+    ],
+    [
+     46.2,
+     30.9
+    ],
+    [
+     46.49,
+     30.75
+    ]
+   ]
+  },
+  {
+   "id": "cn-cnd-suez",
+   "name": "Китай → Констанца (через Суец)",
+   "via": "suez",
+   "rotation": [
+    {
+     "code": "CNSHA",
+     "name": "Шанхай"
+    },
+    {
+     "code": "SGSIN",
+     "name": "Сингапур"
+    },
+    {
+     "code": "GRPIR",
+     "name": "Пірей"
+    },
+    {
+     "code": "ROCND",
+     "name": "Констанца"
+    }
+   ],
+   "transitDaysMin": 27,
+   "transitDaysMax": 34,
+   "distanceNm": 8710,
+   "path": [
+    [
+     31.23,
+     121.47
+    ],
+    [
+     30.6,
+     123.4
+    ],
+    [
+     24.2,
+     119.6
+    ],
+    [
+     21.9,
+     114.6
+    ],
+    [
+     17,
+     113
+    ],
+    [
+     8,
+     109.5
+    ],
+    [
+     1.15,
+     104.1
+    ],
+    [
+     1.26,
+     103.82
+    ],
+    [
+     1.15,
+     104.1
+    ],
+    [
+     2.6,
+     101
+    ],
+    [
+     5.8,
+     97.8
+    ],
+    [
+     6.2,
+     94.3
+    ],
+    [
+     5.4,
+     80.6
+    ],
+    [
+     13.2,
+     53
+    ],
+    [
+     12.3,
+     45.8
+    ],
+    [
+     12.6,
+     43.4
+    ],
+    [
+     16.5,
+     41
+    ],
+    [
+     21,
+     38
+    ],
+    [
+     27,
+     34.5
+    ],
+    [
+     29.6,
+     32.6
+    ],
+    [
+     31.5,
+     32.35
+    ],
+    [
+     33.8,
+     28
+    ],
+    [
+     34.6,
+     24.5
+    ],
+    [
+     36.6,
+     24.8
+    ],
+    [
+     37.94,
+     23.64
+    ],
+    [
+     36.6,
+     24.8
+    ],
+    [
+     39.6,
+     25.2
+    ],
+    [
+     40.15,
+     26.35
+    ],
+    [
+     40.8,
+     28.4
+    ],
+    [
+     41.35,
+     29.15
+    ],
+    [
+     42.5,
+     29
+    ],
+    [
+     43.6,
+     29.6
+    ],
+    [
+     44.17,
+     28.66
+    ]
+   ]
+  },
+  {
+   "id": "cn-cnd-cape",
+   "name": "Китай → Констанца (в обхід Африки)",
+   "via": "cape",
+   "rotation": [
+    {
+     "code": "CNSHA",
+     "name": "Шанхай"
+    },
+    {
+     "code": "SGSIN",
+     "name": "Сингапур"
+    },
+    {
+     "code": "ROCND",
+     "name": "Констанца"
+    }
+   ],
+   "transitDaysMin": 43,
+   "transitDaysMax": 54,
+   "distanceNm": 15623,
+   "path": [
+    [
+     31.23,
+     121.47
+    ],
+    [
+     30.6,
+     123.4
+    ],
+    [
+     24.2,
+     119.6
+    ],
+    [
+     21.9,
+     114.6
+    ],
+    [
+     17,
+     113
+    ],
+    [
+     8,
+     109.5
+    ],
+    [
+     1.15,
+     104.1
+    ],
+    [
+     1.26,
+     103.82
+    ],
+    [
+     1.15,
+     104.1
+    ],
+    [
+     2.6,
+     101
+    ],
+    [
+     5.8,
+     97.8
+    ],
+    [
+     6.2,
+     94.3
+    ],
+    [
+     -3,
+     82
+    ],
+    [
+     -15,
+     55
+    ],
+    [
+     -35.2,
+     19
+    ],
+    [
+     -26,
+     12.5
+    ],
+    [
+     -12,
+     10
+    ],
+    [
+     3,
+     2.5
+    ],
+    [
+     14.5,
+     -18.5
+    ],
+    [
+     28.5,
+     -16
+    ],
+    [
+     35.95,
+     -5.75
+    ],
+    [
+     36.2,
+     -3
+    ],
+    [
+     38.2,
+     4.5
+    ],
+    [
+     37.3,
+     11.8
+    ],
+    [
+     36.8,
+     20
+    ],
+    [
+     34.6,
+     24.5
+    ],
+    [
+     36.6,
+     24.8
+    ],
+    [
+     39.6,
+     25.2
+    ],
+    [
+     40.15,
+     26.35
+    ],
+    [
+     40.8,
+     28.4
+    ],
+    [
+     41.35,
+     29.15
+    ],
+    [
+     42.5,
+     29
+    ],
+    [
+     43.6,
+     29.6
+    ],
+    [
+     44.17,
+     28.66
+    ]
+   ]
+  },
+  {
+   "id": "in-ods-suez",
+   "name": "Індія → Одеса (через Суец)",
+   "via": "suez",
+   "rotation": [
+    {
+     "code": "INNSA",
+     "name": "Нава-Шева"
+    },
+    {
+     "code": "INMUN",
+     "name": "Мундра"
+    },
+    {
+     "code": "TRAMR",
+     "name": "Амбарли"
+    },
+    {
+     "code": "UAODS",
+     "name": "Одеса"
+    }
+   ],
+   "transitDaysMin": 17,
+   "transitDaysMax": 22,
+   "distanceNm": 5038,
+   "path": [
+    [
+     18.95,
+     72.95
+    ],
+    [
+     22.75,
+     69.7
+    ],
+    [
+     15.5,
+     71.5
+    ],
+    [
+     17,
+     63
+    ],
+    [
+     13.2,
+     53
+    ],
+    [
+     12.3,
+     45.8
+    ],
+    [
+     12.6,
+     43.4
+    ],
+    [
+     16.5,
+     41
+    ],
+    [
+     21,
+     38
+    ],
+    [
+     27,
+     34.5
+    ],
+    [
+     29.6,
+     32.6
+    ],
+    [
+     31.5,
+     32.35
+    ],
+    [
+     33.8,
+     28
+    ],
+    [
+     34.6,
+     24.5
+    ],
+    [
+     36.6,
+     24.8
+    ],
+    [
+     39.6,
+     25.2
+    ],
+    [
+     40.15,
+     26.35
+    ],
+    [
+     40.8,
+     28.4
+    ],
+    [
+     40.97,
+     28.68
+    ],
+    [
+     40.8,
+     28.4
+    ],
+    [
+     41.35,
+     29.15
+    ],
+    [
+     42.5,
+     29
+    ],
+    [
+     43.6,
+     29.6
+    ],
+    [
+     45,
+     30.2
+    ],
+    [
+     46.2,
+     30.9
+    ],
+    [
+     46.49,
+     30.75
+    ]
+   ]
+  },
+  {
+   "id": "in-ods-cape",
+   "name": "Індія → Одеса (в обхід Африки)",
+   "via": "cape",
+   "rotation": [
+    {
+     "code": "INNSA",
+     "name": "Нава-Шева"
+    },
+    {
+     "code": "INMUN",
+     "name": "Мундра"
+    },
+    {
+     "code": "TRAMR",
+     "name": "Амбарли"
+    },
+    {
+     "code": "UAODS",
+     "name": "Одеса"
+    }
+   ],
+   "transitDaysMin": 40,
+   "transitDaysMax": 49,
+   "distanceNm": 13688,
+   "path": [
+    [
+     18.95,
+     72.95
+    ],
+    [
+     22.75,
+     69.7
+    ],
+    [
+     15.5,
+     71.5
+    ],
+    [
+     17,
+     63
+    ],
+    [
+     13.2,
+     53
+    ],
+    [
+     -15,
+     55
+    ],
+    [
+     -35.2,
+     19
+    ],
+    [
+     -26,
+     12.5
+    ],
+    [
+     -12,
+     10
+    ],
+    [
+     3,
+     2.5
+    ],
+    [
+     14.5,
+     -18.5
+    ],
+    [
+     28.5,
+     -16
+    ],
+    [
+     35.95,
+     -5.75
+    ],
+    [
+     36.2,
+     -3
+    ],
+    [
+     38.2,
+     4.5
+    ],
+    [
+     37.3,
+     11.8
+    ],
+    [
+     36.8,
+     20
+    ],
+    [
+     34.6,
+     24.5
+    ],
+    [
+     36.6,
+     24.8
+    ],
+    [
+     39.6,
+     25.2
+    ],
+    [
+     40.15,
+     26.35
+    ],
+    [
+     40.8,
+     28.4
+    ],
+    [
+     40.97,
+     28.68
+    ],
+    [
+     40.8,
+     28.4
+    ],
+    [
+     41.35,
+     29.15
+    ],
+    [
+     42.5,
+     29
+    ],
+    [
+     43.6,
+     29.6
+    ],
+    [
+     45,
+     30.2
+    ],
+    [
+     46.2,
+     30.9
+    ],
+    [
+     46.49,
+     30.75
+    ]
+   ]
+  },
+  {
+   "id": "cn-gdn-suez",
+   "name": "Китай → Гданськ (+ авто до України)",
+   "via": "suez",
+   "rotation": [
+    {
+     "code": "CNSHA",
+     "name": "Шанхай"
+    },
+    {
+     "code": "SGSIN",
+     "name": "Сингапур"
+    },
+    {
+     "code": "NLRTM",
+     "name": "Роттердам"
+    },
+    {
+     "code": "PLGDN",
+     "name": "Гданськ"
+    }
+   ],
+   "transitDaysMin": 34,
+   "transitDaysMax": 43,
+   "distanceNm": 11653,
+   "path": [
+    [
+     31.23,
+     121.47
+    ],
+    [
+     30.6,
+     123.4
+    ],
+    [
+     24.2,
+     119.6
+    ],
+    [
+     21.9,
+     114.6
+    ],
+    [
+     17,
+     113
+    ],
+    [
+     8,
+     109.5
+    ],
+    [
+     1.15,
+     104.1
+    ],
+    [
+     1.26,
+     103.82
+    ],
+    [
+     1.15,
+     104.1
+    ],
+    [
+     2.6,
+     101
+    ],
+    [
+     5.8,
+     97.8
+    ],
+    [
+     6.2,
+     94.3
+    ],
+    [
+     5.4,
+     80.6
+    ],
+    [
+     13.2,
+     53
+    ],
+    [
+     12.3,
+     45.8
+    ],
+    [
+     12.6,
+     43.4
+    ],
+    [
+     16.5,
+     41
+    ],
+    [
+     21,
+     38
+    ],
+    [
+     27,
+     34.5
+    ],
+    [
+     29.6,
+     32.6
+    ],
+    [
+     31.5,
+     32.35
+    ],
+    [
+     33.8,
+     28
+    ],
+    [
+     34.6,
+     24.5
+    ],
+    [
+     36.8,
+     20
+    ],
+    [
+     37.3,
+     11.8
+    ],
+    [
+     38.2,
+     4.5
+    ],
+    [
+     36.2,
+     -3
+    ],
+    [
+     35.95,
+     -5.75
+    ],
+    [
+     38,
+     -10.2
+    ],
+    [
+     43.5,
+     -9.9
+    ],
+    [
+     48.6,
+     -6
+    ],
+    [
+     50.2,
+     -1
+    ],
+    [
+     51,
+     1.6
+    ],
+    [
+     53.2,
+     3.8
+    ],
+    [
+     51.95,
+     4.14
+    ],
+    [
+     53.2,
+     3.8
+    ],
+    [
+     57.9,
+     10.9
+    ],
+    [
+     56.5,
+     11.6
+    ],
+    [
+     54.9,
+     13.6
+    ],
+    [
+     55.3,
+     17
+    ],
+    [
+     54.4,
+     18.68
+    ]
+   ]
+  },
+  {
+   "id": "cn-gdn-cape",
+   "name": "Китай → Гданськ в обхід Африки (+ авто)",
+   "via": "cape",
+   "rotation": [
+    {
+     "code": "CNSHA",
+     "name": "Шанхай"
+    },
+    {
+     "code": "SGSIN",
+     "name": "Сингапур"
+    },
+    {
+     "code": "NLRTM",
+     "name": "Роттердам"
+    },
+    {
+     "code": "PLGDN",
+     "name": "Гданськ"
+    }
+   ],
+   "transitDaysMin": 45,
+   "transitDaysMax": 56,
+   "distanceNm": 15735,
+   "path": [
+    [
+     31.23,
+     121.47
+    ],
+    [
+     30.6,
+     123.4
+    ],
+    [
+     24.2,
+     119.6
+    ],
+    [
+     21.9,
+     114.6
+    ],
+    [
+     17,
+     113
+    ],
+    [
+     8,
+     109.5
+    ],
+    [
+     1.15,
+     104.1
+    ],
+    [
+     1.26,
+     103.82
+    ],
+    [
+     1.15,
+     104.1
+    ],
+    [
+     2.6,
+     101
+    ],
+    [
+     5.8,
+     97.8
+    ],
+    [
+     6.2,
+     94.3
+    ],
+    [
+     -3,
+     82
+    ],
+    [
+     -15,
+     55
+    ],
+    [
+     -35.2,
+     19
+    ],
+    [
+     -26,
+     12.5
+    ],
+    [
+     -12,
+     10
+    ],
+    [
+     3,
+     2.5
+    ],
+    [
+     14.5,
+     -18.5
+    ],
+    [
+     28.5,
+     -16
+    ],
+    [
+     35.95,
+     -5.75
+    ],
+    [
+     38,
+     -10.2
+    ],
+    [
+     43.5,
+     -9.9
+    ],
+    [
+     48.6,
+     -6
+    ],
+    [
+     50.2,
+     -1
+    ],
+    [
+     51,
+     1.6
+    ],
+    [
+     53.2,
+     3.8
+    ],
+    [
+     51.95,
+     4.14
+    ],
+    [
+     53.2,
+     3.8
+    ],
+    [
+     57.9,
+     10.9
+    ],
+    [
+     56.5,
+     11.6
+    ],
+    [
+     54.9,
+     13.6
+    ],
+    [
+     55.3,
+     17
+    ],
+    [
+     54.4,
+     18.68
+    ]
+   ]
+  },
+  {
+   "id": "tr-ods",
+   "name": "Туреччина → Одеса (фідер)",
+   "via": "suez",
+   "rotation": [
+    {
+     "code": "TRAMR",
+     "name": "Амбарли"
+    },
+    {
+     "code": "UAODS",
+     "name": "Одеса"
+    }
+   ],
+   "transitDaysMin": 3,
+   "transitDaysMax": 4,
+   "distanceNm": 388,
+   "path": [
+    [
+     40.97,
+     28.68
+    ],
+    [
+     40.8,
+     28.4
+    ],
+    [
+     41.35,
+     29.15
+    ],
+    [
+     42.5,
+     29
+    ],
+    [
+     43.6,
+     29.6
+    ],
+    [
+     45,
+     30.2
+    ],
+    [
+     46.2,
+     30.9
+    ],
+    [
+     46.49,
+     30.75
+    ]
+   ]
+  },
+  {
+   "id": "eu-cnd-danube",
+   "name": "Пірей → Констанца → Дунай",
+   "via": "suez",
+   "rotation": [
+    {
+     "code": "GRPIR",
+     "name": "Пірей"
+    },
+    {
+     "code": "ROCND",
+     "name": "Констанца"
+    },
+    {
+     "code": "UAIZM",
+     "name": "Ізмаїл"
+    }
+   ],
+   "transitDaysMin": 5,
+   "transitDaysMax": 7,
+   "distanceNm": 886,
+   "path": [
+    [
+     37.94,
+     23.64
+    ],
+    [
+     36.6,
+     24.8
+    ],
+    [
+     39.6,
+     25.2
+    ],
+    [
+     40.15,
+     26.35
+    ],
+    [
+     40.8,
+     28.4
+    ],
+    [
+     41.35,
+     29.15
+    ],
+    [
+     42.5,
+     29
+    ],
+    [
+     43.6,
+     29.6
+    ],
+    [
+     44.17,
+     28.66
+    ],
+    [
+     43.6,
+     29.6
+    ],
+    [
+     45,
+     30.2
+    ],
+    [
+     45.33,
+     28.83
+    ]
+   ]
+  }
+ ],
+ "detail": {
+  "carrier": {
+   "id": "maersk",
+   "name": "Maersk",
+   "uaStatus": {
+    "value": "accepting",
+    "label": "Приймає букінги на Україну",
+    "markId": "00000000-0000-4000-8000-000000000100",
+    "by": "ai",
+    "userName": "",
+    "sourceUrl": "https://example.com/news/lines",
+    "sourceTitle": "Splash247: carrier update",
+    "note": "Відновлено букінги на Одесу через фідер з Амбарлі",
+    "updatedAt": "2026-10-07T00:00:00.000Z",
+    "confirmations": 0
+   },
+   "redSea": {
+    "value": "cape",
+    "label": "В обхід Африки",
+    "markId": "00000000-0000-4000-8000-000000000101",
+    "by": "ai",
+    "userName": "",
+    "sourceUrl": "https://example.com/news/lines",
+    "sourceTitle": "Splash247: carrier update",
+    "note": "",
+    "updatedAt": "2026-10-07T00:00:00.000Z",
+    "confirmations": 0
+   },
+   "warRisk": {
+    "value": "WRS $150/TEU на Одесу",
+    "label": "",
+    "markId": "00000000-0000-4000-8000-000000000102",
+    "by": "user",
+    "userName": "Олена",
+    "sourceUrl": "",
+    "sourceTitle": "",
+    "note": "",
+    "updatedAt": "2026-10-07T00:00:00.000Z",
+    "confirmations": 0
+   },
+   "reliability": {
+    "delivered": 7,
+    "onTimeShare": 0.71,
+    "avgDelayDays": 2.4,
+    "inTransit": 1
+   },
+   "updatedAt": null
+  },
+  "services": [
+   {
+    "id": "s1",
+    "carrier": "maersk",
+    "name": "AE-12 / Black Sea feeder",
+    "rotation": [
+     {
+      "code": "CNSHA",
+      "name": "CNSHA"
+     },
+     {
+      "code": "CNNGB",
+      "name": "CNNGB"
+     },
+     {
+      "code": "SGSIN",
+      "name": "SGSIN"
+     },
+     {
+      "code": "TRAMR",
+      "name": "TRAMR"
+     },
+     {
+      "code": "UAODS",
+      "name": "UAODS"
+     }
+    ],
+    "transitDaysMin": 38,
+    "transitDaysMax": 45,
+    "frequency": "щотижня",
+    "via": "cape",
+    "note": "",
+    "createdBy": "Олена",
+    "updatedAt": "2026-10-05T12:00:00.000Z",
+    "path": [
+     [
+      31.23,
+      121.47
+     ],
+     [
+      29.93,
+      121.85
+     ],
+     [
+      30.6,
+      123.4
+     ],
+     [
+      24.2,
+      119.6
+     ],
+     [
+      21.9,
+      114.6
+     ],
+     [
+      17,
+      113
+     ],
+     [
+      8,
+      109.5
+     ],
+     [
+      1.15,
+      104.1
+     ],
+     [
+      1.26,
+      103.82
+     ],
+     [
+      1.15,
+      104.1
+     ],
+     [
+      2.6,
+      101
+     ],
+     [
+      5.8,
+      97.8
+     ],
+     [
+      6.2,
+      94.3
+     ],
+     [
+      -3,
+      82
+     ],
+     [
+      -15,
+      55
+     ],
+     [
+      -35.2,
+      19
+     ],
+     [
+      -26,
+      12.5
+     ],
+     [
+      -12,
+      10
+     ],
+     [
+      3,
+      2.5
+     ],
+     [
+      14.5,
+      -18.5
+     ],
+     [
+      28.5,
+      -16
+     ],
+     [
+      35.95,
+      -5.75
+     ],
+     [
+      36.2,
+      -3
+     ],
+     [
+      38.2,
+      4.5
+     ],
+     [
+      37.3,
+      11.8
+     ],
+     [
+      36.8,
+      20
+     ],
+     [
+      34.6,
+      24.5
+     ],
+     [
+      36.6,
+      24.8
+     ],
+     [
+      39.6,
+      25.2
+     ],
+     [
+      40.15,
+      26.35
+     ],
+     [
+      40.8,
+      28.4
+     ],
+     [
+      40.97,
+      28.68
+     ],
+     [
+      40.8,
+      28.4
+     ],
+     [
+      41.35,
+      29.15
+     ],
+     [
+      42.5,
+      29
+     ],
+     [
+      43.6,
+      29.6
+     ],
+     [
+      45,
+      30.2
+     ],
+     [
+      46.2,
+      30.9
+     ],
+     [
+      46.49,
+      30.75
+     ]
+    ]
+   }
+  ],
+  "history": [
+   {
+    "id": "h1",
+    "uaStatus": "accepting",
+    "redSea": null,
+    "warRisk": "",
+    "note": "Відновлено букінги на Одесу",
+    "by": "ai",
+    "userName": "",
+    "sourceUrl": "https://example.com/news/lines",
+    "sourceTitle": "Splash247",
+    "createdAt": "2026-10-07T00:00:00.000Z"
+   }
+  ]
+ }
+}

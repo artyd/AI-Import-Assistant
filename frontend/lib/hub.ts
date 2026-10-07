@@ -295,3 +295,156 @@ export const portApi = {
   favorite: (code: string, on: boolean) =>
     api<void>(`/api/hub/ports/${encodeURIComponent(code)}/favorite`, { method: on ? "PUT" : "DELETE" }),
 };
+
+// ── Phase 3: sea lines ───────────────────────────────────────────────────────
+
+export type UaStatus = "accepting" | "limited" | "suspended";
+export type RedSea = "suez" | "cape" | "mixed";
+
+export interface FieldStatus<T> {
+  value: T;
+  label?: string;
+  markId: string;
+  by: "ai" | "user";
+  userName: string;
+  sourceUrl: string;
+  sourceTitle: string;
+  note: string;
+  updatedAt: string;
+  confirmations: number;
+}
+
+export interface Reliability {
+  delivered: number;
+  onTimeShare: number | null;
+  avgDelayDays: number | null;
+  inTransit: number;
+}
+
+export interface CarrierSummary {
+  id: string;
+  name: string;
+  uaStatus: FieldStatus<UaStatus> | null;
+  redSea: FieldStatus<RedSea> | null;
+  warRisk: FieldStatus<string> | null;
+  reliability: Reliability;
+  updatedAt: string | null;
+}
+
+export interface Lane {
+  id: string;
+  name: string;
+  via: "suez" | "cape";
+  rotation: { code: string; name: string }[];
+  transitDaysMin: number;
+  transitDaysMax: number;
+  distanceNm: number;
+  path: LatLng[];
+}
+
+export interface CarrierService {
+  id: string;
+  carrier: string;
+  name: string;
+  rotation: { code: string; name: string }[];
+  transitDaysMin: number | null;
+  transitDaysMax: number | null;
+  frequency: string;
+  via: "" | "suez" | "cape";
+  note: string;
+  createdBy: string;
+  updatedAt: string;
+  path: LatLng[];
+}
+
+export interface CarrierMarkHistory {
+  id: string;
+  uaStatus: UaStatus | null;
+  redSea: RedSea | null;
+  warRisk: string;
+  note: string;
+  by: "ai" | "user";
+  userName: string;
+  sourceUrl: string;
+  sourceTitle: string;
+  createdAt: string;
+}
+
+export interface CarrierDetailData {
+  carrier: CarrierSummary;
+  services: CarrierService[];
+  history: CarrierMarkHistory[];
+}
+
+export const UA_STATUS_LABEL: Record<UaStatus, string> = {
+  accepting: "Приймає на Україну",
+  limited: "Обмежено",
+  suspended: "Не приймає",
+};
+export const RED_SEA_LABEL: Record<RedSea, string> = {
+  suez: "Через Суец",
+  cape: "В обхід Африки",
+  mixed: "Змішано",
+};
+
+export function uaColor(s: UaStatus | null | undefined): string {
+  return s === "accepting" ? "var(--ok)" : s === "limited" ? "var(--warn)" : s === "suspended" ? "var(--err)" : "var(--faint)";
+}
+
+export interface ServiceInputBody {
+  name: string;
+  rotation: string[];
+  transitDaysMin?: number | null;
+  transitDaysMax?: number | null;
+  frequency?: string;
+  via?: "" | "suez" | "cape";
+  note?: string;
+}
+
+export const lineApi = {
+  list: () => api<{ carriers: CarrierSummary[]; lanes: Lane[] }>("/api/hub/lines"),
+  get: (id: string) => api<CarrierDetailData>(`/api/hub/lines/${id}`),
+  mark: (id: string, body: { uaStatus?: UaStatus | null; redSea?: RedSea | null; warRisk?: string; note?: string }) =>
+    api<CarrierDetailData>(`/api/hub/lines/${id}/status`, { method: "POST", body }),
+  confirm: (id: string, markId: string) =>
+    api<CarrierDetailData>(`/api/hub/lines/${id}/status/${markId}/confirm`, { method: "POST" }),
+  addService: (id: string, body: ServiceInputBody) =>
+    api<CarrierDetailData>(`/api/hub/lines/${id}/services`, { method: "POST", body }),
+  removeService: (id: string, serviceId: string) =>
+    api<void>(`/api/hub/lines/${id}/services/${serviceId}`, { method: "DELETE" }),
+};
+
+/**
+ * War-risk areas — rough outlines of the Joint War Committee listed areas that
+ * matter for Ukrainian imports. Indicative only; the UI says so.
+ */
+export const RISK_ZONES: { id: string; name: string; note: string; polygon: LatLng[] }[] = [
+  {
+    id: "red-sea",
+    name: "Червоне море / Аденська затока",
+    note: "Атаки на судна; лінії можуть іти в обхід Африки (+10–14 діб) і брати надбавки.",
+    polygon: [
+      [29.9, 32.5], [27.2, 33.9], [24.0, 35.6], [20.0, 37.4], [16.0, 39.8], [12.9, 42.8], [11.6, 43.6],
+      [11.8, 51.2], [13.5, 51.2], [13.6, 48.0], [14.2, 45.0], [15.2, 42.6], [18.0, 41.2], [21.0, 39.4],
+      [24.2, 38.0], [27.3, 35.4], [29.4, 34.8],
+    ],
+  },
+  {
+    id: "black-sea",
+    name: "Північ Чорного моря",
+    note: "Зона воєнного ризику: страхові надбавки, обмеження заходів у порти.",
+    polygon: [
+      [46.7, 30.2], [45.2, 29.6], [44.0, 29.4], [43.2, 31.5], [43.0, 35.0], [43.6, 38.5], [44.6, 38.0],
+      [45.3, 36.6], [46.2, 35.2], [46.6, 32.0],
+    ],
+  },
+  {
+    id: "gulf",
+    name: "Перська затока / Ормузька протока",
+    note: "Підвищений ризик для суден; уточнюйте надбавки у лінії.",
+    polygon: [
+      [30.0, 48.0], [27.0, 50.0], [24.2, 51.6], [24.5, 54.5], [25.6, 56.4], [26.6, 56.6], [27.2, 56.1], [28.0, 51.0],
+      [29.8, 49.0],
+    ],
+  },
+];

@@ -17,10 +17,15 @@ import { api } from "@/lib/api";
 import { useTheme } from "@/lib/theme";
 import {
   hubApi,
+  lineApi,
   portApi,
+  RISK_ZONES,
   portStatusColor,
   statusColor,
   type AmbientVessel,
+  type CarrierDetailData,
+  type CarrierSummary,
+  type Lane,
   type HubPort,
   type LatLng,
   type LiveSnapshot,
@@ -33,6 +38,8 @@ import { TracksPanel, type WorkspaceRef } from "./TracksPanel";
 import { TrackDetail } from "./TrackDetail";
 import { isIssue, PortsPanel } from "./PortsPanel";
 import { PortDetail } from "./PortDetail";
+import { LinesPanel } from "./LinesPanel";
+import { CarrierDetail } from "./CarrierDetail";
 
 const TILE_LIGHT = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}";
 const TILE_DARK =
@@ -51,12 +58,13 @@ const MAX_DR_MS = 20 * 60_000;
 /** Ambient AIS clutters a world view — show it from regional zoom. */
 const AIS_MIN_ZOOM = 4;
 
-type LayerKey = "tracks" | "routes" | "ais" | "ports";
-type Tab = "tracks" | "ports";
+type LayerKey = "tracks" | "routes" | "ais" | "ports" | "lanes" | "risk";
+type Tab = "tracks" | "ports" | "lines";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "tracks", label: "Вантажі" },
   { key: "ports", label: "Порти" },
+  { key: "lines", label: "Лінії" },
 ];
 
 const LAYERS: { key: LayerKey; label: string; dot: string }[] = [
@@ -64,6 +72,8 @@ const LAYERS: { key: LayerKey; label: string; dot: string }[] = [
   { key: "routes", label: "Маршрути", dot: "var(--accent)" },
   { key: "ais", label: "Судна AIS", dot: "#0f9b8e" },
   { key: "ports", label: "Порти", dot: "var(--ok)" },
+  { key: "lanes", label: "Коридори ліній", dot: "var(--warn)" },
+  { key: "risk", label: "Зони воєнного ризику", dot: "var(--err)" },
 ];
 
 interface TrackAnim {
@@ -101,18 +111,32 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [panelOpen, setPanelOpen] = useState(true);
-  const [layers, setLayers] = useState<Record<LayerKey, boolean>>({ tracks: true, routes: true, ais: true, ports: true });
+  const [layers, setLayers] = useState<Record<LayerKey, boolean>>({
+    tracks: true,
+    routes: true,
+    ais: true,
+    ports: true,
+    lanes: false,
+    risk: true,
+  });
+  const [carriers, setCarriers] = useState<CarrierSummary[]>([]);
+  const [lanes, setLanes] = useState<Lane[]>([]);
+  const [selCarrier, setSelCarrier] = useState<string | null>(null);
+  const [selLane, setSelLane] = useState<string | null>(null);
+  const [carrierDetail, setCarrierDetail] = useState<CarrierDetailData | null>(null);
   const [isFull, setIsFull] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [narrow, setNarrow] = useState(false);
   const [layersOpen, setLayersOpen] = useState(false);
   const [zoom, setZoom] = useState(3);
+  const [wrapW, setWrapW] = useState(1200);
 
   const wrapRef = useRef<HTMLDivElement>(null);
   const trackAnims = useRef(new Map<string, TrackAnim>());
   const aisAnims = useRef(new Map<string, AisAnim>());
   const routeLayer = useRef<L.LayerGroup | null>(null);
   const portLayer = useRef<L.LayerGroup | null>(null);
+  const lineLayer = useRef<L.LayerGroup | null>(null);
   const fitted = useRef(false);
   const snapAt = useRef(Date.now());
 
@@ -153,13 +177,37 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
     return () => clearInterval(t);
   }, [loadPorts]);
 
+  const loadLines = useCallback(() => {
+    lineApi
+      .list()
+      .then((r) => {
+        setCarriers(r.carriers ?? []);
+        setLanes(r.lanes ?? []);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    loadLines();
+    const t = setInterval(loadLines, PORTS_POLL_MS);
+    return () => clearInterval(t);
+  }, [loadLines]);
+
   const selectTrack = useCallback((id: string | null) => {
     setSelPort(null);
+    setSelCarrier(null);
     setSelectedId(id);
   }, []);
   const selectPort = useCallback((code: string | null) => {
     setSelectedId(null);
+    setSelCarrier(null);
     setSelPort(code);
+  }, []);
+  const selectCarrier = useCallback((id: string | null) => {
+    setSelectedId(null);
+    setSelPort(null);
+    setCarrierDetail(null);
+    setSelCarrier(id);
   }, []);
   const selectedPort = ports.find((p) => p.code === selPort) ?? null;
 
@@ -181,10 +229,77 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
     };
   }, []);
 
+  // Track the canvas width so the HUD can go compact when space is tight.
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => setWrapW(el.clientWidth));
+    ro.observe(el);
+    setWrapW(el.clientWidth);
+    return () => ro.disconnect();
+  }, []);
+
   // On phones the list and the detail card share the screen — one at a time.
   useEffect(() => {
-    if (narrow && (selectedId || selPort)) setPanelOpen(false);
-  }, [narrow, selectedId, selPort]);
+    if (narrow && (selectedId || selPort || selCarrier)) setPanelOpen(false);
+  }, [narrow, selectedId, selPort, selCarrier]);
+
+  // ── Lines: reference corridors, war-risk zones, selected carrier's services ──
+  useEffect(() => {
+    const g = lineLayer.current;
+    if (!map || !g) return;
+    g.clearLayers();
+    if (layers.risk) {
+      for (const z of RISK_ZONES) {
+        L.polygon(z.polygon, { color: "#dc4a4f", weight: 1, opacity: 0.6, fillColor: "#dc4a4f", fillOpacity: 0.08, dashArray: "4 4" })
+          .bindTooltip(`<b>${z.name}</b><br/>${z.note}<br/><span style="opacity:.7">Контури орієнтовні (зони JWC)</span>`, { sticky: true })
+          .addTo(g);
+      }
+    }
+    const showLanes = layers.lanes || tab === "lines";
+    for (const l of lanes) {
+      const sel = l.id === selLane;
+      if (!showLanes && !sel) continue;
+      const color = l.via === "cape" ? "#d98213" : "#2f6feb";
+      L.polyline(l.path, {
+        color,
+        weight: sel ? 4 : 2,
+        opacity: sel ? 0.95 : selLane ? 0.18 : 0.45,
+        dashArray: l.via === "cape" ? "8 7" : undefined,
+        className: sel ? "hub-ants" : "",
+      })
+        .bindTooltip(`${l.name} · ${l.transitDaysMin}–${l.transitDaysMax} дн (орієнтовно)`, { sticky: true })
+        .on("click", () => {
+          setTab("lines");
+          setSelLane(l.id);
+        })
+        .addTo(g);
+    }
+    for (const s of carrierDetail?.services ?? []) {
+      if (s.path.length < 2) continue;
+      L.polyline(s.path, { color: "#7c3aed", weight: 4, opacity: 0.9, className: "hub-ants" })
+        .bindTooltip(`${s.name}${s.transitDaysMin ? ` · ${s.transitDaysMin}${s.transitDaysMax ? `–${s.transitDaysMax}` : ""} дн` : ""}`, { sticky: true })
+        .addTo(g);
+      for (const r of s.rotation) {
+        const p = ports.find((x) => x.code === r.code);
+        if (p) L.circleMarker([p.lat, p.lng], { radius: 4, color: "#fff", weight: 1.5, fillColor: "#7c3aed", fillOpacity: 1 }).bindTooltip(r.name).addTo(g);
+      }
+    }
+  }, [map, lanes, selLane, layers.lanes, layers.risk, tab, carrierDetail, ports]);
+
+  // Frame a selected corridor / carrier services.
+  useEffect(() => {
+    if (!map || !selLane) return;
+    const l = lanes.find((x) => x.id === selLane);
+    if (l && l.path.length > 1) map.flyToBounds(L.latLngBounds(l.path.map((p) => L.latLng(p[0], p[1]))).pad(0.15), { duration: 0.9 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map, selLane]);
+  useEffect(() => {
+    if (!map || !carrierDetail) return;
+    const pts = carrierDetail.services.flatMap((s) => s.path);
+    if (pts.length > 1) map.flyToBounds(L.latLngBounds(pts.map((p) => L.latLng(p[0], p[1]))).pad(0.15), { duration: 0.9 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map, carrierDetail?.carrier.id]);
 
   // ── Map setup ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -193,6 +308,7 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
     const scale = L.control.scale({ metric: true, imperial: false, position: "bottomright" });
     scale.addTo(map);
     routeLayer.current = L.layerGroup().addTo(map);
+    lineLayer.current = L.layerGroup().addTo(map);
     portLayer.current = L.layerGroup().addTo(map);
     const onZoom = () => setZoom(map.getZoom());
     onZoom();
@@ -202,6 +318,7 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
       scale.remove();
       routeLayer.current?.remove();
       portLayer.current?.remove();
+      lineLayer.current?.remove();
     };
   }, [map]);
 
@@ -459,11 +576,11 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
 
   const tileUrl = theme === "dark" ? TILE_DARK : TILE_LIGHT;
   const panelW = 340;
-  const hasDetail = !!selected || !!selectedPort;
+  const hasDetail = !!selected || !!selectedPort || !!selCarrier;
   const showPanel = panelOpen && !(narrow && hasDetail);
   const leftInset = showPanel && !narrow ? panelW + 24 : 12;
   const rightInset = hasDetail && !narrow ? 384 : 12;
-  const compactHud = hasDetail || narrow;
+  const compactHud = hasDetail || narrow || wrapW - leftInset - rightInset < 900;
 
   return (
     <div ref={wrapRef} style={{ position: "relative", height: "100%", width: "100%", background: "var(--chat)", overflow: "hidden" }} data-testid="hub-map">
@@ -510,6 +627,7 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
                 if (narrow) {
                   setSelectedId(null);
                   setSelPort(null);
+                  setSelCarrier(null);
                 }
               }}
               aria-label="Показати панель хабу"
@@ -637,8 +755,17 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
                 workspaceId={workspaceId}
                 workspaces={workspaces}
               />
-            ) : (
+            ) : tab === "ports" ? (
               <PortsPanel ports={ports} selectedCode={selPort} onSelect={(c) => selectPort(c)} onChanged={loadPorts} />
+            ) : (
+              <LinesPanel
+                carriers={carriers}
+                lanes={lanes}
+                selectedCarrier={selCarrier}
+                selectedLane={selLane}
+                onSelectCarrier={(id) => selectCarrier(id)}
+                onSelectLane={setSelLane}
+              />
             )}
           </div>
         </aside>
@@ -666,6 +793,36 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
             code={selectedPort.code}
             onClose={() => setSelPort(null)}
             onChanged={loadPorts}
+            onOpenTrack={(id) => {
+              setTab("tracks");
+              selectTrack(id);
+            }}
+          />
+        </aside>
+      )}
+      {selCarrier && (
+        <aside
+          aria-label="Деталі лінії"
+          style={{
+            ...glass,
+            position: "absolute",
+            zIndex: 1260,
+            top: narrow ? "auto" : 12,
+            right: 12,
+            bottom: narrow ? 12 : 64,
+            width: narrow ? "calc(100% - 24px)" : 360,
+            height: narrow ? "62%" : undefined,
+            overflow: "hidden",
+            background: "color-mix(in srgb, var(--surface) 96%, transparent)",
+          }}
+        >
+          <CarrierDetail
+            key={selCarrier}
+            id={selCarrier}
+            tracks={items}
+            onClose={() => selectCarrier(null)}
+            onChanged={loadLines}
+            onDetail={setCarrierDetail}
             onOpenTrack={(id) => {
               setTab("tracks");
               selectTrack(id);
@@ -716,7 +873,7 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
             <Stat icon="⚓" n={stats.port} label="у порту / митниці" color="var(--warn)" compact={compactHud} />
             <Stat icon="⚠" n={stats.alert} label="потребують уваги" color="var(--err)" compact={compactHud} />
             <Stat icon="✓" n={stats.done} label="доставлено" color="var(--ok)" compact={compactHud} />
-            <Stat icon="⛔" n={portIssues} label="портів / кордонів зі збоями" color="var(--err)" compact={compactHud} />
+            <Stat icon="⛔" n={portIssues} label="портів і кордонів зі збоями" color="var(--err)" compact={compactHud} />
             <span style={{ width: 1, alignSelf: "stretch", background: "var(--border)" }} />
             <span style={{ color: "var(--muted)" }} title="Живі позиції суден (aisstream.io)">
               <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: (snap?.vessels.length ?? 0) > 0 ? "var(--ok)" : "var(--faint)", marginRight: 6 }} />
