@@ -106,3 +106,21 @@ export function smoothPath(path: LatLng[], iterations = 3): LatLng[] {
   smoothCache.set(path, out);
   return out;
 }
+
+/** Fraction (0..1) of the path length at the vertex nearest to `p`. */
+export function progressOnPath(path: LatLng[], p: LatLng): number {
+  if (path.length < 2) return 0;
+  const cum: number[] = [0];
+  for (let i = 1; i < path.length; i += 1) cum.push(cum[i - 1]! + haversineKm(path[i - 1]!, path[i]!));
+  let best = 0;
+  let bestD = Infinity;
+  for (let i = 0; i < path.length; i += 1) {
+    const d = haversineKm(path[i]!, p);
+    if (d < bestD) {
+      bestD = d;
+      best = i;
+    }
+  }
+  const total = cum[cum.length - 1]!;
+  return total === 0 ? 0 : cum[best]! / total;
+}

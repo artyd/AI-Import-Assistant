@@ -27,12 +27,14 @@ export function TrackDetail({
   onClose,
   onChanged,
   onRemoved,
+  onPlay,
 }: {
   track: Track;
   workspaces: WorkspaceRef[];
   onClose: () => void;
   onChanged: () => void;
   onRemoved: () => void;
+  onPlay?: (events: TrackEvent[]) => void;
 }) {
   const [events, setEvents] = useState<TrackEvent[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -158,7 +160,22 @@ export function TrackDetail({
 
         {/* Timeline */}
         <section>
-          <div style={{ ...label, marginBottom: 8 }}>Події</div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <div style={label}>Події</div>
+            {onPlay && (
+              <button
+                type="button"
+                className="btn"
+                data-testid="hub-play"
+                disabled={!events || events.length === 0 || (track.live?.path.length ?? 0) < 2}
+                title={(track.live?.path.length ?? 0) < 2 ? "Немає маршруту для відтворення" : "Показати рух вантажу по днях проти плану"}
+                onClick={() => events && onPlay(events)}
+                style={{ height: 28, padding: "0 10px", fontSize: 12 }}
+              >
+                ▶ Програти рейс
+              </button>
+            )}
+          </div>
           {events === null ? (
             <div style={{ fontSize: 12.5, color: "var(--muted)" }}>Завантаження…</div>
           ) : past.length + planned.length === 0 ? (

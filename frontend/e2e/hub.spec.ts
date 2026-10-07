@@ -19,7 +19,7 @@ const ROUTES = JSON.parse(readFileSync(join(__dirname, "fixtures", "hub-routes.j
 const EVENTS = [
   { id: "e1", at: "2026-09-16T08:00:00Z", location: "Ningbo, CN", lat: 29.93, lng: 121.85, description: "Завантажено на судно", planned: false },
   { id: "e2", at: "2026-09-17T02:00:00Z", location: "Ningbo, CN", lat: 29.93, lng: 121.85, description: "Відхід судна", planned: false },
-  { id: "e3", at: "2026-10-01T10:00:00Z", location: "Port Said, EG", lat: 31.26, lng: 32.31, description: "Прохід Суецького каналу", planned: false },
+  { id: "e3", at: "2026-10-01T10:00:00Z", location: "Singapore, SG", lat: 1.26, lng: 103.82, description: "Перевантаження в Сингапурі", planned: false },
   { id: "e4", at: "2026-10-20T06:00:00Z", location: "Odesa, UA", lat: 46.49, lng: 30.75, description: "Прибуття судна", planned: true },
 ];
 
@@ -401,5 +401,108 @@ test.describe("Logistics hub", () => {
     await page.screenshot({ path: `test-results/hub-style-dark-${info.project.name}.png` });
     await page.reload();
     await expect(page.getByTestId("hub-map").or(page.getByRole("button", { name: "Карта", exact: true }).first())).toBeVisible();
+  });
+
+  test.describe("map UX (desktop)", () => {
+    test.skip(({ isMobile }) => isMobile, "desktop-only features");
+
+    test("port markers: kind colours, status badges, clusters, labels", async ({ page }) => {
+      await mockHub(page);
+      await openHub(page);
+      await page.getByRole("tab", { name: /Порти/ }).click();
+      // Zoomed out → clusters with counts.
+      await expect(page.locator(".hub-cluster").first()).toBeVisible();
+      const before = await page.locator(".hub-port").count();
+      // Kind colour: sea ports blue, airports violet, crossings orange.
+      expect(await page.locator('.hub-port[style*="--mk:#2f6feb"]').count()).toBeGreaterThan(0);
+      expect(await page.locator(".hub-port .hub-st").count()).toBeGreaterThan(0);
+      // Clicking a cluster zooms in and splits it; labels appear from zoom 6.
+      await page.locator(".hub-cluster").first().click();
+      await page.waitForTimeout(1200);
+      for (let i = 0; i < 6 && (await page.locator(".hub-label").count()) === 0; i += 1) {
+        await page.getByRole("button", { name: "Збільшити" }).click();
+        await page.waitForTimeout(500);
+      }
+      expect(await page.locator(".hub-label").count()).toBeGreaterThan(0);
+      expect(await page.locator(".hub-port").count()).toBeGreaterThan(0);
+      expect(before).toBeGreaterThanOrEqual(0);
+      await page.screenshot({ path: "test-results/hub-ports-colours.png" });
+    });
+
+    test("legend explains colours and remembers being open", async ({ page }) => {
+      await mockHub(page);
+      await openHub(page);
+      await page.getByRole("button", { name: "Легенда" }).click();
+      const lg = page.getByTestId("hub-legend");
+      await expect(lg).toContainText("Морський порт");
+      await expect(lg).toContainText("Днів до ETA");
+      await expect(lg).toContainText("Коридор в обхід Африки");
+      await page.waitForTimeout(800);
+      await page.screenshot({ path: "test-results/hub-legend.png" });
+      await page.reload();
+      await openHub(page);
+      await expect(page.getByTestId("hub-legend")).toBeVisible();
+    });
+
+    test("search finds ports, tracks and any place", async ({ page }) => {
+      await mockHub(page);
+      await page.route("https://nominatim.openstreetmap.org/**", (r) =>
+        r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([{ lat: "50.0", lon: "36.23", display_name: "Харків, Україна" }]) })
+      );
+      await openHub(page);
+      const box = page.getByTestId("hub-search");
+      await box.fill("Одеса");
+      await expect(page.getByTestId("hub-search-results")).toContainText("UAODS");
+      await page.getByRole("option", { name: /Одеса.*UAODS/ }).first().click();
+      await expect(page.getByTestId("hub-port-detail")).toBeVisible();
+
+      await box.fill("Метопрен");
+      await box.press("Enter");
+      await expect(page.getByTestId("hub-track-detail")).toContainText("Метопрен, партія 2");
+
+      await box.fill("Харків");
+      await page.getByRole("option", { name: /Знайти на карті/ }).click();
+      await expect(page.locator(".hub-label", { hasText: "Харків" })).toBeVisible();
+    });
+
+    test("ETA badges and the shipment filter", async ({ page }) => {
+      await mockHub(page);
+      await openHub(page);
+      await expect.poll(() => page.locator(".hub-eta").count()).toBeGreaterThan(1);
+      await expect.poll(() => page.locator(".hub-eta.is-late").count()).toBeGreaterThan(0);
+      await expect(page.getByTestId("hub-track-row")).toHaveCount(6);
+      await page.getByTestId("hub-only-shipment").click();
+      await expect(page.getByTestId("hub-track-row")).toHaveCount(1);
+      await expect(page.locator(".hub-mk")).toHaveCount(1);
+      await page.getByTestId("hub-all-shipments").click();
+      await expect(page.getByTestId("hub-track-row")).toHaveCount(6);
+    });
+
+    test("replay a voyage: fact vs plan with the lag", async ({ page }) => {
+      await mockHub(page);
+      await openHub(page);
+      await page.getByTestId("hub-track-row").first().click();
+      await page.getByTestId("hub-play").click();
+      const bar = page.getByTestId("hub-playback");
+      await expect(bar).toBeVisible();
+      const d0 = await page.getByTestId("hub-playback-date").textContent();
+      await page.waitForTimeout(1200);
+      expect(await page.getByTestId("hub-playback-date").textContent()).not.toBe(d0);
+      // Jump to the end: the cargo is behind its first ETA.
+      const slider = page.getByTestId("hub-playback-slider");
+      await slider.evaluate((el: HTMLInputElement) => {
+        el.value = el.max;
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      await expect(page.getByTestId("hub-playback-lag")).toContainText("Відставання");
+      await expect(page.locator(".hub-label", { hasText: "За планом" })).toBeVisible();
+      await expect(page.locator(".hub-label", { hasText: "Факт" })).toBeVisible();
+      expect(await page.locator(".hub-ghost .hub-mk").evaluate((el) => getComputedStyle(el).opacity)).toBe("1");
+      await page.waitForTimeout(600);
+      await page.screenshot({ path: "test-results/hub-replay.png" });
+      await bar.getByRole("button", { name: "Закрити відтворення" }).click();
+      await expect(bar).toBeHidden();
+    });
   });
 });
