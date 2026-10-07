@@ -13,6 +13,7 @@ import { buildSystemPrompt } from '../agent/systemPrompt.js';
 import { buildDocumentsDigest } from '../services/documentsDigest.js';
 import { runAgentTurn } from '../agent/loop.js';
 import { toolDefinitions, logistTools } from '../agent/tools.js';
+import { hubToolDefinitions } from '../agent/hubTools.js';
 import { chatRateLimitConfig } from './chatRateLimit.js';
 
 const chatSchema = z.object({
@@ -54,6 +55,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
 
         const result = await runAgentTurn({
           workspaceId: ws.id,
+          ownerId: req.user!.sub,
           system: buildSystemPrompt({
             number: ws.number,
             supplier: ws.supplier,
@@ -69,7 +71,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           sse,
           signal: sse.signal,
           // Shipment tools + the customs/logistics reference tools (when enabled).
-          tools: [...toolDefinitions, ...logistTools()],
+          tools: [...toolDefinitions, ...logistTools(), ...hubToolDefinitions],
         });
 
         // Persist the turn (partial text too, on error) with its replay blocks so

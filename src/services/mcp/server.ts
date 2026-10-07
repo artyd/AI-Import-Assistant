@@ -1,5 +1,6 @@
 import { executeTool, logistTools } from '../../agent/tools.js';
 import { getRegistration } from '../drugRegistry.js';
+import { publicTrackTool } from '../../agent/hubTools.js';
 
 /**
  * Public MCP server (Streamable HTTP, stateless, JSON responses only).
@@ -23,7 +24,8 @@ const INSTRUCTIONS =
   'Штурман (Shturman) — довідкові інструменти для імпорту в Україну: митна довідка за кодом ' +
   'УКТ ЗЕД (мито, ПДВ, пільги, ліцензування, обмеження, документи — джерело qdpro.com.ua), ' +
   'навігація по класифікатору УКТ ЗЕД і по списку товарів подвійного використання, курс НБУ, ' +
-  'ідентифікація речовини (PubChem), перевірка реєстрації лікарського засобу в Держреєстрі. ' +
+  'ідентифікація речовини (PubChem), перевірка реєстрації лікарського засобу в Держреєстрі, ' +
+  'відстеження вантажу за номером (контейнер, B/L, AWB, курʼєр, Нова Пошта/Укрпошта). ' +
   'Підбір коду УКТ ЗЕД — довідковий: пропонуй кілька кандидатів з обґрунтуванням і нагадуй, ' +
   'що остаточно код підтверджує митний фахівець. Ставки/вимоги бери з інструментів, не з памʼяті.';
 
@@ -42,6 +44,7 @@ const TITLES: Record<string, string> = {
   get_exchange_rate: 'Курс НБУ',
   pubchem_identify_substance: 'PubChem: ідентифікація речовини',
   check_drug_registration: 'Держреєстр ліків України',
+  track_by_number: 'Трекінг вантажу за номером',
 };
 
 const REGISTRY_TOOL = {
@@ -68,7 +71,7 @@ interface CustomToolDef {
 
 function toolCatalog(): McpTool[] {
   // logistTools() are all plain custom tools (name/description/input_schema).
-  const defs = [...(logistTools() as CustomToolDef[]), REGISTRY_TOOL];
+  const defs = [...(logistTools() as CustomToolDef[]), REGISTRY_TOOL, publicTrackTool as CustomToolDef];
   return defs.map((d) => ({
     name: d.name,
     title: TITLES[d.name] ?? d.name,

@@ -7,6 +7,9 @@ import { createRedis } from '../queue/connection.js';
 import { INDEX_QUEUE, type IndexJobData } from '../queue/index.js';
 import { REMINDERS_QUEUE, scheduleReminders, type ReminderJobData } from '../queue/reminders.js';
 import { NEWS_QUEUE, scheduleNews, type NewsJobData } from '../queue/news.js';
+import { TRACKING_QUEUE, scheduleTracking, type TrackingJobData } from '../queue/tracking.js';
+import { refreshDue } from '../services/hub/track.js';
+import { startAis, stopAis, aisEnabled } from '../services/hub/ais.js';
 import {
   INGEST_RETRY_QUEUE,
   scheduleIngestRetry,
@@ -322,6 +325,19 @@ async function processNews(_job: Job<NewsJobData>): Promise<void> {
 }
 
 /**
+ * Logistics hub: re-check every active tracked number through the hybrid source
+ * chain (official API → carrier page). Per-item failures are recorded on the
+ * item; the job always completes.
+ */
+async function processTracking(_job: Job<TrackingJobData>): Promise<void> {
+  const { checked, failed } = await refreshDue();
+  if (checked > 0) {
+    // eslint-disable-next-line no-console
+    console.log(`Hub tracking: re-checked ${checked} item(s) (${failed} failed).`);
+  }
+}
+
+/**
  * Auto-retry sweep: re-queue files stuck in 'error' up to INGEST_MAX_RETRIES,
  * then flag the persistent ones for manual entry. See services/ingestRetry.
  */
@@ -392,6 +408,23 @@ async function main(): Promise<void> {
     });
   }
 
+  // Logistics hub tracking refresh + live AIS feed. Gated by TRACKING_ENABLED.
+  let trackingWorker: Worker<TrackingJobData> | null = null;
+  if (config.TRACKING_ENABLED) {
+    await scheduleTracking();
+    trackingWorker = new Worker<TrackingJobData>(TRACKING_QUEUE, processTracking, {
+      connection: createRedis(),
+    });
+    trackingWorker.on('failed', (job, err) => {
+      // eslint-disable-next-line no-console
+      console.error(`Tracking job ${job?.id} failed:`, err.message);
+    });
+    await startAis().catch((err: Error) => {
+      // eslint-disable-next-line no-console
+      console.error('AIS stream failed to start:', err.message);
+    });
+  }
+
   // Auto-retry sweep (error files → re-queue / flag). Gated by INGEST_RETRY_ENABLED.
   let ingestRetryWorker: Worker<IngestRetryJobData> | null = null;
   if (config.INGEST_RETRY_ENABLED) {
@@ -410,13 +443,15 @@ async function main(): Promise<void> {
     `Indexing worker started (env=${config.NODE_ENV}, concurrency=${config.INDEX_CONCURRENCY}, ` +
       `anthropicMaxConcurrency=${config.ANTHROPIC_MAX_CONCURRENCY}, extraction=${config.EXTRACTION_ENABLED}, ` +
       `ocr=${config.OCR_ENABLED}, reminders=${config.REMINDERS_ENABLED}, news=${config.NEWS_ENABLED}, ` +
-      `ingestRetry=${config.INGEST_RETRY_ENABLED}).`,
+      `ingestRetry=${config.INGEST_RETRY_ENABLED}, tracking=${config.TRACKING_ENABLED}, ais=${aisEnabled()}).`,
   );
 
   const shutdown = async (): Promise<void> => {
     await worker.close();
     if (remindersWorker) await remindersWorker.close();
     if (newsWorker) await newsWorker.close();
+    if (trackingWorker) await trackingWorker.close();
+    await stopAis();
     if (ingestRetryWorker) await ingestRetryWorker.close();
     await pool.end();
     process.exit(0);

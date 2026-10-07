@@ -262,6 +262,12 @@ export default function WorkspacePage() {
     if (typeof window !== "undefined" && window.innerWidth < 1024) setRightOpen(false);
   }, []);
 
+  // The logistics-hub map needs the whole screen on a phone: collapse the
+  // sidebar to its rail when the map opens on a narrow viewport.
+  useEffect(() => {
+    if (view === "map" && typeof window !== "undefined" && window.innerWidth < 760) setSidebarCollapsed(true);
+  }, [view]);
+
   // Load workspace, folders, files, workspaces list, and latest conversation.
   useEffect(() => {
     if (!user) return;
@@ -1266,7 +1272,7 @@ export default function WorkspacePage() {
               view === "news"
                 ? "Новини"
                 : view === "map"
-                  ? "Карта"
+                  ? "Логістичний хаб"
                   : conversations.find((c) => c.id === conversationId)?.title?.trim() ||
                     "Новий чат"
             }
@@ -1276,7 +1282,7 @@ export default function WorkspacePage() {
           {view === "news" ? (
             <NewsView />
           ) : view === "map" ? (
-            <MapView />
+            <MapView workspaceId={id} />
           ) : chatKind === "consolidated" ? (
             /* Збірний: тулбар (таблиця/експорт/новий аналіз) + опційна картка/ввід,
                а знизу — чат обговорення, прив'язаний до збірника (відповідь аналізу

@@ -673,3 +673,86 @@ CREATE TABLE IF NOT EXISTS supplier_instructions (
 -- The MCP endpoint is open (public reference tools only); the personal-token
 -- table from its first version is no longer used.
 DROP TABLE IF EXISTS mcp_tokens;
+
+-- ── Logistics hub · Phase 1: tracking by number + live map ───────────────────
+-- A tracked item is one trackable number (container / B/L / AWB / courier or
+-- domestic waybill). It belongs to the user who added it and may optionally be
+-- linked to one of their shipments (workspace). `source` records where the last
+-- status came from ('api:novaposhta', 'scrape:msc', 'none' …) and is shown in the
+-- UI next to `last_checked_at` so the logist always knows how fresh/real it is.
+CREATE TABLE IF NOT EXISTS tracked_items (
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  owner_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  workspace_id     UUID REFERENCES workspaces(id) ON DELETE SET NULL,
+  number           TEXT NOT NULL,
+  kind             TEXT NOT NULL CHECK (kind IN ('container', 'bl', 'awb', 'parcel')),
+  carrier          TEXT NOT NULL,
+  mode             TEXT NOT NULL CHECK (mode IN ('sea', 'air', 'courier', 'domestic')),
+  label            TEXT NOT NULL DEFAULT '',
+  status           TEXT NOT NULL DEFAULT 'pending',
+  status_text      TEXT NOT NULL DEFAULT '',
+  origin           TEXT NOT NULL DEFAULT '',
+  destination      TEXT NOT NULL DEFAULT '',
+  origin_lat       DOUBLE PRECISION,
+  origin_lng       DOUBLE PRECISION,
+  dest_lat         DOUBLE PRECISION,
+  dest_lng         DOUBLE PRECISION,
+  vessel_name      TEXT NOT NULL DEFAULT '',
+  vessel_imo       TEXT NOT NULL DEFAULT '',
+  vessel_mmsi      TEXT NOT NULL DEFAULT '',
+  departed_at      TIMESTAMPTZ,
+  eta              TIMESTAMPTZ,
+  first_eta        TIMESTAMPTZ,
+  arrived_at       TIMESTAMPTZ,
+  source           TEXT NOT NULL DEFAULT 'none',
+  page_hash        TEXT NOT NULL DEFAULT '',
+  last_checked_at  TIMESTAMPTZ,
+  last_changed_at  TIMESTAMPTZ,
+  last_error       TEXT NOT NULL DEFAULT '',
+  archived         BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (owner_id, number)
+);
+CREATE INDEX IF NOT EXISTS idx_tracked_owner ON tracked_items(owner_id);
+CREATE INDEX IF NOT EXISTS idx_tracked_workspace ON tracked_items(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_tracked_refresh ON tracked_items(status, last_checked_at);
+
+-- Carrier events (milestones) per tracked item, de-duplicated by `hash`.
+CREATE TABLE IF NOT EXISTS tracking_events (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tracked_id  UUID NOT NULL REFERENCES tracked_items(id) ON DELETE CASCADE,
+  at          TIMESTAMPTZ,
+  location    TEXT NOT NULL DEFAULT '',
+  lat         DOUBLE PRECISION,
+  lng         DOUBLE PRECISION,
+  description TEXT NOT NULL DEFAULT '',
+  planned     BOOLEAN NOT NULL DEFAULT FALSE,
+  hash        TEXT NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (tracked_id, hash)
+);
+CREATE INDEX IF NOT EXISTS idx_tracking_events_item ON tracking_events(tracked_id, at);
+
+-- Latest AIS position per vessel (aisstream.io feed in the worker). Rows older
+-- than a few hours are pruned; the map treats >6h as stale.
+CREATE TABLE IF NOT EXISTS vessel_positions (
+  mmsi        TEXT PRIMARY KEY,
+  imo         TEXT NOT NULL DEFAULT '',
+  name        TEXT NOT NULL DEFAULT '',
+  lat         DOUBLE PRECISION NOT NULL,
+  lng         DOUBLE PRECISION NOT NULL,
+  sog         DOUBLE PRECISION,
+  cog         DOUBLE PRECISION,
+  ship_type   INTEGER,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_vessel_positions_name ON vessel_positions(upper(name));
+CREATE INDEX IF NOT EXISTS idx_vessel_positions_updated ON vessel_positions(updated_at);
+
+-- Network geocoder cache (Nominatim) for event locations the gazetteer misses.
+CREATE TABLE IF NOT EXISTS geo_cache (
+  query      TEXT PRIMARY KEY,
+  lat        DOUBLE PRECISION,
+  lng        DOUBLE PRECISION,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

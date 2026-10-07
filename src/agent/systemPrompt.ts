@@ -22,6 +22,30 @@ function userPortraitBlock(): string[] {
 }
 
 /**
+ * Logistics hub (tracking) guidance — supply and normal chats. Statuses come
+ * only from the hub tools (carrier API / carrier page) with source + time;
+ * never from memory, never guessed from a document date.
+ */
+function hubToolsPromptBlock(scope: 'supply' | 'normal'): string[] {
+  return [
+    '',
+    'ЛОГІСТИЧНИЙ ХАБ (відстеження вантажів):',
+    '- track_shipment — додати номер (контейнер / B/L / AWB / курʼєр / ТТН НП) у хаб користувача і',
+    '  отримати статус, події, ETA. Хаб далі оновлює статус сам і показує вантаж на карті.',
+    '- list_tracked_shipments — що вже відстежується (статус, ETA, джерело, час перевірки).',
+    ...(scope === 'supply'
+      ? [
+          '- find_tracking_numbers — знайти в документах постачання номери контейнерів/AWB/B/L,',
+          '  які ще не відстежуються; запропонуй користувачу їх додати (додавай лише після згоди).',
+        ]
+      : []),
+    'ПРАВИЛА: статус, місцезнаходження та ETA бери ЛИШЕ з цих інструментів і завжди називай',
+    'джерело та час перевірки. Якщо інструмент каже «даних немає» — так і скажи й дай посилання',
+    'на сторінку перевізника; ніколи не вгадуй статус з дат у документах чи з памʼяті.',
+  ];
+}
+
+/**
  * Guidance for the customs/logistics reference tools (logist-mcp). Appended to
  * every chat kind's prompt ONLY when LOGIST_MCP_URL is set — otherwise the tools
  * are not advertised and mentioning them would be misleading. Reconciles with the
@@ -292,6 +316,7 @@ export function buildSystemPrompt(workspace: {
     'варіанти; остаточний код має підтвердити митний брокер.»',
     ...userPortraitBlock(),
     ...logistToolsPromptBlock(),
+    ...hubToolsPromptBlock('supply'),
   ].join('\n');
   const shipment = [
     `ПОТОЧНЕ ПОСТАЧАННЯ: №${workspace.number}` +
@@ -354,6 +379,7 @@ export function buildNormalSystemPrompt(): string {
     'документів, яких ти не бачиш — прямо про це скажи, замість того щоб додумувати.',
     ...userPortraitBlock(),
     ...logistToolsPromptBlock(),
+    ...hubToolsPromptBlock('normal'),
   ].join('\n');
 }
 
