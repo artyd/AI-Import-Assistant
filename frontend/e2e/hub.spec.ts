@@ -195,9 +195,20 @@ test.describe("Logistics hub", () => {
     await expect(card).toContainText("ETA зсунулась на +3 дн.");
     await expect(card).toContainText("Орієнтовно");
     await expect(page.getByTestId("hub-timeline").locator("li")).toHaveCount(4);
-    await expect(card.getByRole("link", { name: "Сайт перевізника ↗" })).toHaveAttribute("href", /maersk\.com/);
+    await expect(card.getByRole("link", { name: "Сайт ↗" })).toHaveAttribute("href", /maersk\.com/);
     await page.waitForTimeout(1200);
     await page.screenshot({ path: `test-results/hub-detail-${info.project.name}.png` });
+    // Actions: three equal buttons on one row, «Видалити» spans the full row below.
+    const boxes = await Promise.all(
+      [card.getByRole("button", { name: /Оновити/ }), card.getByRole("link", { name: "Сайт ↗" }), card.getByRole("button", { name: "В архів" }), card.getByRole("button", { name: "Видалити" })].map((l) => l.boundingBox())
+    );
+    const [r1, r2, r3, del] = boxes.map((b) => b!);
+    expect(Math.abs(r1!.width - r2!.width)).toBeLessThan(2);
+    expect(Math.abs(r2!.width - r3!.width)).toBeLessThan(2);
+    expect(Math.abs(r1!.y - r3!.y)).toBeLessThan(2);
+    expect(del!.y).toBeGreaterThan(r1!.y + r1!.height - 1);
+    expect(Math.abs(del!.x - r1!.x)).toBeLessThan(2);
+    expect(Math.abs(del!.x + del!.width - (r3!.x + r3!.width))).toBeLessThan(2);
     await card.getByRole("button", { name: "Закрити" }).click();
     await expect(card).toBeHidden();
   });
@@ -368,5 +379,27 @@ test.describe("Logistics hub", () => {
     expect(lum(fg) - lum(bg)).toBeGreaterThan(100);
     await page.waitForTimeout(1300);
     await page.screenshot({ path: `test-results/hub-dark-${info.project.name}.png` });
+  });
+
+  test("map styles switch and persist; risk zones are filled", async ({ page }, info) => {
+    await mockHub(page);
+    await openHub(page);
+    // War-risk zones: solid, clearly filled polygons.
+    const zone = page.locator('path.leaflet-interactive[fill="#ff2d2d"]');
+    await expect(zone).toHaveCount(1);
+    expect(Number(await zone.getAttribute("fill-opacity"))).toBeGreaterThan(0.3);
+    expect(await zone.getAttribute("stroke-dasharray")).toBeNull();
+
+    await page.getByRole("button", { name: /Шари/ }).click();
+    await page.getByRole("menuitemradio", { name: /Супутник/ }).click();
+    await expect.poll(() => page.locator(".leaflet-tile-pane img").first().getAttribute("src")).toContain("World_Imagery");
+    expect(await page.evaluate(() => localStorage.getItem("hub-basemap"))).toBe("satellite");
+    await page.getByRole("menuitemradio", { name: /Темна мінімал/ }).click();
+    await expect.poll(() => page.locator(".leaflet-tile-pane img").first().getAttribute("src")).toContain("World_Dark_Gray_Base");
+    await page.getByRole("button", { name: /Шари/ }).click();
+    await page.waitForTimeout(1500);
+    await page.screenshot({ path: `test-results/hub-style-dark-${info.project.name}.png` });
+    await page.reload();
+    await expect(page.getByTestId("hub-map").or(page.getByRole("button", { name: "Карта", exact: true }).first())).toBeVisible();
   });
 });

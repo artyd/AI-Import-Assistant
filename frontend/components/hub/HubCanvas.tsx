@@ -38,7 +38,7 @@ import {
 } from "@/lib/hub";
 import { IconSpinner } from "@/components/icons";
 import { aisIcon, endpointIcon, glyphRotates, HUB_MAP_CSS, HUB_PORT_CSS, portIcon, setRotation, trackIcon } from "./mapIcons";
-import { advance, lerp, splitAt } from "./geo";
+import { advance, lerp, smoothPath, splitAt } from "./geo";
 import { TracksPanel, type WorkspaceRef } from "./TracksPanel";
 import { TrackDetail } from "./TrackDetail";
 import { isIssue, PortsPanel } from "./PortsPanel";
@@ -48,6 +48,73 @@ import { CarrierDetail } from "./CarrierDetail";
 import { RoutesPanel } from "./RoutesPanel";
 import { RouteDetail, type PickedPoint } from "./RouteDetail";
 import { haversineKm } from "./geo";
+
+type BasemapKey = "auto" | "streets" | "light" | "dark" | "satellite" | "terrain" | "ocean";
+
+interface Basemap {
+  key: BasemapKey;
+  label: string;
+  swatch: string;
+  url: string;
+  attribution: string;
+  maxZoom: number;
+}
+
+const ESRI = "Tiles © Esri";
+
+/** Map styles the logist can switch between (persisted per browser). */
+const BASEMAPS: Basemap[] = [
+  { key: "auto", label: "Авто (за темою)", swatch: "linear-gradient(135deg,#e9eef5 50%,#2a2d33 50%)", url: "", attribution: "", maxZoom: 18 },
+  {
+    key: "streets",
+    label: "Вулиці",
+    swatch: "#f2efe6",
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
+    attribution: `${ESRI} — Esri, HERE, Garmin, © OpenStreetMap contributors`,
+    maxZoom: 18,
+  },
+  {
+    key: "light",
+    label: "Світла мінімал",
+    swatch: "#f5f5f3",
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+    attribution: `${ESRI} — Esri, HERE, Garmin, © OpenStreetMap contributors`,
+    maxZoom: 16,
+  },
+  {
+    key: "dark",
+    label: "Темна мінімал",
+    swatch: "#1d1f24",
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+    attribution: `${ESRI} — Esri, HERE, Garmin, © OpenStreetMap contributors`,
+    maxZoom: 16,
+  },
+  {
+    key: "satellite",
+    label: "Супутник",
+    swatch: "linear-gradient(135deg,#2f4a2b,#1c3b5a)",
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    attribution: `${ESRI} — Maxar, Earthstar Geographics`,
+    maxZoom: 18,
+  },
+  {
+    key: "terrain",
+    label: "Рельєф",
+    swatch: "linear-gradient(135deg,#d9e4c4,#c7b48e)",
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
+    attribution: `${ESRI} — Esri, HERE, Garmin, USGS`,
+    maxZoom: 18,
+  },
+  {
+    key: "ocean",
+    label: "Океан",
+    swatch: "linear-gradient(135deg,#9cc3e0,#d7e6ef)",
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}",
+    attribution: `${ESRI} — GEBCO, NOAA, National Geographic`,
+    maxZoom: 13,
+  },
+];
+const BASEMAP_STORE = "hub-basemap";
 
 const TILE_LIGHT = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}";
 const TILE_DARK =
@@ -145,6 +212,24 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
   const [layersOpen, setLayersOpen] = useState(false);
   const [zoom, setZoom] = useState(3);
   const [wrapW, setWrapW] = useState(1200);
+  const [basemap, setBasemap] = useState<BasemapKey>("auto");
+
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem(BASEMAP_STORE) as BasemapKey | null;
+      if (v && BASEMAPS.some((b) => b.key === v)) setBasemap(v);
+    } catch {
+      /* storage unavailable — keep auto */
+    }
+  }, []);
+  const chooseBasemap = useCallback((k: BasemapKey) => {
+    setBasemap(k);
+    try {
+      localStorage.setItem(BASEMAP_STORE, k);
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   const wrapRef = useRef<HTMLDivElement>(null);
   const trackAnims = useRef(new Map<string, TrackAnim>());
@@ -322,7 +407,7 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
         const b = l.mode === "customs" ? a : portPos(l.to);
         const color = ROUTE_MODE_COLOR[l.mode];
         if (a) stop(a, i + 1, color, `${i + 1}. ${l.mode}`);
-        if (a && b && l.mode !== "customs") L.polyline([a, b], { color, weight: 3, opacity: 0.8, dashArray: "6 8" }).addTo(g);
+        if (a && b && l.mode !== "customs") L.polyline(smoothPath([a, b]), { color, weight: 3, opacity: 0.8, dashArray: "6 8" }).addTo(g);
       });
       return;
     }
@@ -331,12 +416,12 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
       const color = ROUTE_MODE_COLOR[l.mode];
       const c = l.computed;
       if (c.path.length > 1) {
-        L.polyline(c.path, { color, weight: 4, opacity: 0.55, dashArray: "8 8" })
+        L.polyline(smoothPath(c.path), { color, weight: 4, opacity: 0.55, dashArray: "8 8" })
           .bindTooltip(`План: ${l.from.name} → ${l.to.name}`, { sticky: true })
           .addTo(g);
       }
       if (c.fact && c.fact.path.length > 1) {
-        L.polyline(c.fact.path, { color: c.delayDays > 0 ? "#dc4a4f" : color, weight: 5, opacity: 0.95, className: "hub-trail" })
+        L.polyline(smoothPath(c.fact.path), { color: c.delayDays > 0 ? "#dc4a4f" : color, weight: 5, opacity: 0.95, className: "hub-trail" })
           .bindTooltip("Факт за трекінгом", { sticky: true })
           .addTo(g);
       }
@@ -380,7 +465,14 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
     g.clearLayers();
     if (layers.risk) {
       for (const z of RISK_ZONES) {
-        L.polygon(z.polygon, { color: "#dc4a4f", weight: 1, opacity: 0.6, fillColor: "#dc4a4f", fillOpacity: 0.08, dashArray: "4 4" })
+        L.polygon(z.polygon, {
+          color: z.color,
+          weight: 2,
+          opacity: 0.95,
+          fillColor: z.color,
+          fillOpacity: 0.38,
+          smoothFactor: 0.5,
+        })
           .bindTooltip(`<b>${z.name}</b><br/>${z.note}<br/><span style="opacity:.7">Контури орієнтовні (зони JWC)</span>`, { sticky: true })
           .addTo(g);
       }
@@ -390,7 +482,7 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
       const sel = l.id === selLane;
       if (!showLanes && !sel) continue;
       const color = l.via === "cape" ? "#d98213" : "#2f6feb";
-      L.polyline(l.path, {
+      L.polyline(smoothPath(l.path), {
         color,
         weight: sel ? 4 : 2,
         opacity: sel ? 0.95 : selLane ? 0.18 : 0.45,
@@ -406,7 +498,7 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
     }
     for (const s of carrierDetail?.services ?? []) {
       if (s.path.length < 2) continue;
-      L.polyline(s.path, { color: "#7c3aed", weight: 4, opacity: 0.9, className: "hub-ants" })
+      L.polyline(smoothPath(s.path), { color: "#7c3aed", weight: 4, opacity: 0.9, className: "hub-ants" })
         .bindTooltip(`${s.name}${s.transitDaysMin ? ` · ${s.transitDaysMin}${s.transitDaysMax ? `–${s.transitDaysMax}` : ""} дн` : ""}`, { sticky: true })
         .addTo(g);
       for (const r of s.rotation) {
@@ -506,7 +598,7 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
     g.clearLayers();
     if (!layers.tracks) return;
     for (const t of items) {
-      const path = t.live?.path ?? [];
+      const path = smoothPath(t.live?.path ?? []);
       const isSel = t.id === selectedId;
       if (path.length < 2 || (!layers.routes && !isSel)) continue;
       const color = resolveCssColor(statusColor(t.status));
@@ -632,7 +724,7 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
           const t1 = new Date(it.eta).getTime();
           if (t1 <= t0) continue;
           const t = Math.max(0.02, Math.min(0.97, (wall - t0) / (t1 - t0)));
-          const { point, heading } = splitAt(it.live.path, t);
+          const { point, heading } = splitAt(smoothPath(it.live.path), t);
           a.marker.setLatLng(point);
           a.to = point;
           if (glyphRotates(it.mode)) setRotation(a.marker, heading);
@@ -714,7 +806,9 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
   }, [items]);
   const portIssues = useMemo(() => ports.filter((p) => p.status?.status === "closed" || p.status?.status === "disrupted").length, [ports]);
 
-  const tileUrl = theme === "dark" ? TILE_DARK : TILE_LIGHT;
+  const bm = BASEMAPS.find((b) => b.key === basemap) ?? BASEMAPS[0]!;
+  const tileUrl = bm.key === "auto" ? (theme === "dark" ? TILE_DARK : TILE_LIGHT) : bm.url;
+  const tileAttrib = bm.key === "auto" ? ATTRIB : `${bm.attribution} · AIS © aisstream.io`;
   const panelW = 340;
   const hasDetail = !!selected || !!selectedPort || !!selCarrier || !!selRoute;
   const showPanel = panelOpen && !(narrow && hasDetail);
@@ -758,11 +852,29 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
         className="aia-map"
         style={{ height: "100%", width: "100%" }}
       >
-        <TileLayer key={theme} url={tileUrl} attribution={ATTRIB} maxZoom={18} />
+        <TileLayer
+          key={`${bm.key}-${theme}`}
+          url={tileUrl}
+          attribution={tileAttrib}
+          maxZoom={18}
+          maxNativeZoom={bm.maxZoom}
+        />
       </MapContainer>
 
       {/* Toolbar: zoom, layers, fullscreen */}
-      <div style={{ position: "absolute", top: 12, left: leftInset, right: rightInset, zIndex: 1200, display: "flex", justifyContent: "center", pointerEvents: "none" }}>
+      <div
+        style={{
+          position: "absolute",
+          top: 12,
+          left: leftInset,
+          right: rightInset,
+          // Above the side panels while the layers menu is open.
+          zIndex: layersOpen ? 1400 : 1200,
+          display: "flex",
+          justifyContent: "center",
+          pointerEvents: "none",
+        }}
+      >
         <div style={{ ...glass, pointerEvents: "auto", display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, padding: 6, maxWidth: "100%" }}>
           {!showPanel && (
             <button
@@ -803,7 +915,19 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
             {layersOpen && (
               <div
                 role="menu"
-                style={{ ...glass, position: "absolute", top: 38, right: 0, minWidth: 200, padding: 6, display: "grid", gap: 2, background: "var(--surface)" }}
+                style={{
+                  ...glass,
+                  position: "absolute",
+                  top: 38,
+                  right: 0,
+                  minWidth: 210,
+                  maxHeight: "min(70vh, 560px)",
+                  overflowY: "auto",
+                  padding: 6,
+                  display: "grid",
+                  gap: 2,
+                  background: "var(--surface)",
+                }}
               >
                 {LAYERS.map((l) => (
                   <button
@@ -822,6 +946,24 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
                 {layers.ais && zoom < AIS_MIN_ZOOM && (
                   <div style={{ fontSize: 11, color: "var(--muted)", padding: "4px 8px" }}>Судна AIS видно при наближенні</div>
                 )}
+                <div style={{ height: 1, background: "var(--border)", margin: "4px 2px" }} />
+                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".05em", padding: "4px 8px 2px" }}>
+                  Стиль карти
+                </div>
+                {BASEMAPS.map((b) => (
+                  <button
+                    key={b.key}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={basemap === b.key}
+                    onClick={() => chooseBasemap(b.key)}
+                    style={{ ...segBtn(basemap === b.key), justifyContent: "flex-start", width: "100%", border: 0 }}
+                  >
+                    <span style={{ width: 16, textAlign: "center", color: "var(--accent)" }}>{basemap === b.key ? "●" : ""}</span>
+                    <span style={{ width: 18, height: 14, borderRadius: 4, background: b.swatch, border: "1px solid var(--border)", flex: "none" }} />
+                    {b.label}
+                  </button>
+                ))}
               </div>
             )}
           </div>
