@@ -17,6 +17,8 @@ import {
   upsertService,
   validRotation,
 } from '../services/hub/lines.js';
+import { deleteRoute, getRoute, listRoutes, RouteError, saveRoute } from '../services/hub/routePlans.js';
+import { suggestRoutes, SuggestError } from '../services/hub/suggestRoutes.js';
 import { liveSnapshot } from '../services/hub/live.js';
 import {
   addTracked,
@@ -331,6 +333,110 @@ export async function hubRoutes(app: FastifyInstance): Promise<void> {
     const p = z.object({ carrier: z.string().min(2).max(20), id: z.string().uuid() }).safeParse(req.params);
     if (!p.success || !(await deleteService(p.data.id))) return reply.status(404).send({ error: 'Not found' });
     return reply.status(204).send();
+  });
+
+  // ── Phase 4: route builder ───────────────────────────────────────────────
+
+  const pointBody = z.object({
+    code: z.string().trim().max(8).optional(),
+    name: z.string().trim().max(120).optional(),
+    lat: z.number().min(-90).max(90).optional(),
+    lng: z.number().min(-180).max(180).optional(),
+  });
+  const legBody = z.object({
+    mode: z.enum(['sea', 'air', 'road', 'rail', 'customs']),
+    from: pointBody,
+    to: pointBody.optional(),
+    carrier: z.string().trim().max(40).optional(),
+    via: z.enum(['', 'suez', 'cape']).optional(),
+    trackedId: z.string().uuid().nullable().optional(),
+    plannedDeparture: z.string().datetime({ offset: true }).nullable().optional(),
+    plannedArrival: z.string().datetime({ offset: true }).nullable().optional(),
+    costAmount: z.number().min(0).max(1e9).nullable().optional(),
+    costCurrency: z.string().trim().length(3).optional(),
+    freeDays: z.number().int().min(0).max(120).nullable().optional(),
+    demurragePerDay: z.number().min(0).max(1e6).nullable().optional(),
+    notes: z.string().trim().max(500).optional(),
+  });
+  const routeBody = z.object({
+    name: z.string().trim().min(1).max(120),
+    workspaceId: z.string().uuid().nullable().optional(),
+    status: z.enum(['draft', 'active', 'done']).optional(),
+    notes: z.string().trim().max(1000).optional(),
+    legs: z.array(legBody).max(20),
+  });
+
+  async function checkWs(userId: string, wsId: string | null | undefined): Promise<boolean> {
+    return !wsId || !!(await getOwnedWorkspace(userId, wsId));
+  }
+
+  // GET /api/hub/routes — my routes with plan-vs-fact summaries.
+  app.get('/api/hub/routes', async (req, reply) => reply.send({ routes: await listRoutes(req.user!.sub) }));
+
+  // GET /api/hub/routes/:id
+  app.get('/api/hub/routes/:id', async (req, reply) => {
+    const p = idParams.safeParse(req.params);
+    if (!p.success) return reply.status(404).send({ error: 'Not found' });
+    const r = await getRoute(req.user!.sub, p.data.id);
+    if (!r) return reply.status(404).send({ error: 'Not found' });
+    return reply.send({ route: r });
+  });
+
+  // POST /api/hub/routes · PUT /api/hub/routes/:id (legs replaced wholesale)
+  app.post('/api/hub/routes', async (req, reply) => {
+    const b = routeBody.safeParse(req.body);
+    if (!b.success) return reply.status(400).send({ error: 'Перевірте поля маршруту.' });
+    const userId = req.user!.sub;
+    if (!(await checkWs(userId, b.data.workspaceId))) return reply.status(404).send({ error: 'Workspace not found' });
+    try {
+      const id = await saveRoute(userId, b.data);
+      return reply.status(201).send({ route: await getRoute(userId, id) });
+    } catch (err) {
+      if (err instanceof RouteError) return reply.status(err.status).send({ error: err.message });
+      throw err;
+    }
+  });
+  app.put('/api/hub/routes/:id', async (req, reply) => {
+    const p = idParams.safeParse(req.params);
+    const b = routeBody.safeParse(req.body);
+    if (!p.success) return reply.status(404).send({ error: 'Not found' });
+    if (!b.success) return reply.status(400).send({ error: 'Перевірте поля маршруту.' });
+    const userId = req.user!.sub;
+    if (!(await checkWs(userId, b.data.workspaceId))) return reply.status(404).send({ error: 'Workspace not found' });
+    try {
+      const id = await saveRoute(userId, b.data, p.data.id);
+      return reply.send({ route: await getRoute(userId, id) });
+    } catch (err) {
+      if (err instanceof RouteError) return reply.status(err.status).send({ error: err.message });
+      throw err;
+    }
+  });
+
+  // DELETE /api/hub/routes/:id — author only.
+  app.delete('/api/hub/routes/:id', async (req, reply) => {
+    const p = idParams.safeParse(req.params);
+    if (!p.success || !(await deleteRoute(req.user!.sub, p.data.id))) return reply.status(404).send({ error: 'Not found' });
+    return reply.status(204).send();
+  });
+
+  // POST /api/hub/routes/suggest — Штурман proposes 2–3 variants (advisory).
+  app.post('/api/hub/routes/suggest', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const b = z
+      .object({
+        from: z.string().trim().min(2).max(80),
+        to: z.string().trim().min(2).max(80),
+        readyDate: z.string().datetime({ offset: true }).optional(),
+        cargo: z.string().trim().max(200).optional(),
+        priority: z.enum(['cost', 'speed', 'reliability']).optional(),
+      })
+      .safeParse(req.body);
+    if (!b.success) return reply.status(400).send({ error: 'Вкажіть звідки і куди.' });
+    try {
+      return reply.send(await suggestRoutes(req.user!.sub, b.data));
+    } catch (err) {
+      if (err instanceof SuggestError) return reply.status(422).send({ error: err.message });
+      throw err;
+    }
   });
 
   // GET /api/workspaces/:id/tracking-suggestions — container / AWB / B/L numbers

@@ -836,3 +836,45 @@ CREATE TABLE IF NOT EXISTS carrier_services (
   updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_carrier_services ON carrier_services(carrier);
+
+-- ── Logistics hub · Phase 4: route builder (plan vs fact) ────────────────────
+-- A planned multimodal route: ordered legs (sea / air / road / rail / customs),
+-- each optionally bound to a tracked item so the plan is compared with reality.
+CREATE TABLE IF NOT EXISTS planned_routes (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  owner_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  workspace_id  UUID REFERENCES workspaces(id) ON DELETE SET NULL,
+  name          TEXT NOT NULL,
+  status        TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'active', 'done')),
+  notes         TEXT NOT NULL DEFAULT '',
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_planned_routes_owner ON planned_routes(owner_id);
+CREATE INDEX IF NOT EXISTS idx_planned_routes_ws ON planned_routes(workspace_id);
+
+CREATE TABLE IF NOT EXISTS route_legs (
+  id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  route_id           UUID NOT NULL REFERENCES planned_routes(id) ON DELETE CASCADE,
+  seq                INT NOT NULL,
+  mode               TEXT NOT NULL CHECK (mode IN ('sea', 'air', 'road', 'rail', 'customs')),
+  from_code          TEXT NOT NULL DEFAULT '',
+  from_name          TEXT NOT NULL DEFAULT '',
+  from_lat           DOUBLE PRECISION,
+  from_lng           DOUBLE PRECISION,
+  to_code            TEXT NOT NULL DEFAULT '',
+  to_name            TEXT NOT NULL DEFAULT '',
+  to_lat             DOUBLE PRECISION,
+  to_lng             DOUBLE PRECISION,
+  carrier            TEXT NOT NULL DEFAULT '',
+  via                TEXT NOT NULL DEFAULT '' CHECK (via IN ('', 'suez', 'cape')),
+  tracked_id         UUID REFERENCES tracked_items(id) ON DELETE SET NULL,
+  planned_departure  TIMESTAMPTZ,
+  planned_arrival    TIMESTAMPTZ,
+  cost_amount        NUMERIC(14, 2),
+  cost_currency      TEXT NOT NULL DEFAULT 'USD',
+  free_days          INT,
+  demurrage_per_day  NUMERIC(12, 2),
+  notes              TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_route_legs_route ON route_legs(route_id, seq);

@@ -14,6 +14,7 @@ import { mockWorkspace, WSID } from "./mocks";
 const LIVE = JSON.parse(readFileSync(join(__dirname, "fixtures", "hub-live.json"), "utf8"));
 const PORTS = JSON.parse(readFileSync(join(__dirname, "fixtures", "hub-ports.json"), "utf8"));
 const LINES = JSON.parse(readFileSync(join(__dirname, "fixtures", "hub-lines.json"), "utf8"));
+const ROUTES = JSON.parse(readFileSync(join(__dirname, "fixtures", "hub-routes.json"), "utf8"));
 
 const EVENTS = [
   { id: "e1", at: "2026-09-16T08:00:00Z", location: "Ningbo, CN", lat: 29.93, lng: 121.85, description: "Завантажено на судно", planned: false },
@@ -28,6 +29,8 @@ interface HubMockState {
   favs?: string[];
   services?: unknown[];
   carrierMarks?: unknown[];
+  savedRoutes?: unknown[];
+  suggests?: unknown[];
 }
 
 async function mockHub(page: Page, state: HubMockState = { added: [] }) {
@@ -37,6 +40,16 @@ async function mockHub(page: Page, state: HubMockState = { added: [] }) {
     if (pathname === "/api/hub/live") return (await json(LIVE), true);
     if (pathname === "/api/map/ports") return (await json({ ports: [] }), true);
     if (pathname === "/api/hub/ports") return (await json(PORTS), true);
+    if (pathname === "/api/hub/routes" && method === "GET") return (await json({ routes: ROUTES.routes }), true);
+    if (pathname === "/api/hub/routes/suggest") {
+      state.suggests?.push(route.request().postDataJSON());
+      return (await json(ROUTES.suggest), true);
+    }
+    if (pathname === "/api/hub/routes" && method === "POST") {
+      state.savedRoutes?.push(route.request().postDataJSON());
+      return (await json({ route: ROUTES.routes[0] }, 201), true);
+    }
+    if (pathname.startsWith("/api/hub/routes/")) return (await json({ route: ROUTES.routes[0] }), true);
     if (pathname === "/api/hub/lines") return (await json({ carriers: LINES.carriers, lanes: LINES.lanes }), true);
     const lm = pathname.match(/^\/api\/hub\/lines\/([a-z-]+)(\/.*)?$/);
     if (lm) {
@@ -137,7 +150,8 @@ test.describe("Logistics hub", () => {
 
     if (info.project.name !== "mobile") {
       const hud = page.getByTestId("hub-hud");
-      await expect(hud).toContainText("в дорозі");
+      await expect(hud.getByLabel(/3 в дорозі/)).toBeVisible();
+      await expect(hud.getByLabel(/портів і кордонів зі збоями/)).toBeVisible();
       await expect(hud).toContainText("AIS:");
     }
     // Layers live in a compact menu.
@@ -272,5 +286,54 @@ test.describe("Logistics hub", () => {
     await card.getByRole("button", { name: "Зберегти сервіс" }).click();
     await expect.poll(() => state.services!.length).toBe(1);
     expect(state.services![0]).toMatchObject({ name: "ME-3", rotation: ["INNSA", "TRAMR", "UAODS"], transitDaysMin: 24 });
+  });
+
+  test("routes tab: plan vs fact, Штурман variants, builder", async ({ page }, info) => {
+    const state: HubMockState = { added: [], savedRoutes: [], suggests: [] };
+    await mockHub(page, state);
+    await openHub(page);
+    await page.getByRole("tab", { name: "Маршрути" }).click();
+    const row = page.getByTestId("hub-route-row").first();
+    await expect(row).toContainText("Метопрен Нінбо → Київ");
+    await expect(row).toContainText("Затримка");
+    await row.click();
+
+    const card = page.getByTestId("hub-route-detail");
+    await expect(card).toBeVisible();
+    await expect(page.getByTestId("hub-route-legs").locator("li")).toHaveCount(3);
+    await expect(page.getByTestId("hub-route-summary")).toContainText("5");
+    await expect(card.getByTestId("hub-free-time")).toContainText("Free time 5 дн");
+    await expect(card).toContainText("Метопрен, партія 2");
+    // Planned (dashed) + actual (solid) paths and numbered stops on the map.
+    expect(await page.locator("path.hub-trail").count()).toBeGreaterThan(0);
+    await page.waitForTimeout(1300);
+    await page.screenshot({ path: `test-results/hub-route-${info.project.name}.png` });
+
+    // New route via Штурман's suggestions.
+    await card.getByRole("button", { name: "Закрити" }).click();
+    if (info.project.name === "mobile") await page.getByRole("button", { name: "Показати панель хабу" }).click();
+    await page.getByTestId("hub-route-new").click();
+    const ed = page.getByTestId("hub-route-editor");
+    await ed.getByLabel("Звідки").first().fill("Нінбо (CNNGB)");
+    await ed.getByLabel("Куди").first().fill("Київ (UAIEV)");
+    await ed.getByRole("button", { name: "Запропонувати варіанти" }).click();
+    await expect(page.getByTestId("hub-route-variants")).toContainText("Море до Констанци");
+    expect(state.suggests![0]).toMatchObject({ from: "Нінбо (CNNGB)", to: "Київ (UAIEV)", priority: "reliability" });
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: `test-results/hub-route-suggest-${info.project.name}.png` });
+    await page.getByTestId("hub-route-variants").getByRole("button", { name: "Застосувати" }).first().click();
+    await expect(page.getByTestId("hub-route-leg")).toHaveCount(4);
+    await expect(ed.getByLabel("Назва маршруту")).toHaveValue("Море до Констанци + авто через Орлівку");
+    // Add a manual leg, then save.
+    await page.getByTestId("hub-route-add-leg").click();
+    await expect(page.getByTestId("hub-route-leg")).toHaveCount(5);
+    await page.getByRole("button", { name: "Видалити плече 5" }).click();
+    await page.getByTestId("hub-route-save").click();
+    await expect.poll(() => state.savedRoutes!.length).toBe(1);
+    const saved = state.savedRoutes![0] as { legs: { mode: string; from: { code: string } }[]; workspaceId: string };
+    expect(saved.legs.map((l) => l.mode)).toEqual(["sea", "road", "customs", "road"]);
+    expect(saved.legs[0]!.from.code).toBe("CNNGB");
+    expect(saved.workspaceId).toBe(WSID);
+    await expect(page.getByTestId("hub-route-detail")).toBeVisible();
   });
 });

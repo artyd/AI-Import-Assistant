@@ -18,12 +18,17 @@ import { useTheme } from "@/lib/theme";
 import {
   hubApi,
   lineApi,
+  routeApi,
+  ROUTE_MODE_COLOR,
   portApi,
   RISK_ZONES,
   portStatusColor,
   statusColor,
   type AmbientVessel,
   type CarrierDetailData,
+  type CarrierRef,
+  type LegDraft,
+  type PlannedRoute,
   type CarrierSummary,
   type Lane,
   type HubPort,
@@ -40,6 +45,9 @@ import { isIssue, PortsPanel } from "./PortsPanel";
 import { PortDetail } from "./PortDetail";
 import { LinesPanel } from "./LinesPanel";
 import { CarrierDetail } from "./CarrierDetail";
+import { RoutesPanel } from "./RoutesPanel";
+import { RouteDetail, type PickedPoint } from "./RouteDetail";
+import { haversineKm } from "./geo";
 
 const TILE_LIGHT = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}";
 const TILE_DARK =
@@ -59,12 +67,13 @@ const MAX_DR_MS = 20 * 60_000;
 const AIS_MIN_ZOOM = 4;
 
 type LayerKey = "tracks" | "routes" | "ais" | "ports" | "lanes" | "risk";
-type Tab = "tracks" | "ports" | "lines";
+type Tab = "tracks" | "ports" | "lines" | "routes";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "tracks", label: "Вантажі" },
   { key: "ports", label: "Порти" },
   { key: "lines", label: "Лінії" },
+  { key: "routes", label: "Маршрути" },
 ];
 
 const LAYERS: { key: LayerKey; label: string; dot: string }[] = [
@@ -124,6 +133,12 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
   const [selCarrier, setSelCarrier] = useState<string | null>(null);
   const [selLane, setSelLane] = useState<string | null>(null);
   const [carrierDetail, setCarrierDetail] = useState<CarrierDetailData | null>(null);
+  const [routes, setRoutes] = useState<PlannedRoute[]>([]);
+  const [selRoute, setSelRoute] = useState<string | null>(null);
+  const [draftLegs, setDraftLegs] = useState<LegDraft[] | null>(null);
+  const [carrierRefs, setCarrierRefs] = useState<CarrierRef[]>([]);
+  const [picking, setPicking] = useState(false);
+  const pickRef = useRef<((p: PickedPoint) => void) | null>(null);
   const [isFull, setIsFull] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [narrow, setNarrow] = useState(false);
@@ -137,6 +152,7 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
   const routeLayer = useRef<L.LayerGroup | null>(null);
   const portLayer = useRef<L.LayerGroup | null>(null);
   const lineLayer = useRef<L.LayerGroup | null>(null);
+  const planLayer = useRef<L.LayerGroup | null>(null);
   const fitted = useRef(false);
   const snapAt = useRef(Date.now());
 
@@ -193,19 +209,50 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
     return () => clearInterval(t);
   }, [loadLines]);
 
+  const loadRoutes = useCallback(() => {
+    routeApi
+      .list()
+      .then((r) => setRoutes(r.routes ?? []))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    loadRoutes();
+    hubApi
+      .carriers()
+      .then((r) => setCarrierRefs(r.carriers))
+      .catch(() => {});
+    const t = setInterval(loadRoutes, POLL_MS);
+    return () => clearInterval(t);
+  }, [loadRoutes]);
+
+  const setPick = useCallback((cb: ((p: PickedPoint) => void) | null) => {
+    pickRef.current = cb;
+    setPicking(!!cb);
+  }, []);
+
   const selectTrack = useCallback((id: string | null) => {
     setSelPort(null);
     setSelCarrier(null);
+    setSelRoute(null);
     setSelectedId(id);
+  }, []);
+  const selectRoute = useCallback((id: string | null) => {
+    setSelectedId(null);
+    setSelPort(null);
+    setSelCarrier(null);
+    setSelRoute(id);
   }, []);
   const selectPort = useCallback((code: string | null) => {
     setSelectedId(null);
     setSelCarrier(null);
+    setSelRoute(null);
     setSelPort(code);
   }, []);
   const selectCarrier = useCallback((id: string | null) => {
     setSelectedId(null);
     setSelPort(null);
+    setSelRoute(null);
     setCarrierDetail(null);
     setSelCarrier(id);
   }, []);
@@ -241,8 +288,90 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
 
   // On phones the list and the detail card share the screen — one at a time.
   useEffect(() => {
-    if (narrow && (selectedId || selPort || selCarrier)) setPanelOpen(false);
-  }, [narrow, selectedId, selPort, selCarrier]);
+    if (narrow && (selectedId || selPort || selCarrier || selRoute)) setPanelOpen(false);
+  }, [narrow, selectedId, selPort, selCarrier, selRoute]);
+
+  // ── Route plan: planned legs (dashed, by mode) + actual tracked path ──────
+  const selectedRoute = routes.find((r) => r.id === selRoute) ?? null;
+  useEffect(() => {
+    const g = planLayer.current;
+    if (!map || !g) return;
+    g.clearLayers();
+    const portPos = (p: { code?: string; lat?: number; lng?: number } | undefined): [number, number] | null => {
+      if (!p) return null;
+      if (p.code) {
+        const x = ports.find((q) => q.code === p.code);
+        return x ? [x.lat, x.lng] : null;
+      }
+      return p.lat != null && p.lng != null ? [p.lat, p.lng] : null;
+    };
+    const stop = (pos: [number, number], n: number, color: string, title: string) =>
+      L.marker(pos, {
+        icon: L.divIcon({
+          className: "",
+          html: `<span style="display:grid;place-items:center;width:20px;height:20px;border-radius:50%;background:${color};color:#fff;font:700 11px/1 var(--font-sans);box-shadow:0 0 0 2px var(--surface),0 2px 6px rgba(0,0,0,.3)">${n}</span>`,
+          iconSize: [20, 20],
+          iconAnchor: [10, 10],
+        }),
+      })
+        .bindTooltip(title, { direction: "top" })
+        .addTo(g);
+    if (draftLegs) {
+      draftLegs.forEach((l, i) => {
+        const a = portPos(l.from);
+        const b = l.mode === "customs" ? a : portPos(l.to);
+        const color = ROUTE_MODE_COLOR[l.mode];
+        if (a) stop(a, i + 1, color, `${i + 1}. ${l.mode}`);
+        if (a && b && l.mode !== "customs") L.polyline([a, b], { color, weight: 3, opacity: 0.8, dashArray: "6 8" }).addTo(g);
+      });
+      return;
+    }
+    if (!selectedRoute) return;
+    selectedRoute.legs.forEach((l, i) => {
+      const color = ROUTE_MODE_COLOR[l.mode];
+      const c = l.computed;
+      if (c.path.length > 1) {
+        L.polyline(c.path, { color, weight: 4, opacity: 0.55, dashArray: "8 8" })
+          .bindTooltip(`План: ${l.from.name} → ${l.to.name}`, { sticky: true })
+          .addTo(g);
+      }
+      if (c.fact && c.fact.path.length > 1) {
+        L.polyline(c.fact.path, { color: c.delayDays > 0 ? "#dc4a4f" : color, weight: 5, opacity: 0.95, className: "hub-trail" })
+          .bindTooltip("Факт за трекінгом", { sticky: true })
+          .addTo(g);
+      }
+      if (l.from.pos) stop(l.from.pos, i + 1, color, `${i + 1}. ${l.mode === "customs" ? "Митниця · " : ""}${l.from.name}`);
+      if (i === selectedRoute.legs.length - 1 && l.to.pos && l.mode !== "customs") stop(l.to.pos, i + 2, "#111", l.to.name);
+    });
+  }, [map, selectedRoute, draftLegs, ports]);
+
+  useEffect(() => {
+    if (!map || !selectedRoute) return;
+    const pts = selectedRoute.legs.flatMap((l) => l.computed.path);
+    if (pts.length > 1) map.flyToBounds(L.latLngBounds(pts.map((p) => L.latLng(p[0], p[1]))).pad(0.15), { duration: 0.9 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map, selectedRoute?.id]);
+
+  // Map pick mode for the route builder: nearest gazetteer place, else a point.
+  useEffect(() => {
+    if (!map) return;
+    const onClick = (e: L.LeafletMouseEvent) => {
+      const cb = pickRef.current;
+      if (!cb) return;
+      const p: [number, number] = [e.latlng.lat, e.latlng.lng];
+      let best: { code: string; d: number } | null = null;
+      for (const q of ports) {
+        const d = haversineKm(p, [q.lat, q.lng]);
+        if (d < 150 && (!best || d < best.d)) best = { code: q.code, d };
+      }
+      cb(best ? { code: best.code } : { name: `Точка ${p[0].toFixed(2)}, ${p[1].toFixed(2)}`, lat: p[0], lng: p[1] });
+      setPick(null);
+    };
+    map.on("click", onClick);
+    return () => {
+      map.off("click", onClick);
+    };
+  }, [map, ports, setPick]);
 
   // ── Lines: reference corridors, war-risk zones, selected carrier's services ──
   useEffect(() => {
@@ -309,6 +438,7 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
     scale.addTo(map);
     routeLayer.current = L.layerGroup().addTo(map);
     lineLayer.current = L.layerGroup().addTo(map);
+    planLayer.current = L.layerGroup().addTo(map);
     portLayer.current = L.layerGroup().addTo(map);
     const onZoom = () => setZoom(map.getZoom());
     onZoom();
@@ -319,6 +449,7 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
       routeLayer.current?.remove();
       portLayer.current?.remove();
       lineLayer.current?.remove();
+      planLayer.current?.remove();
     };
   }, [map]);
 
@@ -576,14 +707,19 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
 
   const tileUrl = theme === "dark" ? TILE_DARK : TILE_LIGHT;
   const panelW = 340;
-  const hasDetail = !!selected || !!selectedPort || !!selCarrier;
+  const hasDetail = !!selected || !!selectedPort || !!selCarrier || !!selRoute;
   const showPanel = panelOpen && !(narrow && hasDetail);
   const leftInset = showPanel && !narrow ? panelW + 24 : 12;
   const rightInset = hasDetail && !narrow ? 384 : 12;
   const compactHud = hasDetail || narrow || wrapW - leftInset - rightInset < 900;
 
   return (
-    <div ref={wrapRef} style={{ position: "relative", height: "100%", width: "100%", background: "var(--chat)", overflow: "hidden" }} data-testid="hub-map">
+    <div
+      ref={wrapRef}
+      style={{ position: "relative", height: "100%", width: "100%", background: "var(--chat)", overflow: "hidden" }}
+      data-testid="hub-map"
+      data-picking={picking ? "1" : undefined}
+    >
       <style>{`
         .aia-map .leaflet-container { background: var(--panel); font-family: var(--font-sans); }
         .aia-map .leaflet-tooltip { background: var(--surface); color: var(--text); border: 1px solid var(--border); box-shadow: var(--shadow); font-size: 12px; }
@@ -593,6 +729,7 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
         .aia-map .leaflet-control-attribution a { color: var(--accent) !important; }
         ${HUB_MAP_CSS}
         ${HUB_PORT_CSS}
+        [data-picking="1"] .aia-map, [data-picking="1"] .aia-map .leaflet-interactive { cursor: crosshair !important; }
       `}</style>
 
       {loading && (
@@ -628,6 +765,7 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
                   setSelectedId(null);
                   setSelPort(null);
                   setSelCarrier(null);
+                  setSelRoute(null);
                 }
               }}
               aria-label="Показати панель хабу"
@@ -732,13 +870,15 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
                   boxShadow: tab === t.key ? "0 1px 4px rgba(0,0,0,.06)" : "none",
                   color: tab === t.key ? "var(--text)" : "var(--muted)",
                   font: "inherit",
-                  fontSize: 13,
+                  fontSize: 12.5,
                   fontWeight: 650,
                   cursor: "pointer",
+                  padding: "0 4px",
+                  whiteSpace: "nowrap",
                 }}
               >
                 {t.label}
-                {t.key === "ports" && portIssues > 0 && <span style={{ marginLeft: 6, color: "var(--err)" }}>● {portIssues}</span>}
+                {t.key === "ports" && portIssues > 0 && <span style={{ marginLeft: 4, color: "var(--err)" }}>●{portIssues}</span>}
               </button>
             ))}
           </div>
@@ -757,6 +897,8 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
               />
             ) : tab === "ports" ? (
               <PortsPanel ports={ports} selectedCode={selPort} onSelect={(c) => selectPort(c)} onChanged={loadPorts} />
+            ) : tab === "routes" ? (
+              <RoutesPanel routes={routes} selectedId={selRoute === "new" ? null : selRoute} onSelect={(id) => selectRoute(id)} onNew={() => selectRoute("new")} />
             ) : (
               <LinesPanel
                 carriers={carriers}
@@ -799,6 +941,56 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
             }}
           />
         </aside>
+      )}
+      {selRoute && (
+        <aside
+          aria-label="Маршрут"
+          style={{
+            ...glass,
+            position: "absolute",
+            zIndex: 1260,
+            top: narrow ? "auto" : 12,
+            right: 12,
+            bottom: narrow ? 12 : 64,
+            width: narrow ? "calc(100% - 24px)" : 380,
+            height: narrow ? "66%" : undefined,
+            overflow: "hidden",
+            background: "color-mix(in srgb, var(--surface) 97%, transparent)",
+          }}
+        >
+          <RouteDetail
+            key={selRoute}
+            routeId={selRoute === "new" ? null : selRoute}
+            ports={ports}
+            tracks={items}
+            carriers={carrierRefs}
+            workspaces={workspaces}
+            defaultWorkspaceId={workspaceId}
+            onClose={() => selectRoute(null)}
+            onSaved={(r) => {
+              loadRoutes();
+              setSelRoute(r.id);
+            }}
+            onDeleted={() => {
+              selectRoute(null);
+              loadRoutes();
+            }}
+            onPick={setPick}
+            onDraftChange={setDraftLegs}
+            onOpenTrack={(id) => {
+              setTab("tracks");
+              selectTrack(id);
+            }}
+          />
+        </aside>
+      )}
+      {picking && (
+        <div role="status" style={{ ...glass, position: "absolute", top: 64, left: "50%", transform: "translateX(-50%)", zIndex: 1300, padding: "8px 14px", fontSize: 13, display: "flex", gap: 10, alignItems: "center" }}>
+          📍 Клікніть на карті, щоб обрати точку
+          <button type="button" className="btn" style={{ height: 26, padding: "0 10px", fontSize: 12 }} onClick={() => setPick(null)}>
+            Скасувати
+          </button>
+        </div>
       )}
       {selCarrier && (
         <aside
@@ -868,6 +1060,7 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
           <div
             style={{ ...glass, pointerEvents: "auto", display: "flex", flexWrap: "nowrap", alignItems: "center", gap: compactHud ? 10 : 14, padding: "8px 14px", fontSize: 12.5, whiteSpace: "nowrap", maxWidth: "100%", overflow: "hidden" }}
             data-testid="hub-hud"
+            data-tick={now}
           >
             <Stat icon="🚢" n={stats.moving} label="в дорозі" color="var(--accent)" compact={compactHud} />
             <Stat icon="⚓" n={stats.port} label="у порту / митниці" color="var(--warn)" compact={compactHud} />
@@ -881,7 +1074,6 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
             </span>
             <span style={{ color: "var(--faint)", display: compactHud ? "none" : undefined }}>
               оновлено {snap ? new Date(snapAt.current).toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" }) : "—"}
-              <span hidden>{now}</span>
             </span>
           </div>
         </div>
