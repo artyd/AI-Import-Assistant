@@ -30,6 +30,7 @@ import { partiesRoutes } from './routes/parties.js';
 import { reportRoutes } from './routes/report.js';
 import { exportRoutes } from './routes/export.js';
 import { mapRoutes } from './routes/map.js';
+import { hubRoutes } from './routes/hub.js';
 import { mcpRoutes } from './routes/mcp.js';
 
 async function buildServer() {
@@ -123,6 +124,7 @@ async function buildServer() {
   await app.register(reportRoutes);
   await app.register(exportRoutes);
   await app.register(mapRoutes);
+  await app.register(hubRoutes);
   await app.register(mcpRoutes);
 
   return app;

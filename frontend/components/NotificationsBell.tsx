@@ -14,6 +14,9 @@ const TYPE_TAG: Record<string, { label: string; color: string }> = {
   checklist_incomplete: { label: "Документи", color: "var(--warn)" },
 };
 
+// Logistics-hub tracking alerts carry a per-item type (`hub:<id>:<event>`).
+const HUB_TAG = { label: "Хаб", color: "var(--accent)" };
+
 export function NotificationsBell() {
   const { user } = useAuth();
   const router = useRouter();
@@ -106,7 +109,7 @@ export function NotificationsBell() {
             </div>
           ) : (
             items.map((n) => {
-              const tag = TYPE_TAG[n.type];
+              const tag = TYPE_TAG[n.type] ?? (n.type.startsWith("hub:") ? HUB_TAG : undefined);
               const clickable = !!n.workspace_id;
               return (
                 <div

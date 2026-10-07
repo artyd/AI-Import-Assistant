@@ -720,14 +720,85 @@ shipments, no seeded routes, or the live provider has no fix).
 
 ---
 
+## Logistics hub (Карта → Логістичний хаб)
+
+One hub for every delivery type: sea containers / B/L, air cargo (AWB),
+courier / express, Ukrainian domestic (Нова Пошта, Укрпошта, Meest, Делівері).
+All routes are **authenticated**. A tracked item is visible to the user who
+added it and to the owner of the shipment it is linked to; linking requires
+owning that shipment (404 otherwise).
+
+Status source is a **hybrid chain**: official carrier API (Нова Пошта keyless;
+Укрпошта / DHL / Maersk when their keys are set) → the carrier's public tracking
+page (fetched by `logist-mcp`, rendered by headless Chromium if it is an SPA) read
+by Claude into a strict schema → otherwise **no data** (never a guessed status).
+Every item carries `source` + `lastCheckedAt`.
+
+Shapes:
+- `TrackStatus ∈ pending|info|in_transit|at_port|customs|out_for_delivery|delivered|exception|unknown`
+- `Track = { id, number, kind: container|bl|awb|parcel, carrier, carrierName,
+  mode: sea|air|courier|domestic, label, status, statusLabel, statusText, origin,
+  destination, originPos: [lat,lng]|null, destPos, vesselName, vesselImo,
+  departedAt, eta, firstEta, arrivedAt, source ('api:<carrier>'|'scrape:<carrier>'|'none'),
+  lastCheckedAt, lastChangedAt, lastError, workspaceId, workspaceNumber, trackUrl, createdAt }`
+- `TrackEvent = { id, at, location, lat, lng, description, planned }`
+- `LiveInfo = { id, pos: [lat,lng]|null, heading, path: [lat,lng][], progress (0..1),
+  positionSource: ais|estimate|event|origin|destination|null, vessel: { name, sog, updatedAt }|null }`
+  — `estimate` = interpolated along the sea lane / air arc by departure→ETA time;
+  the UI labels it "орієнтовно".
+
+### `GET /api/hub/carriers`
+`{ carriers: { id, name, mode }[] }` — registry for the manual carrier picker.
+
+### `GET /api/hub/detect?number=`
+`{ normalized, candidates: { carrier, carrierName, kind, mode, confidence }[] }`
+(ISO 6346 check digit for containers, IATA mod-7 for AWB, format rules for couriers).
+
+### `GET /api/hub/tracks[?workspaceId=&archived=1]`
+`{ tracks: Track[] }`.
+
+### `POST /api/hub/tracks`
+Body `{ number, carrier?, label?, workspaceId? }`. Checks the number immediately.
+`201 { track, events }`; `400` bad number; `422` carrier not recognisable (pick one);
+`404` workspace not owned.
+
+### `GET /api/hub/tracks/:id`
+`{ track, events: TrackEvent[] }`.
+
+### `PATCH /api/hub/tracks/:id`
+Body `{ label?, workspaceId? (null = unlink), carrier?, archived? }` → `{ track, events }`.
+Changing `carrier` re-checks immediately.
+
+### `DELETE /api/hub/tracks/:id`  → `204` (only the user who added it).
+
+### `POST /api/hub/tracks/:id/refresh`
+Manual re-check → `{ track, events }`; `429` if checked < 2 min ago.
+
+### `GET /api/hub/live`
+Everything the live map draws: `{ items: (Track & { live: LiveInfo })[],
+vessels: { mmsi, name, lat, lng, cog, sog, type }[] (ambient AIS ≤2h old), serverTime }`.
+
+### `GET /api/workspaces/:id/tracking-suggestions`
+Numbers found in the shipment's documents (check-digit-valid containers / AWB,
+carrier-prefixed B/L) that are not tracked yet:
+`{ suggestions: { number, carrier, carrierName, kind, mode, files: string[] }[] }`.
+
+Notifications: in-app only (`notifications.type = 'hub:<trackId>:<event>'`) — on
+arrival at port/hub, customs, out for delivery, delivered, exception, or an ETA
+shift ≥ 24 h. Agent tools: `track_shipment`, `list_tracked_shipments`,
+`find_tracking_numbers` (chat); `track_by_number` (read-only, also on `/api/mcp`).
+
+---
+
 ## MCP server (public reference tools)
 
 Штурман is also a remote MCP server so users can connect it to their own AI client
 (Claude, Claude Code, Cursor, VS Code). Only scope-less **read-only reference
 tools** are exposed — no shipment data: `uktzed_lookup_code`,
 `uktzed_browse_classifier`, `dualuse_browse_classifier`, `get_exchange_rate`,
-`pubchem_identify_substance` (only when `LOGIST_MCP_URL` is set) and
-`check_drug_registration` (`{ reg_number }`, local Держреєстр mirror).
+`pubchem_identify_substance` (only when `LOGIST_MCP_URL` is set),
+`check_drug_registration` (`{ reg_number }`, local Держреєстр mirror) and
+`track_by_number` (`{ number, carrier? }` — live cargo status, nothing stored).
 
 ### `POST /api/mcp`  (no auth — open; `/api/mcp/<anything>` also served for old token links)
 MCP Streamable HTTP, **stateless, JSON-only** (no `Mcp-Session-Id`, no SSE).

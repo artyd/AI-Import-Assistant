@@ -75,6 +75,16 @@ services:
       MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-104857600}
       # Internal logist-mcp URL (Phase 1). Empty disables the Phase-2 tools.
       LOGIST_MCP_URL: ${LOGIST_MCP_URL:-http://logist-mcp:8015}
+      # Logistics hub tracking (hybrid: carrier APIs → carrier page via logist-mcp/Chromium).
+      TRACKING_ENABLED: ${TRACKING_ENABLED:-true}
+      TRACKING_CRON: ${TRACKING_CRON:-*/30 * * * *}
+      TRACKING_SCRAPE_ENABLED: ${TRACKING_SCRAPE_ENABLED:-true}
+      TRACKING_PARSE_MODEL: ${TRACKING_PARSE_MODEL:-claude-haiku-4-5}
+      NOVAPOSHTA_API_KEY: ${NOVAPOSHTA_API_KEY:-}
+      UKRPOSHTA_TRACKING_TOKEN: ${UKRPOSHTA_TRACKING_TOKEN:-}
+      DHL_API_KEY: ${DHL_API_KEY:-}
+      MAERSK_API_KEY: ${MAERSK_API_KEY:-}
+      AISSTREAM_API_KEY: ${AISSTREAM_API_KEY:-}
     volumes:
       - storage_data:/data/storage
     depends_on:
@@ -109,6 +119,16 @@ services:
       NEWS_ENABLED: ${NEWS_ENABLED:-true}
       NEWS_CRON: ${NEWS_CRON:-*/30 * * * *}
       NEWS_RETENTION_DAYS: ${NEWS_RETENTION_DAYS:-14}
+      # Logistics hub tracking (hybrid: carrier APIs → carrier page via logist-mcp/Chromium).
+      TRACKING_ENABLED: ${TRACKING_ENABLED:-true}
+      TRACKING_CRON: ${TRACKING_CRON:-*/30 * * * *}
+      TRACKING_SCRAPE_ENABLED: ${TRACKING_SCRAPE_ENABLED:-true}
+      TRACKING_PARSE_MODEL: ${TRACKING_PARSE_MODEL:-claude-haiku-4-5}
+      NOVAPOSHTA_API_KEY: ${NOVAPOSHTA_API_KEY:-}
+      UKRPOSHTA_TRACKING_TOKEN: ${UKRPOSHTA_TRACKING_TOKEN:-}
+      DHL_API_KEY: ${DHL_API_KEY:-}
+      MAERSK_API_KEY: ${MAERSK_API_KEY:-}
+      AISSTREAM_API_KEY: ${AISSTREAM_API_KEY:-}
     volumes:
       - storage_data:/data/storage
     depends_on:

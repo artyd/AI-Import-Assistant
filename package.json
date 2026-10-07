@@ -49,6 +49,7 @@
     "rss-parser": "^3.13.0",
     "unzipper": "^0.12.5",
     "uuid": "^11.0.5",
+    "ws": "^8.22.0",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "zod": "^3.24.1"
   },
@@ -57,6 +58,7 @@
     "@types/node": "^22.10.5",
     "@types/pdf-parse": "^1.1.4",
     "@types/pg": "^8.11.10",
+    "@types/ws": "^8.18.2",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
     "vitest": "^2.1.9"

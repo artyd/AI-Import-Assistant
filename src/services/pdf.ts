@@ -87,3 +87,39 @@ async function render(html: string, opts: { format?: 'A4'; margin?: string }): P
     await page.close().catch(() => undefined);
   }
 }
+
+/**
+ * Render a public page in headless Chromium and return its visible text — the
+ * fallback for carrier tracking pages that are client-side apps (the plain HTML
+ * fetch returns an empty shell). Only https URLs on the caller's allow-list ever
+ * reach here (see services/hub/scrape.ts); images/fonts/media are blocked to
+ * keep it light.
+ */
+export function renderPageText(url: string, timeoutMs = 25_000): Promise<string> {
+  return slot(async () => {
+    const browser = await getBrowser();
+    const page = await browser.newPage();
+    try {
+      await page.setUserAgent(
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      );
+      await page.setRequestInterception(true);
+      page.on('request', (req) => {
+        const t = req.resourceType();
+        if (t === 'image' || t === 'font' || t === 'media') void req.abort();
+        else void req.continue();
+      });
+      await withTimeout(
+        page.goto(url, { waitUntil: 'networkidle2', timeout: timeoutMs }).catch(() => undefined),
+        timeoutMs + 2_000,
+      );
+      const text = await withTimeout(
+        page.evaluate('document.body ? document.body.innerText : ""') as Promise<string>,
+        5_000,
+      );
+      return (text ?? '').slice(0, 60_000);
+    } finally {
+      await page.close().catch(() => undefined);
+    }
+  });
+}

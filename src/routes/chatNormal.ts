@@ -12,6 +12,7 @@ import { SseStream } from '../sse/sse.js';
 import { buildNormalSystemPrompt } from '../agent/systemPrompt.js';
 import { runAgentTurn } from '../agent/loop.js';
 import { logistTools } from '../agent/tools.js';
+import { hubToolDefinitions } from '../agent/hubTools.js';
 import { chatRateLimitConfig } from './chatRateLimit.js';
 
 const chatSchema = z.object({
@@ -51,6 +52,7 @@ export async function chatNormalRoutes(app: FastifyInstance): Promise<void> {
       await appendMessage(conversationId, 'user', message);
 
       const result = await runAgentTurn({
+        ownerId,
         system: buildNormalSystemPrompt(),
         history,
         userMessage: message,
@@ -58,7 +60,10 @@ export async function chatNormalRoutes(app: FastifyInstance): Promise<void> {
         signal: sse.signal,
         // Global consultant: no shipment tools, but the customs/logistics
         // reference lookups (УКТ ЗЕД / dual-use / НБУ / PubChem) when enabled.
-        tools: logistTools(),
+        tools: [
+          ...logistTools(),
+          ...hubToolDefinitions.filter((t) => 'name' in t && t.name !== 'find_tracking_numbers'),
+        ],
       });
 
       // A failed save must not turn a streamed answer into an error: the user

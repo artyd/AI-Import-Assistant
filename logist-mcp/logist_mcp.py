@@ -972,6 +972,66 @@ async def _rest_export_xlsx(request: Request) -> Response:
     return Response(content=data, media_type=XLSX_MEDIA)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Logistics hub: carrier tracking-page fetch (tier 2 of the hybrid tracker).
+# The TS backend builds the URL from its carrier registry and asks this service
+# for the page's readable text; the backend's Claude reads the milestones out of
+# it. Only the carrier/aggregator hosts below are allowed (no open proxy / SSRF).
+# ─────────────────────────────────────────────────────────────────────────────
+
+TRACK_ALLOWED_HOSTS = (
+    "maersk.com", "msc.com", "cma-cgm.com", "coscoshipping.com", "oocl.com",
+    "hapag-lloyd.com", "one-line.com", "shipmentlink.com", "hmm21.com",
+    "yangming.com", "zim.com", "wanhai.com", "pilship.com", "turkon.com",
+    "arkasline.com.tr", "track-trace.com", "dhl.com", "fedex.com", "ups.com",
+    "tnt.com", "parcelsapp.com", "novaposhta.ua", "ukrposhta.ua", "meest.com",
+    "delivery-auto.com",
+)
+
+BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
+    "Accept-Language": "uk,en;q=0.8",
+}
+
+
+def _track_host_allowed(url: str) -> bool:
+    m = re.match(r"^https://([^/:?#]+)", url)
+    if not m:
+        return False
+    host = m.group(1).lower()
+    return any(host == h or host.endswith("." + h) for h in TRACK_ALLOWED_HOSTS)
+
+
+async def _rest_track_page(request: Request) -> JSONResponse:
+    url = request.query_params.get("url", "")
+    if not _track_host_allowed(url):
+        return _json_err("URL не дозволено для трекінгу")
+    try:
+        async with httpx.AsyncClient(
+            headers=BROWSER_HEADERS, timeout=REQUEST_TIMEOUT, follow_redirects=True
+        ) as client:
+            resp = await client.get(url)
+    except httpx.TimeoutException:
+        return _json_err("Таймаут сторінки перевізника")
+    except httpx.HTTPError as e:
+        return _json_err(f"Сторінка перевізника недоступна: {e.__class__.__name__}")
+    ctype = resp.headers.get("content-type", "")
+    if "json" in ctype:
+        text = resp.text
+    else:
+        soup = BeautifulSoup(resp.text, "html.parser")
+        for tag in soup(["script", "style", "noscript", "svg", "nav", "footer", "header"]):
+            tag.decompose()
+        text = soup.get_text("\n", strip=True)
+    return JSONResponse(
+        {"url": str(resp.url), "status": resp.status_code, "text": _cap(text, 60000)}
+    )
+
+
 def build_rest_app() -> Starlette:
     return Starlette(
         routes=[
@@ -983,6 +1043,7 @@ def build_rest_app() -> Starlette:
             Route("/rest/rate", _rest_rate, methods=["GET"]),
             Route("/rest/pubchem", _rest_pubchem, methods=["GET"]),
             Route("/rest/export/xlsx", _rest_export_xlsx, methods=["POST"]),
+            Route("/rest/track/page", _rest_track_page, methods=["GET"]),
         ]
     )
 

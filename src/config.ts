@@ -196,6 +196,29 @@ const envSchema = z.object({
   AIS_PROVIDER: z.enum(['demo', 'aishub']).default('demo'),
   AIS_API_KEY: z.string().default(''),
 
+  // Logistics hub (tracking by number + live map). The worker cron re-checks
+  // every non-delivered tracked item on TRACKING_CRON. Carrier sources are a
+  // hybrid: official APIs first (Нова Пошта works keyless; the others activate
+  // when their key is set), then the public tracking page (fetched via logist-mcp,
+  // rendered by headless Chromium if it is an SPA) read by TRACKING_PARSE_MODEL.
+  TRACKING_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
+  TRACKING_CRON: z.string().default('*/30 * * * *'),
+  TRACKING_SCRAPE_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
+  TRACKING_PARSE_MODEL: z.string().default('claude-haiku-4-5'),
+  NOVAPOSHTA_API_KEY: z.string().default(''),
+  UKRPOSHTA_TRACKING_TOKEN: z.string().default(''),
+  DHL_API_KEY: z.string().default(''),
+  MAERSK_API_KEY: z.string().default(''),
+  // aisstream.io (free) live AIS websocket — vessel positions for the live map.
+  // Empty = positions are interpolated from carrier events + ETA.
+  AISSTREAM_API_KEY: z.string().default(''),
+
   // BYOK (Phase E): symmetric key that encrypts each user's provider API key at
   // rest (AES-256-GCM). Must decode to exactly 32 bytes — accepts base64 or hex.
   // Leave empty to DISABLE BYOK entirely: everything stays on the built-in

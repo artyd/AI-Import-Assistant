@@ -1,0 +1,660 @@
+"use client";
+
+// Логістичний хаб — the live map. Everything a logist tracks (containers, B/L,
+// AWB, couriers, Нова Пошта/Укрпошта) on one map: markers glide between
+// updates, in-transit items creep along their sea lane / air arc by elapsed time,
+// AIS vessels around the Black Sea drift by their reported course and speed.
+// The left panel adds/lists tracks, the right card shows one item's timeline.
+//
+// Statically imports Leaflet → must only load client-side (MapView wraps it in
+// dynamic(ssr:false)). Map layers are managed imperatively for smooth motion.
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { MapContainer, TileLayer } from "react-leaflet";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+import { api } from "@/lib/api";
+import { useTheme } from "@/lib/theme";
+import { hubApi, statusColor, type AmbientVessel, type LatLng, type LiveSnapshot, type Track } from "@/lib/hub";
+import type { Port } from "@/lib/types";
+import { IconSpinner } from "@/components/icons";
+import { aisIcon, endpointIcon, glyphRotates, HUB_MAP_CSS, setRotation, trackIcon } from "./mapIcons";
+import { advance, lerp, splitAt } from "./geo";
+import { TracksPanel, type WorkspaceRef } from "./TracksPanel";
+import { TrackDetail } from "./TrackDetail";
+
+const TILE_LIGHT = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}";
+const TILE_DARK =
+  "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}";
+const ATTRIB = "Tiles © Esri — Esri, HERE, Garmin, © OpenStreetMap contributors · AIS © aisstream.io";
+
+const FIT_BOUNDS: L.LatLngBoundsExpression = [
+  [58, -14],
+  [0, 124],
+];
+const POLL_MS = 60_000;
+const GLIDE_MS = 1400;
+/** Never dead-reckon an AIS vessel further than this past its last fix. */
+const MAX_DR_MS = 20 * 60_000;
+/** Ambient AIS clutters a world view — show it from regional zoom. */
+const AIS_MIN_ZOOM = 4;
+
+type LayerKey = "tracks" | "routes" | "ais" | "ports";
+
+const LAYERS: { key: LayerKey; label: string; dot: string }[] = [
+  { key: "tracks", label: "Вантажі", dot: "var(--accent)" },
+  { key: "routes", label: "Маршрути", dot: "var(--accent)" },
+  { key: "ais", label: "Судна AIS", dot: "#0f9b8e" },
+  { key: "ports", label: "Порти", dot: "var(--ok)" },
+];
+
+interface TrackAnim {
+  marker: L.Marker;
+  from: LatLng;
+  to: LatLng;
+  start: number;
+  heading: number;
+  item: Track;
+  iconKey: string;
+}
+
+interface AisAnim {
+  marker: L.Marker;
+  base: LatLng;
+  baseAt: number;
+  v: AmbientVessel;
+}
+
+function resolveCssColor(v: string): string {
+  if (typeof document === "undefined" || !v.startsWith("var(")) return v;
+  const name = v.slice(4, -1).trim();
+  return getComputedStyle(document.body).getPropertyValue(name).trim() || "#2f6feb";
+}
+
+export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
+  const { theme } = useTheme();
+  const [map, setMap] = useState<L.Map | null>(null);
+  const [snap, setSnap] = useState<LiveSnapshot | null>(null);
+  const [ports, setPorts] = useState<Port[]>([]);
+  const [workspaces, setWorkspaces] = useState<WorkspaceRef[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [panelOpen, setPanelOpen] = useState(true);
+  const [layers, setLayers] = useState<Record<LayerKey, boolean>>({ tracks: true, routes: true, ais: true, ports: true });
+  const [isFull, setIsFull] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+  const [narrow, setNarrow] = useState(false);
+  const [layersOpen, setLayersOpen] = useState(false);
+  const [zoom, setZoom] = useState(3);
+
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const trackAnims = useRef(new Map<string, TrackAnim>());
+  const aisAnims = useRef(new Map<string, AisAnim>());
+  const routeLayer = useRef<L.LayerGroup | null>(null);
+  const portLayer = useRef<L.LayerGroup | null>(null);
+  const fitted = useRef(false);
+  const snapAt = useRef(Date.now());
+
+  const items = useMemo(() => snap?.items ?? [], [snap]);
+  const selected = items.find((t) => t.id === selectedId) ?? null;
+
+  // ── Data ─────────────────────────────────────────────────────────────────
+  const reload = useCallback(async (selectId?: string) => {
+    try {
+      const s = await hubApi.live();
+      snapAt.current = Date.now();
+      setSnap(s);
+      setError(null);
+      if (selectId) setSelectedId(selectId);
+    } catch {
+      setError("Не вдалося завантажити дані хабу.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void reload();
+    const t = setInterval(() => void reload(), POLL_MS);
+    return () => clearInterval(t);
+  }, [reload]);
+
+  useEffect(() => {
+    api<{ ports: Port[] }>("/api/map/ports")
+      .then((r) => setPorts(r.ports ?? []))
+      .catch(() => {});
+    api<{ workspaces: WorkspaceRef[] }>("/api/workspaces")
+      .then((r) => setWorkspaces(r.workspaces ?? []))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30_000);
+    const mq = window.matchMedia("(max-width: 760px)");
+    const onMq = () => setNarrow(mq.matches);
+    onMq();
+    mq.addEventListener("change", onMq);
+    return () => {
+      clearInterval(t);
+      mq.removeEventListener("change", onMq);
+    };
+  }, []);
+
+  // On phones the list and the detail card share the screen — one at a time.
+  useEffect(() => {
+    if (narrow && selectedId) setPanelOpen(false);
+  }, [narrow, selectedId]);
+
+  // ── Map setup ────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!map) return;
+    map.fitBounds(FIT_BOUNDS);
+    const scale = L.control.scale({ metric: true, imperial: false, position: "bottomright" });
+    scale.addTo(map);
+    routeLayer.current = L.layerGroup().addTo(map);
+    portLayer.current = L.layerGroup().addTo(map);
+    const onZoom = () => setZoom(map.getZoom());
+    onZoom();
+    map.on("zoomend", onZoom);
+    return () => {
+      map.off("zoomend", onZoom);
+      scale.remove();
+      routeLayer.current?.remove();
+      portLayer.current?.remove();
+    };
+  }, [map]);
+
+  // Frame the tracked items once they first arrive.
+  useEffect(() => {
+    if (!map || fitted.current || items.length === 0) return;
+    const pts = items.flatMap((t) => (t.live?.pos ? [t.live.pos] : []));
+    if (pts.length === 0) return;
+    fitted.current = true;
+    if (pts.length === 1) map.setView(pts[0]!, 5);
+    else map.fitBounds(L.latLngBounds(pts.map((p) => L.latLng(p[0], p[1]))).pad(0.35), { maxZoom: 6 });
+  }, [map, items]);
+
+  // ── Ports (static atlas; Phase 2 adds live status) ───────────────────────
+  useEffect(() => {
+    const g = portLayer.current;
+    if (!map || !g) return;
+    g.clearLayers();
+    if (!layers.ports) return;
+    for (const p of ports) {
+      const color = p.kind === "customs" ? "#d98213" : p.kind === "sea" ? "#2f6feb" : "#12936a";
+      L.circleMarker([p.lat, p.lng], { radius: 4, color: "#fff", weight: 1.5, fillColor: color, fillOpacity: 1 })
+        .bindTooltip(p.name, { direction: "top", offset: [0, -4] })
+        .addTo(g);
+    }
+  }, [map, ports, layers.ports]);
+
+  // ── Route lines (traveled solid + remaining "marching ants") ─────────────
+  useEffect(() => {
+    const g = routeLayer.current;
+    if (!map || !g) return;
+    g.clearLayers();
+    if (!layers.tracks) return;
+    for (const t of items) {
+      const path = t.live?.path ?? [];
+      const isSel = t.id === selectedId;
+      if (path.length < 2 || (!layers.routes && !isSel)) continue;
+      const color = resolveCssColor(statusColor(t.status));
+      const progress = t.status === "delivered" ? 1 : (t.live?.progress ?? 0);
+      const { done, rest } = splitAt(path, progress);
+      const w = isSel ? 4 : 2.5;
+      const op = isSel ? 0.95 : selectedId ? 0.25 : 0.55;
+      if (done.length > 1) L.polyline(done, { color, weight: w, opacity: op, className: isSel ? "hub-trail" : "" }).addTo(g);
+      if (rest.length > 1)
+        L.polyline(rest, { color, weight: w - 0.5, opacity: op * 0.85, className: "hub-ants", dashArray: "7 9" }).addTo(g);
+      if (isSel || layers.routes) {
+        if (t.originPos) L.marker(t.originPos, { icon: endpointIcon("origin", color), interactive: false }).addTo(g);
+        if (t.destPos)
+          L.marker(t.destPos, { icon: endpointIcon("dest", color) })
+            .bindTooltip(t.destination || "Пункт призначення", { direction: "top" })
+            .addTo(g);
+      }
+    }
+  }, [map, items, selectedId, layers.routes, layers.tracks, theme]);
+
+  // ── Tracked-item markers: create / update / glide ────────────────────────
+  useEffect(() => {
+    if (!map) return;
+    const anims = trackAnims.current;
+    const seen = new Set<string>();
+    const t0 = performance.now();
+    if (layers.tracks) {
+      for (const t of items) {
+        const pos = t.live?.pos;
+        if (!pos) continue;
+        seen.add(t.id);
+        const isSel = t.id === selectedId;
+        const iconKey = `${t.mode}|${t.status}|${isSel}`;
+        const cur = anims.get(t.id);
+        if (cur) {
+          const ll = cur.marker.getLatLng();
+          cur.from = [ll.lat, ll.lng];
+          cur.to = pos;
+          cur.start = t0;
+          cur.item = t;
+          cur.heading = t.live?.heading ?? 0;
+          if (cur.iconKey !== iconKey) {
+            cur.marker.setIcon(trackIcon(t.mode, t.status, isSel));
+            cur.iconKey = iconKey;
+          }
+          cur.marker.setZIndexOffset(isSel ? 1000 : 0);
+          if (glyphRotates(t.mode)) setRotation(cur.marker, cur.heading);
+        } else {
+          const marker = L.marker(pos, { icon: trackIcon(t.mode, t.status, isSel), zIndexOffset: isSel ? 1000 : 0, keyboard: true, title: t.label || t.number })
+            .on("click", () => setSelectedId(t.id))
+            .bindTooltip(`${t.label || t.number} · ${t.statusLabel}`, { direction: "top", offset: [0, -16] })
+            .addTo(map);
+          const anim: TrackAnim = { marker, from: pos, to: pos, start: t0, heading: t.live?.heading ?? 0, item: t, iconKey };
+          anims.set(t.id, anim);
+          if (glyphRotates(t.mode)) requestAnimationFrame(() => setRotation(marker, anim.heading));
+        }
+      }
+    }
+    for (const [id, a] of anims) {
+      if (!seen.has(id)) {
+        a.marker.remove();
+        anims.delete(id);
+      }
+    }
+  }, [map, items, selectedId, layers.tracks]);
+
+  // ── Ambient AIS vessels ──────────────────────────────────────────────────
+  useEffect(() => {
+    if (!map) return;
+    const anims = aisAnims.current;
+    const seen = new Set<string>();
+    if (layers.ais && zoom >= AIS_MIN_ZOOM) {
+      for (const v of (snap?.vessels ?? []).slice(0, 700)) {
+        seen.add(v.mmsi);
+        const cur = anims.get(v.mmsi);
+        if (cur) {
+          cur.base = [v.lat, v.lng];
+          cur.baseAt = Date.now();
+          cur.v = v;
+        } else {
+          const marker = L.marker([v.lat, v.lng], { icon: aisIcon(v.type), interactive: true, keyboard: false })
+            .bindTooltip(`${v.name || `MMSI ${v.mmsi}`}${v.sog != null ? ` · ${v.sog.toFixed(1)} вуз.` : ""}`, { direction: "top" })
+            .addTo(map);
+          anims.set(v.mmsi, { marker, base: [v.lat, v.lng], baseAt: Date.now(), v });
+          requestAnimationFrame(() => setRotation(marker, v.cog ?? 0));
+        }
+      }
+    }
+    for (const [k, a] of anims) {
+      if (!seen.has(k)) {
+        a.marker.remove();
+        anims.delete(k);
+      }
+    }
+  }, [map, snap, layers.ais, zoom]);
+
+  // ── Animation loop: glides every frame, estimates + dead reckoning ~1/s ──
+  useEffect(() => {
+    if (!map) return;
+    let raf = 0;
+    let lastSlow = 0;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const tick = (ts: number) => {
+      for (const a of trackAnims.current.values()) {
+        const f = Math.min(1, (ts - a.start) / GLIDE_MS);
+        if (f < 1) {
+          const e = 1 - (1 - f) ** 3;
+          a.marker.setLatLng(lerp(a.from, a.to, e));
+        }
+      }
+      if (!reduce && ts - lastSlow > 1000) {
+        lastSlow = ts;
+        const wall = Date.now();
+        // In-transit estimates keep creeping along their lane between polls.
+        for (const a of trackAnims.current.values()) {
+          const it = a.item;
+          if (it.live?.positionSource !== "estimate" || !it.departedAt || !it.eta) continue;
+          if (ts - a.start < GLIDE_MS) continue;
+          const t0 = new Date(it.departedAt).getTime();
+          const t1 = new Date(it.eta).getTime();
+          if (t1 <= t0) continue;
+          const t = Math.max(0.02, Math.min(0.97, (wall - t0) / (t1 - t0)));
+          const { point, heading } = splitAt(it.live.path, t);
+          a.marker.setLatLng(point);
+          a.to = point;
+          if (glyphRotates(it.mode)) setRotation(a.marker, heading);
+        }
+        // AIS vessels drift by course/speed since their last fix.
+        for (const a of aisAnims.current.values()) {
+          const { sog, cog } = a.v;
+          if (sog == null || cog == null || sog < 0.5) continue;
+          const dt = Math.min(wall - a.baseAt, MAX_DR_MS);
+          a.marker.setLatLng(advance(a.base, cog, (sog * 1.852 * dt) / 3_600_000));
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [map]);
+
+  // Clean up all imperative markers on unmount.
+  useEffect(
+    () => () => {
+      for (const a of trackAnims.current.values()) a.marker.remove();
+      for (const a of aisAnims.current.values()) a.marker.remove();
+      trackAnims.current.clear();
+      aisAnims.current.clear();
+    },
+    []
+  );
+
+  // Fly to a newly selected item.
+  useEffect(() => {
+    if (!map || !selected?.live?.pos) return;
+    const z = Math.max(map.getZoom(), 4);
+    // On phones the card covers the lower ~60% — keep the marker in the visible top part.
+    const target = narrow
+      ? map.unproject(map.project(L.latLng(selected.live.pos[0], selected.live.pos[1]), z).add([0, map.getSize().y * 0.3]), z)
+      : L.latLng(selected.live.pos[0], selected.live.pos[1]);
+    map.flyTo(target, z, { duration: 0.9 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map, selectedId]);
+
+  // Fullscreen.
+  useEffect(() => {
+    const onFs = () => {
+      setIsFull(document.fullscreenElement === wrapRef.current);
+      window.setTimeout(() => map?.invalidateSize(), 120);
+    };
+    document.addEventListener("fullscreenchange", onFs);
+    return () => document.removeEventListener("fullscreenchange", onFs);
+  }, [map]);
+
+  const toggleFullscreen = useCallback(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else void el.requestFullscreen?.();
+  }, []);
+
+  // ── HUD numbers ──────────────────────────────────────────────────────────
+  const stats = useMemo(() => {
+    const c = { moving: 0, port: 0, alert: 0, done: 0 };
+    for (const t of items) {
+      if (t.status === "in_transit" || t.status === "out_for_delivery") c.moving += 1;
+      else if (t.status === "at_port" || t.status === "customs") c.port += 1;
+      else if (t.status === "delivered") c.done += 1;
+      if (t.status === "exception" || t.status === "unknown") c.alert += 1;
+    }
+    return c;
+  }, [items]);
+
+  const tileUrl = theme === "dark" ? TILE_DARK : TILE_LIGHT;
+  const panelW = 340;
+  const showPanel = panelOpen && !(narrow && selected);
+  const leftInset = showPanel && !narrow ? panelW + 24 : 12;
+  const rightInset = selected && !narrow ? 384 : 12;
+  const compactHud = !!selected || narrow;
+
+  return (
+    <div ref={wrapRef} style={{ position: "relative", height: "100%", width: "100%", background: "var(--chat)", overflow: "hidden" }} data-testid="hub-map">
+      <style>{`
+        .aia-map .leaflet-container { background: var(--panel); font-family: var(--font-sans); }
+        .aia-map .leaflet-tooltip { background: var(--surface); color: var(--text); border: 1px solid var(--border); box-shadow: var(--shadow); font-size: 12px; }
+        .aia-map .leaflet-tooltip-top:before { border-top-color: var(--surface); }
+        .aia-map .leaflet-control-scale-line { background: color-mix(in srgb, var(--surface) 80%, transparent); border-color: var(--border) !important; color: var(--muted); }
+        .aia-map .leaflet-control-attribution { background: color-mix(in srgb, var(--surface) 80%, transparent) !important; color: var(--muted) !important; }
+        .aia-map .leaflet-control-attribution a { color: var(--accent) !important; }
+        ${HUB_MAP_CSS}
+      `}</style>
+
+      {loading && (
+        <div style={overlayCenter}>
+          <IconSpinner size={26} />
+        </div>
+      )}
+
+      <MapContainer
+        ref={setMap}
+        center={[30, 40]}
+        zoom={3}
+        minZoom={2}
+        maxZoom={18}
+        worldCopyJump
+        zoomControl={false}
+        className="aia-map"
+        style={{ height: "100%", width: "100%" }}
+      >
+        <TileLayer key={theme} url={tileUrl} attribution={ATTRIB} maxZoom={18} />
+      </MapContainer>
+
+      {/* Toolbar: zoom, layers, fullscreen */}
+      <div style={{ position: "absolute", top: 12, left: leftInset, right: rightInset, zIndex: 1200, display: "flex", justifyContent: "center", pointerEvents: "none" }}>
+        <div style={{ ...glass, pointerEvents: "auto", display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, padding: 6, maxWidth: "100%" }}>
+          {!showPanel && (
+            <button type="button" style={iconBtn} onClick={() => { setPanelOpen(true); if (narrow) setSelectedId(null); }} aria-label="Показати панель вантажів" title="Вантажі">
+              ☰
+            </button>
+          )}
+          <button type="button" style={iconBtn} onClick={() => map?.zoomIn()} aria-label="Збільшити">
+            +
+          </button>
+          <button type="button" style={iconBtn} onClick={() => map?.zoomOut()} aria-label="Зменшити">
+            −
+          </button>
+          <span style={{ width: 1, alignSelf: "stretch", background: "var(--border)" }} />
+          <div style={{ position: "relative" }}>
+            <button
+              type="button"
+              aria-haspopup="true"
+              aria-expanded={layersOpen}
+              onClick={() => setLayersOpen((v) => !v)}
+              style={{ ...segBtn(true), border: "1px solid var(--border)" }}
+            >
+              <span aria-hidden>◫</span> Шари <span style={{ color: "var(--muted)", fontSize: 10 }}>▾</span>
+            </button>
+            {layersOpen && (
+              <div
+                role="menu"
+                style={{ ...glass, position: "absolute", top: 38, right: 0, minWidth: 200, padding: 6, display: "grid", gap: 2, background: "var(--surface)" }}
+              >
+                {LAYERS.map((l) => (
+                  <button
+                    key={l.key}
+                    type="button"
+                    role="menuitemcheckbox"
+                    aria-checked={layers[l.key]}
+                    onClick={() => setLayers((st) => ({ ...st, [l.key]: !st[l.key] }))}
+                    style={{ ...segBtn(layers[l.key]), justifyContent: "flex-start", width: "100%", border: 0 }}
+                  >
+                    <span style={{ width: 16, textAlign: "center", color: "var(--accent)" }}>{layers[l.key] ? "✓" : ""}</span>
+                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: l.dot, opacity: layers[l.key] ? 1 : 0.35 }} />
+                    {l.label}
+                  </button>
+                ))}
+                {layers.ais && zoom < AIS_MIN_ZOOM && (
+                  <div style={{ fontSize: 11, color: "var(--muted)", padding: "4px 8px" }}>Судна AIS видно при наближенні</div>
+                )}
+              </div>
+            )}
+          </div>
+          <button type="button" style={iconBtn} onClick={toggleFullscreen} aria-label="На весь екран" title="На весь екран">
+            {isFull ? "🗗" : "⤢"}
+          </button>
+        </div>
+      </div>
+
+      {/* Left: tracks panel */}
+      {showPanel && (
+        <aside
+          aria-label="Логістичний хаб"
+          style={{
+            ...glass,
+            position: "absolute",
+            zIndex: 1250,
+            top: narrow ? "auto" : 12,
+            left: 12,
+            bottom: narrow ? 12 : 64,
+            width: narrow ? "calc(100% - 24px)" : panelW,
+            height: narrow ? "58%" : undefined,
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+            background: "color-mix(in srgb, var(--surface) 94%, transparent)",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 12px 0" }}>
+            <span style={{ fontSize: 18 }} aria-hidden>
+              🧭
+            </span>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 750, fontSize: 15, lineHeight: 1.1 }}>Логістичний хаб</div>
+              <div style={{ fontSize: 11.5, color: "var(--muted)" }}>Море · Авіа · Курʼєри · Україна</div>
+            </div>
+            <button type="button" onClick={() => setPanelOpen(false)} aria-label="Сховати панель" style={{ ...iconBtn, width: 30, height: 30, fontSize: 14 }}>
+              ‹
+            </button>
+          </div>
+          <div style={{ flex: 1, minHeight: 0 }}>
+            <TracksPanel
+              items={items}
+              selectedId={selectedId}
+              onSelect={(id) => setSelectedId(id)}
+              onChanged={(id) => void reload(id)}
+              workspaceId={workspaceId}
+              workspaces={workspaces}
+            />
+          </div>
+        </aside>
+      )}
+
+      {/* Right: detail card */}
+      {selected && (
+        <aside
+          aria-label="Деталі вантажу"
+          style={{
+            ...glass,
+            position: "absolute",
+            zIndex: 1260,
+            top: narrow ? "auto" : 12,
+            right: 12,
+            bottom: narrow ? 12 : 64,
+            width: narrow ? "calc(100% - 24px)" : 360,
+            height: narrow ? "62%" : undefined,
+            overflow: "hidden",
+            background: "color-mix(in srgb, var(--surface) 96%, transparent)",
+          }}
+        >
+          <TrackDetail
+            key={selected.id}
+            track={selected}
+            workspaces={workspaces}
+            onClose={() => setSelectedId(null)}
+            onChanged={() => void reload()}
+            onRemoved={() => {
+              setSelectedId(null);
+              void reload();
+            }}
+          />
+        </aside>
+      )}
+
+      {/* HUD: dispatcher strip */}
+      {!(narrow && (showPanel || selected)) && (
+        <div
+          style={{ position: "absolute", left: leftInset, right: rightInset, bottom: 18, zIndex: 1200, display: "flex", justifyContent: "center", pointerEvents: "none" }}
+        >
+          <div
+            style={{ ...glass, pointerEvents: "auto", display: "flex", flexWrap: "nowrap", alignItems: "center", gap: compactHud ? 10 : 14, padding: "8px 14px", fontSize: 12.5, whiteSpace: "nowrap", maxWidth: "100%", overflow: "hidden" }}
+            data-testid="hub-hud"
+          >
+            <Stat icon="🚢" n={stats.moving} label="в дорозі" color="var(--accent)" compact={compactHud} />
+            <Stat icon="⚓" n={stats.port} label="у порту / митниці" color="var(--warn)" compact={compactHud} />
+            <Stat icon="⚠" n={stats.alert} label="потребують уваги" color="var(--err)" compact={compactHud} />
+            <Stat icon="✓" n={stats.done} label="доставлено" color="var(--ok)" compact={compactHud} />
+            <span style={{ width: 1, alignSelf: "stretch", background: "var(--border)" }} />
+            <span style={{ color: "var(--muted)" }} title="Живі позиції суден (aisstream.io)">
+              <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: (snap?.vessels.length ?? 0) > 0 ? "var(--ok)" : "var(--faint)", marginRight: 6 }} />
+              AIS: {(snap?.vessels.length ?? 0) > 0 ? `${snap!.vessels.length}${compactHud ? "" : " суден"}` : "—"}
+            </span>
+            <span style={{ color: "var(--faint)", display: compactHud ? "none" : undefined }}>
+              оновлено {snap ? new Date(snapAt.current).toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" }) : "—"}
+              <span hidden>{now}</span>
+            </span>
+          </div>
+        </div>
+      )}
+
+      {error && !loading && (
+        <div role="alert" style={{ ...glass, position: "absolute", top: 70, left: "50%", transform: "translateX(-50%)", zIndex: 1300, padding: "8px 14px", fontSize: 13, color: "var(--err)" }}>
+          {error}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Stat({ icon, n, label, color, compact }: { icon: string; n: number; label: string; color: string; compact?: boolean }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }} title={label} aria-label={`${n} ${label}`}>
+      <span aria-hidden>{icon}</span>
+      <b style={{ color, fontSize: 14 }}>{n}</b>
+      {!compact && <span style={{ color: "var(--muted)" }}>{label}</span>}
+    </span>
+  );
+}
+
+const glass: React.CSSProperties = {
+  background: "color-mix(in srgb, var(--surface) 84%, transparent)",
+  backdropFilter: "blur(12px) saturate(1.2)",
+  WebkitBackdropFilter: "blur(12px) saturate(1.2)",
+  border: "1px solid var(--border)",
+  borderRadius: "var(--radius)",
+  boxShadow: "var(--shadow)",
+};
+
+const iconBtn: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  height: 32,
+  width: 32,
+  flex: "none",
+  borderRadius: 9,
+  border: "1px solid var(--border)",
+  background: "var(--surface)",
+  color: "var(--text)",
+  fontSize: 17,
+  lineHeight: 1,
+  fontWeight: 600,
+  cursor: "pointer",
+};
+
+function segBtn(active: boolean): React.CSSProperties {
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    height: 32,
+    padding: "0 10px",
+    borderRadius: 9,
+    border: `1px solid ${active ? "var(--border)" : "transparent"}`,
+    background: active ? "var(--surface)" : "transparent",
+    color: active ? "var(--text)" : "var(--muted)",
+    font: "inherit",
+    fontSize: 12.5,
+    fontWeight: 600,
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+  };
+}
+
+const overlayCenter: React.CSSProperties = {
+  position: "absolute",
+  inset: 0,
+  zIndex: 1300,
+  display: "grid",
+  placeItems: "center",
+  pointerEvents: "none",
+};

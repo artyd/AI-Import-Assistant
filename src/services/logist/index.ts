@@ -167,3 +167,14 @@ export async function exportXlsx(analysis: unknown): Promise<Buffer> {
 }
 
 const XLSX_MEDIA = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+export interface TrackPageResult {
+  url: string;
+  status: number;
+  text: string;
+}
+
+/** Readable text of a carrier tracking page (host allow-listed in logist-mcp). */
+export function trackPage(url: string): Promise<TrackPageResult> {
+  return logistGet<TrackPageResult>('/rest/track/page', { url });
+}
