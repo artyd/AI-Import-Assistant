@@ -4,7 +4,8 @@ import { ThemeProvider } from "@/lib/theme";
 import { AuthProvider } from "@/lib/auth";
 
 export const metadata: Metadata = {
-  title: "AI Import Assistant",
+  title: "Shturman",
+  applicationName: "Shturman",
   description:
     "Штурман — помічник з імпортної логістики: звірка документів, комплектність пакета, підказки УКТ ЗЕД.",
 };

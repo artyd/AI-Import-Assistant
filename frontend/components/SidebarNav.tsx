@@ -2,6 +2,8 @@
 
 import type { ChatKind, Collection, ConversationMeta, Workspace } from "@/lib/types";
 import type { AppView } from "@/lib/store";
+import { useState } from "react";
+import { McpConnectModal } from "./McpConnectModal";
 import {
   LnChat,
   LnChevronDown,
@@ -10,6 +12,7 @@ import {
   LnList,
   LnPanelLeft,
   LnPencil,
+  LnPlug,
   LnTrash,
 } from "./LineIcons";
 
@@ -79,6 +82,8 @@ export function SidebarNav(props: Props) {
     onDeleteActiveCollection,
     onSelectConversation,
   } = props;
+  const [mcpOpen, setMcpOpen] = useState(false);
+  const mcpModal = mcpOpen ? <McpConnectModal onClose={() => setMcpOpen(false)} /> : null;
 
   if (collapsed) {
     const railBtn: React.CSSProperties = {
@@ -140,6 +145,10 @@ export function SidebarNav(props: Props) {
         <button style={railBtn} onClick={() => onSetView("map")} title="Карта">
           <LnGrid size={18} />
         </button>
+        <button style={railBtn} onClick={() => setMcpOpen(true)} title="Підключити MCP" aria-label="Підключити MCP">
+          <LnPlug size={18} />
+        </button>
+        {mcpModal}
       </aside>
     );
   }
@@ -244,7 +253,14 @@ export function SidebarNav(props: Props) {
           </span>
           Карта
         </button>
+        <button style={navBtn} onClick={() => setMcpOpen(true)} className="nav-row" data-testid="open-mcp">
+          <span style={{ color: "var(--muted)", display: "flex" }}>
+            <LnPlug size={18} />
+          </span>
+          Підключити MCP
+        </button>
       </div>
+      {mcpModal}
 
       {/* Chat type switcher (Звичайний / Постачання / Збірний) — dubs the composer one */}
       <div style={{ flex: "none", padding: "2px 12px 8px" }}>
