@@ -103,3 +103,38 @@ export const HUB_MAP_CSS = `
   .hub-rot { transition: none; }
 }
 `;
+
+// ── Ports / airports / crossings (Phase 2) ───────────────────────────────────
+
+const PORT_GLYPH: Record<string, string> = {
+  sea: '<path d="M12 3.5a2 2 0 1 1 0 4 2 2 0 0 1 0-4Zm-.9 4.3h1.8v9.6c2.4-.3 4.2-1.8 4.8-3.9l-1.6.4 2.4-3.4 1.2 4-1.2-.8c-.8 3.3-3.8 5.7-7.5 5.7s-6.7-2.4-7.5-5.7l-1.2.8 1.2-4 2.4 3.4-1.6-.4c.6 2.1 2.4 3.6 4.8 3.9Z" fill="currentColor"/>',
+  air: '<path d="M12 2.6c.7 0 1.2.6 1.2 1.4v5.4l6.6 3.9v1.8l-6.6-2v4.1l1.8 1.4v1.4L12 19.2 9 20v-1.4l1.8-1.4v-4.1l-6.6 2v-1.8l6.6-3.9V4c0-.8.5-1.4 1.2-1.4Z" fill="currentColor"/>',
+  customs: '<path d="M5 4h14v3H5zM6.5 8h11v11h-11z" fill="currentColor"/><path d="m9.3 13.4 1.9 1.9 3.6-3.8" stroke="var(--surface)" stroke-width="1.8" fill="none"/>',
+  inland: '<circle cx="12" cy="12" r="5" fill="currentColor"/>',
+};
+
+export function portIcon(kind: string, color: string, favorite: boolean, alert: boolean, selected: boolean): L.DivIcon {
+  const size = selected ? 30 : 22;
+  return L.divIcon({
+    className: "hub-marker",
+    html:
+      `<div class="hub-port${selected ? " is-sel" : ""}${alert ? " is-alert" : ""}" style="--mk:${color};width:${size}px;height:${size}px">` +
+      (alert ? '<span class="hub-pulse"></span>' : "") +
+      `<span class="hub-pcore"><svg viewBox="0 0 24 24" width="${selected ? 17 : 13}" height="${selected ? 17 : 13}">${PORT_GLYPH[kind] ?? PORT_GLYPH.inland}</svg></span>` +
+      (favorite ? '<span class="hub-star">★</span>' : "") +
+      `</div>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+  });
+}
+
+export const HUB_PORT_CSS = `
+.hub-port { position: relative; display: grid; place-items: center; cursor: pointer; }
+.hub-pcore { position: relative; z-index: 1; display: grid; place-items: center; width: 100%; height: 100%;
+  border-radius: 7px; background: var(--surface); color: var(--mk);
+  box-shadow: 0 0 0 2px var(--mk), 0 2px 8px rgba(0,0,0,.25); }
+.hub-port.is-sel .hub-pcore { box-shadow: 0 0 0 2.5px var(--mk), 0 0 0 6px color-mix(in srgb, var(--mk) 22%, transparent), 0 4px 12px rgba(0,0,0,.3); }
+.hub-port .hub-pulse { border-radius: 8px; }
+.hub-star { position: absolute; z-index: 2; top: -8px; right: -8px; font-size: 12px; line-height: 1; color: #f2b100;
+  text-shadow: 0 0 2px var(--surface), 0 0 3px var(--surface); }
+`;

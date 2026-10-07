@@ -13,6 +13,7 @@ vi.mock('../../agent/tools.js', () => ({
 vi.mock('../drugRegistry.js', () => ({ getRegistration: vi.fn(async () => null) }));
 vi.mock('../../agent/hubTools.js', () => ({
   publicTrackTool: { name: 'track_by_number', description: 'track', input_schema: { type: 'object', properties: {} } },
+  portStatusTool: { name: 'get_port_status', description: 'port', input_schema: { type: 'object', properties: {} } },
 }));
 
 const { handleMcpPayload } = await import('../mcp/server.js');
@@ -33,7 +34,7 @@ describe('MCP server', () => {
     const res = (await handleMcpPayload({ jsonrpc: '2.0', id: 3, method: 'tools/list' })) as {
       result: { tools: { name: string; annotations: { readOnlyHint: boolean } }[] };
     };
-    expect(res.result.tools.map((t) => t.name)).toEqual(['uktzed_lookup_code', 'check_drug_registration', 'track_by_number']);
+    expect(res.result.tools.map((t) => t.name)).toEqual(['uktzed_lookup_code', 'check_drug_registration', 'track_by_number', 'get_port_status']);
     expect(res.result.tools.every((t) => t.annotations.readOnlyHint)).toBe(true);
   });
 

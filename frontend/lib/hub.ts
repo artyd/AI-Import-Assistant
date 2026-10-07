@@ -203,3 +203,95 @@ export const hubApi = {
   suggestions: (workspaceId: string) =>
     api<{ suggestions: TrackingSuggestion[] }>(`/api/workspaces/${workspaceId}/tracking-suggestions`),
 };
+
+// ── Phase 2: ports / airports / crossings ────────────────────────────────────
+
+export type PlaceKind = "sea" | "air" | "customs" | "inland";
+export type PortStatus = "ok" | "congested" | "disrupted" | "closed";
+
+export interface PortStatusInfo {
+  markId: string;
+  status: PortStatus;
+  label: string;
+  note: string;
+  by: "ai" | "user";
+  userName: string;
+  sourceUrl: string;
+  sourceTitle: string;
+  confidence: number | null;
+  updatedAt: string;
+  confirmations: number;
+}
+
+export interface HubPort {
+  code: string;
+  name: string;
+  nameEn: string;
+  country: string;
+  lat: number;
+  lng: number;
+  kind: PlaceKind;
+  favorite: boolean;
+  trackCount: number;
+  status: PortStatusInfo | null;
+}
+
+export interface PortMark {
+  id: string;
+  status: PortStatus;
+  label: string;
+  note: string;
+  by: "ai" | "user";
+  userName: string;
+  sourceUrl: string;
+  sourceTitle: string;
+  createdAt: string;
+  validUntil: string;
+  confirmations: number;
+}
+
+export interface PortDetailData {
+  port: HubPort;
+  history: PortMark[];
+  tracks: { id: string; number: string; label: string; status: TrackStatus; eta: string | null }[];
+}
+
+export const PORT_STATUS_LABEL: Record<PortStatus, string> = {
+  ok: "Працює",
+  congested: "Черги / перевантаження",
+  disrupted: "Збої в роботі",
+  closed: "Закрито",
+};
+
+export const PLACE_KIND_LABEL: Record<PlaceKind, string> = {
+  sea: "Морський порт",
+  air: "Аеропорт",
+  customs: "Пункт пропуску",
+  inland: "Хаб / місто",
+};
+
+export function portStatusColor(s: PortStatus | null | undefined): string {
+  switch (s) {
+    case "ok":
+      return "var(--ok)";
+    case "congested":
+      return "var(--warn)";
+    case "disrupted":
+      return "#e8590c";
+    case "closed":
+      return "var(--err)";
+    default:
+      return "var(--faint)";
+  }
+}
+
+export const portApi = {
+  list: () => api<{ ports: HubPort[] }>("/api/hub/ports"),
+  get: (code: string) => api<PortDetailData>(`/api/hub/ports/${encodeURIComponent(code)}`),
+  mark: (code: string, status: PortStatus, note?: string) =>
+    api<PortDetailData>(`/api/hub/ports/${encodeURIComponent(code)}/status`, { method: "POST", body: { status, note } }),
+  confirm: (code: string, markId: string) =>
+    api<PortDetailData>(`/api/hub/ports/${encodeURIComponent(code)}/status/${markId}/confirm`, { method: "POST" }),
+  favorite: (code: string, on: boolean) =>
+    api<void>(`/api/hub/ports/${encodeURIComponent(code)}/favorite`, { method: on ? "PUT" : "DELETE" }),
+};

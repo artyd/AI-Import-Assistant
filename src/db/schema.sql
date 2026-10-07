@@ -756,3 +756,44 @@ CREATE TABLE IF NOT EXISTS geo_cache (
   lng        DOUBLE PRECISION,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- ── Logistics hub · Phase 2: ports / airports / crossings — live status ───────
+-- The `ports` atlas grows to the hub gazetteer (sea ports, cargo airports, UA
+-- border crossings, inland hubs; seeded from src/services/hub/places.ts on boot).
+ALTER TABLE ports DROP CONSTRAINT IF EXISTS ports_kind_check;
+ALTER TABLE ports ADD CONSTRAINT ports_kind_check CHECK (kind IN ('sea', 'inland', 'customs', 'air'));
+ALTER TABLE ports ADD COLUMN IF NOT EXISTS name_en TEXT NOT NULL DEFAULT '';
+ALTER TABLE ports ADD COLUMN IF NOT EXISTS aliases TEXT[] NOT NULL DEFAULT '{}';
+
+-- Status marks ("працює / черги / збої / закрито"). Team-wide: a mark set by
+-- the AI (from a news item, with its link) or by a logist. The current status is
+-- the newest non-expired mark; a logist can confirm an AI mark.
+CREATE TABLE IF NOT EXISTS port_status_marks (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  port_code     TEXT NOT NULL REFERENCES ports(code) ON DELETE CASCADE,
+  status        TEXT NOT NULL CHECK (status IN ('ok', 'congested', 'disrupted', 'closed')),
+  note          TEXT NOT NULL DEFAULT '',
+  source        TEXT NOT NULL CHECK (source IN ('ai', 'user')),
+  source_url    TEXT NOT NULL DEFAULT '',
+  source_title  TEXT NOT NULL DEFAULT '',
+  confidence    REAL,
+  user_id       UUID REFERENCES users(id) ON DELETE SET NULL,
+  confirmed_by  UUID[] NOT NULL DEFAULT '{}',
+  valid_until   TIMESTAMPTZ NOT NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_port_marks_port ON port_status_marks(port_code, created_at DESC);
+
+-- Personal favourite ports.
+CREATE TABLE IF NOT EXISTS port_favorites (
+  user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  port_code  TEXT NOT NULL REFERENCES ports(code) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, port_code)
+);
+
+-- News items already read by the port-status AI (each item is read once).
+CREATE TABLE IF NOT EXISTS news_hub_scans (
+  news_id    UUID PRIMARY KEY REFERENCES news_items(id) ON DELETE CASCADE,
+  scanned_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

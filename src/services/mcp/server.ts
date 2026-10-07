@@ -1,6 +1,6 @@
 import { executeTool, logistTools } from '../../agent/tools.js';
 import { getRegistration } from '../drugRegistry.js';
-import { publicTrackTool } from '../../agent/hubTools.js';
+import { portStatusTool, publicTrackTool } from '../../agent/hubTools.js';
 
 /**
  * Public MCP server (Streamable HTTP, stateless, JSON responses only).
@@ -45,6 +45,7 @@ const TITLES: Record<string, string> = {
   pubchem_identify_substance: 'PubChem: ідентифікація речовини',
   check_drug_registration: 'Держреєстр ліків України',
   track_by_number: 'Трекінг вантажу за номером',
+  get_port_status: 'Чи працює порт / аеропорт / кордон',
 };
 
 const REGISTRY_TOOL = {
@@ -71,7 +72,7 @@ interface CustomToolDef {
 
 function toolCatalog(): McpTool[] {
   // logistTools() are all plain custom tools (name/description/input_schema).
-  const defs = [...(logistTools() as CustomToolDef[]), REGISTRY_TOOL, publicTrackTool as CustomToolDef];
+  const defs = [...(logistTools() as CustomToolDef[]), REGISTRY_TOOL, publicTrackTool as CustomToolDef, portStatusTool as CustomToolDef];
   return defs.map((d) => ({
     name: d.name,
     title: TITLES[d.name] ?? d.name,

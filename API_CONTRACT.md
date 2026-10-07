@@ -783,6 +783,28 @@ Numbers found in the shipment's documents (check-digit-valid containers / AWB,
 carrier-prefixed B/L) that are not tracked yet:
 `{ suggestions: { number, carrier, carrierName, kind, mode, files: string[] }[] }`.
 
+### Ports / airports / border crossings (hub phase 2)
+
+The `ports` atlas now holds the hub gazetteer (sea ports by UN/LOCODE, cargo
+airports by IATA, Ukrainian border crossings, inland hubs); `Port.kind` gains
+`'air'`. Status is **team-wide**: marks set by the AI from a news item (always
+with its link) or by a logist; current = newest non-expired mark (AI 5 days,
+logist 72 h; confirming extends). No mark ⇒ `status: null` ("немає даних").
+
+- `PortStatus ∈ ok|congested|disrupted|closed`
+- `HubPort = { code, name, nameEn, country, lat, lng, kind: sea|air|customs|inland,
+  favorite, trackCount, status: { markId, status, label, note, by: ai|user, userName,
+  sourceUrl, sourceTitle, confidence, updatedAt, confirmations } | null }`
+
+#### `GET /api/hub/ports` → `{ ports: HubPort[] }`
+#### `GET /api/hub/ports/:code` → `{ port: HubPort, history: Mark[], tracks: { id, number, label, status, eta }[] }`
+#### `POST /api/hub/ports/:code/status` — body `{ status, note? }` → same as GET (logist mark).
+#### `POST /api/hub/ports/:code/status/:markId/confirm` → same as GET; `404` if the mark expired.
+#### `PUT | DELETE /api/hub/ports/:code/favorite` → `204` (personal ★).
+
+Users who starred a place get an in-app notification (`type = 'port:<code>:<status>'`)
+when it becomes disrupted/closed or returns to ok. Agent/MCP tool: `get_port_status`.
+
 Notifications: in-app only (`notifications.type = 'hub:<trackId>:<event>'`) — on
 arrival at port/hub, customs, out for delivery, delivered, exception, or an ETA
 shift ≥ 24 h. Agent tools: `track_shipment`, `list_tracked_shipments`,

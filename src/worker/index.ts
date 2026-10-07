@@ -9,6 +9,8 @@ import { REMINDERS_QUEUE, scheduleReminders, type ReminderJobData } from '../que
 import { NEWS_QUEUE, scheduleNews, type NewsJobData } from '../queue/news.js';
 import { TRACKING_QUEUE, scheduleTracking, type TrackingJobData } from '../queue/tracking.js';
 import { refreshDue } from '../services/hub/track.js';
+import { scanNewsForPortStatus } from '../services/hub/portNews.js';
+import { seedPlaces } from '../services/hub/ports.js';
 import { startAis, stopAis, aisEnabled } from '../services/hub/ais.js';
 import {
   INGEST_RETRY_QUEUE,
@@ -322,6 +324,18 @@ async function processNews(_job: Job<NewsJobData>): Promise<void> {
   console.log(
     `News ingest: +${inserted} new item(s) from ${ok} feed(s) (${failed} failed), ${purged} purged.`,
   );
+  // Logistics hub: read port / airport / crossing status out of the fresh news.
+  if (config.TRACKING_ENABLED) {
+    const s = await scanNewsForPortStatus().catch((err: Error) => {
+      // eslint-disable-next-line no-console
+      console.error('Port-status scan failed:', err.message);
+      return { scanned: 0, marks: 0 };
+    });
+    if (s.marks > 0) {
+      // eslint-disable-next-line no-console
+      console.log(`Hub port status: ${s.marks} mark(s) from ${s.scanned} news item(s).`);
+    }
+  }
 }
 
 /**
@@ -351,6 +365,7 @@ async function processIngestRetry(_job: Job<IngestRetryJobData>): Promise<void> 
 
 async function main(): Promise<void> {
   await runMigrations();
+  await seedPlaces().catch(() => undefined);
 
   const worker = new Worker<IndexJobData>(INDEX_QUEUE, processJob, {
     connection: createRedis(),

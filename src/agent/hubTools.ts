@@ -12,6 +12,7 @@ import {
   type TrackingEventRow,
 } from '../services/hub/track.js';
 import { STATUS_LABEL_UK, type TrackResult } from '../services/hub/types.js';
+import { findPorts, getPort, serializePort } from '../services/hub/ports.js';
 
 /**
  * Logistics-hub tools for the Штурман agent (chat) and the public MCP server.
@@ -45,6 +46,19 @@ const CARRIER_PROP = {
   description: 'Необовʼязково: id перевізника, якщо номер неоднозначний (maersk, msc, cma, cosco, hapag, one, dhl, fedex, ups, novaposhta, ukrposhta…).',
 };
 
+export const portStatusTool: ChatTool = {
+  name: 'get_port_status',
+  description:
+    'Чи працює зараз порт, аеропорт або пункт пропуску (кордон): поточний статус (працює / черги / збої / закрито), ' +
+    'звідки він (новина з посиланням або позначка логіста) і коли оновлено. Шукає за назвою (укр/англ) або кодом ' +
+    '(UN/LOCODE, IATA). Якщо даних немає — так і каже; не припускай, що обʼєкт працює.',
+  input_schema: {
+    type: 'object',
+    properties: { query: { type: 'string', description: 'Назва або код: «Одеса», «Constanta», «ROCND», «IST», «Ягодин».' } },
+    required: ['query'],
+  },
+};
+
 export const hubToolDefinitions: ChatTool[] = [
   {
     name: 'track_shipment',
@@ -69,6 +83,7 @@ export const hubToolDefinitions: ChatTool[] = [
       'статус, ETA, джерело і час останньої перевірки.',
     input_schema: { type: 'object', properties: {} },
   },
+  portStatusTool,
   {
     name: 'find_tracking_numbers',
     description:
@@ -91,7 +106,7 @@ export const publicTrackTool: ChatTool = {
   },
 };
 
-const HUB_NAMES = new Set(['track_shipment', 'list_tracked_shipments', 'find_tracking_numbers', 'track_by_number']);
+const HUB_NAMES = new Set(['track_shipment', 'list_tracked_shipments', 'find_tracking_numbers', 'track_by_number', 'get_port_status']);
 export function isHubTool(name: string): boolean {
   return HUB_NAMES.has(name);
 }
@@ -231,6 +246,36 @@ export async function executeHubTool(name: string, input: unknown, ctx: HubToolC
           list.map((s) => `- ${s.number} — ${s.carrierName} (${s.kind}); файли: ${s.files.join(', ')}`).join('\n'),
         summary: `Хаб: знайдено ${list.length} номер(ів)`,
       };
+    }
+    case 'get_port_status': {
+      const q = String((input as { query?: unknown })?.query ?? '').trim();
+      if (!q) return { result: 'Не вказано порт.', summary: 'Порти: помилка' };
+      const found = await findPorts(q, 3);
+      if (found.length === 0) {
+        return { result: `«${q}» немає в довіднику портів/аеропортів/пунктів пропуску хабу.`, summary: 'Порти: не знайдено' };
+      }
+      const blocks: string[] = [];
+      for (const row of found) {
+        const p = serializePort(row);
+        const kind = p.kind === 'air' ? 'аеропорт' : p.kind === 'customs' ? 'пункт пропуску' : p.kind === 'sea' ? 'морський порт' : 'хаб';
+        if (!p.status) {
+          blocks.push(`${p.name} (${p.code}, ${kind}, ${p.country}): даних про роботу немає — позначок за останні дні не було.`);
+          continue;
+        }
+        const s = p.status;
+        const who = s.by === 'ai' ? `ШІ з новини «${s.sourceTitle}» ${s.sourceUrl}` : `позначка логіста${s.userName ? ` (${s.userName})` : ''}`;
+        const detail = ctx.ownerId ? await getPort(ctx.ownerId, p.code) : null;
+        const hist = (detail?.history ?? [])
+          .slice(1, 4)
+          .map((h) => `  · ${d(h.createdAt)}: ${h.label}${h.note ? ` — ${h.note}` : ''}`)
+          .join('\n');
+        blocks.push(
+          `${p.name} (${p.code}, ${kind}, ${p.country}): ${s.label}${s.note ? ` — ${s.note}` : ''}.\n` +
+            `Джерело: ${who}; оновлено ${d(s.updatedAt)}${s.confirmations ? `; підтверджено логістами: ${s.confirmations}` : ''}.` +
+            (hist ? `\nРаніше:\n${hist}` : ''),
+        );
+      }
+      return { result: blocks.join('\n\n'), summary: `Порти: ${found[0]!.name}` };
     }
     default:
       return { result: `Невідомий інструмент: ${name}`, summary: 'Невідомий інструмент' };
