@@ -31,7 +31,12 @@ function glyph(mode: HubMode): { svg: string; rotates: boolean } {
  * sits in `.hub-rot` so the animation loop can update its rotation without
  * rebuilding the icon.
  */
-export function trackIcon(mode: HubMode, status: TrackStatus, selected: boolean): L.DivIcon {
+export interface EtaBadge {
+  text: string;
+  late: boolean;
+}
+
+export function trackIcon(mode: HubMode, status: TrackStatus, selected: boolean, eta?: EtaBadge | null): L.DivIcon {
   const { svg } = glyph(mode);
   const color = statusColor(status);
   const moving = status === "in_transit" || status === "out_for_delivery";
@@ -42,6 +47,7 @@ export function trackIcon(mode: HubMode, status: TrackStatus, selected: boolean)
       `<div class="hub-mk${selected ? " is-sel" : ""}" style="--mk:${color};width:${size}px;height:${size}px">` +
       (moving ? '<span class="hub-pulse"></span>' : "") +
       `<span class="hub-core"><svg class="hub-rot" viewBox="0 0 24 24" width="${selected ? 22 : 18}" height="${selected ? 22 : 18}">${svg}</svg></span>` +
+      (eta ? `<span class="hub-eta${eta.late ? " is-late" : ""}">${eta.text}</span>` : "") +
       `</div>`,
     iconSize: [size, size],
     iconAnchor: [size / 2, size / 2],
@@ -93,6 +99,12 @@ export const HUB_MAP_CSS = `
 .hub-mk.is-sel .hub-core { box-shadow: 0 0 0 3px var(--mk), 0 0 0 7px color-mix(in srgb, var(--mk) 22%, transparent), 0 6px 18px rgba(0,0,0,.32); }
 .hub-rot { transition: transform .6s linear; transform-origin: 50% 50%; }
 .hub-pulse { position: absolute; inset: 0; border-radius: 50%; background: var(--mk); opacity: .35; animation: hubPulse 2.2s ease-out infinite; }
+.hub-eta { position: absolute; z-index: 2; left: 50%; top: calc(100% + 3px); transform: translateX(-50%); white-space: nowrap;
+  padding: 1px 6px; border-radius: 999px; font: 700 10.5px/1.5 var(--font-sans); color: var(--text);
+  background: var(--surface); box-shadow: 0 0 0 1px var(--border), 0 1px 4px rgba(0,0,0,.2); }
+.hub-eta.is-late { color: #fff; background: var(--err); box-shadow: 0 1px 4px rgba(0,0,0,.25); }
+.hub-replay-dim .hub-mk { opacity: .3; }
+.hub-replay-dim .hub-ghost .hub-mk { opacity: 1; }
 @keyframes hubPulse { 0% { transform: scale(.9); opacity: .45 } 100% { transform: scale(2.1); opacity: 0 } }
 .hub-ais { background: none; border: 0; }
 .hub-ants { stroke-dasharray: 7 9; animation: hubAnts 1.4s linear infinite; }
@@ -113,16 +125,48 @@ const PORT_GLYPH: Record<string, string> = {
   inland: '<circle cx="12" cy="12" r="5" fill="currentColor"/>',
 };
 
-export function portIcon(kind: string, color: string, favorite: boolean, alert: boolean, selected: boolean): L.DivIcon {
+/** Base colour per place kind — the icon body; status is a separate badge. */
+export const PLACE_KIND_COLOR: Record<string, string> = {
+  sea: "#2f6feb",
+  air: "#7c3aed",
+  customs: "#e67700",
+  inland: "#12936a",
+};
+
+/**
+ * Port / airport / crossing marker: a filled tile in the kind's colour with a
+ * white glyph, a status dot badge (none when there is no status), ★ for
+ * favourites, and a pulse in the status colour when it is closed / disrupted.
+ */
+export function portIcon(
+  kind: string,
+  statusColor: string | null,
+  favorite: boolean,
+  alert: boolean,
+  selected: boolean
+): L.DivIcon {
   const size = selected ? 30 : 22;
+  const kc = PLACE_KIND_COLOR[kind] ?? PLACE_KIND_COLOR.inland!;
   return L.divIcon({
     className: "hub-marker",
     html:
-      `<div class="hub-port${selected ? " is-sel" : ""}${alert ? " is-alert" : ""}" style="--mk:${color};width:${size}px;height:${size}px">` +
-      (alert ? '<span class="hub-pulse"></span>' : "") +
+      `<div class="hub-port${selected ? " is-sel" : ""}${alert ? " is-alert" : ""}" style="--mk:${kc};--st:${statusColor ?? "transparent"};width:${size}px;height:${size}px">` +
+      (alert ? '<span class="hub-pulse" style="background:var(--st)"></span>' : "") +
       `<span class="hub-pcore"><svg viewBox="0 0 24 24" width="${selected ? 17 : 13}" height="${selected ? 17 : 13}">${PORT_GLYPH[kind] ?? PORT_GLYPH.inland}</svg></span>` +
+      (statusColor ? '<span class="hub-st"></span>' : "") +
       (favorite ? '<span class="hub-star">★</span>' : "") +
       `</div>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+  });
+}
+
+/** Cluster of ports at low zoom: count bubble ringed in the worst status colour. */
+export function clusterIcon(count: number, color: string): L.DivIcon {
+  const size = count >= 10 ? 34 : 28;
+  return L.divIcon({
+    className: "hub-marker",
+    html: `<div class="hub-cluster" style="--cl:${color};width:${size}px;height:${size}px">${count}</div>`,
     iconSize: [size, size],
     iconAnchor: [size / 2, size / 2],
   });
@@ -131,8 +175,20 @@ export function portIcon(kind: string, color: string, favorite: boolean, alert: 
 export const HUB_PORT_CSS = `
 .hub-port { position: relative; display: grid; place-items: center; cursor: pointer; }
 .hub-pcore { position: relative; z-index: 1; display: grid; place-items: center; width: 100%; height: 100%;
-  border-radius: 7px; background: var(--surface); color: var(--mk);
-  box-shadow: 0 0 0 2px var(--mk), 0 2px 8px rgba(0,0,0,.25); }
+  border-radius: 7px; background: var(--mk); color: #fff;
+  box-shadow: 0 0 0 2px var(--surface), 0 2px 8px rgba(0,0,0,.3); }
+.hub-pcore svg path[fill="var(--surface)"], .hub-pcore svg [stroke="var(--surface)"] { stroke: var(--mk); }
+.hub-st { position: absolute; z-index: 2; left: -4px; top: -4px; width: 10px; height: 10px; border-radius: 50%;
+  background: var(--st); box-shadow: 0 0 0 2px var(--surface), 0 1px 3px rgba(0,0,0,.35); }
+.hub-cluster { display: grid; place-items: center; border-radius: 50%; cursor: pointer;
+  font: 700 12px/1 var(--font-sans); color: var(--text); background: var(--surface);
+  box-shadow: 0 0 0 3px var(--cl), 0 0 0 7px color-mix(in srgb, var(--cl) 25%, transparent), 0 3px 10px rgba(0,0,0,.3);
+  transition: transform .15s; }
+.hub-cluster:hover { transform: scale(1.08); }
+.hub-label { background: color-mix(in srgb, var(--surface) 88%, transparent) !important; border: 0 !important;
+  box-shadow: 0 1px 3px rgba(0,0,0,.18) !important; padding: 1px 6px !important; font-size: 11px !important;
+  font-weight: 650; color: var(--text) !important; }
+.hub-label:before { display: none; }
 .hub-port.is-sel .hub-pcore { box-shadow: 0 0 0 2.5px var(--mk), 0 0 0 6px color-mix(in srgb, var(--mk) 22%, transparent), 0 4px 12px rgba(0,0,0,.3); }
 .hub-port .hub-pulse { border-radius: 8px; }
 .hub-star { position: absolute; z-index: 2; top: -8px; right: -8px; font-size: 12px; line-height: 1; color: #f2b100;

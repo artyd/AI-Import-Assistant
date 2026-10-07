@@ -35,9 +35,27 @@ import {
   type LatLng,
   type LiveSnapshot,
   type Track,
+  type TrackEvent,
+  etaShiftDays,
 } from "@/lib/hub";
 import { IconSpinner } from "@/components/icons";
-import { aisIcon, endpointIcon, glyphRotates, HUB_MAP_CSS, HUB_PORT_CSS, portIcon, setRotation, trackIcon } from "./mapIcons";
+import {
+  aisIcon,
+  clusterIcon,
+  endpointIcon,
+  glyphRotates,
+  HUB_MAP_CSS,
+  HUB_PORT_CSS,
+  portIcon,
+  setRotation,
+  trackIcon,
+  type EtaBadge,
+} from "./mapIcons";
+import { clusterByPixels } from "./cluster";
+import { MapLegend } from "./MapLegend";
+import { MapSearch } from "./MapSearch";
+import { PlaybackBar } from "./PlaybackBar";
+import { actualProgress, buildReplay, planProgress, positionAt, type Replay } from "./playback";
 import { advance, lerp, smoothPath, splitAt } from "./geo";
 import { TracksPanel, type WorkspaceRef } from "./TracksPanel";
 import { TrackDetail } from "./TrackDetail";
@@ -132,6 +150,24 @@ const GLIDE_MS = 1400;
 const MAX_DR_MS = 20 * 60_000;
 /** Ambient AIS clutters a world view — show it from regional zoom. */
 const AIS_MIN_ZOOM = 4;
+/** Ports are grouped into count bubbles below this zoom. */
+const CLUSTER_MAX_ZOOM = 6;
+/** Permanent name labels from this zoom. */
+const LABEL_MIN_ZOOM = 7;
+
+const STATUS_RANK: Record<string, number> = { closed: 0, disrupted: 1, congested: 2, ok: 3 };
+function statusRank(p: HubPort): number {
+  return p.status ? (STATUS_RANK[p.status.status] ?? 4) : 5;
+}
+
+/** Days-to-ETA badge for a moving item; red when the ETA slipped or passed. */
+function etaBadge(t: Track, now: number): EtaBadge | null {
+  if (!t.eta || ["delivered", "pending", "unknown", "exception"].includes(t.status)) return null;
+  const days = Math.ceil((new Date(t.eta).getTime() - now) / 86_400_000);
+  const late = etaShiftDays(t) >= 1 || days < 0;
+  const text = days < 0 ? `+${-days} дн` : days === 0 ? "сьогодні" : `${days} дн`;
+  return { text, late };
+}
 
 type LayerKey = "tracks" | "routes" | "ais" | "ports" | "lanes" | "risk";
 type Tab = "tracks" | "ports" | "lines" | "routes";
@@ -213,6 +249,12 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
   const [zoom, setZoom] = useState(3);
   const [wrapW, setWrapW] = useState(1200);
   const [basemap, setBasemap] = useState<BasemapKey>("auto");
+  const [onlyShipment, setOnlyShipment] = useState(false);
+  const [replay, setReplay] = useState<Replay | null>(null);
+  const [replayT, setReplayT] = useState(0);
+  const replayLayer = useRef<L.LayerGroup | null>(null);
+  const replayMarks = useRef<{ actual: L.Marker; plan: L.Marker; trail: L.Polyline } | null>(null);
+  const searchPin = useRef<L.Marker | null>(null);
 
   useEffect(() => {
     try {
@@ -241,7 +283,14 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
   const fitted = useRef(false);
   const snapAt = useRef(Date.now());
 
-  const items = useMemo(() => snap?.items ?? [], [snap]);
+  const allItems = useMemo(() => snap?.items ?? [], [snap]);
+  // "Лише ця поставка": the whole map (tracks, routes, HUD) narrows to the
+  // shipment the hub was opened from.
+  const shipmentFilter = onlyShipment && !!workspaceId;
+  const items = useMemo(
+    () => (shipmentFilter ? allItems.filter((t) => t.workspaceId === workspaceId) : allItems),
+    [allItems, shipmentFilter, workspaceId]
+  );
   const selected = items.find((t) => t.id === selectedId) ?? null;
 
   // ── Data ─────────────────────────────────────────────────────────────────
@@ -532,6 +581,7 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
     lineLayer.current = L.layerGroup().addTo(map);
     planLayer.current = L.layerGroup().addTo(map);
     portLayer.current = L.layerGroup().addTo(map);
+    replayLayer.current = L.layerGroup().addTo(map);
     const onZoom = () => setZoom(map.getZoom());
     onZoom();
     map.on("zoomend", onZoom);
@@ -542,6 +592,7 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
       portLayer.current?.remove();
       lineLayer.current?.remove();
       planLayer.current?.remove();
+      replayLayer.current?.remove();
     };
   }, [map]);
 
@@ -563,22 +614,25 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
     }
   }, [map, items]);
 
-  // ── Ports / airports / crossings, coloured by live status ────────────────
+  // ── Ports / airports / crossings: kind colour + status badge, clustered ──
   useEffect(() => {
     const g = portLayer.current;
     if (!map || !g) return;
     g.clearLayers();
     if (!layers.ports) return;
-    for (const p of ports) {
-      if (p.kind === "inland") continue;
+    const visible = ports.filter(
+      (p) =>
+        p.kind !== "inland" &&
+        // Zoomed out, show only what matters: favourites, places with a known
+        // status, my destinations. Everything else appears from regional zoom.
+        (zoom >= 6 || p.code === selPort || p.favorite || p.status || p.trackCount > 0)
+    );
+    const addPort = (p: HubPort) => {
       const issue = isIssue(p);
       const sel = p.code === selPort;
-      // Zoomed out, show only what matters: favourites, places with a known
-      // status, my destinations. Everything else appears from regional zoom.
-      if (zoom < 6 && !sel && !p.favorite && !p.status && p.trackCount === 0) continue;
-      const color = resolveCssColor(portStatusColor(p.status?.status));
-      L.marker([p.lat, p.lng], {
-        icon: portIcon(p.kind, color, p.favorite, p.status?.status === "closed" || p.status?.status === "disrupted", sel),
+      const st = p.status ? resolveCssColor(portStatusColor(p.status.status)) : null;
+      const m = L.marker([p.lat, p.lng], {
+        icon: portIcon(p.kind, st, p.favorite, p.status?.status === "closed" || p.status?.status === "disrupted", sel),
         zIndexOffset: sel ? 900 : issue ? 300 : p.favorite ? 200 : 0,
         title: p.name,
       })
@@ -586,10 +640,49 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
           setTab("ports");
           selectPort(p.code);
         })
-        .bindTooltip(`${p.name} · ${p.status ? p.status.label : "немає даних"}`, { direction: "top", offset: [0, -10] })
+        .addTo(g);
+      // From regional zoom every place carries a name label; before that, a hover tooltip.
+      if (zoom >= LABEL_MIN_ZOOM && !narrow) {
+        m.bindTooltip(p.name, { permanent: true, direction: "right", offset: [12, 0], className: "hub-label" });
+      } else {
+        m.bindTooltip(`${p.name} · ${p.status ? p.status.label : "немає даних"}`, { direction: "top", offset: [0, -10] });
+      }
+    };
+    // Clustering is a desktop feature (the phone layout is frozen for now).
+    if (zoom >= CLUSTER_MAX_ZOOM || narrow) {
+      visible.forEach(addPort);
+      return;
+    }
+    const groups = clusterByPixels(
+      visible.map((p) => {
+        const pt = map.project([p.lat, p.lng], zoom);
+        return { item: p, x: pt.x, y: pt.y };
+      }),
+      34
+    );
+    for (const c of groups) {
+      if (c.items.length === 1 || c.items.some((p) => p.code === selPort)) {
+        c.items.forEach(addPort);
+        continue;
+      }
+      const worst = c.items.reduce<HubPort | null>((w, p) => (statusRank(p) < (w ? statusRank(w) : 99) ? p : w), null);
+      const color = worst?.status ? resolveCssColor(portStatusColor(worst.status.status)) : resolveCssColor("var(--muted)");
+      const ll = map.unproject([c.x, c.y], zoom);
+      L.marker(ll, { icon: clusterIcon(c.items.length, color), zIndexOffset: 250 })
+        .bindTooltip(
+          c.items
+            .slice(0, 8)
+            .map((p) => `${p.name}${p.status ? ` · ${p.status.label}` : ""}`)
+            .join("<br/>") + (c.items.length > 8 ? `<br/>… ще ${c.items.length - 8}` : ""),
+          { direction: "top", offset: [0, -14] }
+        )
+        .on("click", () => {
+          const b = L.latLngBounds(c.items.map((p) => L.latLng(p.lat, p.lng)));
+          map.flyToBounds(b.pad(0.4), { maxZoom: Math.min(zoom + 3, 9), duration: 0.7 });
+        })
         .addTo(g);
     }
-  }, [map, ports, layers.ports, zoom, selPort, selectPort, theme]);
+  }, [map, ports, layers.ports, zoom, selPort, selectPort, theme, narrow]);
 
   // ── Route lines (traveled solid + remaining "marching ants") ─────────────
   useEffect(() => {
@@ -631,7 +724,8 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
         if (!pos) continue;
         seen.add(t.id);
         const isSel = t.id === selectedId;
-        const iconKey = `${t.mode}|${t.status}|${isSel}`;
+        const badge = narrow ? null : etaBadge(t, now);
+        const iconKey = `${t.mode}|${t.status}|${isSel}|${badge?.text ?? ""}|${badge?.late ? 1 : 0}`;
         const cur = anims.get(t.id);
         if (cur) {
           const ll = cur.marker.getLatLng();
@@ -641,13 +735,13 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
           cur.item = t;
           cur.heading = t.live?.heading ?? 0;
           if (cur.iconKey !== iconKey) {
-            cur.marker.setIcon(trackIcon(t.mode, t.status, isSel));
+            cur.marker.setIcon(trackIcon(t.mode, t.status, isSel, badge));
             cur.iconKey = iconKey;
           }
           cur.marker.setZIndexOffset(isSel ? 1000 : 0);
           if (glyphRotates(t.mode)) setRotation(cur.marker, cur.heading);
         } else {
-          const marker = L.marker(pos, { icon: trackIcon(t.mode, t.status, isSel), zIndexOffset: isSel ? 1000 : 0, keyboard: true, title: t.label || t.number })
+          const marker = L.marker(pos, { icon: trackIcon(t.mode, t.status, isSel, badge), zIndexOffset: isSel ? 1000 : 0, keyboard: true, title: t.label || t.number })
             .on("click", () => {
               setTab("tracks");
               selectTrack(t.id);
@@ -666,7 +760,77 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
         anims.delete(id);
       }
     }
-  }, [map, items, selectedId, layers.tracks, selectTrack]);
+  }, [map, items, selectedId, layers.tracks, selectTrack, now, narrow]);
+
+  // ── "Програти рейс": ghost markers for fact vs plan along the path ───────
+  const startReplay = useCallback(
+    (track: Track, events: TrackEvent[]) => {
+      const r = buildReplay(track, events);
+      if (!r) return;
+      setReplay(r);
+      setReplayT(r.start);
+      // The voyage needs the map: close the card so the bar gets the full width.
+      setSelectedId(null);
+      // Frame the whole voyage clear of the side panel (left) and the replay bar (bottom).
+      if (map)
+        map.flyToBounds(L.latLngBounds(r.path.map((p) => L.latLng(p[0], p[1]))), {
+          paddingTopLeft: [panelOpen ? 370 : 40, 70],
+          paddingBottomRight: [40, 170],
+          duration: 0.8,
+        });
+    },
+    [map]
+  );
+  useEffect(() => {
+    const g = replayLayer.current;
+    if (!map || !g) return;
+    g.clearLayers();
+    replayMarks.current = null;
+    if (!replay) return;
+    const item = allItems.find((t) => t.id === replay.trackId);
+    const color = resolveCssColor(statusColor(item?.status ?? "in_transit"));
+    L.polyline(replay.path, { color: "#8b8b94", weight: 2, opacity: 0.5, dashArray: "4 6" }).addTo(g);
+    const trail = L.polyline([], { color, weight: 5, opacity: 0.95, className: "hub-trail" }).addTo(g);
+    const plan = L.marker(replay.path[0]!, {
+      icon: L.divIcon({
+        className: "",
+        html: '<span title="план" style="display:block;width:22px;height:22px;border-radius:50%;border:3px dashed #8b8b94;background:color-mix(in srgb,var(--surface) 60%,transparent)"></span>',
+        iconSize: [22, 22],
+        iconAnchor: [11, 11],
+      }),
+      interactive: false,
+    })
+      .bindTooltip("За планом", { permanent: true, direction: "left", offset: [-10, 0], className: "hub-label" })
+      .addTo(g);
+    const actual = L.marker(replay.path[0]!, {
+      icon: trackIcon(item?.mode ?? "sea", item?.status ?? "in_transit", true),
+      interactive: false,
+      zIndexOffset: 2000,
+    }).addTo(g);
+    // Not dimmed with the live markers while the replay runs.
+    actual.getElement()?.classList.add("hub-ghost");
+    actual.bindTooltip("Факт", { permanent: true, direction: "right", offset: [16, 0], className: "hub-label" });
+    replayMarks.current = { actual, plan, trail };
+  }, [map, replay, allItems]);
+  useEffect(() => {
+    const m = replayMarks.current;
+    if (!replay || !m) return;
+    const pa = actualProgress(replay, replayT);
+    const a = positionAt(replay, pa);
+    m.actual.setLatLng(a.point);
+    m.trail.setLatLngs(a.done);
+    const item = allItems.find((t) => t.id === replay.trackId);
+    if (item && glyphRotates(item.mode)) setRotation(m.actual, a.heading);
+    const pp = planProgress(replay, replayT);
+    if (pp == null) m.plan.setOpacity(0);
+    else {
+      m.plan.setOpacity(1);
+      m.plan.setLatLng(positionAt(replay, pp).point);
+    }
+  }, [replay, replayT, allItems]);
+  useEffect(() => {
+    if (replay && !allItems.some((t) => t.id === replay.trackId)) setReplay(null);
+  }, [replay, allItems]);
 
   // ── Ambient AIS vessels ──────────────────────────────────────────────────
   useEffect(() => {
@@ -806,6 +970,45 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
   }, [items]);
   const portIssues = useMemo(() => ports.filter((p) => p.status?.status === "closed" || p.status?.status === "disrupted").length, [ports]);
 
+  const flyToPlace = useCallback(
+    (p: { lat: number; lng: number; name: string }) => {
+      if (!map) return;
+      searchPin.current?.remove();
+      searchPin.current = L.marker([p.lat, p.lng], {
+        icon: L.divIcon({ className: "", html: '<span style="font-size:26px;filter:drop-shadow(0 2px 3px rgba(0,0,0,.4))">📍</span>', iconSize: [26, 26], iconAnchor: [13, 24] }),
+      })
+        .bindTooltip(p.name.split(",").slice(0, 2).join(","), { permanent: true, direction: "top", offset: [0, -22], className: "hub-label" })
+        .addTo(map);
+      map.flyTo([p.lat, p.lng], 8, { duration: 0.9 });
+      const pin = searchPin.current;
+      window.setTimeout(() => {
+        if (searchPin.current === pin) {
+          pin.remove();
+          searchPin.current = null;
+        }
+      }, 15_000);
+    },
+    [map]
+  );
+  const showShipment = useCallback(
+    (wsId: string) => {
+      if (wsId === workspaceId) setOnlyShipment(true);
+      const pts = allItems.filter((t) => t.workspaceId === wsId && t.live?.pos).map((t) => t.live!.pos!);
+      setTab("tracks");
+      if (map && pts.length > 0) {
+        if (pts.length === 1) map.flyTo(pts[0]!, 5, { duration: 0.8 });
+        else map.flyToBounds(L.latLngBounds(pts.map((p) => L.latLng(p[0], p[1]))).pad(0.3), { duration: 0.8 });
+      }
+    },
+    [map, allItems, workspaceId]
+  );
+  const visibleRoutes = useMemo(
+    () => (shipmentFilter ? routes.filter((r) => r.workspaceId === workspaceId) : routes),
+    [routes, shipmentFilter, workspaceId]
+  );
+  const shipmentNumber = workspaces.find((w) => w.id === workspaceId)?.number ?? null;
+  const replayItem = replay ? allItems.find((t) => t.id === replay.trackId) : null;
+
   const bm = BASEMAPS.find((b) => b.key === basemap) ?? BASEMAPS[0]!;
   const tileUrl = bm.key === "auto" ? (theme === "dark" ? TILE_DARK : TILE_LIGHT) : bm.url;
   const tileAttrib = bm.key === "auto" ? ATTRIB : `${bm.attribution} · AIS © aisstream.io`;
@@ -822,6 +1025,7 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
       style={{ position: "relative", height: "100%", width: "100%", background: "var(--chat)", overflow: "hidden" }}
       data-testid="hub-map"
       data-picking={picking ? "1" : undefined}
+      className={replay ? "hub-replay-dim" : undefined}
     >
       <style>{`
         .aia-map .leaflet-container { background: var(--panel); font-family: var(--font-sans); }
@@ -1004,6 +1208,65 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
               ‹
             </button>
           </div>
+          {!narrow && (
+            <div style={{ padding: "10px 12px 0", display: "grid", gap: 6 }}>
+              <MapSearch
+                ports={ports}
+                items={allItems}
+                routes={routes}
+                workspaces={workspaces}
+                onTrack={(id) => {
+                  setOnlyShipment(false);
+                  setTab("tracks");
+                  selectTrack(id);
+                }}
+                onPort={(code) => {
+                  setTab("ports");
+                  selectPort(code);
+                }}
+                onRoute={(id) => {
+                  setTab("routes");
+                  selectRoute(id);
+                }}
+                onShipment={showShipment}
+                onPlace={flyToPlace}
+              />
+              {workspaceId && shipmentNumber && (
+                <div role="radiogroup" aria-label="Що показувати на карті" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, padding: 3, borderRadius: 10, background: "var(--hover)" }}>
+                  {[
+                    { v: false, label: "Усі вантажі" },
+                    { v: true, label: `Лише №${shipmentNumber}` },
+                  ].map((o) => (
+                    <button
+                      key={String(o.v)}
+                      type="button"
+                      role="radio"
+                      aria-checked={onlyShipment === o.v}
+                      data-testid={o.v ? "hub-only-shipment" : "hub-all-shipments"}
+                      onClick={() => setOnlyShipment(o.v)}
+                      style={{
+                        height: 28,
+                        borderRadius: 8,
+                        border: 0,
+                        background: onlyShipment === o.v ? "var(--surface)" : "transparent",
+                        boxShadow: onlyShipment === o.v ? "0 1px 3px rgba(0,0,0,.1)" : "none",
+                        color: onlyShipment === o.v ? "var(--text)" : "var(--muted)",
+                        font: "inherit",
+                        fontSize: 12.5,
+                        fontWeight: 650,
+                        cursor: "pointer",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           <div role="tablist" aria-label="Розділи хабу" style={{ display: "flex", gap: 4, padding: "10px 12px 0" }}>
             {TABS.map((t) => (
               <button
@@ -1049,7 +1312,7 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
             ) : tab === "ports" ? (
               <PortsPanel ports={ports} selectedCode={selPort} onSelect={(c) => selectPort(c)} onChanged={loadPorts} />
             ) : tab === "routes" ? (
-              <RoutesPanel routes={routes} selectedId={selRoute === "new" ? null : selRoute} onSelect={(id) => selectRoute(id)} onNew={() => selectRoute("new")} />
+              <RoutesPanel routes={visibleRoutes} selectedId={selRoute === "new" ? null : selRoute} onSelect={(id) => selectRoute(id)} onNew={() => selectRoute("new")} />
             ) : (
               <LinesPanel
                 carriers={carriers}
@@ -1191,6 +1454,7 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
         >
           <TrackDetail
             key={selected.id}
+            onPlay={narrow ? undefined : (events) => startReplay(selected, events)}
             track={selected}
             workspaces={workspaces}
             onClose={() => selectTrack(null)}
@@ -1204,7 +1468,19 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
       )}
 
       {/* HUD: dispatcher strip */}
-      {!(narrow && (showPanel || hasDetail)) && (
+      {replay && (
+        <PlaybackBar
+          replay={replay}
+          title={replayItem ? replayItem.label || replayItem.number : "Рейс"}
+          t={replayT}
+          setT={setReplayT}
+          onClose={() => setReplay(null)}
+          left={leftInset}
+          right={rightInset}
+        />
+      )}
+      {!narrow && <MapLegend right={rightInset} bottom={replay ? 150 : 40} />}
+      {!replay && !(narrow && (showPanel || hasDetail)) && (
         <div
           style={{ position: "absolute", left: leftInset, right: rightInset, bottom: 18, zIndex: 1200, display: "flex", justifyContent: "center", pointerEvents: "none" }}
         >
