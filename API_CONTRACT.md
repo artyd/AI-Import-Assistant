@@ -828,6 +828,35 @@ value (AI 10 days, logist 14 days):
 
 Agent tool (chat only, not public MCP): `get_carrier_status`.
 
+### Route builder — plan vs fact (hub phase 4)
+
+A planned route = ordered legs `mode ∈ sea|air|road|rail|customs` between places
+(gazetteer code, or a map point `{ name, lat, lng }`). A leg may bind a tracked
+item (`trackedId`) — then the plan is compared with the live fact. Visibility as
+for tracks (author + linked shipment's owner).
+
+Computed per leg (`computed`): geometry (sea lanes / air arc / straight road),
+`distanceKm`, planned window (explicit dates or a mode estimate chained from the
+previous leg — `datesEstimated: true`), `fact` from tracking (state, departed,
+arrived, ETA, event path snapped to sea lanes), `projectedDeparture/Arrival`
+(delays cascade: a leg can't start before the previous one projects to end),
+`delayDays`, and for sea legs with `freeDays` the free-time window and
+demurrage (`overDays × demurragePerDay`) given the next leg's pickup.
+`summary.health ∈ draft|on_track|delayed|at_risk|done`.
+
+#### `GET /api/hub/routes` → `{ routes: Route[] }`
+#### `GET /api/hub/routes/:id` → `{ route }`
+#### `POST /api/hub/routes` · `PUT /api/hub/routes/:id` — body `{ name, workspaceId?, status?, notes?, legs: Leg[] (≤20) }`, legs replaced wholesale; `404` if a bound track or shipment is not visible.
+`Leg = { mode, from: { code? | name+lat+lng }, to?, carrier?, via?, trackedId?, plannedDeparture?, plannedArrival?, costAmount?, costCurrency?, freeDays?, demurragePerDay?, notes? }`
+#### `DELETE /api/hub/routes/:id` → `204` (author only)
+#### `POST /api/hub/routes/suggest` — `{ from, to (code or name), readyDate?, cargo?, priority?: cost|speed|reliability }` (10/min)
+→ `{ from, to, readyDate, variants: { title, summary, costLevel, risks, pros, cons, totalDays, arrival, legs }[] }`.
+Claude gets only hub facts (port/crossing statuses, carrier statuses, team services,
+corridors, war-risk notes); the server validates every code and recomputes each
+leg's duration itself. `422` when a place is not in the gazetteer. Advisory.
+
+Agent tools: `suggest_routes`, `list_routes`.
+
 Notifications: in-app only (`notifications.type = 'hub:<trackId>:<event>'`) — on
 arrival at port/hub, customs, out for delivery, delivered, exception, or an ETA
 shift ≥ 24 h. Agent tools: `track_shipment`, `list_tracked_shipments`,

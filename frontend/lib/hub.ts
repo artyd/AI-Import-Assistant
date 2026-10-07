@@ -448,3 +448,163 @@ export const RISK_ZONES: { id: string; name: string; note: string; polygon: LatL
     ],
   },
 ];
+
+// ── Phase 4: route builder ───────────────────────────────────────────────────
+
+export type RouteMode = "sea" | "air" | "road" | "rail" | "customs";
+export type LegState = "planned" | "in_progress" | "done" | "no_data";
+
+export interface RoutePoint {
+  code: string;
+  name: string;
+  pos: LatLng | null;
+}
+
+export interface LegComputed {
+  id: string;
+  path: LatLng[];
+  distanceKm: number;
+  plannedDeparture: string | null;
+  plannedArrival: string | null;
+  estimatedDays: number;
+  datesEstimated: boolean;
+  fact: { state: LegState; departedAt: string | null; arrivedAt: string | null; eta: string | null; path: LatLng[] } | null;
+  projectedDeparture: string | null;
+  projectedArrival: string | null;
+  delayDays: number;
+  freeTime: {
+    freeDays: number;
+    startsAt: string | null;
+    endsAt: string | null;
+    daysLeft: number | null;
+    overDays: number;
+    demurrageCost: number;
+    currency: string;
+  } | null;
+}
+
+export interface RouteLeg {
+  id: string;
+  seq: number;
+  mode: RouteMode;
+  from: RoutePoint;
+  to: RoutePoint;
+  carrier: string;
+  carrierName: string;
+  via: "" | "suez" | "cape";
+  trackedId: string | null;
+  tracked: { id: string; number: string; label: string; status: TrackStatus } | null;
+  plannedDeparture: string | null;
+  plannedArrival: string | null;
+  costAmount: number | null;
+  costCurrency: string;
+  freeDays: number | null;
+  demurragePerDay: number | null;
+  notes: string;
+  computed: LegComputed;
+}
+
+export type RouteHealth = "draft" | "on_track" | "delayed" | "at_risk" | "done";
+
+export interface PlannedRoute {
+  id: string;
+  name: string;
+  status: "draft" | "active" | "done";
+  notes: string;
+  workspaceId: string | null;
+  workspaceNumber: string | null;
+  createdAt: string;
+  updatedAt: string;
+  summary: {
+    distanceKm: number;
+    plannedStart: string | null;
+    plannedEnd: string | null;
+    projectedEnd: string | null;
+    delayDays: number;
+    costs: Record<string, number>;
+    demurrage: Record<string, number>;
+    health: RouteHealth;
+  };
+  legs: RouteLeg[];
+}
+
+export interface LegDraft {
+  mode: RouteMode;
+  from: { code?: string; name?: string; lat?: number; lng?: number };
+  to?: { code?: string; name?: string; lat?: number; lng?: number };
+  carrier?: string;
+  via?: "" | "suez" | "cape";
+  trackedId?: string | null;
+  plannedDeparture?: string | null;
+  plannedArrival?: string | null;
+  costAmount?: number | null;
+  costCurrency?: string;
+  freeDays?: number | null;
+  demurragePerDay?: number | null;
+  notes?: string;
+}
+
+export interface RouteDraft {
+  name: string;
+  workspaceId?: string | null;
+  status?: "draft" | "active" | "done";
+  notes?: string;
+  legs: LegDraft[];
+}
+
+export interface RouteVariant {
+  title: string;
+  summary: string;
+  costLevel: "low" | "medium" | "high";
+  risks: string[];
+  pros: string[];
+  cons: string[];
+  totalDays: number;
+  arrival: string;
+  legs: (LegDraft & { estimatedDays: number; fromName: string; toName: string; carrierName: string })[];
+}
+
+export const ROUTE_MODE_LABEL: Record<RouteMode, string> = {
+  sea: "Море",
+  air: "Авіа",
+  road: "Авто",
+  rail: "Залізниця",
+  customs: "Митниця",
+};
+export const ROUTE_MODE_ICON: Record<RouteMode, string> = { sea: "🚢", air: "✈️", road: "🚚", rail: "🚆", customs: "🛃" };
+export const ROUTE_MODE_COLOR: Record<RouteMode, string> = {
+  sea: "#2f6feb",
+  air: "#7c3aed",
+  road: "#12936a",
+  rail: "#8a5a2b",
+  customs: "#d98213",
+};
+
+export const HEALTH_LABEL: Record<RouteHealth, string> = {
+  draft: "Чернетка",
+  on_track: "За планом",
+  delayed: "Затримка",
+  at_risk: "Під ризиком",
+  done: "Завершено",
+};
+export function healthColor(h: RouteHealth): string {
+  return h === "on_track" || h === "done" ? "var(--ok)" : h === "delayed" ? "var(--warn)" : h === "at_risk" ? "var(--err)" : "var(--muted)";
+}
+
+export function money(map: Record<string, number>): string {
+  const parts = Object.entries(map).map(([c, v]) => `${Math.round(v).toLocaleString("uk-UA")} ${c}`);
+  return parts.length ? parts.join(" + ") : "—";
+}
+
+export const routeApi = {
+  list: () => api<{ routes: PlannedRoute[] }>("/api/hub/routes"),
+  get: (id: string) => api<{ route: PlannedRoute }>(`/api/hub/routes/${id}`),
+  create: (body: RouteDraft) => api<{ route: PlannedRoute }>("/api/hub/routes", { method: "POST", body }),
+  update: (id: string, body: RouteDraft) => api<{ route: PlannedRoute }>(`/api/hub/routes/${id}`, { method: "PUT", body }),
+  remove: (id: string) => api<void>(`/api/hub/routes/${id}`, { method: "DELETE" }),
+  suggest: (body: { from: string; to: string; readyDate?: string; cargo?: string; priority?: "cost" | "speed" | "reliability" }) =>
+    api<{ from: { code: string; name: string }; to: { code: string; name: string }; readyDate: string; variants: RouteVariant[] }>(
+      "/api/hub/routes/suggest",
+      { method: "POST", body }
+    ),
+};

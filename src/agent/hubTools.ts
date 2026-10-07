@@ -14,6 +14,8 @@ import {
 import { STATUS_LABEL_UK, type TrackResult } from '../services/hub/types.js';
 import { findPorts, getPort, serializePort } from '../services/hub/ports.js';
 import { getCarrierDetail, listCarriers, SEA_CARRIERS } from '../services/hub/lines.js';
+import { suggestRoutes, SuggestError } from '../services/hub/suggestRoutes.js';
+import { listRoutes } from '../services/hub/routePlans.js';
 
 /**
  * Logistics-hub tools for the Штурман agent (chat) and the public MCP server.
@@ -73,7 +75,35 @@ export const carrierStatusTool: ChatTool = {
   },
 };
 
+export const routeTools: ChatTool[] = [
+  {
+    name: 'suggest_routes',
+    description:
+      'Запропонувати 2–3 варіанти мультимодального маршруту (море/авіа/авто/залізниця + митниця) між двома точками ' +
+      'з урахуванням ЖИВИХ статусів портів, кордонів і ліній, коридорів та зон ризику з Логістичного хабу. ' +
+      'Терміни рахує хаб (за відстанню), не модель. Дорадчо: користувач обирає і зберігає маршрут у хабі.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        from: { type: 'string', description: 'Звідки: код (CNSHA, INNSA, PVG) або назва (Шанхай, Нінбо).' },
+        to: { type: 'string', description: 'Куди: код або назва (Київ, Одеса, UAIEV).' },
+        ready_date: { type: 'string', description: 'Дата готовності вантажу YYYY-MM-DD (необовʼязково).' },
+        cargo: { type: 'string', description: 'Що веземо (необовʼязково).' },
+        priority: { type: 'string', enum: ['cost', 'speed', 'reliability'] },
+      },
+      required: ['from', 'to'],
+    },
+  },
+  {
+    name: 'list_routes',
+    description:
+      'Маршрути користувача з Логістичного хабу: план проти факту (затримка, прогноз прибуття), вартість, ризик демереджу.',
+    input_schema: { type: 'object', properties: {} },
+  },
+];
+
 export const hubToolDefinitions: ChatTool[] = [
+  ...routeTools,
   {
     name: 'track_shipment',
     description:
@@ -121,7 +151,7 @@ export const publicTrackTool: ChatTool = {
   },
 };
 
-const HUB_NAMES = new Set(['track_shipment', 'list_tracked_shipments', 'find_tracking_numbers', 'track_by_number', 'get_port_status', 'get_carrier_status']);
+const HUB_NAMES = new Set(['track_shipment', 'list_tracked_shipments', 'find_tracking_numbers', 'track_by_number', 'get_port_status', 'get_carrier_status', 'suggest_routes', 'list_routes']);
 export function isHubTool(name: string): boolean {
   return HUB_NAMES.has(name);
 }
@@ -333,6 +363,54 @@ export async function executeHubTool(name: string, input: unknown, ctx: HubToolC
         }
       }
       return { result: lines.join('\n'), summary: `Лінії: ${c.name}` };
+    }
+    case 'suggest_routes': {
+      if (!ctx.ownerId) return { result: 'Недоступно в цьому контексті.', summary: 'Маршрути: помилка' };
+      const a = input as { from?: unknown; to?: unknown; ready_date?: unknown; cargo?: unknown; priority?: unknown };
+      try {
+        const r = await suggestRoutes(ctx.ownerId, {
+          from: String(a.from ?? ''),
+          to: String(a.to ?? ''),
+          readyDate: a.ready_date ? new Date(String(a.ready_date)).toISOString() : undefined,
+          cargo: a.cargo ? String(a.cargo) : undefined,
+          priority: ['cost', 'speed', 'reliability'].includes(String(a.priority)) ? (String(a.priority) as 'cost') : undefined,
+        });
+        if (r.variants.length === 0) return { result: 'Не вдалося скласти варіанти з наявних даних.', summary: 'Маршрути: немає варіантів' };
+        const text = r.variants
+          .map(
+            (v, i) =>
+              `${i + 1}. ${v.title} — ≈${v.totalDays} дн (прибуття ~${d(v.arrival)}), вартість: ${{ low: 'нижча', medium: 'середня', high: 'вища' }[v.costLevel] ?? v.costLevel}\n` +
+              `   ${v.legs.map((l) => `${l.mode}: ${l.fromName}→${l.toName}${l.carrierName ? ` (${l.carrierName})` : ''}${l.via ? ` via ${l.via}` : ''} ~${l.estimatedDays} дн`).join('; ')}\n` +
+              `   ${v.summary}${v.risks.length ? `\n   Ризики: ${v.risks.join('; ')}` : ''}`,
+          )
+          .join('\n');
+        return {
+          result: `${text}\n\nТерміни розраховано хабом за відстанню (орієнтовно). Зберегти маршрут можна в Логістичному хабі → «Маршрути».`,
+          summary: `Маршрути: ${r.variants.length} варіанти`,
+        };
+      } catch (err) {
+        if (err instanceof SuggestError) return { result: err.message, summary: 'Маршрути: помилка' };
+        throw err;
+      }
+    }
+    case 'list_routes': {
+      if (!ctx.ownerId) return { result: 'Недоступно в цьому контексті.', summary: 'Маршрути: помилка' };
+      const routes = (await listRoutes(ctx.ownerId)).filter((r) => !ctx.workspaceId || r.workspaceId === ctx.workspaceId);
+      if (routes.length === 0) return { result: 'Маршрутів у хабі немає.', summary: 'Маршрути: порожньо' };
+      return {
+        result: routes
+          .map((r) => {
+            const s = r.summary;
+            const dem = Object.entries(s.demurrage).map(([c, v]) => `${v} ${c}`).join(', ');
+            return (
+              `- ${r.name}${r.workspaceNumber ? ` (№${r.workspaceNumber})` : ''}: ${r.legs.length} плеч(а); план до ${d(s.plannedEnd)}, ` +
+              `прогноз ${d(s.projectedEnd)}${s.delayDays ? ` (${s.delayDays > 0 ? '+' : ''}${s.delayDays} дн)` : ''}` +
+              `${dem ? `; демередж: ${dem}` : ''}`
+            );
+          })
+          .join('\n'),
+        summary: `Маршрути: ${routes.length}`,
+      };
     }
     default:
       return { result: `Невідомий інструмент: ${name}`, summary: 'Невідомий інструмент' };
