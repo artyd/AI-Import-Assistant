@@ -336,4 +336,37 @@ test.describe("Logistics hub", () => {
     expect(saved.workspaceId).toBe(WSID);
     await expect(page.getByTestId("hub-route-detail")).toBeVisible();
   });
+
+  test("dark theme: hub stays legible (visual)", async ({ page }, info) => {
+    await page.addInitScript(() => {
+      try {
+        localStorage.setItem("theme", "dark");
+      } catch {
+        /* ignore */
+      }
+    });
+    await mockHub(page);
+    await openHub(page);
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await page.getByTestId("hub-track-row").first().click();
+    await expect(page.getByTestId("hub-track-detail")).toBeVisible();
+    // Card text must contrast with its background in dark mode.
+    const [fg, bg] = await page.getByTestId("hub-track-detail").evaluate((el) => {
+      const c = getComputedStyle(el).color;
+      let n: Element | null = el;
+      let b = "rgba(0, 0, 0, 0)";
+      while (n && (b === "rgba(0, 0, 0, 0)" || b === "transparent")) {
+        b = getComputedStyle(n).backgroundColor;
+        n = n.parentElement;
+      }
+      return [c, b];
+    });
+    const lum = (s: string) => {
+      const m = s.match(/[\d.]+/g)!.map(Number);
+      return 0.2126 * m[0]! + 0.7152 * m[1]! + 0.0722 * m[2]!;
+    };
+    expect(lum(fg) - lum(bg)).toBeGreaterThan(100);
+    await page.waitForTimeout(1300);
+    await page.screenshot({ path: `test-results/hub-dark-${info.project.name}.png` });
+  });
 });

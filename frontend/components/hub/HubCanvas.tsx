@@ -460,7 +460,15 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
     if (pts.length === 0) return;
     fitted.current = true;
     if (pts.length === 1) map.setView(pts[0]!, 5);
-    else map.fitBounds(L.latLngBounds(pts.map((p) => L.latLng(p[0], p[1]))).pad(0.35), { maxZoom: 6 });
+    else {
+      // Keep markers clear of the floating panel (left) and the toolbar / HUD.
+      const wide = map.getSize().x > 760;
+      map.fitBounds(L.latLngBounds(pts.map((p) => L.latLng(p[0], p[1]))), {
+        maxZoom: 6,
+        paddingTopLeft: [wide ? 370 : 30, 70],
+        paddingBottomRight: [40, 80],
+      });
+    }
   }, [map, items]);
 
   // ── Ports / airports / crossings, coloured by live status ────────────────
@@ -473,8 +481,9 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
       if (p.kind === "inland") continue;
       const issue = isIssue(p);
       const sel = p.code === selPort;
-      // A world view shows only what matters: favourites, problems, my destinations.
-      if (zoom < 4 && !sel && !p.favorite && !issue && p.trackCount === 0) continue;
+      // Zoomed out, show only what matters: favourites, places with a known
+      // status, my destinations. Everything else appears from regional zoom.
+      if (zoom < 6 && !sel && !p.favorite && !p.status && p.trackCount === 0) continue;
       const color = resolveCssColor(portStatusColor(p.status?.status));
       L.marker([p.lat, p.lng], {
         icon: portIcon(p.kind, color, p.favorite, p.status?.status === "closed" || p.status?.status === "disrupted", sel),
