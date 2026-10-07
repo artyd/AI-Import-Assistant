@@ -6,6 +6,7 @@ import { getOwnedWorkspace } from '../services/workspaceAccess.js';
 import { CARRIERS, getCarrier } from '../services/hub/carriers.js';
 import { detectNumber } from '../services/hub/detect.js';
 import { trackingSuggestions } from '../services/hub/suggest.js';
+import { addMark, confirmMark, getPort, listPorts, PORT_STATUSES, setFavorite } from '../services/hub/ports.js';
 import { liveSnapshot } from '../services/hub/live.js';
 import {
   addTracked,
@@ -176,6 +177,66 @@ export async function hubRoutes(app: FastifyInstance): Promise<void> {
 
   // GET /api/hub/live — everything the live map draws (items + ambient AIS).
   app.get('/api/hub/live', async (req, reply) => reply.send(await liveSnapshot(req.user!.sub)));
+
+  // ── Phase 2: ports / airports / crossings ────────────────────────────────
+
+  const codeParams = z.object({ code: z.string().trim().min(3).max(8) });
+
+  // GET /api/hub/ports — atlas with current status, my favourites, my tracks heading there.
+  app.get('/api/hub/ports', async (req, reply) => reply.send({ ports: await listPorts(req.user!.sub) }));
+
+  // GET /api/hub/ports/:code — status, mark history, my tracks to this place.
+  app.get('/api/hub/ports/:code', async (req, reply) => {
+    const p = codeParams.safeParse(req.params);
+    if (!p.success) return reply.status(404).send({ error: 'Not found' });
+    const port = await getPort(req.user!.sub, p.data.code);
+    if (!port) return reply.status(404).send({ error: 'Not found' });
+    return reply.send(port);
+  });
+
+  // POST /api/hub/ports/:code/status — a logist marks the status (team-wide, 72 h).
+  app.post('/api/hub/ports/:code/status', async (req, reply) => {
+    const p = codeParams.safeParse(req.params);
+    const body = z
+      .object({ status: z.enum(PORT_STATUSES as [string, ...string[]]), note: z.string().trim().max(500).optional() })
+      .safeParse(req.body);
+    if (!p.success) return reply.status(404).send({ error: 'Not found' });
+    if (!body.success) return reply.status(400).send({ error: 'Оберіть статус.' });
+    const ok = await addMark({
+      code: p.data.code,
+      status: body.data.status as (typeof PORT_STATUSES)[number],
+      note: body.data.note,
+      source: 'user',
+      userId: req.user!.sub,
+    });
+    if (!ok) return reply.status(404).send({ error: 'Not found' });
+    return reply.send(await getPort(req.user!.sub, p.data.code));
+  });
+
+  // POST /api/hub/ports/:code/status/:markId/confirm — confirm the current (AI) mark.
+  app.post('/api/hub/ports/:code/status/:markId/confirm', async (req, reply) => {
+    const p = z.object({ code: z.string().min(3).max(8), markId: z.string().uuid() }).safeParse(req.params);
+    if (!p.success) return reply.status(404).send({ error: 'Not found' });
+    const ok = await confirmMark(req.user!.sub, p.data.code, p.data.markId);
+    if (!ok) return reply.status(404).send({ error: 'Позначка вже неактуальна.' });
+    return reply.send(await getPort(req.user!.sub, p.data.code));
+  });
+
+  // PUT/DELETE /api/hub/ports/:code/favorite — personal ★.
+  app.put('/api/hub/ports/:code/favorite', async (req, reply) => {
+    const p = codeParams.safeParse(req.params);
+    if (!p.success || !(await setFavorite(req.user!.sub, p.data.code, true))) {
+      return reply.status(404).send({ error: 'Not found' });
+    }
+    return reply.status(204).send();
+  });
+  app.delete('/api/hub/ports/:code/favorite', async (req, reply) => {
+    const p = codeParams.safeParse(req.params);
+    if (!p.success || !(await setFavorite(req.user!.sub, p.data.code, false))) {
+      return reply.status(404).send({ error: 'Not found' });
+    }
+    return reply.status(204).send();
+  });
 
   // GET /api/workspaces/:id/tracking-suggestions — container / AWB / B/L numbers
   // found in the shipment's documents that are not tracked yet.

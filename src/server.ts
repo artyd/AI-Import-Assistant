@@ -5,6 +5,7 @@ import multipart from '@fastify/multipart';
 import { config } from './config.js';
 import { pool } from './db/pool.js';
 import { runMigrations } from './db/migrate.js';
+import { seedPlaces } from './services/hub/ports.js';
 import { authRoutes } from './routes/auth.js';
 import { workspaceRoutes } from './routes/workspaces.js';
 import { collectionRoutes } from './routes/collections.js';
@@ -133,6 +134,8 @@ async function buildServer() {
 async function main(): Promise<void> {
   await runMigrations();
   const app = await buildServer();
+  // Logistics-hub gazetteer → ports atlas (idempotent, only changed rows written).
+  await seedPlaces().catch((err: Error) => app.log.warn({ err }, 'seedPlaces failed'));
   await app.listen({ port: config.PORT, host: config.HOST });
   app.log.info(`Backend listening on http://${config.HOST}:${config.PORT}`);
 

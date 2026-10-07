@@ -15,13 +15,24 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { api } from "@/lib/api";
 import { useTheme } from "@/lib/theme";
-import { hubApi, statusColor, type AmbientVessel, type LatLng, type LiveSnapshot, type Track } from "@/lib/hub";
-import type { Port } from "@/lib/types";
+import {
+  hubApi,
+  portApi,
+  portStatusColor,
+  statusColor,
+  type AmbientVessel,
+  type HubPort,
+  type LatLng,
+  type LiveSnapshot,
+  type Track,
+} from "@/lib/hub";
 import { IconSpinner } from "@/components/icons";
-import { aisIcon, endpointIcon, glyphRotates, HUB_MAP_CSS, setRotation, trackIcon } from "./mapIcons";
+import { aisIcon, endpointIcon, glyphRotates, HUB_MAP_CSS, HUB_PORT_CSS, portIcon, setRotation, trackIcon } from "./mapIcons";
 import { advance, lerp, splitAt } from "./geo";
 import { TracksPanel, type WorkspaceRef } from "./TracksPanel";
 import { TrackDetail } from "./TrackDetail";
+import { isIssue, PortsPanel } from "./PortsPanel";
+import { PortDetail } from "./PortDetail";
 
 const TILE_LIGHT = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}";
 const TILE_DARK =
@@ -33,6 +44,7 @@ const FIT_BOUNDS: L.LatLngBoundsExpression = [
   [0, 124],
 ];
 const POLL_MS = 60_000;
+const PORTS_POLL_MS = 5 * 60_000;
 const GLIDE_MS = 1400;
 /** Never dead-reckon an AIS vessel further than this past its last fix. */
 const MAX_DR_MS = 20 * 60_000;
@@ -40,6 +52,12 @@ const MAX_DR_MS = 20 * 60_000;
 const AIS_MIN_ZOOM = 4;
 
 type LayerKey = "tracks" | "routes" | "ais" | "ports";
+type Tab = "tracks" | "ports";
+
+const TABS: { key: Tab; label: string }[] = [
+  { key: "tracks", label: "Вантажі" },
+  { key: "ports", label: "Порти" },
+];
 
 const LAYERS: { key: LayerKey; label: string; dot: string }[] = [
   { key: "tracks", label: "Вантажі", dot: "var(--accent)" },
@@ -75,7 +93,9 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
   const { theme } = useTheme();
   const [map, setMap] = useState<L.Map | null>(null);
   const [snap, setSnap] = useState<LiveSnapshot | null>(null);
-  const [ports, setPorts] = useState<Port[]>([]);
+  const [ports, setPorts] = useState<HubPort[]>([]);
+  const [tab, setTab] = useState<Tab>("tracks");
+  const [selPort, setSelPort] = useState<string | null>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceRef[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -120,10 +140,30 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
     return () => clearInterval(t);
   }, [reload]);
 
-  useEffect(() => {
-    api<{ ports: Port[] }>("/api/map/ports")
+  const loadPorts = useCallback(() => {
+    portApi
+      .list()
       .then((r) => setPorts(r.ports ?? []))
       .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    loadPorts();
+    const t = setInterval(loadPorts, PORTS_POLL_MS);
+    return () => clearInterval(t);
+  }, [loadPorts]);
+
+  const selectTrack = useCallback((id: string | null) => {
+    setSelPort(null);
+    setSelectedId(id);
+  }, []);
+  const selectPort = useCallback((code: string | null) => {
+    setSelectedId(null);
+    setSelPort(code);
+  }, []);
+  const selectedPort = ports.find((p) => p.code === selPort) ?? null;
+
+  useEffect(() => {
     api<{ workspaces: WorkspaceRef[] }>("/api/workspaces")
       .then((r) => setWorkspaces(r.workspaces ?? []))
       .catch(() => {});
@@ -143,8 +183,8 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
 
   // On phones the list and the detail card share the screen — one at a time.
   useEffect(() => {
-    if (narrow && selectedId) setPanelOpen(false);
-  }, [narrow, selectedId]);
+    if (narrow && (selectedId || selPort)) setPanelOpen(false);
+  }, [narrow, selectedId, selPort]);
 
   // ── Map setup ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -175,19 +215,32 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
     else map.fitBounds(L.latLngBounds(pts.map((p) => L.latLng(p[0], p[1]))).pad(0.35), { maxZoom: 6 });
   }, [map, items]);
 
-  // ── Ports (static atlas; Phase 2 adds live status) ───────────────────────
+  // ── Ports / airports / crossings, coloured by live status ────────────────
   useEffect(() => {
     const g = portLayer.current;
     if (!map || !g) return;
     g.clearLayers();
     if (!layers.ports) return;
     for (const p of ports) {
-      const color = p.kind === "customs" ? "#d98213" : p.kind === "sea" ? "#2f6feb" : "#12936a";
-      L.circleMarker([p.lat, p.lng], { radius: 4, color: "#fff", weight: 1.5, fillColor: color, fillOpacity: 1 })
-        .bindTooltip(p.name, { direction: "top", offset: [0, -4] })
+      if (p.kind === "inland") continue;
+      const issue = isIssue(p);
+      const sel = p.code === selPort;
+      // A world view shows only what matters: favourites, problems, my destinations.
+      if (zoom < 4 && !sel && !p.favorite && !issue && p.trackCount === 0) continue;
+      const color = resolveCssColor(portStatusColor(p.status?.status));
+      L.marker([p.lat, p.lng], {
+        icon: portIcon(p.kind, color, p.favorite, p.status?.status === "closed" || p.status?.status === "disrupted", sel),
+        zIndexOffset: sel ? 900 : issue ? 300 : p.favorite ? 200 : 0,
+        title: p.name,
+      })
+        .on("click", () => {
+          setTab("ports");
+          selectPort(p.code);
+        })
+        .bindTooltip(`${p.name} · ${p.status ? p.status.label : "немає даних"}`, { direction: "top", offset: [0, -10] })
         .addTo(g);
     }
-  }, [map, ports, layers.ports]);
+  }, [map, ports, layers.ports, zoom, selPort, selectPort, theme]);
 
   // ── Route lines (traveled solid + remaining "marching ants") ─────────────
   useEffect(() => {
@@ -246,7 +299,10 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
           if (glyphRotates(t.mode)) setRotation(cur.marker, cur.heading);
         } else {
           const marker = L.marker(pos, { icon: trackIcon(t.mode, t.status, isSel), zIndexOffset: isSel ? 1000 : 0, keyboard: true, title: t.label || t.number })
-            .on("click", () => setSelectedId(t.id))
+            .on("click", () => {
+              setTab("tracks");
+              selectTrack(t.id);
+            })
             .bindTooltip(`${t.label || t.number} · ${t.statusLabel}`, { direction: "top", offset: [0, -16] })
             .addTo(map);
           const anim: TrackAnim = { marker, from: pos, to: pos, start: t0, heading: t.live?.heading ?? 0, item: t, iconKey };
@@ -261,7 +317,7 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
         anims.delete(id);
       }
     }
-  }, [map, items, selectedId, layers.tracks]);
+  }, [map, items, selectedId, layers.tracks, selectTrack]);
 
   // ── Ambient AIS vessels ──────────────────────────────────────────────────
   useEffect(() => {
@@ -361,6 +417,16 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map, selectedId]);
 
+  // Fly to a selected port.
+  useEffect(() => {
+    if (!map || !selectedPort) return;
+    const z = Math.max(map.getZoom(), 6);
+    const ll = L.latLng(selectedPort.lat, selectedPort.lng);
+    const target = narrow ? map.unproject(map.project(ll, z).add([0, map.getSize().y * 0.3]), z) : ll;
+    map.flyTo(target, z, { duration: 0.9 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map, selPort]);
+
   // Fullscreen.
   useEffect(() => {
     const onFs = () => {
@@ -389,13 +455,15 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
     }
     return c;
   }, [items]);
+  const portIssues = useMemo(() => ports.filter((p) => p.status?.status === "closed" || p.status?.status === "disrupted").length, [ports]);
 
   const tileUrl = theme === "dark" ? TILE_DARK : TILE_LIGHT;
   const panelW = 340;
-  const showPanel = panelOpen && !(narrow && selected);
+  const hasDetail = !!selected || !!selectedPort;
+  const showPanel = panelOpen && !(narrow && hasDetail);
   const leftInset = showPanel && !narrow ? panelW + 24 : 12;
-  const rightInset = selected && !narrow ? 384 : 12;
-  const compactHud = !!selected || narrow;
+  const rightInset = hasDetail && !narrow ? 384 : 12;
+  const compactHud = hasDetail || narrow;
 
   return (
     <div ref={wrapRef} style={{ position: "relative", height: "100%", width: "100%", background: "var(--chat)", overflow: "hidden" }} data-testid="hub-map">
@@ -407,6 +475,7 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
         .aia-map .leaflet-control-attribution { background: color-mix(in srgb, var(--surface) 80%, transparent) !important; color: var(--muted) !important; }
         .aia-map .leaflet-control-attribution a { color: var(--accent) !important; }
         ${HUB_MAP_CSS}
+        ${HUB_PORT_CSS}
       `}</style>
 
       {loading && (
@@ -433,7 +502,19 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
       <div style={{ position: "absolute", top: 12, left: leftInset, right: rightInset, zIndex: 1200, display: "flex", justifyContent: "center", pointerEvents: "none" }}>
         <div style={{ ...glass, pointerEvents: "auto", display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, padding: 6, maxWidth: "100%" }}>
           {!showPanel && (
-            <button type="button" style={iconBtn} onClick={() => { setPanelOpen(true); if (narrow) setSelectedId(null); }} aria-label="Показати панель вантажів" title="Вантажі">
+            <button
+              type="button"
+              style={iconBtn}
+              onClick={() => {
+                setPanelOpen(true);
+                if (narrow) {
+                  setSelectedId(null);
+                  setSelPort(null);
+                }
+              }}
+              aria-label="Показати панель хабу"
+              title="Панель хабу"
+            >
               ☰
             </button>
           )}
@@ -516,20 +597,82 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
               ‹
             </button>
           </div>
+          <div role="tablist" aria-label="Розділи хабу" style={{ display: "flex", gap: 4, padding: "10px 12px 0" }}>
+            {TABS.map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                role="tab"
+                aria-selected={tab === t.key}
+                onClick={() => setTab(t.key)}
+                style={{
+                  flex: 1,
+                  height: 32,
+                  borderRadius: 9,
+                  border: `1px solid ${tab === t.key ? "var(--border)" : "transparent"}`,
+                  background: tab === t.key ? "var(--surface)" : "var(--hover)",
+                  boxShadow: tab === t.key ? "0 1px 4px rgba(0,0,0,.06)" : "none",
+                  color: tab === t.key ? "var(--text)" : "var(--muted)",
+                  font: "inherit",
+                  fontSize: 13,
+                  fontWeight: 650,
+                  cursor: "pointer",
+                }}
+              >
+                {t.label}
+                {t.key === "ports" && portIssues > 0 && <span style={{ marginLeft: 6, color: "var(--err)" }}>● {portIssues}</span>}
+              </button>
+            ))}
+          </div>
           <div style={{ flex: 1, minHeight: 0 }}>
-            <TracksPanel
-              items={items}
-              selectedId={selectedId}
-              onSelect={(id) => setSelectedId(id)}
-              onChanged={(id) => void reload(id)}
-              workspaceId={workspaceId}
-              workspaces={workspaces}
-            />
+            {tab === "tracks" ? (
+              <TracksPanel
+                items={items}
+                selectedId={selectedId}
+                onSelect={(id) => selectTrack(id)}
+                onChanged={(id) => {
+                  void reload(id);
+                  loadPorts();
+                }}
+                workspaceId={workspaceId}
+                workspaces={workspaces}
+              />
+            ) : (
+              <PortsPanel ports={ports} selectedCode={selPort} onSelect={(c) => selectPort(c)} onChanged={loadPorts} />
+            )}
           </div>
         </aside>
       )}
 
       {/* Right: detail card */}
+      {selectedPort && (
+        <aside
+          aria-label="Деталі порту"
+          style={{
+            ...glass,
+            position: "absolute",
+            zIndex: 1260,
+            top: narrow ? "auto" : 12,
+            right: 12,
+            bottom: narrow ? 12 : 64,
+            width: narrow ? "calc(100% - 24px)" : 360,
+            height: narrow ? "62%" : undefined,
+            overflow: "hidden",
+            background: "color-mix(in srgb, var(--surface) 96%, transparent)",
+          }}
+        >
+          <PortDetail
+            key={selectedPort.code}
+            code={selectedPort.code}
+            onClose={() => setSelPort(null)}
+            onChanged={loadPorts}
+            onOpenTrack={(id) => {
+              setTab("tracks");
+              selectTrack(id);
+            }}
+          />
+        </aside>
+      )}
       {selected && (
         <aside
           aria-label="Деталі вантажу"
@@ -550,7 +693,7 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
             key={selected.id}
             track={selected}
             workspaces={workspaces}
-            onClose={() => setSelectedId(null)}
+            onClose={() => selectTrack(null)}
             onChanged={() => void reload()}
             onRemoved={() => {
               setSelectedId(null);
@@ -561,7 +704,7 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
       )}
 
       {/* HUD: dispatcher strip */}
-      {!(narrow && (showPanel || selected)) && (
+      {!(narrow && (showPanel || hasDetail)) && (
         <div
           style={{ position: "absolute", left: leftInset, right: rightInset, bottom: 18, zIndex: 1200, display: "flex", justifyContent: "center", pointerEvents: "none" }}
         >
@@ -573,6 +716,7 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
             <Stat icon="⚓" n={stats.port} label="у порту / митниці" color="var(--warn)" compact={compactHud} />
             <Stat icon="⚠" n={stats.alert} label="потребують уваги" color="var(--err)" compact={compactHud} />
             <Stat icon="✓" n={stats.done} label="доставлено" color="var(--ok)" compact={compactHud} />
+            <Stat icon="⛔" n={portIssues} label="портів / кордонів зі збоями" color="var(--err)" compact={compactHud} />
             <span style={{ width: 1, alignSelf: "stretch", background: "var(--border)" }} />
             <span style={{ color: "var(--muted)" }} title="Живі позиції суден (aisstream.io)">
               <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: (snap?.vessels.length ?? 0) > 0 ? "var(--ok)" : "var(--faint)", marginRight: 6 }} />

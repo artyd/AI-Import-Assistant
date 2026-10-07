@@ -12,6 +12,7 @@ import { mockWorkspace, WSID } from "./mocks";
  */
 
 const LIVE = JSON.parse(readFileSync(join(__dirname, "fixtures", "hub-live.json"), "utf8"));
+const PORTS = JSON.parse(readFileSync(join(__dirname, "fixtures", "hub-ports.json"), "utf8"));
 
 const EVENTS = [
   { id: "e1", at: "2026-09-16T08:00:00Z", location: "Ningbo, CN", lat: 29.93, lng: 121.85, description: "Завантажено на судно", planned: false },
@@ -22,6 +23,8 @@ const EVENTS = [
 
 interface HubMockState {
   added: unknown[];
+  marks?: unknown[];
+  favs?: string[];
 }
 
 async function mockHub(page: Page, state: HubMockState = { added: [] }) {
@@ -30,6 +33,25 @@ async function mockHub(page: Page, state: HubMockState = { added: [] }) {
       route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
     if (pathname === "/api/hub/live") return (await json(LIVE), true);
     if (pathname === "/api/map/ports") return (await json({ ports: [] }), true);
+    if (pathname === "/api/hub/ports") return (await json(PORTS), true);
+    const pm = pathname.match(/^\/api\/hub\/ports\/([A-Z]+)(\/.*)?$/);
+    if (pm) {
+      const port = PORTS.ports.find((x: { code: string }) => x.code === pm[1]);
+      const detail = {
+        port,
+        history: port?.status ? [{ id: "h0", ...port.status, createdAt: port.status.updatedAt, validUntil: "2026-10-10T00:00:00Z" }, { id: "h1", status: "ok", label: "Працює", note: "", by: "user", userName: "Олена", sourceUrl: "", sourceTitle: "", createdAt: "2026-10-03T09:00:00Z", validUntil: "2026-10-06T09:00:00Z", confirmations: 0 }] : [],
+        tracks: pm[1] === "UAODS" ? [{ id: "t1", number: "MSKU1234565", label: "Метопрен, партія 2", status: "in_transit", eta: "2026-10-20T06:00:00Z" }] : [],
+      };
+      if (pm[2] === "/status" && method === "POST") {
+        state.marks?.push(route.request().postDataJSON());
+        return (await json(detail), true);
+      }
+      if (pm[2] === "/favorite") {
+        state.favs?.push(`${method}:${pm[1]}`);
+        return (await route.fulfill({ status: 204 }), true);
+      }
+      return (await json(detail), true);
+    }
     if (pathname === "/api/hub/carriers")
       return (
         await json({
@@ -165,5 +187,39 @@ test.describe("Logistics hub", () => {
     await expect(row).toContainText("Немає даних від перевізника");
     await row.click();
     await expect(page.getByTestId("hub-track-detail")).toContainText("Штурман не вгадує статус");
+  });
+
+  test("ports tab: live statuses, favourites, team marks", async ({ page }, info) => {
+    const state: HubMockState = { added: [], marks: [], favs: [] };
+    await mockHub(page, state);
+    await openHub(page);
+    await page.getByRole("tab", { name: /Порти/ }).click();
+    // Default filter = favourites; problems surface first.
+    const rows = page.getByTestId("hub-port-row");
+    await expect(rows.first()).toContainText("Ягодин");
+    await expect(rows.first()).toContainText("Закрито");
+    // Port markers on the map, alerts pulse.
+    expect(await page.locator(".hub-port").count()).toBeGreaterThan(3);
+    expect(await page.locator(".hub-port.is-alert").count()).toBeGreaterThan(0);
+
+    // Search → open Odesa card.
+    await page.getByTestId("hub-port-search").fill("Одеса");
+    await page.getByTestId("hub-port-row").filter({ hasText: "UAODS" }).getByRole("button", { name: /UAODS/ }).click();
+    const card = page.getByTestId("hub-port-detail");
+    await expect(card).toBeVisible();
+    await expect(page.getByTestId("hub-port-status")).toContainText("Збої в роботі");
+    await expect(page.getByTestId("hub-port-status")).toContainText("ШІ з новини");
+    await expect(card.getByRole("link", { name: /Укрінформ/ })).toHaveAttribute("href", /example\.com/);
+    await expect(card).toContainText("Метопрен, партія 2");
+    await page.waitForTimeout(1200);
+    await page.screenshot({ path: `test-results/hub-port-${info.project.name}.png` });
+
+    // Team mark with a comment + confirm the AI mark + toggle favourite.
+    await card.getByLabel("Коментар до статусу").fill("черга 2 доби");
+    await card.getByRole("button", { name: "Черги / перевантаження" }).click();
+    await expect.poll(() => state.marks!.length).toBe(1);
+    expect(state.marks![0]).toEqual({ status: "congested", note: "черга 2 доби" });
+    await card.getByRole("button", { name: "Прибрати з обраних" }).click();
+    await expect.poll(() => state.favs!).toContain("DELETE:UAODS");
   });
 });
