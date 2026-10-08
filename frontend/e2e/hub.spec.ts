@@ -31,13 +31,26 @@ interface HubMockState {
   carrierMarks?: unknown[];
   savedRoutes?: unknown[];
   suggests?: unknown[];
+  /** Serve HLCU1234567 as a manual-mode sea item and record what the logist enters. */
+  manual?: { patches: unknown[]; events: unknown[] };
+}
+
+/** LIVE with the Hapag item in manual mode (no carrier data yet). */
+function liveWithManualSea() {
+  return {
+    ...LIVE,
+    items: LIVE.items.map((t: { number: string }) =>
+      t.number === "HLCU1234567" ? { ...t, manualOnly: true, status: "pending", statusLabel: "Очікує перевірки", source: "none" } : t
+    ),
+  };
 }
 
 async function mockHub(page: Page, state: HubMockState = { added: [] }) {
   await mockWorkspace(page, async (route, pathname, method) => {
     const json = (body: unknown, status = 200) =>
       route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
-    if (pathname === "/api/hub/live") return (await json(LIVE), true);
+    const live = state.manual ? liveWithManualSea() : LIVE;
+    if (pathname === "/api/hub/live") return (await json(live), true);
     if (pathname === "/api/map/ports") return (await json({ ports: [] }), true);
     if (pathname === "/api/hub/ports") return (await json(PORTS), true);
     if (pathname === "/api/hub/routes" && method === "GET") return (await json({ routes: ROUTES.routes }), true);
@@ -101,9 +114,20 @@ async function mockHub(page: Page, state: HubMockState = { added: [] }) {
       const track = { ...LIVE.items[0], id: "t-new", number: body.number.toUpperCase(), label: "" };
       return (await json({ track, events: [] }, 201), true);
     }
+    const ev = pathname.match(/^\/api\/hub\/tracks\/([\w-]+)\/events$/);
+    if (ev && method === "POST" && state.manual) {
+      state.manual.events.push(route.request().postDataJSON());
+      const track = live.items.find((t: { id: string }) => t.id === ev[1]);
+      return (await json({ track, events: [] }, 201), true);
+    }
     const m = pathname.match(/^\/api\/hub\/tracks\/([\w-]+)$/);
+    if (m && method === "PATCH" && state.manual) {
+      state.manual.patches.push(route.request().postDataJSON());
+      const track = live.items.find((t: { id: string }) => t.id === m[1]);
+      return (await json({ track, events: [] }), true);
+    }
     if (m && method === "GET") {
-      const track = LIVE.items.find((t: { id: string }) => t.id === m[1]) ?? LIVE.items[0];
+      const track = live.items.find((t: { id: string }) => t.id === m[1]) ?? live.items[0];
       return (await json({ track, events: track.id === "t1" ? EVENTS : [] }), true);
     }
     if (pathname === `/api/workspaces/${WSID}/tracking-suggestions`)
@@ -194,6 +218,7 @@ test.describe("Logistics hub", () => {
     await expect(card).toContainText("API · maersk");
     await expect(card).toContainText("ETA зсунулась на +3 дн.");
     await expect(card).toContainText("Орієнтовно");
+    await expect(card.getByTestId("hub-countdown")).toContainText(/До прибуття|Прострочено/);
     await expect(page.getByTestId("hub-timeline").locator("li")).toHaveCount(4);
     await expect(card.getByRole("link", { name: "Сайт ↗" })).toHaveAttribute("href", /maersk\.com/);
     await page.waitForTimeout(1200);
@@ -222,6 +247,43 @@ test.describe("Logistics hub", () => {
     await expect(row).toContainText("Немає даних від перевізника");
     await row.click();
     await expect(page.getByTestId("hub-track-detail")).toContainText("Штурман не вгадує статус");
+  });
+
+  test("sea line kept by hand: logist enters status, ETA, vessel and a milestone", async ({ page }, info) => {
+    test.skip(info.project.name === "mobile", "desktop-only feature");
+    const state: HubMockState = { added: [], manual: { patches: [], events: [] } };
+    await mockHub(page, state);
+    await openHub(page);
+    await page.getByRole("tab", { name: /Увага/ }).click();
+    await page.getByTestId("hub-track-row").filter({ hasText: "HLCU1234567" }).click();
+    const card = page.getByTestId("hub-track-detail");
+    await expect(card.getByTestId("hub-manual-hint")).toBeVisible();
+    await expect(card.getByRole("button", { name: /Оновити/ })).toHaveCount(0);
+    await expect(card).not.toContainText("Штурман не вгадує статус");
+
+    await card.getByTestId("hub-manual-hint").getByRole("button", { name: /Внести дані/ }).click();
+    const form = card.getByTestId("hub-manual-form");
+    await form.getByRole("combobox", { name: "Статус" }).selectOption("at_port");
+    await form.getByLabel("Куди", { exact: true }).fill("Odesa");
+    await form.getByLabel("ETA", { exact: true }).fill("2026-10-20");
+    await form.getByLabel("Судно", { exact: true }).fill("MSC ANNA");
+    await form.getByLabel("IMO").fill("12345");
+    await form.getByRole("button", { name: "Зберегти" }).click();
+    await expect(form.getByRole("alert")).toContainText("IMO");
+    await form.getByLabel("IMO").fill("9811000");
+    await page.screenshot({ path: `test-results/hub-manual-${info.project.name}.png` });
+    await form.getByRole("button", { name: "Зберегти" }).click();
+    await expect.poll(() => state.manual!.patches.length).toBe(1);
+    expect(state.manual!.patches[0]).toMatchObject({
+      manual: { status: "at_port", destination: "Odesa", eta: "2026-10-20", vesselName: "MSC ANNA", vesselImo: "9811000" },
+    });
+
+    const evForm = card.getByTestId("hub-manual-event");
+    await evForm.getByPlaceholder(/Подія/).fill("Вивантажено з судна");
+    await evForm.getByPlaceholder("Місце").fill("Odesa");
+    await evForm.getByRole("button", { name: /Додати подію/ }).click();
+    await expect.poll(() => state.manual!.events.length).toBe(1);
+    expect(state.manual!.events[0]).toMatchObject({ description: "Вивантажено з судна", location: "Odesa", planned: false });
   });
 
   test("ports tab: live statuses, favourites, team marks", async ({ page }, info) => {

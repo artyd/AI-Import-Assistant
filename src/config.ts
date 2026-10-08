@@ -215,6 +215,15 @@ const envSchema = z.object({
   UKRPOSHTA_TRACKING_TOKEN: z.string().default(''),
   DHL_API_KEY: z.string().default(''),
   MAERSK_API_KEY: z.string().default(''),
+  // 17TRACK (api.17track.net) — parcels / express (DHL, FedEx, UPS, TNT,
+  // international post, Meest…). One quota unit per registered number.
+  // Also read from SEVENTEEN_TRACK_KEY (and NOVAPOSHTA_API_KEY from
+  // NOVA_POSHTA_API_KEY) — see ENV_ALIASES.
+  TRACK17_API_KEY: z.string().default(''),
+  // Sea containers / B/L: 'manual' = logists enter status, ETA, vessel and
+  // events by hand (no carrier-page scraping; an official API still runs when
+  // its key is set); 'auto' = the full hybrid chain incl. scraping.
+  TRACKING_SEA_MODE: z.enum(['manual', 'auto']).default('manual'),
   // aisstream.io (free) live AIS websocket — vessel positions for the live map.
   // Empty = positions are interpolated from carrier events + ETA.
   AISSTREAM_API_KEY: z.string().default(''),
@@ -238,8 +247,18 @@ const envSchema = z.object({
 
 export type AppConfig = z.infer<typeof envSchema>;
 
+/** Alternative env names (as used in the news service's .env) → canonical keys. */
+const ENV_ALIASES: Record<string, string> = {
+  NOVA_POSHTA_API_KEY: 'NOVAPOSHTA_API_KEY',
+  SEVENTEEN_TRACK_KEY: 'TRACK17_API_KEY',
+};
+
 function loadConfig(): AppConfig {
-  const parsed = envSchema.safeParse(process.env);
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  for (const [alias, key] of Object.entries(ENV_ALIASES)) {
+    if (!env[key] && env[alias]) env[key] = env[alias];
+  }
+  const parsed = envSchema.safeParse(env);
   if (!parsed.success) {
     const issues = parsed.error.issues
       .map((i) => `  - ${i.path.join('.') || '(root)'}: ${i.message}`)

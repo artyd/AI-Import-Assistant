@@ -729,23 +729,39 @@ added it and to the owner of the shipment it is linked to; linking requires
 owning that shipment (404 otherwise).
 
 Status source is a **hybrid chain**: official carrier API (Нова Пошта keyless;
-Укрпошта / DHL / Maersk when their keys are set) → the carrier's public tracking
-page (fetched by `logist-mcp`, rendered by headless Chromium if it is an SPA) read
-by Claude into a strict schema → otherwise **no data** (never a guessed status).
+Укрпошта / DHL / Maersk when their keys are set; **17TRACK** for courier / express /
+international post / Meest when `TRACK17_API_KEY` is set — a number is registered
+with 17TRACK once, on its first check) → the carrier's public tracking page
+(fetched by `logist-mcp`, rendered by headless Chromium if it is an SPA) read by
+Claude into a strict schema → otherwise **no data** (never a guessed status).
 Every item carries `source` + `lastCheckedAt`.
+
+**Sea in manual mode** (`TRACKING_SEA_MODE=manual`, the default): sea containers /
+B/L are not scraped or re-checked by the cron — logists enter status, route, dates,
+vessel and milestones by hand (`PATCH … { manual }`, `POST …/events`); such items
+have `manualOnly: true` and `source: 'manual'`. An official API (Maersk with a key)
+still runs. A manually entered vessel name/IMO feeds the AIS layer.
 
 Shapes:
 - `TrackStatus ∈ pending|info|in_transit|at_port|customs|out_for_delivery|delivered|exception|unknown`
 - `Track = { id, number, kind: container|bl|awb|parcel, carrier, carrierName,
   mode: sea|air|courier|domestic, label, status, statusLabel, statusText, origin,
   destination, originPos: [lat,lng]|null, destPos, vesselName, vesselImo,
-  departedAt, eta, firstEta, arrivedAt, source ('api:<carrier>'|'scrape:<carrier>'|'none'),
-  lastCheckedAt, lastChangedAt, lastError, workspaceId, workspaceNumber, trackUrl, createdAt }`
-- `TrackEvent = { id, at, location, lat, lng, description, planned }`
+  departedAt, eta, firstEta, arrivedAt, source ('api:<carrier>'|'scrape:<carrier>'|'manual'|'none'),
+  lastCheckedAt, lastChangedAt, lastError, workspaceId, workspaceNumber, trackUrl,
+  manualOnly (sea kept by hand — no refresh), createdAt }`
+- `TrackEvent = { id, at, location, lat, lng, description, planned, manual }` —
+  `manual` = entered by a logist (only these can be deleted).
 - `LiveInfo = { id, pos: [lat,lng]|null, heading, path: [lat,lng][], progress (0..1),
-  positionSource: ais|estimate|event|origin|destination|null, vessel: { name, sog, updatedAt }|null }`
+  positionSource: ais|estimate|event|origin|destination|null, vessel: { name, sog, updatedAt }|null,
+  departedAt, eta, etaEstimated }`
   — `estimate` = interpolated along the sea lane / air arc by departure→ETA time;
-  the UI labels it "орієнтовно".
+  the UI labels it "орієнтовно". `departedAt`/`eta` are the effective dates: a
+  missing one is derived from the route length (typical transit for the mode —
+  no ETA → departure + transit, flagged `etaEstimated`; no departure → ETA −
+  transit; in transit with neither → from when the item was added). They drive
+  the moving marker and the countdown to arrival, and follow any date the logist
+  changes. Marking an item "in transit" by hand without a departure sets it to now.
 
 ### `GET /api/hub/carriers`
 `{ carriers: { id, name, mode }[] }` — registry for the manual carrier picker.
@@ -766,8 +782,18 @@ Body `{ number, carrier?, label?, workspaceId? }`. Checks the number immediately
 `{ track, events: TrackEvent[] }`.
 
 ### `PATCH /api/hub/tracks/:id`
-Body `{ label?, workspaceId? (null = unlink), carrier?, archived? }` → `{ track, events }`.
-Changing `carrier` re-checks immediately.
+Body `{ label?, workspaceId? (null = unlink), carrier?, archived?, manual? }` → `{ track, events }`.
+Changing `carrier` re-checks immediately. `manual = { status? (any TrackStatus except
+pending), statusText?, origin?, destination?, vesselName?, vesselImo? (7 digits or ''),
+departedAt?, eta?, arrivedAt? (ISO date/datetime or null) }` — only present fields
+change; sets `source: 'manual'`; teammates (not the editor) get the usual in-app
+notification on an important status change or an ETA shift ≥ 24h.
+
+### `POST /api/hub/tracks/:id/events`
+Body `{ description, at? (ISO|null), location?, planned? }` → `201 { track, events }`.
+
+### `DELETE /api/hub/tracks/:id/events/:eventId`
+Removes a hand-entered event → `{ track, events }`; `404` for carrier events.
 
 ### `DELETE /api/hub/tracks/:id`  → `204` (only the user who added it).
 

@@ -27,6 +27,11 @@ export interface LiveInfo {
   progress: number;
   positionSource: PositionSource | null;
   vessel: { name: string; sog: number | null; updatedAt: string } | null;
+  /** Effective departure / ETA (a missing one derived from the route length). */
+  departedAt?: string | null;
+  eta?: string | null;
+  /** The ETA was derived from the route, not given by the carrier / logist. */
+  etaEstimated?: boolean;
 }
 
 export interface Track {
@@ -57,8 +62,23 @@ export interface Track {
   workspaceId: string | null;
   workspaceNumber: string | null;
   trackUrl: string | null;
+  /** Sea in manual mode — logists enter status / ETA / vessel / events by hand. */
+  manualOnly: boolean;
   createdAt: string;
   live?: LiveInfo;
+}
+
+/** Fields a logist can enter by hand (dates ISO or null to clear). */
+export interface ManualTrackInput {
+  status?: Exclude<TrackStatus, "pending">;
+  statusText?: string;
+  origin?: string;
+  destination?: string;
+  vesselName?: string;
+  vesselImo?: string;
+  departedAt?: string | null;
+  eta?: string | null;
+  arrivedAt?: string | null;
 }
 
 export interface TrackEvent {
@@ -69,6 +89,8 @@ export interface TrackEvent {
   lng: number | null;
   description: string;
   planned: boolean;
+  /** Entered by a logist (can be deleted); carrier events are read-only. */
+  manual?: boolean;
 }
 
 export interface AmbientVessel {
@@ -153,6 +175,7 @@ export const POSITION_LABEL: Record<PositionSource, string> = {
 export function sourceLabel(source: string): string {
   if (source.startsWith("api:")) return `API · ${source.slice(4)}`;
   if (source.startsWith("scrape:")) return `Сайт перевізника · ${source.slice(7)}`;
+  if (source === "manual") return "Внесено вручну";
   return "Немає джерела";
 }
 
@@ -177,6 +200,26 @@ export function fmtDate(iso: string | null | undefined, withTime = false): strin
   });
 }
 
+/** ETA to show / count down to: the given one, else the route-based estimate. */
+export function effEta(t: Pick<Track, "eta" | "live">): string | null {
+  return t.eta ?? t.live?.eta ?? null;
+}
+
+export function effDeparted(t: Pick<Track, "departedAt" | "live">): string | null {
+  return t.departedAt ?? t.live?.departedAt ?? null;
+}
+
+/** "5 дн 4 год" / "3 год 20 хв" until `iso`; `late` once it has passed. */
+export function countdown(iso: string, now = Date.now()): { text: string; late: boolean } {
+  const ms = new Date(iso).getTime() - now;
+  const abs = Math.abs(ms);
+  const d = Math.floor(abs / 86_400_000);
+  const h = Math.floor((abs % 86_400_000) / 3_600_000);
+  const m = Math.floor((abs % 3_600_000) / 60_000);
+  const text = d > 0 ? `${d} дн ${h} год` : h > 0 ? `${h} год ${m} хв` : `${m} хв`;
+  return { text, late: ms < 0 };
+}
+
 /** Days between the first and current ETA (positive = later). */
 export function etaShiftDays(t: Pick<Track, "eta" | "firstEta">): number {
   if (!t.eta || !t.firstEta) return 0;
@@ -195,8 +238,18 @@ export const hubApi = {
   get: (id: string) => api<{ track: Track; events: TrackEvent[] }>(`/api/hub/tracks/${id}`),
   patch: (
     id: string,
-    body: { label?: string; workspaceId?: string | null; carrier?: string; archived?: boolean }
+    body: {
+      label?: string;
+      workspaceId?: string | null;
+      carrier?: string;
+      archived?: boolean;
+      manual?: ManualTrackInput;
+    }
   ) => api<{ track: Track; events: TrackEvent[] }>(`/api/hub/tracks/${id}`, { method: "PATCH", body }),
+  addEvent: (id: string, body: { at: string | null; location: string; description: string; planned: boolean }) =>
+    api<{ track: Track; events: TrackEvent[] }>(`/api/hub/tracks/${id}/events`, { method: "POST", body }),
+  removeEvent: (id: string, eventId: string) =>
+    api<{ track: Track; events: TrackEvent[] }>(`/api/hub/tracks/${id}/events/${eventId}`, { method: "DELETE" }),
   remove: (id: string) => api<void>(`/api/hub/tracks/${id}`, { method: "DELETE" }),
   refresh: (id: string) =>
     api<{ track: Track; events: TrackEvent[] }>(`/api/hub/tracks/${id}/refresh`, { method: "POST" }),

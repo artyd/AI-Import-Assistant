@@ -36,6 +36,8 @@ import {
   type LiveSnapshot,
   type Track,
   type TrackEvent,
+  effDeparted,
+  effEta,
   etaShiftDays,
 } from "@/lib/hub";
 import { IconSpinner } from "@/components/icons";
@@ -162,8 +164,9 @@ function statusRank(p: HubPort): number {
 
 /** Days-to-ETA badge for a moving item; red when the ETA slipped or passed. */
 function etaBadge(t: Track, now: number): EtaBadge | null {
-  if (!t.eta || ["delivered", "pending", "unknown", "exception"].includes(t.status)) return null;
-  const days = Math.ceil((new Date(t.eta).getTime() - now) / 86_400_000);
+  const eta = effEta(t);
+  if (!eta || ["delivered", "pending", "unknown", "exception"].includes(t.status)) return null;
+  const days = Math.ceil((new Date(eta).getTime() - now) / 86_400_000);
   const late = etaShiftDays(t) >= 1 || days < 0;
   const text = days < 0 ? `+${-days} дн` : days === 0 ? "сьогодні" : `${days} дн`;
   return { text, late };
@@ -882,10 +885,12 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
         // In-transit estimates keep creeping along their lane between polls.
         for (const a of trackAnims.current.values()) {
           const it = a.item;
-          if (it.live?.positionSource !== "estimate" || !it.departedAt || !it.eta) continue;
+          const dep = effDeparted(it);
+          const eta = effEta(it);
+          if (it.live?.positionSource !== "estimate" || !dep || !eta) continue;
           if (ts - a.start < GLIDE_MS) continue;
-          const t0 = new Date(it.departedAt).getTime();
-          const t1 = new Date(it.eta).getTime();
+          const t0 = new Date(dep).getTime();
+          const t1 = new Date(eta).getTime();
           if (t1 <= t0) continue;
           const t = Math.max(0.02, Math.min(0.97, (wall - t0) / (t1 - t0)));
           const { point, heading } = splitAt(smoothPath(it.live.path), t);

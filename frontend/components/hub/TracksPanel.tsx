@@ -8,6 +8,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError } from "@/lib/api";
 import {
   ago,
+  countdown,
+  effEta,
   etaShiftDays,
   fmtDate,
   hubApi,
@@ -37,6 +39,10 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: "domestic", label: "Україна" },
   { key: "problems", label: "Увага" },
 ];
+
+/** Needs attention: a problem, no data, a slipped ETA, or a hand-kept sea item still empty. */
+const needsAttention = (t: Track) =>
+  t.status === "exception" || t.status === "unknown" || etaShiftDays(t) >= 2 || (t.manualOnly && t.source !== "manual");
 
 const MODE_ICON: Record<HubMode, string> = { sea: "🚢", air: "✈️", courier: "📦", domestic: "🚚" };
 
@@ -145,7 +151,7 @@ export function TracksPanel({
         filter === "all"
           ? true
           : filter === "problems"
-            ? t.status === "exception" || t.status === "unknown" || etaShiftDays(t) >= 2
+            ? needsAttention(t)
             : t.mode === filter
       ),
     [items, filter]
@@ -266,7 +272,7 @@ export function TracksPanel({
             f.key === "all"
               ? items.length
               : f.key === "problems"
-                ? items.filter((t) => t.status === "exception" || t.status === "unknown" || etaShiftDays(t) >= 2).length
+                ? items.filter(needsAttention).length
                 : items.filter((t) => t.mode === f.key).length;
           if (f.key !== "all" && count === 0) return null;
           return (
@@ -294,6 +300,8 @@ function TrackRow({ t, selected, onClick }: { t: Track; selected: boolean; onCli
   const color = statusColor(t.status);
   const progress = t.status === "delivered" ? 1 : (t.live?.progress ?? 0);
   const shift = etaShiftDays(t);
+  const eta = effEta(t);
+  const left = eta && t.status !== "delivered" ? countdown(eta) : null;
   return (
     <button
       type="button"
@@ -336,9 +344,14 @@ function TrackRow({ t, selected, onClick }: { t: Track; selected: boolean; onCli
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
           {t.origin || "—"} → {t.destination || "—"}
         </span>
-        {t.eta && t.status !== "delivered" && (
-          <span style={{ flex: "none", color: shift >= 2 ? "var(--err)" : "var(--muted)" }}>
-            ETA {fmtDate(t.eta)}
+        {eta && left && (
+          <span
+            style={{ flex: "none", color: shift >= 2 || left.late ? "var(--err)" : "var(--muted)" }}
+            title={t.eta ? `ETA ${fmtDate(t.eta)}` : "Орієнтовно — розраховано за відстанню маршруту"}
+            data-testid="hub-row-eta"
+          >
+            {t.eta ? "" : "≈ "}
+            {left.late ? `прострочено ${left.text}` : `${left.text} до прибуття`}
             {shift !== 0 ? ` (${shift > 0 ? "+" : ""}${shift} дн)` : ""}
           </span>
         )}
@@ -347,7 +360,13 @@ function TrackRow({ t, selected, onClick }: { t: Track; selected: boolean; onCli
         <div style={{ width: `${Math.round(progress * 100)}%`, height: "100%", background: color, borderRadius: 4, transition: "width .6s" }} />
       </div>
       <div style={{ fontSize: 11, color: "var(--faint)" }}>
-        {t.source === "none" ? "Немає даних від перевізника" : `Оновлено ${ago(t.lastCheckedAt)}`}
+        {t.manualOnly
+          ? t.source !== "manual"
+            ? "Ведеться вручну — внесіть дані"
+            : `Внесено вручну ${ago(t.lastChangedAt)}`
+          : t.source === "none"
+            ? "Немає даних від перевізника"
+            : `Оновлено ${ago(t.lastCheckedAt)}`}
       </div>
     </button>
   );
