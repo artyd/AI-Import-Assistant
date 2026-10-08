@@ -266,7 +266,7 @@ export function CalendarView() {
         >
           {facets.forwarder.length > 0 && (
             <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }} aria-label="Хто везе">
-              <span style={legendLabel}>Хто везе:</span>
+              <span style={legendLabel} title="Колір смужки зліва на мітці">Хто везе (смужка):</span>
               {facets.forwarder.map((fw) => (
                 <button
                   key={fw}
@@ -317,7 +317,16 @@ export function CalendarView() {
                   }
                   style={{ ...legendChip, opacity: off ? 0.4 : 1 }}
                 >
-                  <span aria-hidden style={{ width: 14, height: 10, borderRadius: 3, border: `2px ${EVENT_SHAPE[t].border} var(--muted)` }} />
+                  <span
+                    aria-hidden
+                    style={{
+                      width: 14,
+                      height: 10,
+                      borderRadius: 3,
+                      border: `2px ${EVENT_SHAPE[t].border} ${EVENT_META[t].color}`,
+                      background: `color-mix(in srgb, ${EVENT_META[t].color} 25%, transparent)`,
+                    }}
+                  />
                   {EVENT_SHAPE[t].mark} {EVENT_META[t].label}
                 </button>
               );
@@ -537,15 +546,15 @@ function chipTitle(e: CalEvent, row: CalRow): string {
 }
 
 /**
- * One event on the calendar. Colour = who carries it, icon = cargo type, border
- * style + mark = event type (dashed ↗ departure, solid ⚑ planned arrival, dotted
- * ⏱ tracking ETA, double ✓ cleared / delivered). The tracking number links to
- * the carrier's site.
+ * One event on the calendar. Fill + border + mark = event type (orange ↗
+ * departure, blue ⚑ planned arrival, yellow ⏱ tracking ETA, teal / violet / green
+ * for arrived / cleared / delivered); the bar on the left = who carries it; the
+ * icon = cargo type. The tracking number links to the carrier's site.
  */
 function EventChip({ e, row, onPick, selected, wide }: { e: CalEvent; row: CalRow; onPick: (id: string) => void; selected: boolean; wide?: boolean }) {
-  const color = row.tab === "warehouse" ? EVENT_META.warehouse.color : forwarderColor(row.forwarder);
+  const color = EVENT_META[e.type].color;
+  const bar = row.tab === "warehouse" || !row.forwarder ? color : forwarderColor(row.forwarder);
   const shape = EVENT_SHAPE[e.type];
-  const done = e.type === "delivered" || e.type === "customs";
   return (
     <div
       role="button"
@@ -567,11 +576,10 @@ function EventChip({ e, row, onPick, selected, wide }: { e: CalEvent; row: CalRo
         boxSizing: "border-box",
         textAlign: "left",
         border: `1.5px ${shape.border} ${color}`,
-        borderLeftWidth: 4,
-        borderLeftStyle: "solid",
+        borderLeft: `5px solid ${bar}`,
         borderRadius: 6,
         padding: wide ? "5px 7px" : "2px 5px",
-        background: selected ? "var(--active)" : `color-mix(in srgb, ${color} ${done ? 20 : 9}%, var(--surface))`,
+        background: selected ? "var(--active)" : `color-mix(in srgb, ${color} 16%, var(--surface))`,
         color: "var(--text)",
         fontSize: wide ? 12.5 : 11.5,
         cursor: "pointer",

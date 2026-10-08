@@ -233,6 +233,10 @@ test.describe("Logistics hub", () => {
     await mockHub(page);
     await openHub(page);
     const box = page.getByTestId("hub-suggestions");
+    // Collapsed by default: the header shows the count, the list opens on click.
+    await expect(page.getByTestId("hub-suggestions-toggle")).toContainText("1");
+    await expect(box).not.toContainText("CSQU3054383");
+    await page.getByTestId("hub-suggestions-toggle").click();
     await expect(box).toContainText("CSQU3054383");
     await expect(box.getByRole("button", { name: "Відстежувати CSQU3054383" })).toBeVisible();
   });

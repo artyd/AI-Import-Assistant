@@ -73,6 +73,8 @@ export function TracksPanel({
   const [filter, setFilter] = useState<Filter>("all");
   const [sugg, setSugg] = useState<TrackingSuggestion[]>([]);
   const [suggBusy, setSuggBusy] = useState<string | null>(null);
+  // Numbers found in the shipment's documents — a collapsed dropdown so it doesn't push the list down.
+  const [suggOpen, setSuggOpen] = useState(false);
   const detectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => setLinkWs(workspaceId ?? ""), [workspaceId]);
@@ -239,30 +241,60 @@ export function TracksPanel({
       </form>
 
       {sugg.length > 0 && (
-        <div style={{ margin: "10px 12px 0", padding: 10, borderRadius: 10, background: "var(--active)", fontSize: 12.5 }} data-testid="hub-suggestions">
-          <div style={{ fontWeight: 650, marginBottom: 6 }}>🧭 Штурман знайшов у документах постачання:</div>
-          <div style={{ display: "grid", gap: 6 }}>
-            {sugg.slice(0, 5).map((s) => (
-              <div key={s.number} style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>{s.number}</div>
-                  <div style={{ color: "var(--muted)", fontSize: 11.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.files.join(", ")}>
-                    {s.carrierName} · {s.files[0]}
+        <div style={{ margin: "10px 12px 0", borderRadius: 10, background: "var(--active)", fontSize: 12.5 }} data-testid="hub-suggestions">
+          <button
+            type="button"
+            aria-expanded={suggOpen}
+            onClick={() => setSuggOpen((o) => !o)}
+            data-testid="hub-suggestions-toggle"
+            style={{
+              width: "100%",
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "9px 10px",
+              border: "none",
+              background: "none",
+              color: "var(--text)",
+              font: "inherit",
+              fontSize: 12.5,
+              fontWeight: 650,
+              textAlign: "left",
+              cursor: "pointer",
+            }}
+          >
+            <span style={{ flex: 1, minWidth: 0 }}>🧭 Штурман знайшов у документах постачання</span>
+            <span style={{ flex: "none", minWidth: 20, height: 20, padding: "0 6px", borderRadius: 10, background: "var(--accent)", color: "var(--accentTx)", fontSize: 11, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+              {sugg.length}
+            </span>
+            <span aria-hidden style={{ flex: "none", transition: "transform .15s", transform: suggOpen ? "rotate(180deg)" : "none" }}>
+              ▾
+            </span>
+          </button>
+          {suggOpen && (
+            <div style={{ display: "grid", gap: 6, padding: "0 10px 10px", maxHeight: 220, overflowY: "auto" }}>
+              {sugg.map((s) => (
+                <div key={s.number} style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>{s.number}</div>
+                    <div style={{ color: "var(--muted)", fontSize: 11.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.files.join(", ")}>
+                      {s.carrierName} · {s.files[0]}
+                    </div>
                   </div>
+                  <button
+                    type="button"
+                    className="btn"
+                    aria-label={`Відстежувати ${s.number}`}
+                    style={{ height: 28, padding: "0 10px", fontSize: 12, flex: "none" }}
+                    disabled={suggBusy === s.number}
+                    onClick={() => void add(undefined, { number: s.number, carrier: s.carrier })}
+                  >
+                    {suggBusy === s.number ? "…" : "+ Додати"}
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  className="btn"
-                  aria-label={`Відстежувати ${s.number}`}
-                  style={{ height: 28, padding: "0 10px", fontSize: 12, flex: "none" }}
-                  disabled={suggBusy === s.number}
-                  onClick={() => void add(undefined, { number: s.number, carrier: s.carrier })}
-                >
-                  {suggBusy === s.number ? "…" : "+ Додати"}
-                </button>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

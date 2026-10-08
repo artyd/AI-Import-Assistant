@@ -81,13 +81,15 @@ export const calendarApi = {
 };
 
 export const EVENT_META: Record<CalEventType, { label: string; color: string; icon: string }> = {
-  departure: { label: "Вихід", color: "#64748b", icon: "↗" },
-  arrival: { label: "Прибуття (план)", color: "var(--accent)", icon: "⚓" },
+  // Event colours are what tells departure from arrival at a glance (the
+  // forwarder's colour is the thin bar on the left).
+  departure: { label: "Вихід", color: "#ea580c", icon: "↗" },
+  arrival: { label: "Прибуття (план)", color: "#2563eb", icon: "⚓" },
   arrived: { label: "Прибуло", color: "#0d9488", icon: "📍" },
   customs: { label: "Розмитнено", color: "#7c3aed", icon: "🛃" },
-  delivered: { label: "Доставлено", color: "var(--ok)", icon: "✓" },
-  eta: { label: "ETA трекінгу", color: "var(--warn)", icon: "⏱" },
-  warehouse: { label: "Склад БЦ", color: "#b45309", icon: "🏬" },
+  delivered: { label: "Доставлено", color: "#16a34a", icon: "✓" },
+  eta: { label: "ETA трекінгу", color: "#ca8a04", icon: "⏱" },
+  warehouse: { label: "Склад БЦ", color: "#92400e", icon: "🏬" },
 };
 
 export type CargoType = "samples" | "groupage" | "lcl" | "fcl" | "air" | "parcel" | "other" | "warehouse";
