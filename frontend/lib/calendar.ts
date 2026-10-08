@@ -4,8 +4,8 @@
 
 import { api, downloadBlob } from "@/lib/api";
 
-export type CalEventType = "departure" | "arrival" | "arrived" | "customs" | "delivered" | "eta" | "warehouse";
-export type CalView = "week" | "month" | "year";
+export type CalEventType = "departure" | "arrival" | "arrived" | "customs" | "delivered" | "eta" | "warehouse" | "free_end";
+export type CalView = "list" | "week" | "month" | "year";
 
 export interface SheetDate {
   date: string;
@@ -51,6 +51,9 @@ export interface CalRow {
   cargoType: CargoType;
   /** Tracking page for the number (the sheet's link, else the carrier's). */
   trackLink: string | null;
+  /** Port free time (sea): end = last free day; source of the days. */
+  freeTime: { start: string; end: string; days: number; source: "sheet" | "line" | "default"; fromActual: boolean } | null;
+  notesCount: number;
   trackedId: string | null;
   track: { status: string; statusLabel: string; eta: string | null; source: string } | null;
   qty?: string;
@@ -72,7 +75,29 @@ export interface CalendarResponse {
   sync: SyncInfo;
 }
 
+export interface Punctuality {
+  forwarder: string;
+  count: number;
+  onTime: number;
+  avgDelay: number;
+  maxDelay: number;
+  overdueOpen: number;
+}
+
+export interface SheetNote {
+  id: string;
+  text: string;
+  userId: string | null;
+  userName: string;
+  createdAt: string;
+}
+
 export const calendarApi = {
+  punctuality: () => api<{ rows: Punctuality[] }>("/api/calendar/punctuality"),
+  notes: (rowId: string) => api<{ notes: SheetNote[] }>(`/api/calendar/rows/${rowId}/notes`),
+  addNote: (rowId: string, text: string) =>
+    api<{ notes: SheetNote[] }>(`/api/calendar/rows/${rowId}/notes`, { method: "POST", body: { text } }),
+  deleteNote: (noteId: string) => api<{ notes: SheetNote[] }>(`/api/calendar/notes/${noteId}`, { method: "DELETE" }),
   range: (from: string, to: string) => api<CalendarResponse>(`/api/calendar?from=${from}&to=${to}`),
   attention: () => api<{ rows: CalRow[] }>("/api/calendar/attention"),
   sync: () => api<{ sync: SyncInfo }>("/api/sheet/sync", { method: "POST" }),
@@ -90,6 +115,7 @@ export const EVENT_META: Record<CalEventType, { label: string; color: string; ic
   delivered: { label: "Доставлено", color: "#16a34a", icon: "✓" },
   eta: { label: "ETA трекінгу", color: "#ca8a04", icon: "⏱" },
   warehouse: { label: "Склад БЦ", color: "#92400e", icon: "🏬" },
+  free_end: { label: "Кінець free time", color: "#dc2626", icon: "⏳" },
 };
 
 export type CargoType = "samples" | "groupage" | "lcl" | "fcl" | "air" | "parcel" | "other" | "warehouse";
@@ -143,9 +169,10 @@ export const EVENT_SHAPE: Record<CalEventType, { border: string; mark: string }>
   customs: { border: "double", mark: "🛃" },
   delivered: { border: "double", mark: "✓" },
   warehouse: { border: "solid", mark: "🏬" },
+  free_end: { border: "solid", mark: "⏳" },
 };
 
-export const EVENT_ORDER: CalEventType[] = ["departure", "arrival", "eta", "arrived", "customs", "delivered", "warehouse"];
+export const EVENT_ORDER: CalEventType[] = ["departure", "arrival", "eta", "arrived", "free_end", "customs", "delivered", "warehouse"];
 
 export const MODE_LABEL_CAL: Record<string, string> = {
   sea: "Море",
@@ -188,6 +215,10 @@ export function daysInMonth(d: string): number {
 
 /** The date window a view fetches (month = the whole 6-week grid). */
 export function viewRange(view: CalView, anchor: string): [string, string] {
+  if (view === "list") {
+    const start = monthStart(anchor);
+    return [start, addDays(start, daysInMonth(start) - 1)];
+  }
   if (view === "week") {
     const m = mondayOf(anchor);
     return [m, addDays(m, 6)];
@@ -202,7 +233,7 @@ export function viewRange(view: CalView, anchor: string): [string, string] {
 
 export function shiftAnchor(view: CalView, anchor: string, dir: -1 | 1): string {
   if (view === "week") return addDays(anchor, 7 * dir);
-  if (view === "month") return addMonths(monthStart(anchor), dir);
+  if (view === "month" || view === "list") return addMonths(monthStart(anchor), dir);
   return `${Number(anchor.slice(0, 4)) + dir}-01-01`;
 }
 
@@ -218,7 +249,7 @@ export const WEEKDAYS_UK = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Н�
 
 export function viewTitle(view: CalView, anchor: string): string {
   if (view === "year") return anchor.slice(0, 4);
-  if (view === "month") return `${MONTHS_UK[Number(anchor.slice(5, 7)) - 1]} ${anchor.slice(0, 4)}`;
+  if (view === "month" || view === "list") return `${MONTHS_UK[Number(anchor.slice(5, 7)) - 1]} ${anchor.slice(0, 4)}`;
   const [a, b] = viewRange("week", anchor);
   const da = Number(a.slice(8, 10));
   const db = Number(b.slice(8, 10));
@@ -228,6 +259,103 @@ export function viewTitle(view: CalView, anchor: string): string {
 }
 
 export const fmtDay = (d: string) => `${d.slice(8, 10)}.${d.slice(5, 7)}.${d.slice(0, 4)}`;
+
+/** ISO-8601 week number. */
+export function isoWeek(d: string): number {
+  const t = new Date(utc(d));
+  const dow = (t.getUTCDay() + 6) % 7;
+  t.setUTCDate(t.getUTCDate() - dow + 3); // Thursday of this week
+  const firstThu = new Date(Date.UTC(t.getUTCFullYear(), 0, 4));
+  return 1 + Math.round(((t.getTime() - firstThu.getTime()) / DAY - 3 + ((firstThu.getUTCDay() + 6) % 7)) / 7);
+}
+
+export const isWeekend = (d: string) => [0, 6].includes(new Date(utc(d)).getUTCDay());
+
+/** Orthodox Easter (Julian computus → Gregorian date) — Ukraine's Easter / Trinity. */
+function orthodoxEaster(y: number): string {
+  const a = y % 4;
+  const b = y % 7;
+  const c = y % 19;
+  const d = (19 * c + 15) % 30;
+  const e = (2 * a + 4 * b - d + 34) % 7;
+  const month = Math.floor((d + e + 114) / 31);
+  const day = ((d + e + 114) % 31) + 1;
+  return addDays(`${y}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`, 13);
+}
+
+/**
+ * Ukrainian public holidays (calendar marks only — under martial law they are
+ * working days).
+ */
+export function uaHoliday(d: string): string | null {
+  const y = Number(d.slice(0, 4));
+  const md = d.slice(5);
+  const fixed: Record<string, string> = {
+    "01-01": "Новий рік",
+    "03-08": "Міжнародний жіночий день",
+    "05-01": "День праці",
+    "05-08": "День памʼяті та перемоги",
+    "06-28": "День Конституції",
+    "07-15": "День Державності",
+    "08-24": "День Незалежності",
+    "10-01": "День захисників і захисниць",
+    "12-25": "Різдво Христове",
+  };
+  if (fixed[md]) return fixed[md]!;
+  const easter = orthodoxEaster(y);
+  if (d === easter) return "Великдень";
+  if (d === addDays(easter, 49)) return "Трійця";
+  return null;
+}
+
+const NICK: Record<string, string> = {
+  люда: 'людмила',
+  людмила: 'людмила',
+  мила: 'людмила',
+  оля: 'ольга',
+  ольга: 'ольга',
+  таня: 'тетяна',
+  тетяна: 'тетяна',
+  татьяна: 'тетяна',
+  юля: 'юлія',
+  юлія: 'юлія',
+  юлия: 'юлія',
+  наташа: 'наталія',
+  наталія: 'наталія',
+  наталья: 'наталія',
+  настя: 'анастасія',
+  анастасія: 'анастасія',
+  анастасия: 'анастасія',
+  катя: 'катерина',
+  катерина: 'катерина',
+  екатерина: 'катерина',
+  саша: 'олександр',
+  олександр: 'олександр',
+  александр: 'олександр',
+  олександра: 'олександра',
+  александра: 'олександра',
+  леся: 'олеся',
+  олеся: 'олеся',
+  іра: 'ірина',
+  ира: 'ірина',
+  ірина: 'ірина',
+  ирина: 'ірина',
+  света: 'світлана',
+  світлана: 'світлана',
+  светлана: 'світлана',
+};
+
+/** Same person by first name: equal, a known short form (Люда = Людмила) or a shared ≥4-letter stem. */
+export function sameLogist(x: string, y: string): boolean {
+  const f = (s: string) => s.toLowerCase().replace(/ё/g, "е").trim().split(/\s+/)[0] ?? "";
+  const a = f(x);
+  const b = f(y);
+  if (a.length < 2 || b.length < 2) return false;
+  if (a === b || (NICK[a] ?? a) === (NICK[b] ?? b)) return true;
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i += 1;
+  return i >= 4;
+}
 
 /** Days from today to `d` (negative = in the past). */
 export function daysFrom(today: string, d: string): number {

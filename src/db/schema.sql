@@ -922,3 +922,14 @@ CREATE TABLE IF NOT EXISTS sheet_tabs (
   error      TEXT NOT NULL DEFAULT '',
   synced_at  TIMESTAMPTZ
 );
+
+-- Team notes on a sheet row («машина замовлена на 14.10»). Kept in Штурман, never
+-- written to the sheet. Survive re-syncs (the row id is stable per row_key).
+CREATE TABLE IF NOT EXISTS sheet_notes (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  row_id      UUID NOT NULL REFERENCES sheet_rows(id) ON DELETE CASCADE,
+  user_id     UUID REFERENCES users(id) ON DELETE SET NULL,
+  text        TEXT NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_sheet_notes_row ON sheet_notes(row_id, created_at);

@@ -347,6 +347,7 @@ type Named =
   | 'logist'
   | 'comment'
   | 'customsPlace'
+  | 'freeDays'
   | 'warehouse';
 
 const HEADER_RULES: Array<[Named, RegExp]> = [
@@ -365,6 +366,7 @@ const HEADER_RULES: Array<[Named, RegExp]> = [
   ['trackUrl', /ссылк|посилан|трекинг|трекінг|tracking|link/],
   ['comment', /коммент|комент|примечан|примітк/],
   ['customsPlace', /(место|місце)\s*(растаможки|розмитнення)/],
+  ['freeDays', /free\s*time|безкошт|бесплатн|свобод\S*\s*дн|фрі\s*тайм/],
   ['warehouse', /склад/],
 ];
 
@@ -519,6 +521,8 @@ export interface TrackingRow {
   cargoType: CargoType;
   /** Quantity / weight cell ("Кол-во"). */
   weight: string;
+  /** Free days at the destination port from a «Free time» column, if the sheet has one. */
+  freeDays: number | null;
   line: string;
   containerRaw: string;
   ttnRaw: string;
@@ -629,6 +633,7 @@ export function parseTrackingRow(
     forwarderRaw,
     cargoType: cargoType(product, mode),
     weight: cellAt(row, cols.weight),
+    freeDays: /^\d{1,3}$/.test(c('freeDays')) ? Number(c('freeDays')) : null,
     line: cellAt(row, cols.line),
     containerRaw,
     ttnRaw,

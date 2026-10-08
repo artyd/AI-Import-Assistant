@@ -235,6 +235,10 @@ const envSchema = z.object({
   SHEET_GID_WAREHOUSE: z.string().trim().default('409503827'),
   SHEET_GID_RATES: z.string().trim().default('389453399'),
   SHEET_GID_QUANTITIES: z.string().trim().default('873326925'),
+  // Free time at the destination port (days after arrival before demurrage):
+  // default, and per line ("MSC:10,MAERSK:7"); a «Free time» sheet column wins.
+  SHEET_FREE_DAYS: z.coerce.number().int().min(0).max(120).default(7),
+  SHEET_FREE_DAYS_BY_LINE: z.string().default(''),
   // aisstream.io (free) live AIS websocket — vessel positions for the live map.
   // Empty = positions are interpolated from carrier events + ETA.
   AISSTREAM_API_KEY: z.string().default(''),

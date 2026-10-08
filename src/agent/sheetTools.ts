@@ -110,6 +110,7 @@ const EV_LABEL: Record<CalendarEvent['type'], string> = {
   delivered: 'доставлено',
   eta: 'ETA трекінгу',
   warehouse: 'заїзд на склад БЦ',
+  free_end: 'кінець безкоштовного зберігання',
 };
 
 function rowLine(r: CalendarRow): string {

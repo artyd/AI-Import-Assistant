@@ -88,6 +88,8 @@ services:
       TRACKING_SEA_MODE: ${TRACKING_SEA_MODE:-manual}
       SHEET_ID: ${SHEET_ID:-}
       SHEET_SYNC_CRON: ${SHEET_SYNC_CRON:-5 * * * *}
+      SHEET_FREE_DAYS: ${SHEET_FREE_DAYS:-7}
+      SHEET_FREE_DAYS_BY_LINE: ${SHEET_FREE_DAYS_BY_LINE:-}
       AISSTREAM_API_KEY: ${AISSTREAM_API_KEY:-}
     volumes:
       - storage_data:/data/storage
@@ -136,6 +138,8 @@ services:
       TRACKING_SEA_MODE: ${TRACKING_SEA_MODE:-manual}
       SHEET_ID: ${SHEET_ID:-}
       SHEET_SYNC_CRON: ${SHEET_SYNC_CRON:-5 * * * *}
+      SHEET_FREE_DAYS: ${SHEET_FREE_DAYS:-7}
+      SHEET_FREE_DAYS_BY_LINE: ${SHEET_FREE_DAYS_BY_LINE:-}
       AISSTREAM_API_KEY: ${AISSTREAM_API_KEY:-}
     volumes:
       - storage_data:/data/storage

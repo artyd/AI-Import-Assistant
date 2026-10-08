@@ -246,6 +246,8 @@ describe('matchLogist', () => {
     expect(matchLogist('Люда', users)?.id).toBe('1');
     expect(matchLogist('Яна', users)?.id).toBe('2');
     expect(matchLogist('Олег', users)).toBeNull();
+    expect(matchLogist('Олеся', [{ id: '9', name: 'Олександр' }, { id: '8', name: 'Олеся Петренко' }])?.id).toBe('8');
+    expect(matchLogist('Карина', [{ id: '7', name: 'Карина' }])?.id).toBe('7');
     expect(matchLogist('', users)).toBeNull();
   });
 });

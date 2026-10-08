@@ -924,7 +924,7 @@ team-wide (no per-user scoping).
 
 Shapes:
 - `SheetDate = { date: 'YYYY-MM-DD', guessed: boolean }`
-- `CalEvent = { id, rowId, type: departure|arrival|arrived|customs|delivered|eta|warehouse,
+- `CalEvent = { id, rowId, type: departure|arrival|arrived|customs|delivered|eta|warehouse|free_end,
   date, approx, source? }` — `eta` = what tracking says when it differs from the plan
   (17TRACK / carrier ETA, actual delivery, or the route-based estimate).
 - `CalRow = { id, tab: tracking|warehouse, rowIndex, url, product, status
@@ -933,7 +933,9 @@ Shapes:
   arrival, statusDate, comment, weight, line, refNo, customsPlace, warehouse,
   issues: { code, label }[], cargoType (fcl|groupage|lcl|air|parcel|samples|other|warehouse),
   trackLink (the sheet's tracking link when it carries the number, else the carrier's
-  page), trackedId, track: { status, statusLabel, eta, source }|null,
+  page), freeTime: { start, end, days, source: sheet|line|default, fromActual }|null
+  (sea cargo: port free time from the actual — else planned — arrival; `free_end`
+  event on `end`; a bell notice 2 days before and on the day), notesCount, trackedId, track: { status, statusLabel, eta, source }|null,
   qty?, when?, fits? }` (the last three for warehouse rows). `forwarder` is
   normalised («мультикс» → «Мультикс», «дсв» → «DSV»; a courier shipment without
   one → its courier). Only rows dated in the **current year** (Kyiv) are returned.
@@ -951,6 +953,16 @@ sheet, `place_unknown` — the map could not locate the origin / destination tex
 
 ### `GET /api/calendar/export.xlsx?from=&to=`
 The period's events as an Excel plan (one line per event).
+
+### `GET /api/calendar/punctuality`
+Per forwarder, current year: `{ rows: { forwarder, count, onTime, avgDelay, maxDelay,
+overdueOpen }[] }` — actual arrival (status-text date or carrier delivery) vs the
+sheet's plan; on time = ≤ 1 day late.
+
+### Team notes on a sheet row (kept in Штурман, never written to the sheet)
+`GET /api/calendar/rows/:id/notes` → `{ notes: { id, text, userId, userName, createdAt }[] }`;
+`POST` same path `{ text }` → `201 { notes }`; `DELETE /api/calendar/notes/:id` →
+`{ notes }` (author only, else `404`).
 
 ### `POST /api/sheet/sync`
 Read the sheet now → `{ result, sync }`; `409` sheet not configured; `429` if

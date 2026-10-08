@@ -4,6 +4,7 @@ import { getCarrier } from '../hub/carriers.js';
 import { liveItem } from '../hub/live.js';
 import type { TrackedRow } from '../hub/track.js';
 import { STATUS_LABEL_UK } from '../hub/types.js';
+import { freeTimeOf, type FreeTime } from './freetime.js';
 import { sheetRowUrl, type SheetTab } from './link.js';
 import type { CargoType, SheetDate, SheetIssue, SheetStatus, TrackingRow, WarehouseRow } from './parse.js';
 
@@ -21,7 +22,7 @@ import type { CargoType, SheetDate, SheetIssue, SheetStatus, TrackingRow, Wareho
  * the whole sheet is a few hundred rows.
  */
 
-export type EventType = 'departure' | 'arrival' | 'arrived' | 'customs' | 'delivered' | 'eta' | 'warehouse';
+export type EventType = 'departure' | 'arrival' | 'arrived' | 'customs' | 'delivered' | 'eta' | 'warehouse' | 'free_end';
 
 export interface CalendarEvent {
   id: string;
@@ -81,6 +82,7 @@ interface DbRow {
   recent: boolean;
   tracked_id: string | null;
   updated_at: string;
+  notes_count?: number;
 }
 
 export interface CalendarRow {
@@ -113,6 +115,10 @@ export interface CalendarRow {
   cargoType: CargoType | 'warehouse';
   /** Tracking page for the number (the sheet's link, else the carrier's). */
   trackLink: string | null;
+  /** Port free time (sea): start, end (demurrage from the next day), days and where they came from. */
+  freeTime: FreeTime | null;
+  /** Team notes kept in Штурман for this row. */
+  notesCount: number;
   trackedId: string | null;
   track: { status: string; statusLabel: string; eta: string | null; source: string } | null;
   // warehouse tab
@@ -195,6 +201,8 @@ function toCalendarRow(r: DbRow, t: TrackedRow | undefined): CalendarRow {
       issues: [],
       cargoType: 'warehouse',
       trackLink: null,
+      freeTime: null,
+      notesCount: Number(r.notes_count ?? 0),
       trackedId: null,
       track: null,
       qty: w.qty,
@@ -232,6 +240,8 @@ function toCalendarRow(r: DbRow, t: TrackedRow | undefined): CalendarRow {
     issues: [...d.issues.map((code) => ({ code, label: ISSUE_LABEL[code] as string })), ...trackingIssues(d, t)],
     cargoType: d.cargoType ?? 'other',
     trackLink: d.trackLink ?? (d.trackUrl || null),
+    freeTime: d.mode !== undefined ? freeTimeOf({ ...d, freeDays: d.freeDays ?? null, cargoType: d.cargoType ?? 'other' }) : null,
+    notesCount: Number(r.notes_count ?? 0),
     trackedId: r.tracked_id,
     track: t
       ? {
@@ -246,7 +256,8 @@ function toCalendarRow(r: DbRow, t: TrackedRow | undefined): CalendarRow {
 
 async function loadRows(where: string, params: unknown[]): Promise<{ rows: DbRow[]; tracked: Map<string, TrackedRow> }> {
   const { rows } = await query<DbRow>(
-    `SELECT id, tab, row_index, data, status, active, recent, tracked_id, updated_at
+    `SELECT id, tab, row_index, data, status, active, recent, tracked_id, updated_at,
+       (SELECT count(*) FROM sheet_notes n WHERE n.row_id = sheet_rows.id) AS notes_count
      FROM sheet_rows WHERE NOT removed AND ${IN_SCOPE} AND (${where}) ORDER BY row_index`,
     params,
   );
@@ -292,6 +303,16 @@ function rowEvents(r: DbRow, row: CalendarRow): CalendarEvent[] {
   if (row.statusDate && ['arrived', 'customs', 'delivered'].includes(row.status)) {
     ev.push({ id: `${r.id}:st`, rowId: r.id, type: row.status as EventType, date: row.statusDate.date, approx: false });
   }
+  if (row.freeTime) {
+    ev.push({
+      id: `${r.id}:free`,
+      rowId: r.id,
+      type: 'free_end',
+      date: row.freeTime.end,
+      approx: !row.freeTime.fromActual,
+      source: `${row.freeTime.days} дн ${row.freeTime.source === 'sheet' ? 'з таблиці' : row.freeTime.source === 'line' ? 'за лінією' : 'за замовчуванням'}`,
+    });
+  }
   return ev;
 }
 
@@ -306,7 +327,8 @@ export interface CalendarPayload {
 export async function calendarRange(from: string, to: string): Promise<CalendarPayload> {
   const { rows, tracked } = await loadRows(
     `(departure_on BETWEEN $1 AND $2) OR (arrival_on BETWEEN $1 AND $2) OR (status_on BETWEEN $1 AND $2)
-     OR (tracked_id IS NOT NULL AND active)`,
+     OR (tracked_id IS NOT NULL AND active)
+     OR (active AND arrival_on BETWEEN ($1::date - 130) AND $2)`,
     [from, to],
   );
   const outRows: CalendarRow[] = [];
@@ -334,6 +356,76 @@ export async function attentionRows(): Promise<CalendarRow[]> {
     .filter((r) => r.issues.some((i) => ATTENTION.includes(i.code)))
     .map((r) => ({ ...r, issues: r.issues.filter((i) => ATTENTION.includes(i.code)) }))
     .sort((a, b) => b.rowIndex - a.rowIndex);
+}
+
+// ── Punctuality (plan vs fact) ────────────────────────────────────────────────
+
+export interface Punctuality {
+  forwarder: string;
+  /** Rows with both a planned and an actual arrival. */
+  count: number;
+  onTime: number;
+  avgDelay: number;
+  maxDelay: number;
+  /** Still open and already past the plan. */
+  overdueOpen: number;
+}
+
+/**
+ * Per forwarder over the working year: actual arrival (the date in the status
+ * text — arrived / cleared / delivered — or the carrier's delivery) vs the plan.
+ * On time = no more than 1 day late.
+ */
+export async function punctuality(today: string): Promise<Punctuality[]> {
+  const { rows, tracked } = await loadRows(`tab = 'tracking'`, []);
+  const by = new Map<string, { delays: number[]; overdue: number }>();
+  for (const r of rows) {
+    const d = r.data as TrackingRow;
+    const plan = d.arrival?.date;
+    if (!plan) continue;
+    const t = r.tracked_id ? tracked.get(r.tracked_id) : undefined;
+    const actual =
+      d.statusDate && ['arrived', 'customs', 'delivered'].includes(d.status)
+        ? d.statusDate.date
+        : t?.arrived_at
+          ? new Date(t.arrived_at).toISOString().slice(0, 10)
+          : null;
+    const key = d.forwarder || 'Не вказано';
+    const cur = by.get(key) ?? { delays: [], overdue: 0 };
+    if (actual) cur.delays.push(Math.round((Date.parse(actual) - Date.parse(plan)) / 86_400_000));
+    else if (plan < today && r.active) cur.overdue += 1;
+    by.set(key, cur);
+  }
+  return [...by.entries()]
+    .map(([forwarder, v]) => ({
+      forwarder,
+      count: v.delays.length,
+      onTime: v.delays.filter((x) => x <= 1).length,
+      avgDelay: v.delays.length ? Math.round((v.delays.reduce((a, b) => a + b, 0) / v.delays.length) * 10) / 10 : 0,
+      maxDelay: v.delays.length ? Math.max(...v.delays) : 0,
+      overdueOpen: v.overdue,
+    }))
+    .filter((p) => p.count > 0 || p.overdueOpen > 0)
+    .sort((a, b) => b.count - a.count);
+}
+
+// ── Notes ────────────────────────────────────────────────────────────────────
+
+export interface SheetNote {
+  id: string;
+  text: string;
+  userId: string | null;
+  userName: string;
+  createdAt: string;
+}
+
+export async function listNotes(rowId: string): Promise<SheetNote[]> {
+  const { rows } = await query<{ id: string; text: string; user_id: string | null; name: string | null; created_at: string }>(
+    `SELECT n.id, n.text, n.user_id, u.name, n.created_at FROM sheet_notes n LEFT JOIN users u ON u.id = n.user_id
+     WHERE n.row_id = $1 ORDER BY n.created_at`,
+    [rowId],
+  );
+  return rows.map((n) => ({ id: n.id, text: n.text, userId: n.user_id, userName: n.name ?? '', createdAt: n.created_at }));
 }
 
 export interface SyncState {
@@ -368,6 +460,7 @@ const TYPE_LABEL: Record<EventType, string> = {
   delivered: 'Доставлено',
   eta: 'ETA трекінгу',
   warehouse: 'Заїзд на склад БЦ',
+  free_end: 'Кінець безкоштовного зберігання',
 };
 
 /** Excel of the events in a range (one line per event) — for the week / month plan. */

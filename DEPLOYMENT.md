@@ -211,6 +211,8 @@ tunes how long to wait for indexing. Exit code is non-zero if any check fails.
 | `TRACKING_SEA_MODE` | — | `manual` | Sea containers kept by hand / from the sheet (`auto` = scrape carrier pages) |
 | `SHEET_ID` | — | `` (off) | Team Google Sheet id (shared "anyone with the link can view") → hourly calendar + hub sync |
 | `SHEET_SYNC_CRON` | — | `5 * * * *` | Cron for the sheet sync (also runs once on worker boot) |
+| `SHEET_FREE_DAYS` | — | `7` | Port free time (days after arrival before demurrage) for sea cargo |
+| `SHEET_FREE_DAYS_BY_LINE` | — | `` | Per-line free days, e.g. `MSC:10,MAERSK:7` (a «Free time» sheet column wins) |
 | `SHEET_GID_TRACKING` / `_WAREHOUSE` / `_RATES` / `_QUANTITIES` | — | Аркуш3 / Аркуш5 / Черноморск / Аркуш4 gids | Tabs to read (empty = skip) |
 
 ## Out of scope for v1 (documented v2 additions)

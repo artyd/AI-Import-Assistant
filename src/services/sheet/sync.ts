@@ -14,6 +14,7 @@ import {
   type TrackingRow,
   type WarehouseRow,
 } from './parse.js';
+import { freeTimeOf } from './freetime.js';
 import { sheetEnabled, sheetTabs, type SheetTab } from './link.js';
 
 export { sheetEnabled, sheetRowUrl, sheetTabs, type SheetTab } from './link.js';
@@ -72,18 +73,60 @@ interface UserRef {
 
 const firstWord = (s: string) => s.toLowerCase().replace(/ё/g, 'е').trim().split(/\s+/)[0] ?? '';
 
-/** "Люда" ↔ "Людмила Коваль": same first name or a shared ≥3-letter stem. */
+/** Short forms → full name (Люда = Людмила); names not listed match themselves. */
+const NICK: Record<string, string> = {
+  люда: 'людмила',
+  людмила: 'людмила',
+  мила: 'людмила',
+  оля: 'ольга',
+  ольга: 'ольга',
+  таня: 'тетяна',
+  тетяна: 'тетяна',
+  татьяна: 'тетяна',
+  юля: 'юлія',
+  юлія: 'юлія',
+  юлия: 'юлія',
+  наташа: 'наталія',
+  наталія: 'наталія',
+  наталья: 'наталія',
+  настя: 'анастасія',
+  анастасія: 'анастасія',
+  анастасия: 'анастасія',
+  катя: 'катерина',
+  катерина: 'катерина',
+  екатерина: 'катерина',
+  саша: 'олександр',
+  олександр: 'олександр',
+  александр: 'олександр',
+  олександра: 'олександра',
+  александра: 'олександра',
+  леся: 'олеся',
+  олеся: 'олеся',
+  іра: 'ірина',
+  ира: 'ірина',
+  ірина: 'ірина',
+  ирина: 'ірина',
+  света: 'світлана',
+  світлана: 'світлана',
+  светлана: 'світлана',
+};
+
+/** Same person by first name: equal, a known short form, or a shared ≥4-letter stem. */
+export function sameFirstName(x: string, y: string): boolean {
+  const a = firstWord(x);
+  const b = firstWord(y);
+  if (a.length < 2 || b.length < 2) return false;
+  if (a === b || (NICK[a] ?? a) === (NICK[b] ?? b)) return true;
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i += 1;
+  return i >= 4;
+}
+
+/** "Люда" ↔ "Людмила Коваль" (see sameFirstName). */
 export function matchLogist(logist: string, users: UserRef[]): UserRef | null {
   const a = firstWord(logist);
   if (a.length < 2) return null;
-  const hits = users.filter((u) => {
-    const b = firstWord(u.name);
-    if (!b) return false;
-    if (a === b) return true;
-    let i = 0;
-    while (i < a.length && i < b.length && a[i] === b[i]) i += 1;
-    return i >= 3;
-  });
+  const hits = users.filter((u) => sameFirstName(logist, u.name));
   return hits.length === 1 ? hits[0]! : (hits.find((u) => firstWord(u.name) === a) ?? null);
 }
 
@@ -354,6 +397,18 @@ async function syncTracking(grid: string[][], today: string, users: UserRef[]): 
       notified += 1;
     } else if (r.active && newArr === today) {
       await notifyFor(users, r.logist, `sheet:${id}:d0:${newArr}`, `🗓 Сьогодні прибуття: ${r.product}${r.destination ? ` → ${r.destination}` : ''}.`);
+      notified += 1;
+    }
+    // Port free time running out → demurrage soon.
+    const ft = r.active ? freeTimeOf(r) : null;
+    if (ft && (ft.end === addDays(today, 2) || ft.end === today)) {
+      const when = ft.end === today ? 'сьогодні останній день' : `закінчується ${fmt(ft.end)} (за 2 дні)`;
+      await notifyFor(
+        users,
+        r.logist,
+        `sheet:${id}:free:${ft.end}:${ft.end === today ? 0 : 2}`,
+        `⏳ ${r.product}${r.destination ? ` (${r.destination})` : ''}: безкоштовне зберігання в порту — ${when}; далі демередж.`,
+      );
       notified += 1;
     }
 

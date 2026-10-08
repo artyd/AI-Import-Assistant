@@ -45,6 +45,8 @@ function row(id: string, extra: Record<string, unknown>) {
     issues: [],
     cargoType: "other",
     trackLink: null,
+    freeTime: null,
+    notesCount: 0,
     trackedId: null,
     track: null,
     ...extra,
@@ -68,6 +70,8 @@ const ROWS = [
     arrival: { date: plus(3), guessed: false },
     track: { status: "in_transit", statusLabel: "В дорозі", eta: `${plus(5)}T00:00:00.000Z`, source: "sheet" },
     trackedId: "t1",
+    notesCount: 1,
+    freeTime: { start: plus(3), end: plus(10), days: 7, source: "default", fromActual: false },
   }),
   row("r2", {
     rowIndex: 230,
@@ -106,6 +110,7 @@ const EVENTS = [
   { id: "r2:arr", rowId: "r2", type: "arrival", date: plus(-2), approx: true },
   { id: "r3:st", rowId: "r3", type: "delivered", date: plus(1), approx: false },
   { id: "w1:wh", rowId: "w1", type: "warehouse", date: plus(2), approx: true },
+  { id: "r1:free", rowId: "r1", type: "free_end", date: plus(10), approx: true, source: "7 дн за замовчуванням" },
 ];
 
 const SYNC = {
@@ -118,6 +123,7 @@ interface CalState {
   ranges: string[];
   syncs: number;
   exports: string[];
+  notes?: Array<{ id: string; text: string; userId: string; userName: string; createdAt: string }>;
 }
 
 async function mockCalendar(page: Page, state: CalState) {
@@ -132,7 +138,28 @@ async function mockCalendar(page: Page, state: CalState) {
       const ids = new Set(events.map((e) => e.rowId));
       return (await json({ from, to, events, rows: ROWS.filter((r) => ids.has(r.id)), sync: SYNC }), true);
     }
-    if (pathname === "/api/calendar/attention") return (await json({ rows: [ROWS[1]] }), true);
+    if (pathname === "/api/calendar/attention")
+      return (await json({ rows: [ROWS[1], row("r9", { rowIndex: 239, product: "Зразок без дат", issues: [{ code: "no_dates", label: "Немає дат" }] })] }), true);
+    if (pathname === "/api/auth/me") return (await json({ user: { id: "u1", email: "t@t", name: "Людмила" } }), true);
+    if (pathname === "/api/calendar/punctuality")
+      return (
+        await json({
+          rows: [
+            { forwarder: "Мультикс", count: 10, onTime: 8, avgDelay: 1.2, maxDelay: 6, overdueOpen: 1 },
+            { forwarder: "DHL", count: 4, onTime: 2, avgDelay: 3, maxDelay: 9, overdueOpen: 0 },
+          ],
+        }),
+        true
+      );
+    const nm = pathname.match(/^\/api\/calendar\/rows\/([\w-]+)\/notes$/);
+    if (nm) {
+      state.notes ??= [{ id: "n1", text: "Брокер у курсі", userId: "u2", userName: "Олеся", createdAt: new Date().toISOString() }];
+      if (method === "POST") {
+        const body = route.request().postDataJSON() as { text: string };
+        state.notes.push({ id: `n${state.notes.length + 1}`, text: body.text, userId: "u1", userName: "Людмила", createdAt: new Date().toISOString() });
+      }
+      return (await json({ notes: state.notes }, method === "POST" ? 201 : 200), true);
+    }
     if (pathname === "/api/sheet/sync" && method === "POST") {
       state.syncs += 1;
       return (await json({ result: { ok: true }, sync: SYNC }), true);
@@ -253,6 +280,72 @@ test.describe("Logist calendar (team sheet)", () => {
     await expect(page.getByTestId("hub-track-detail")).toContainText("MSKU1234565");
   });
 
+  test("list view, search with jump, quick filters", async ({ page }, info) => {
+    const state: CalState = { ranges: [], syncs: 0, exports: [] };
+    await mockCalendar(page, state);
+    await page.addInitScript(() => localStorage.setItem("aia_calendar_view", "month"));
+    await openCalendar(page);
+    // «Список»: the month as a table with tracking links.
+    await page.getByRole("tab", { name: "Список" }).click();
+    const list = page.getByTestId("calendar-list");
+    await expect(list).toBeVisible();
+    await expect(list.getByRole("link", { name: /MSBU1491088/ }).first()).toHaveAttribute("href", /MSBU1491088/);
+    await page.screenshot({ path: `test-results/calendar-list-${info.project.name}.png` });
+    // Search across the year → jump to the shipment's week with its card open.
+    await page.getByTestId("calendar-search").fill("холіна");
+    const hits = page.getByTestId("calendar-search-hits");
+    await expect(hits).toContainText("Холіна хлорид 2 контейнер");
+    await hits.getByRole("button").first().click();
+    await expect(page.getByTestId("calendar-week")).toBeVisible();
+    await expect(page.getByTestId("calendar-detail")).toContainText("MSBU1491088");
+    await page.getByTestId("calendar-detail").getByRole("button", { name: "Закрити" }).click();
+    await page.getByRole("button", { name: "Скинути" }).click();
+    // Quick filters: «Мої» (Людмила ↔ Люда), «Запізнюються».
+    await page.getByRole("tab", { name: "Місяць" }).click();
+    const events = page.getByTestId("calendar-event");
+    await page.getByRole("button", { name: /Мої/ }).click();
+    await expect(events.filter({ hasText: "Спиносад" })).toHaveCount(0);
+    await expect(events.filter({ hasText: "Холіна" }).first()).toBeVisible();
+    await page.getByRole("button", { name: /Мої/ }).click();
+    await page.getByRole("button", { name: /Запізнюються/ }).click();
+    await expect(events.filter({ hasText: "Холіна" })).toHaveCount(0);
+    await expect(events.filter({ hasText: "Спиносад" }).first()).toBeVisible();
+    await page.getByRole("button", { name: /Запізнюються/ }).click();
+    // «Без дат» → the attention list filtered to undated rows.
+    await page.getByRole("button", { name: /Без дат/ }).click();
+    await expect(page.getByTestId("calendar-attention")).toContainText("Зразок без дат");
+    await expect(page.getByTestId("calendar-attention")).not.toContainText("Спиносад");
+  });
+
+  test("load per day, free time, notes, punctuality", async ({ page }, info) => {
+    const state: CalState = { ranges: [], syncs: 0, exports: [] };
+    await mockCalendar(page, state);
+    await page.addInitScript(() => localStorage.setItem("aia_calendar_view", "month"));
+    await openCalendar(page);
+    // What arrives that day, by kind (the planned arrival of the container).
+    await expect(page.locator(`[data-day="${plus(3)}"] [data-testid="calendar-load"]`).first()).toContainText("🚢1");
+    // Card: free time countdown + team notes.
+    await page.getByTestId("calendar-search").fill("холіна");
+    await page.getByTestId("calendar-search-hits").getByRole("button").first().click();
+    await expect(page.getByTestId("calendar-title")).toContainText("тиждень");
+    const card = page.getByTestId("calendar-detail");
+    await expect(card.getByTestId("calendar-freetime")).toContainText("Залишилось 10 дн");
+    const notes = card.getByTestId("calendar-notes");
+    await expect(notes).toContainText("Брокер у курсі");
+    await notes.getByLabel("Нова нотатка").fill("Машина замовлена");
+    await notes.getByRole("button", { name: "Додати" }).click();
+    await expect(notes.getByTestId("calendar-note")).toHaveCount(2);
+    await page.screenshot({ path: `test-results/calendar-card2-${info.project.name}.png` });
+    await card.getByRole("button", { name: "Закрити" }).click();
+    // Punctuality per forwarder; a click narrows the calendar to that forwarder.
+    await page.getByTestId("calendar-punctuality-toggle").click();
+    const pun = page.getByTestId("calendar-punctuality");
+    await expect(pun.getByTestId("calendar-punctuality-row")).toHaveCount(2);
+    await expect(pun).toContainText("вчасно 8 з 10");
+    await pun.getByTestId("calendar-punctuality-row").filter({ hasText: "DHL" }).click();
+    await expect(page.getByRole("combobox", { name: "Хто везе" })).toHaveValue("DHL");
+  });
+
   test("event → row card with countdown, sheet link; «Увага» list; sync + Excel", async ({ page }, info) => {
     const state: CalState = { ranges: [], syncs: 0, exports: [] };
     await mockCalendar(page, state);
@@ -270,7 +363,7 @@ test.describe("Logist calendar (team sheet)", () => {
 
     await page.getByTestId("calendar-attention-toggle").click();
     const att = page.getByTestId("calendar-attention");
-    await expect(att.getByTestId("calendar-attention-row")).toHaveCount(1);
+    await expect(att.getByTestId("calendar-attention-row")).toHaveCount(2);
     await expect(att).toContainText("Спиносад");
     await expect(att).toContainText("План прибуття минув");
 

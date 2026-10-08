@@ -1,8 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { authenticate } from '../auth/hook.js';
-import { attentionRows, calendarRange, calendarXlsx, syncState } from '../services/sheet/calendar.js';
-import { sheetEnabled, sheetRowUrl, syncSheet } from '../services/sheet/sync.js';
+import { query } from '../db/pool.js';
+import { attentionRows, calendarRange, calendarXlsx, listNotes, punctuality, syncState } from '../services/sheet/calendar.js';
+import { kyivToday, sheetEnabled, sheetRowUrl, syncSheet } from '../services/sheet/sync.js';
 
 /**
  * Logist calendar over the team Google Sheet (synced hourly by the worker).
@@ -45,6 +46,39 @@ export async function sheetRoutes(app: FastifyInstance): Promise<void> {
       .header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
       .header('Content-Disposition', `attachment; filename="calendar-${q.data.from}_${q.data.to}.xlsx"`)
       .send(buf);
+  });
+
+  // GET /api/calendar/punctuality — per forwarder: plan vs actual arrival this year.
+  app.get('/api/calendar/punctuality', async (_req, reply) => reply.send({ rows: await punctuality(kyivToday()) }));
+
+  // Team notes on a sheet row (kept in Штурман, never written to the sheet).
+  const rowParams = z.object({ id: z.string().uuid() });
+  app.get('/api/calendar/rows/:id/notes', async (req, reply) => {
+    const p = rowParams.safeParse(req.params);
+    if (!p.success) return reply.status(404).send({ error: 'Not found' });
+    return reply.send({ notes: await listNotes(p.data.id) });
+  });
+  app.post('/api/calendar/rows/:id/notes', async (req, reply) => {
+    const p = rowParams.safeParse(req.params);
+    const b = z.object({ text: z.string().trim().min(1).max(1000) }).safeParse(req.body);
+    if (!p.success) return reply.status(404).send({ error: 'Not found' });
+    if (!b.success) return reply.status(400).send({ error: 'Напишіть текст нотатки.' });
+    const { rowCount } = await query(
+      `INSERT INTO sheet_notes (row_id, user_id, text) SELECT id, $2, $3 FROM sheet_rows WHERE id = $1`,
+      [p.data.id, req.user!.sub, b.data.text],
+    );
+    if (!rowCount) return reply.status(404).send({ error: 'Not found' });
+    return reply.status(201).send({ notes: await listNotes(p.data.id) });
+  });
+  app.delete('/api/calendar/notes/:id', async (req, reply) => {
+    const p = rowParams.safeParse(req.params);
+    if (!p.success) return reply.status(404).send({ error: 'Not found' });
+    const { rows } = await query<{ row_id: string }>('DELETE FROM sheet_notes WHERE id = $1 AND user_id = $2 RETURNING row_id', [
+      p.data.id,
+      req.user!.sub,
+    ]);
+    if (!rows[0]) return reply.status(404).send({ error: 'Нотатку може видалити лише автор.' });
+    return reply.send({ notes: await listNotes(rows[0].row_id) });
   });
 
   // POST /api/sheet/sync — read the sheet now (throttled; the worker also does it hourly).
