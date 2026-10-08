@@ -925,8 +925,12 @@ Shapes:
   (planned|in_transit|arrived|customs|delivered), statusLabel, active, number, carrier,
   carrierName, mode, forwarder, logist, origin, destination, departure: SheetDate|null,
   arrival, statusDate, comment, weight, line, refNo, customsPlace, warehouse,
-  issues: { code, label }[], trackedId, track: { status, statusLabel, eta, source }|null,
-  qty?, when?, fits? }` (the last three for warehouse rows).
+  issues: { code, label }[], cargoType (fcl|groupage|lcl|air|parcel|samples|other|warehouse),
+  trackLink (the sheet's tracking link when it carries the number, else the carrier's
+  page), trackedId, track: { status, statusLabel, eta, source }|null,
+  qty?, when?, fits? }` (the last three for warehouse rows). `forwarder` is
+  normalised («мультикс» → «Мультикс», «дсв» → «DSV»; a courier shipment without
+  one → its courier). Only rows dated in the **current year** (Kyiv) are returned.
 - `SyncInfo = { enabled, sheetUrl, tabs: { tab, ok, rows, error, syncedAt }[] }`
 
 ### `GET /api/calendar?from=YYYY-MM-DD&to=YYYY-MM-DD`  (≤ 400 days)
@@ -934,7 +938,8 @@ Shapes:
 
 ### `GET /api/calendar/attention`
 Active / recently added tracking rows with a data problem (`overdue`,
-`date_unparsed`, `container_not_number`, `number_mangled`, `no_dates`):
+`tracking_delivered` / `tracking_eta` — the carrier tracking disagrees with the
+sheet, `date_unparsed`, `container_not_number`, `number_mangled`, `no_dates`):
 `{ rows: CalRow[] }`, newest rows first.
 
 ### `GET /api/calendar/export.xlsx?from=&to=`

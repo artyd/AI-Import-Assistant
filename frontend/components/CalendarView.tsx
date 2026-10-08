@@ -11,6 +11,10 @@ import { ApiError } from "@/lib/api";
 import {
   addDays,
   calendarApi,
+  CARGO_META,
+  CARGO_ORDER,
+  EVENT_SHAPE,
+  forwarderColor,
   daysFrom,
   daysInMonth,
   EVENT_META,
@@ -28,17 +32,19 @@ import {
   type CalEventType,
   type CalRow,
   type CalView,
+  type CargoType,
   type SyncInfo,
 } from "@/lib/calendar";
 
 interface Filters {
+  type: string;
   logist: string;
   mode: string;
   forwarder: string;
   place: string;
   status: string;
 }
-const NO_FILTERS: Filters = { logist: "", mode: "", forwarder: "", place: "", status: "" };
+const NO_FILTERS: Filters = { type: "", logist: "", mode: "", forwarder: "", place: "", status: "" };
 
 const VIEW_KEY = "aia_calendar_view";
 
@@ -105,6 +111,7 @@ export function CalendarView() {
       forwarder: uniq(rows.map((r) => r.forwarder)),
       place: uniq(rows.map((r) => r.destination)),
       status: uniq(rows.map((r) => r.statusLabel)),
+      type: CARGO_ORDER.filter((t) => rows.some((r) => r.cargoType === t)),
     };
   }, [data]);
 
@@ -114,7 +121,8 @@ export function CalendarView() {
       (!filters.mode || r.mode === filters.mode) &&
       (!filters.forwarder || r.forwarder === filters.forwarder) &&
       (!filters.place || r.destination === filters.place) &&
-      (!filters.status || r.statusLabel === filters.status),
+      (!filters.status || r.statusLabel === filters.status) &&
+      (!filters.type || r.cargoType === filters.type),
     [filters]
   );
 
@@ -226,6 +234,14 @@ export function CalendarView() {
 
         {/* Filters + legend */}
         <div style={{ padding: "8px 16px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", borderBottom: "1px solid var(--border)" }}>
+          <FilterSelect
+            label="Тип"
+            value={filters.type}
+            options={facets.type}
+            format={(v) => `${CARGO_META[v as CargoType]?.icon ?? ""} ${CARGO_META[v as CargoType]?.label ?? v}`}
+            onChange={(v) => setFilters((f) => ({ ...f, type: v }))}
+          />
+          <FilterSelect label="Хто везе" value={filters.forwarder} options={facets.forwarder} onChange={(v) => setFilters((f) => ({ ...f, forwarder: v }))} />
           <FilterSelect label="Логіст" value={filters.logist} options={facets.logist} onChange={(v) => setFilters((f) => ({ ...f, logist: v }))} />
           <FilterSelect
             label="Вид"
@@ -234,7 +250,6 @@ export function CalendarView() {
             format={(v) => MODE_LABEL_CAL[v] ?? v}
             onChange={(v) => setFilters((f) => ({ ...f, mode: v }))}
           />
-          <FilterSelect label="Хто везе" value={filters.forwarder} options={facets.forwarder} onChange={(v) => setFilters((f) => ({ ...f, forwarder: v }))} />
           <FilterSelect label="Куди" value={filters.place} options={facets.place} onChange={(v) => setFilters((f) => ({ ...f, place: v }))} />
           <FilterSelect label="Статус" value={filters.status} options={facets.status} onChange={(v) => setFilters((f) => ({ ...f, status: v }))} />
           {filtered && (
@@ -242,8 +257,49 @@ export function CalendarView() {
               Скинути
             </button>
           )}
-          <div style={{ flex: 1 }} />
-          <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }} aria-label="Типи подій">
+        </div>
+
+        {/* Legend: colour = who carries (click = filter), icon = cargo type, shape = event */}
+        <div
+          style={{ padding: "6px 16px 8px", display: "flex", alignItems: "center", gap: "4px 14px", flexWrap: "wrap", borderBottom: "1px solid var(--border)", fontSize: 12 }}
+          data-testid="calendar-legend"
+        >
+          {facets.forwarder.length > 0 && (
+            <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }} aria-label="Хто везе">
+              <span style={legendLabel}>Хто везе:</span>
+              {facets.forwarder.map((fw) => (
+                <button
+                  key={fw}
+                  type="button"
+                  aria-pressed={filters.forwarder === fw}
+                  onClick={() => setFilters((f) => ({ ...f, forwarder: f.forwarder === fw ? "" : fw }))}
+                  style={{ ...legendChip, borderColor: filters.forwarder === fw ? forwarderColor(fw) : "var(--border)" }}
+                >
+                  <span style={{ width: 10, height: 10, borderRadius: 3, background: forwarderColor(fw) }} />
+                  {fw}
+                </button>
+              ))}
+            </div>
+          )}
+          {facets.type.length > 0 && (
+            <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }} aria-label="Типи вантажу">
+              <span style={legendLabel}>Тип:</span>
+              {facets.type.map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  aria-pressed={filters.type === t}
+                  onClick={() => setFilters((f) => ({ ...f, type: f.type === t ? "" : t }))}
+                  style={{ ...legendChip, borderColor: filters.type === t ? "var(--accent)" : "var(--border)" }}
+                >
+                  <span aria-hidden>{CARGO_META[t].icon}</span>
+                  {CARGO_META[t].label}
+                </button>
+              ))}
+            </div>
+          )}
+          <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }} aria-label="Типи подій">
+            <span style={legendLabel}>Події:</span>
             {EVENT_ORDER.map((t) => {
               const off = hidden.has(t);
               return (
@@ -259,24 +315,10 @@ export function CalendarView() {
                       return n;
                     })
                   }
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 5,
-                    height: 26,
-                    padding: "0 9px",
-                    borderRadius: 999,
-                    border: "1px solid var(--border)",
-                    background: "var(--surface)",
-                    color: "var(--text)",
-                    opacity: off ? 0.4 : 1,
-                    font: "inherit",
-                    fontSize: 12,
-                    cursor: "pointer",
-                  }}
+                  style={{ ...legendChip, opacity: off ? 0.4 : 1 }}
                 >
-                  <span style={{ width: 9, height: 9, borderRadius: 3, background: EVENT_META[t].color }} />
-                  {EVENT_META[t].label}
+                  <span aria-hidden style={{ width: 14, height: 10, borderRadius: 3, border: `2px ${EVENT_SHAPE[t].border} var(--muted)` }} />
+                  {EVENT_SHAPE[t].mark} {EVENT_META[t].label}
                 </button>
               );
             })}
@@ -340,7 +382,7 @@ interface GridProps {
 function WeekGrid({ from, ...p }: GridProps & { from: string }) {
   const days = Array.from({ length: 7 }, (_, i) => addDays(from, i));
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 6, minWidth: 620 }} data-testid="calendar-week">
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 6, minWidth: 840 }} data-testid="calendar-week">
       {days.map((d, i) => {
         const list = p.byDay.get(d) ?? [];
         const isToday = d === p.today;
@@ -480,48 +522,116 @@ function YearGrid({ year, today, byDay, onMonth, onDay }: { year: string; today:
   );
 }
 
+function chipTitle(e: CalEvent, row: CalRow): string {
+  return [
+    `${EVENT_META[e.type].label}${e.approx ? " (орієнтовно)" : ""}${e.source ? ` · ${e.source}` : ""}`,
+    `${CARGO_META[row.cargoType].icon} ${row.product} — ${CARGO_META[row.cargoType].label}`,
+    row.forwarder ? `Хто везе: ${row.forwarder}` : "",
+    row.number ? `№ ${row.number}${row.carrierName ? ` · ${row.carrierName}` : ""}` : "",
+    row.origin || row.destination ? `${row.origin || "—"} → ${row.destination || "—"}` : "",
+    `Статус: ${row.statusLabel}`,
+    row.logist ? `Логіст: ${row.logist}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/**
+ * One event on the calendar. Colour = who carries it, icon = cargo type, border
+ * style + mark = event type (dashed ↗ departure, solid ⚑ planned arrival, dotted
+ * ⏱ tracking ETA, double ✓ cleared / delivered). The tracking number links to
+ * the carrier's site.
+ */
 function EventChip({ e, row, onPick, selected, wide }: { e: CalEvent; row: CalRow; onPick: (id: string) => void; selected: boolean; wide?: boolean }) {
-  const m = EVENT_META[e.type];
+  const color = row.tab === "warehouse" ? EVENT_META.warehouse.color : forwarderColor(row.forwarder);
+  const shape = EVENT_SHAPE[e.type];
+  const done = e.type === "delivered" || e.type === "customs";
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       data-testid="calendar-event"
       data-type={e.type}
+      data-cargo={row.cargoType}
       onClick={() => onPick(e.rowId)}
-      title={`${m.label}${e.approx ? " (орієнтовно)" : ""}: ${row.product}${row.destination ? ` → ${row.destination}` : ""}${e.source ? ` · ${e.source}` : ""}`}
+      onKeyDown={(k) => {
+        if (k.key === "Enter" || k.key === " ") {
+          k.preventDefault();
+          onPick(e.rowId);
+        }
+      }}
+      title={chipTitle(e, row)}
       style={{
         display: "block",
         width: "100%",
+        boxSizing: "border-box",
         textAlign: "left",
-        border: "none",
-        borderLeft: `3px solid ${m.color}`,
+        border: `1.5px ${shape.border} ${color}`,
+        borderLeftWidth: 4,
+        borderLeftStyle: "solid",
         borderRadius: 6,
-        padding: wide ? "5px 7px" : "2px 6px",
-        background: selected ? "var(--active)" : `color-mix(in srgb, ${m.color} 11%, var(--surface))`,
+        padding: wide ? "5px 7px" : "2px 5px",
+        background: selected ? "var(--active)" : `color-mix(in srgb, ${color} ${done ? 20 : 9}%, var(--surface))`,
         color: "var(--text)",
-        font: "inherit",
         fontSize: wide ? 12.5 : 11.5,
         cursor: "pointer",
         overflow: "hidden",
         whiteSpace: wide ? "normal" : "nowrap",
         textOverflow: "ellipsis",
+        opacity: e.approx ? 0.85 : 1,
       }}
     >
-      <span aria-hidden style={{ marginRight: 4 }}>
-        {m.icon}
+      <span aria-hidden style={{ marginRight: 3 }}>
+        {CARGO_META[row.cargoType].icon}
       </span>
+      {e.type !== "warehouse" && (
+        <span aria-hidden style={{ marginRight: 3, color, fontWeight: 700 }}>
+          {shape.mark}
+        </span>
+      )}
       <b style={{ fontWeight: 600 }}>{row.product}</b>
       {e.approx ? " ≈" : ""}
+      {!wide && row.trackLink && (
+        <a
+          href={row.trackLink}
+          target="_blank"
+          rel="noreferrer noopener"
+          onClick={(ev) => ev.stopPropagation()}
+          title={`Відстежити ${row.number ?? ""} на сайті`}
+          style={{ marginLeft: 4, color, textDecoration: "none", fontWeight: 700 }}
+          data-testid="calendar-track-link"
+        >
+          ↗
+        </a>
+      )}
       {wide && (
         <span style={{ display: "block", fontSize: 11.5, color: "var(--muted)", marginTop: 1 }}>
-          {m.label}
+          {EVENT_META[e.type].label}
+          {row.forwarder ? ` · ${row.forwarder}` : ""}
           {row.destination && e.type !== "departure" ? ` · ${row.destination}` : ""}
           {row.origin && e.type === "departure" ? ` · ${row.origin}` : ""}
-          {row.logist ? ` · ${row.logist}` : ""}
           {e.source ? ` · ${e.source}` : ""}
         </span>
       )}
-    </button>
+      {wide && row.number && (
+        <span style={{ display: "block", fontSize: 11.5, marginTop: 2 }}>
+          {row.trackLink ? (
+            <a
+              href={row.trackLink}
+              target="_blank"
+              rel="noreferrer noopener"
+              onClick={(ev) => ev.stopPropagation()}
+              style={{ color, fontFamily: "var(--font-mono)", textDecoration: "none" }}
+              data-testid="calendar-track-link"
+            >
+              {row.number} ↗
+            </a>
+          ) : (
+            <span style={{ fontFamily: "var(--font-mono)", color: "var(--muted)" }}>{row.number}</span>
+          )}
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -530,9 +640,9 @@ function EventChip({ e, row, onPick, selected, wide }: { e: CalEvent; row: CalRo
 function RowDetail({ row, events, today, onClose }: { row: CalRow; events: CalEvent[]; today: string; onClose: () => void }) {
   const left = row.arrival && !["customs", "delivered"].includes(row.status) ? daysFrom(today, row.arrival.date) : null;
   const facts: Array<[string, string]> = [
-    ["Номер", row.number ? `${row.number}${row.carrierName ? ` · ${row.carrierName}` : ""}` : ""],
-    ["Вид", row.mode ? (MODE_LABEL_CAL[row.mode] ?? row.mode) : ""],
+    ["Тип", `${CARGO_META[row.cargoType].icon} ${CARGO_META[row.cargoType].label}`],
     ["Хто везе", row.forwarder],
+    ["Вид", row.mode ? (MODE_LABEL_CAL[row.mode] ?? row.mode) : ""],
     ["Звідки", row.origin],
     ["Куди", row.destination],
     ["Вихід", row.departure ? `${fmtDay(row.departure.date)}${row.departure.guessed ? " (рік вгадано)" : ""}` : ""],
@@ -540,7 +650,7 @@ function RowDetail({ row, events, today, onClose }: { row: CalRow; events: CalEv
     ["Кількість", row.qty ?? ""],
     ["Коли (склад)", row.when ?? ""],
     ["Вміститься в БЦ", row.fits ?? ""],
-    ["Вага", row.weight],
+    ["Кількість", row.weight],
     ["Лінія", row.line],
     ["Логіст", row.logist],
     ["Місце розмитнення", row.customsPlace],
@@ -574,6 +684,33 @@ function RowDetail({ row, events, today, onClose }: { row: CalRow; events: CalEv
             {row.issues.map((i) => (
               <div key={i.code}>⚠ {i.label}</div>
             ))}
+          </section>
+        )}
+        {row.number && (
+          <section
+            style={{ padding: 10, borderRadius: 10, border: `1px solid ${forwarderColor(row.forwarder)}`, display: "grid", gap: 6 }}
+            data-testid="calendar-track"
+          >
+            <div style={{ fontSize: 11, fontWeight: 650, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".05em" }}>
+              Трек-номер{row.carrierName ? ` · ${row.carrierName}` : ""}
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 700, fontFamily: "var(--font-mono)", overflowWrap: "anywhere" }}>{row.number}</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {row.trackLink && (
+                <a
+                  className="btn btn-primary"
+                  href={row.trackLink}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  style={{ ...toolBtn, textDecoration: "none", display: "inline-flex", alignItems: "center" }}
+                >
+                  Відстежити на сайті ↗
+                </a>
+              )}
+              <button type="button" className="btn" style={toolBtn} onClick={() => void navigator.clipboard?.writeText(row.number ?? "")}>
+                Копіювати
+              </button>
+            </div>
           </section>
         )}
         <section style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 12px", fontSize: 13 }}>
@@ -745,12 +882,13 @@ function printPlan(title: string, events: CalEvent[], rowsById: Map<string, CalR
     .map((e) => {
       const r = rowsById.get(e.rowId);
       if (!r) return "";
-      return `<tr><td>${fmtDay(e.date)}${e.approx ? " ≈" : ""}</td><td>${esc(EVENT_META[e.type].label)}${e.source ? ` (${esc(e.source)})` : ""}</td><td><b>${esc(r.product)}</b></td><td>${esc(r.number ?? "")}</td><td>${esc([r.origin, r.destination].filter(Boolean).join(" → "))}</td><td>${esc(r.forwarder)}</td><td>${esc(r.logist)}</td><td>${esc(r.statusLabel)}</td></tr>`;
+      const num = r.number ? (r.trackLink ? `<a href="${esc(r.trackLink)}">${esc(r.number)}</a>` : esc(r.number)) : "";
+      return `<tr><td>${fmtDay(e.date)}${e.approx ? " ≈" : ""}</td><td>${esc(EVENT_META[e.type].label)}${e.source ? ` (${esc(e.source)})` : ""}</td><td>${esc(CARGO_META[r.cargoType].label)}</td><td><b>${esc(r.product)}</b></td><td>${num}</td><td>${esc([r.origin, r.destination].filter(Boolean).join(" → "))}</td><td>${esc(r.forwarder)}</td><td>${esc(r.logist)}</td><td>${esc(r.statusLabel)}</td></tr>`;
     })
     .join("");
   w.document.write(`<!doctype html><html lang="uk"><head><meta charset="utf-8"><title>Календар логістів — ${esc(title)}</title>
 <style>body{font:13px system-ui,sans-serif;margin:24px;color:#111}h1{font-size:18px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:4px 6px;text-align:left;vertical-align:top}th{background:#f1f5f9}</style></head>
-<body><h1>Календар логістів — ${esc(title)}</h1><table><thead><tr><th>Дата</th><th>Подія</th><th>Товар</th><th>Номер</th><th>Маршрут</th><th>Хто везе</th><th>Логіст</th><th>Статус</th></tr></thead><tbody>${rows}</tbody></table>
+<body><h1>Календар логістів — ${esc(title)}</h1><table><thead><tr><th>Дата</th><th>Подія</th><th>Тип</th><th>Товар</th><th>Трек-номер</th><th>Маршрут</th><th>Хто везе</th><th>Логіст</th><th>Статус</th></tr></thead><tbody>${rows}</tbody></table>
 <p style="color:#666;font-size:11px">«≈» — рік у таблиці не вказано або дата орієнтовна. Джерело: робоча таблиця.</p></body></html>`);
   w.document.close();
   w.focus();
@@ -759,6 +897,21 @@ function printPlan(title: string, events: CalEvent[], rowsById: Map<string, CalR
 
 // ── Styles ───────────────────────────────────────────────────────────────────
 
+const legendLabel: React.CSSProperties = { color: "var(--muted)", fontWeight: 600, marginRight: 2 };
+const legendChip: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 5,
+  height: 24,
+  padding: "0 8px",
+  borderRadius: 999,
+  border: "1px solid var(--border)",
+  background: "var(--surface)",
+  color: "var(--text)",
+  font: "inherit",
+  fontSize: 12,
+  cursor: "pointer",
+};
 const iconBtn: React.CSSProperties = { width: 32, height: 32, padding: 0, fontSize: 16, display: "inline-flex", alignItems: "center", justifyContent: "center" };
 const toolBtn: React.CSSProperties = { height: 32, padding: "0 11px", fontSize: 12.5, whiteSpace: "nowrap" };
 const statusPill: React.CSSProperties = { fontSize: 12, fontWeight: 600, padding: "2px 9px", borderRadius: 999, background: "var(--hover)" };

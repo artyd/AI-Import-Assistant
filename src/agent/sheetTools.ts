@@ -1,6 +1,6 @@
 import type { ChatTool } from '../anthropic/client.js';
 import { query } from '../db/pool.js';
-import { attentionRows, calendarRange, type CalendarEvent, type CalendarRow } from '../services/sheet/calendar.js';
+import { attentionRows, calendarRange, CARGO_LABEL, type CalendarEvent, type CalendarRow } from '../services/sheet/calendar.js';
 import { kyivToday, sheetEnabled, sheetRowUrl } from '../services/sheet/sync.js';
 
 /**
@@ -115,7 +115,8 @@ const EV_LABEL: Record<CalendarEvent['type'], string> = {
 function rowLine(r: CalendarRow): string {
   const parts = [
     `**${r.product}**`,
-    r.number ? `№ ${r.number}${r.carrierName ? ` (${r.carrierName})` : ''}` : '',
+    r.tab === 'tracking' ? CARGO_LABEL[r.cargoType] : '',
+    r.number ? `№ ${r.number}${r.carrierName ? ` (${r.carrierName})` : ''}${r.trackLink ? ` — трекінг: ${r.trackLink}` : ''}` : '',
     r.origin || r.destination ? `${r.origin || '—'} → ${r.destination || '—'}` : '',
     r.departure ? `вихід ${dmy(r.departure.date)}${r.departure.guessed ? '≈' : ''}` : '',
     r.arrival ? `план ${dmy(r.arrival.date)}${r.arrival.guessed ? '≈' : ''}` : '',

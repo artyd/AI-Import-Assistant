@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { HubMode } from '../hub/carriers.js';
+import { trackingUrl, type HubMode } from '../hub/carriers.js';
 import { detectNumber, type NumberKind } from '../hub/detect.js';
 
 /**
@@ -163,7 +163,7 @@ export type SheetStatus = 'planned' | 'in_transit' | 'arrived' | 'customs' | 'de
 const STATUS_RULES: Array<{ status: SheetStatus; re: RegExp }> = [
   { status: 'delivered', re: /(доставлен\w*|доставлено|delivered|отриман\w*|получен\w*|выгружен\w*|вигружен\w*|выгрузка|вивантажен\w*)/i },
   { status: 'customs', re: /(растаможен\w*|розмитнен\w*|растаможк\w* завершен\w*)/i },
-  { status: 'arrived', re: /(прибыл\w*|прибув\w*|прибула|arrived|discharged|вивантажено з судна)/i },
+  { status: 'arrived', re: /(прибыл\w*|прибув\w*|прибула|arrived|vessel arrival|discharg\w*|вивантажено з судна|выгружен\w* с судна)/i },
 ];
 
 export interface StatusHit {
@@ -335,6 +335,7 @@ type Named =
   | 'sheetNo'
   | 'product'
   | 'forwarder'
+  | 'qty'
   | 'container'
   | 'ttn'
   | 'arrival'
@@ -342,6 +343,8 @@ type Named =
   | 'departure'
   | 'origin'
   | 'trackUrl'
+  | 'line'
+  | 'logist'
   | 'comment'
   | 'customsPlace'
   | 'warehouse';
@@ -350,13 +353,16 @@ const HEADER_RULES: Array<[Named, RegExp]> = [
   ['sheetNo', /^№\s*лист/],
   ['product', /^(товар|номенклатура|продукт)/],
   ['forwarder', /(кто|хто)\s*(везет|везе)|перевозчик|перевізник|экспедитор|експедитор/],
+  ['qty', /^(кол-?во|количество|кількість|к-?сть)/],
   ['container', /контейнер/],
   ['ttn', /ттн|awb|накладн/],
   ['arrival', /дата\s*(прибытия|прибуття)|eta/],
   ['destination', /(место|місце)\s*(прибытия|прибуття)|куда|куди/],
   ['departure', /дата\s*(выхода|виходу|отправ|відправ)|etd/],
   ['origin', /(место|місце)\s*(выхода|виходу|отправ|відправ)|откуда|звідки/],
-  ['trackUrl', /(морская|морська)\s*линия|лінія|ссылка|посилання|трекинг|трекінг/],
+  ['logist', /логист|логіст|ответствен|відповідальн|менеджер/],
+  ['line', /линия|лінія|^line/],
+  ['trackUrl', /ссылк|посилан|трекинг|трекінг|tracking|link/],
   ['comment', /коммент|комент|примечан|примітк/],
   ['customsPlace', /(место|місце)\s*(растаможки|розмитнення)/],
   ['warehouse', /склад/],
@@ -372,11 +378,23 @@ export interface ColumnMap {
   extra: number[];
 }
 
-export function mapColumns(header: string[]): ColumnMap {
+const isUrl = (s: string) => /^\s*https?:\/\//i.test(s);
+
+/**
+ * Header → column indexes. The sheet is edited by hand, so:
+ *  - the tracking-link column is found by CONTENT (the column holding most
+ *    http links) — two columns may both be titled «Морская линия»;
+ *  - the other «… линия» column is the line name;
+ *  - unnamed columns (old layout: weight, line, 2nd arrival place, logist) are
+ *    taken by position only when no named column covers them.
+ */
+export function mapColumns(header: string[], body: string[][] = []): ColumnMap {
   const named: Partial<Record<Named, number>> = {};
+  const lineCols: number[] = [];
   header.forEach((h, i) => {
     const f = fold(h);
     if (!f) return;
+    if (/линия|лінія|^line/.test(f)) lineCols.push(i);
     for (const [key, re] of HEADER_RULES) {
       if (named[key] == null && re.test(f)) {
         named[key] = i;
@@ -384,6 +402,21 @@ export function mapColumns(header: string[]): ColumnMap {
       }
     }
   });
+  // Tracking links by content.
+  let urlCol: number | null = null;
+  let best = 0;
+  for (let i = 0; i < header.length; i += 1) {
+    const n = body.reduce((acc, r) => acc + (isUrl(r[i] ?? '') ? 1 : 0), 0);
+    if (n > best) {
+      best = n;
+      urlCol = i;
+    }
+  }
+  if (urlCol != null && best >= 1) named.trackUrl = urlCol;
+  const lineNamed = lineCols.find((i) => i !== named.trackUrl);
+  if (lineNamed != null) named.line = lineNamed;
+  else if (named.line === named.trackUrl) delete named.line;
+
   const blank = (i: number | undefined | null) => (i != null && i >= 0 && i < header.length && !fold(header[i] ?? '') ? i : null);
   const after = (k: Named, by = 1) => (named[k] != null ? blank(named[k]! + by) : null);
   const lastNamed = Math.max(...Object.values(named).map((v) => v ?? -1));
@@ -393,12 +426,73 @@ export function mapColumns(header: string[]): ColumnMap {
   return {
     named,
     ref: after('sheetNo'),
-    weight: after('forwarder'),
-    line: after('forwarder', 1) != null && forwarder2 != null ? forwarder2 : null,
+    weight: named.qty != null ? named.qty : after('forwarder'),
+    line: named.line != null ? named.line : after('forwarder', 1) != null && forwarder2 != null ? forwarder2 : null,
     destination2: after('destination'),
-    logist: after('departure'),
+    logist: named.logist != null ? named.logist : after('departure'),
     extra,
   };
+}
+
+// ── Forwarder + cargo type ───────────────────────────────────────────────────
+
+const FORWARDERS: Array<[RegExp, string]> = [
+  [/мульти?кс|multi?x/i, 'Мультикс'],
+  [/еврофорвард|eurofor/i, 'Еврофорвард'],
+  [/^дсв$|^dsv$|дсв|\bdsv\b/i, 'DSV'],
+  [/ксиоми|ксіомі|xiomi|ksiomi/i, 'Ксиоми'],
+  [/трансвосток|transvostok/i, 'Трансвосток'],
+  [/айкарго|aicargo|icargo/i, 'Айкарго'],
+  [/дхл|\bdhl\b/i, 'DHL'],
+  [/федекс|fedex/i, 'FedEx'],
+  [/мист|міст|meest/i, 'Мист'],
+  [/\btnt\b|тнт/i, 'TNT'],
+  [/\bups\b/i, 'UPS'],
+  [/нова\s*пошта|новая\s*почта|nova\s*poshta/i, 'Нова Пошта'],
+  [/поставщик|постачальник|supplier/i, 'Постачальник'],
+];
+
+const COURIER_NAME: Record<string, string> = {
+  dhl: 'DHL',
+  fedex: 'FedEx',
+  ups: 'UPS',
+  tnt: 'TNT',
+  meest: 'Мист',
+  novaposhta: 'Нова Пошта',
+  ukrposhta: 'Укрпошта',
+};
+
+/**
+ * One spelling per forwarder ("мультикс" / "Мультикс" → "Мультикс"; "Ксиоми/ДСВ"
+ * → "Ксиоми / DSV"). Numbers / notes that ended up in the column are dropped;
+ * a courier shipment without a forwarder is shown under its courier.
+ */
+export function normalizeForwarder(raw: string, carrier: string | null): string {
+  const parts = raw
+    .split(/[/,;+]| и | та /)
+    .map((p) => p.trim())
+    .filter((p) => p && !/\d{3,}/.test(p) && !/^(образ|зразк|q-?ty)/i.test(p));
+  const names: string[] = [];
+  for (const p of parts) {
+    const hit = FORWARDERS.find(([re]) => re.test(p));
+    const name = hit ? hit[1] : p.charAt(0).toUpperCase() + p.slice(1);
+    if (!names.includes(name)) names.push(name);
+  }
+  if (!names.length && carrier && COURIER_NAME[carrier]) names.push(COURIER_NAME[carrier]!);
+  return names.join(' / ');
+}
+
+export type CargoType = 'samples' | 'groupage' | 'lcl' | 'fcl' | 'air' | 'parcel' | 'other';
+
+/** Cargo type from the product name + how it travels (keywords first). */
+export function cargoType(product: string, mode: HubMode | null): CargoType {
+  if (/образ|зразк|sample/i.test(product)) return 'samples';
+  if (/сборник|збірник|groupage/i.test(product)) return 'groupage';
+  if (/\blcl\b/i.test(product)) return 'lcl';
+  if (mode === 'air') return 'air';
+  if (mode === 'courier' || mode === 'domestic') return 'parcel';
+  if (mode === 'sea' || /\d\s*конт|контейнер|\bfcl\b/i.test(product)) return 'fcl';
+  return 'other';
 }
 
 // ── Rows ─────────────────────────────────────────────────────────────────────
@@ -411,12 +505,19 @@ export interface TrackingRow {
   key: string;
   product: string;
   refNo: string;
+  /** Normalised forwarder ("Мультикс", "DSV", "Ксиоми / DSV", courier name…). */
   forwarder: string;
+  /** As written in the sheet. */
+  forwarderRaw: string;
+  cargoType: CargoType;
+  /** Quantity / weight cell ("Кол-во"). */
   weight: string;
   line: string;
   containerRaw: string;
   ttnRaw: string;
   trackUrl: string;
+  /** Where to track the number: the sheet's link, else the carrier's page. */
+  trackLink: string | null;
   origin: string;
   destination: string;
   logist: string;
@@ -438,6 +539,8 @@ export interface TrackingRow {
   active: boolean;
   /** Among the last rows of the sheet (recently added) — data issues matter here. */
   recent: boolean;
+  /** Dated in the working year (only those rows are shown / tracked). */
+  inScope: boolean;
 }
 
 const cellAt = (row: string[], i: number | null | undefined) => (i == null ? '' : (row[i] ?? '').trim());
@@ -459,6 +562,7 @@ export function parseTrackingRow(
   cols: ColumnMap,
   today: string,
   ref: string = today,
+  year: string = today.slice(0, 4),
 ): TrackingRow | null {
   const c = (k: Named) => cellAt(row, cols.named[k]);
   const product = c('product');
@@ -488,28 +592,36 @@ export function parseTrackingRow(
   if (!departure && !arrival) issues.push('no_dates');
   const done = status === 'delivered' || status === 'customs';
   if (!done && arrival && arrival.date < today) issues.push('overdue');
+  const statusDate = hit?.date ?? null;
+  const inScope = [departure, arrival, statusDate].some((d) => !!d && d.date.startsWith(year));
   // In play = not cleared / delivered and dated recently: arrival within the
   // last 30 days or ahead; without an arrival, left within the last 120 days.
   const recent = arrival
     ? utc(today) - utc(arrival.date) <= 30 * DAY
     : !!departure && utc(today) - utc(departure.date) <= 120 * DAY;
-  const active = !done && recent;
+  const active = !done && recent && inScope;
 
   const destination = c('destination') || cellAt(row, cols.destination2);
   const number = pick?.number ?? null;
+  const carrier = pick?.carrier ?? carrierFromUrl(trackUrl);
+  const mode = pick?.mode ?? modeFromUrl(trackUrl);
   // In this sheet the container column sometimes holds the forwarder instead.
-  const forwarder = c('forwarder') || (issues.includes('container_not_number') && !/\d/.test(containerRaw) ? containerRaw : '');
+  const forwarderRaw = c('forwarder') || (issues.includes('container_not_number') && !/\d/.test(containerRaw) ? containerRaw : '');
+  const link = /^https?:\/\//i.test(trackUrl) ? trackUrl : '';
   return {
     rowIndex,
     key: rowKey(product, number, `${product}|${depRaw}|${arrRaw}`),
     product,
     refNo: cellAt(row, cols.ref),
-    forwarder,
+    forwarder: normalizeForwarder(forwarderRaw, carrier),
+    forwarderRaw,
+    cargoType: cargoType(product, mode),
     weight: cellAt(row, cols.weight),
     line: cellAt(row, cols.line),
     containerRaw,
     ttnRaw,
-    trackUrl: /^https?:\/\//i.test(trackUrl) ? trackUrl : '',
+    trackUrl: link,
+    trackLink: pickTrackLink(link, number, carrier),
     origin: c('origin'),
     destination,
     logist: cellAt(row, cols.logist),
@@ -519,16 +631,36 @@ export function parseTrackingRow(
     extra,
     departure,
     arrival,
-    statusDate: hit?.date ?? null,
+    statusDate,
     status,
     number,
-    carrier: pick?.carrier ?? carrierFromUrl(trackUrl),
+    carrier,
     kind: pick?.kind ?? null,
-    mode: pick?.mode ?? modeFromUrl(trackUrl),
+    mode,
     issues,
     active,
     recent: false,
+    inScope,
   };
+}
+
+/**
+ * The sheet's own link wins (the logist chose that site) — unless it is a bare
+ * tracking page without this number, then the carrier's page for the number.
+ */
+export function pickTrackLink(sheetLink: string, number: string | null, carrier: string | null): string | null {
+  const own = number && carrier ? trackingUrl(carrier, number) : null;
+  if (!sheetLink) return own;
+  if (!number || !own) return sheetLink;
+  const flat = decodeURIComponent(sheetLink).toUpperCase().replace(/[\s-]/g, '');
+  let decoded = '';
+  try {
+    const p = new URL(sheetLink).searchParams.get('params');
+    if (p) decoded = Buffer.from(p, 'base64').toString('utf8').toUpperCase();
+  } catch {
+    /* not a URL */
+  }
+  return flat.includes(number) || decoded.includes(number) ? sheetLink : own;
 }
 
 /** Rows at the bottom of the sheet count as "recent" for the data-issue list. */
@@ -538,7 +670,7 @@ export const RECENT_ROWS = 40;
 export function parseTrackingTab(grid: string[][], today: string): TrackingRow[] {
   const headerAt = grid.findIndex((r) => r.some((c) => /товар|номенклатура/i.test(c)));
   if (headerAt < 0) return [];
-  const cols = mapColumns(grid[headerAt]!);
+  const cols = mapColumns(grid[headerAt]!, grid.slice(headerAt + 1));
   const out: TrackingRow[] = [];
   const seen = new Map<string, number>();
   // Year-less dates are guessed around the latest explicit date above (the sheet
@@ -557,8 +689,13 @@ export function parseTrackingTab(grid: string[][], today: string): TrackingRow[]
     if (n > 0) r.key = `${r.key}-${n}`;
     out.push(r);
   }
+  // "Recent" (data issues worth showing): in play, or among the last rows and not
+  // dated in another year.
   const last = out.at(-1)?.rowIndex ?? 0;
-  for (const r of out) r.recent = r.active || r.rowIndex > last - RECENT_ROWS;
+  for (const r of out) {
+    const undated = !r.departure && !r.arrival && !r.statusDate;
+    r.recent = r.active || (r.rowIndex > last - RECENT_ROWS && (r.inScope || undated));
+  }
   return out;
 }
 

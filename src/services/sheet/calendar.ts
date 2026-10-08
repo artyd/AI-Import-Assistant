@@ -5,7 +5,7 @@ import { liveItem } from '../hub/live.js';
 import type { TrackedRow } from '../hub/track.js';
 import { STATUS_LABEL_UK } from '../hub/types.js';
 import { sheetRowUrl, type SheetTab } from './link.js';
-import type { SheetDate, SheetIssue, SheetStatus, TrackingRow, WarehouseRow } from './parse.js';
+import type { CargoType, SheetDate, SheetIssue, SheetStatus, TrackingRow, WarehouseRow } from './parse.js';
 
 /**
  * Logist calendar over the synced sheet rows. Every row contributes dated events:
@@ -51,8 +51,22 @@ export const ISSUE_LABEL: Record<SheetIssue, string> = {
   no_dates: 'Немає дат',
 };
 
+/** Tracking says something the sheet doesn't (the sheet stays the source of truth). */
+export type TrackingIssue = 'tracking_delivered' | 'tracking_eta';
+
 /** Issues that need a logist's attention (a guessed year alone is just shown). */
-const ATTENTION: SheetIssue[] = ['overdue', 'date_unparsed', 'container_not_number', 'number_mangled', 'no_dates'];
+const ATTENTION: Array<SheetIssue | TrackingIssue> = [
+  'overdue',
+  'tracking_delivered',
+  'tracking_eta',
+  'date_unparsed',
+  'container_not_number',
+  'number_mangled',
+  'no_dates',
+];
+
+/** Only rows dated in the working year (older stored rows lack the flag → kept). */
+const IN_SCOPE = `(tab <> 'tracking' OR COALESCE((data->>'inScope')::boolean, TRUE))`;
 
 interface DbRow {
   id: string;
@@ -92,7 +106,10 @@ export interface CalendarRow {
   refNo: string;
   customsPlace: string;
   warehouse: string;
-  issues: Array<{ code: SheetIssue; label: string }>;
+  issues: Array<{ code: SheetIssue | TrackingIssue; label: string }>;
+  cargoType: CargoType | 'warehouse';
+  /** Tracking page for the number (the sheet's link, else the carrier's). */
+  trackLink: string | null;
   trackedId: string | null;
   track: { status: string; statusLabel: string; eta: string | null; source: string } | null;
   // warehouse tab
@@ -109,6 +126,27 @@ function sourceName(source: string): string {
   if (source.startsWith('api:')) return `API ${source.slice(4)}`;
   if (source.startsWith('scrape:')) return `сайт перевізника`;
   return source;
+}
+
+const dmy = (d: string) => `${d.slice(8, 10)}.${d.slice(5, 7)}`;
+
+/** Where tracking disagrees with the sheet — shown and listed in «Увага». */
+function trackingIssues(d: TrackingRow, t: TrackedRow | undefined): Array<{ code: TrackingIssue; label: string }> {
+  if (!t || d.status === 'delivered' || d.status === 'customs') return [];
+  const fromCarrier = !['sheet', 'manual', 'none'].includes(t.source);
+  if (t.status === 'delivered' && fromCarrier) {
+    const at = t.arrived_at ? ` ${dmy(new Date(t.arrived_at).toISOString().slice(0, 10))}` : '';
+    return [{ code: 'tracking_delivered', label: `Трекінг (${sourceName(t.source)}): доставлено${at} — оновіть таблицю` }];
+  }
+  const plan = d.arrival?.date;
+  if (fromCarrier && t.eta && plan) {
+    const eta = new Date(t.eta).toISOString().slice(0, 10);
+    const diff = Math.round((Date.parse(eta) - Date.parse(plan)) / 86_400_000);
+    if (Math.abs(diff) >= 2) {
+      return [{ code: 'tracking_eta', label: `Трекінг (${sourceName(t.source)}): ETA ${dmy(eta)}, а в таблиці ${dmy(plan)} (${diff > 0 ? '+' : ''}${diff} дн)` }];
+    }
+  }
+  return [];
 }
 
 function toCalendarRow(r: DbRow, t: TrackedRow | undefined): CalendarRow {
@@ -141,6 +179,8 @@ function toCalendarRow(r: DbRow, t: TrackedRow | undefined): CalendarRow {
       customsPlace: '',
       warehouse: 'БЦ',
       issues: [],
+      cargoType: 'warehouse',
+      trackLink: null,
       trackedId: null,
       track: null,
       qty: w.qty,
@@ -175,7 +215,9 @@ function toCalendarRow(r: DbRow, t: TrackedRow | undefined): CalendarRow {
     refNo: d.refNo,
     customsPlace: d.customsPlace,
     warehouse: d.warehouse,
-    issues: d.issues.map((code) => ({ code, label: ISSUE_LABEL[code] })),
+    issues: [...d.issues.map((code) => ({ code, label: ISSUE_LABEL[code] as string })), ...trackingIssues(d, t)],
+    cargoType: d.cargoType ?? 'other',
+    trackLink: d.trackLink ?? (d.trackUrl || null),
     trackedId: r.tracked_id,
     track: t
       ? {
@@ -191,7 +233,7 @@ function toCalendarRow(r: DbRow, t: TrackedRow | undefined): CalendarRow {
 async function loadRows(where: string, params: unknown[]): Promise<{ rows: DbRow[]; tracked: Map<string, TrackedRow> }> {
   const { rows } = await query<DbRow>(
     `SELECT id, tab, row_index, data, status, active, recent, tracked_id, updated_at
-     FROM sheet_rows WHERE NOT removed AND (${where}) ORDER BY row_index`,
+     FROM sheet_rows WHERE NOT removed AND ${IN_SCOPE} AND (${where}) ORDER BY row_index`,
     params,
   );
   const ids = rows.map((r) => r.tracked_id).filter((x): x is string => !!x);
@@ -293,6 +335,17 @@ export async function syncState(): Promise<Omit<SyncState, 'enabled' | 'sheetUrl
   return { tabs: rows.map((r) => ({ tab: r.tab, ok: r.ok, rows: r.rows, error: r.error, syncedAt: r.synced_at })) };
 }
 
+export const CARGO_LABEL: Record<CargoType | 'warehouse', string> = {
+  samples: 'Зразки',
+  groupage: 'Збірник',
+  lcl: 'LCL',
+  fcl: 'Контейнер',
+  air: 'Авіа',
+  parcel: 'Посилка',
+  other: 'Вантаж',
+  warehouse: 'Склад БЦ',
+};
+
 const TYPE_LABEL: Record<EventType, string> = {
   departure: 'Вихід',
   arrival: 'Прибуття (план)',
@@ -307,7 +360,7 @@ const TYPE_LABEL: Record<EventType, string> = {
 export function calendarXlsx(p: CalendarPayload): Buffer {
   const byId = new Map(p.rows.map((r) => [r.id, r]));
   const aoa: unknown[][] = [
-    ['Дата', 'Подія', 'Товар', 'Номер', 'Перевізник', 'Хто везе', 'Звідки', 'Куди', 'Логіст', 'Статус', 'Коментар', 'Рядок таблиці'],
+    ['Дата', 'Подія', 'Тип', 'Товар', 'Номер', 'Трекінг', 'Перевізник', 'Хто везе', 'Звідки', 'Куди', 'Логіст', 'Статус', 'Коментар', 'Рядок таблиці'],
   ];
   for (const e of p.events) {
     const r = byId.get(e.rowId);
@@ -315,8 +368,10 @@ export function calendarXlsx(p: CalendarPayload): Buffer {
     aoa.push([
       `${e.date.slice(8, 10)}.${e.date.slice(5, 7)}.${e.date.slice(0, 4)}${e.approx ? ' ≈' : ''}`,
       `${TYPE_LABEL[e.type]}${e.source ? ` (${e.source})` : ''}`,
+      CARGO_LABEL[r.cargoType],
       r.product,
       r.number ?? '',
+      r.trackLink ?? '',
       r.carrierName ?? '',
       r.forwarder,
       r.origin,
@@ -328,7 +383,13 @@ export function calendarXlsx(p: CalendarPayload): Buffer {
     ]);
   }
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols'] = [12, 22, 34, 18, 16, 16, 16, 16, 10, 14, 40, 8].map((wch) => ({ wch }));
+  ws['!cols'] = [12, 22, 14, 34, 18, 40, 16, 16, 16, 16, 10, 14, 40, 8].map((wch) => ({ wch }));
+  // Tracking links clickable in Excel.
+  for (let i = 1; i < aoa.length; i += 1) {
+    const ref = XLSX.utils.encode_cell({ r: i, c: 5 });
+    const url = String(aoa[i]![5] ?? '');
+    if (url && ws[ref]) ws[ref].l = { Target: url };
+  }
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Календар');
   return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;

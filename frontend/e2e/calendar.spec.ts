@@ -39,6 +39,8 @@ function row(id: string, extra: Record<string, unknown>) {
     customsPlace: "",
     warehouse: "",
     issues: [],
+    cargoType: "other",
+    trackLink: null,
     trackedId: null,
     track: null,
     ...extra,
@@ -52,6 +54,8 @@ const ROWS = [
     number: "MSBU1491088",
     carrier: "msc",
     carrierName: "MSC",
+    cargoType: "fcl",
+    trackLink: "https://www.msc.com/en/track-a-shipment?trackingNumber=MSBU1491088",
     forwarder: "Мультикс",
     logist: "Люда",
     origin: "Шанхай",
@@ -66,6 +70,9 @@ const ROWS = [
     number: "5407559360",
     carrier: "dhl",
     carrierName: "DHL Express",
+    cargoType: "samples",
+    forwarder: "DHL",
+    trackLink: "https://www.dhl.com/ua-uk/home/tracking.html?tracking-id=5407559360",
     mode: "courier",
     logist: "Яна",
     destination: "Київ",
@@ -75,6 +82,8 @@ const ROWS = [
   row("r3", {
     rowIndex: 228,
     product: "Моксидектин",
+    cargoType: "parcel",
+    forwarder: "FedEx",
     mode: "courier",
     status: "delivered",
     statusLabel: "Доставлено",
@@ -82,7 +91,7 @@ const ROWS = [
     logist: "Яна",
     statusDate: { date: plus(1), guessed: false },
   }),
-  row("w1", { tab: "warehouse", rowIndex: 5, product: "сорбитол", statusLabel: "Заїзд на склад БЦ", destination: "Склад БЦ", qty: "24000", when: "на этой неделе", fits: "не влезет", arrival: { date: plus(2), guessed: true }, mode: null }),
+  row("w1", { tab: "warehouse", cargoType: "warehouse", rowIndex: 5, product: "сорбитол", statusLabel: "Заїзд на склад БЦ", destination: "Склад БЦ", qty: "24000", when: "на этой неделе", fits: "не влезет", arrival: { date: plus(2), guessed: true }, mode: null }),
 ];
 
 const EVENTS = [
@@ -195,8 +204,36 @@ test.describe("Logist calendar (team sheet)", () => {
     await expect(events.filter({ hasText: "Спиносад" })).not.toHaveCount(0);
     await page.getByRole("button", { name: "Скинути" }).click();
     await expect(events).toHaveCount(all);
-    await page.getByRole("button", { name: "Склад БЦ" }).click();
+    await page.getByLabel("Типи подій").getByRole("button", { name: /Склад БЦ/ }).click();
     await expect(events.filter({ hasText: "сорбитол" })).toHaveCount(0);
+  });
+
+  test("colour = forwarder, icon = cargo type; legend filters; tracking links", async ({ page }, info) => {
+    const state: CalState = { ranges: [], syncs: 0, exports: [] };
+    await mockCalendar(page, state);
+    await page.addInitScript(() => localStorage.setItem("aia_calendar_view", "week"));
+    await openCalendar(page);
+    const legend = page.getByTestId("calendar-legend");
+    await expect(legend.getByLabel("Хто везе")).toContainText("Мультикс");
+    await expect(legend.getByLabel("Типи вантажу")).toContainText("Контейнер");
+    const chip = page.getByTestId("calendar-event").filter({ hasText: "Холіна" }).first();
+    await expect(chip).toHaveAttribute("data-cargo", "fcl");
+    await expect(chip).toContainText("🚢");
+    await expect(chip.getByTestId("calendar-track-link")).toHaveAttribute("href", /MSBU1491088/);
+    await expect(chip).toHaveAttribute("title", /Хто везе: Мультикс/);
+    // Click a forwarder in the legend → only its shipments.
+    await legend.getByLabel("Хто везе").getByRole("button", { name: /DHL/ }).click();
+    await expect(page.getByTestId("calendar-event").filter({ hasText: "Холіна" })).toHaveCount(0);
+    await legend.getByLabel("Хто везе").getByRole("button", { name: /DHL/ }).click();
+    await legend.getByLabel("Типи вантажу").getByRole("button", { name: /Зразки/ }).click();
+    await expect(page.getByTestId("calendar-event").filter({ hasText: "Холіна" })).toHaveCount(0);
+    await legend.getByLabel("Типи вантажу").getByRole("button", { name: /Зразки/ }).click();
+    // Card: the number with a link to the carrier's site.
+    await chip.click();
+    const track = page.getByTestId("calendar-detail").getByTestId("calendar-track");
+    await expect(track).toContainText("MSBU1491088");
+    await expect(track.getByRole("link", { name: /Відстежити на сайті/ })).toHaveAttribute("href", /MSBU1491088/);
+    await page.screenshot({ path: `test-results/calendar-marks-${info.project.name}.png` });
   });
 
   test("event → row card with countdown, sheet link; «Увага» list; sync + Excel", async ({ page }, info) => {
