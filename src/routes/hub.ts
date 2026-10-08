@@ -21,14 +21,18 @@ import { deleteRoute, getRoute, listRoutes, RouteError, saveRoute } from '../ser
 import { suggestRoutes, SuggestError } from '../services/hub/suggestRoutes.js';
 import { liveSnapshot } from '../services/hub/live.js';
 import {
+  addManualEvent,
   addTracked,
+  deleteManualEvent,
   getTracked,
   HubError,
   listEvents,
   listTracked,
   refreshTracked,
   serializeTracked,
+  updateManual,
 } from '../services/hub/track.js';
+import { TRACK_STATUSES } from '../services/hub/types.js';
 
 /**
  * Logistics hub — Phase 1: tracking by number + live map.
@@ -47,11 +51,41 @@ const addBody = z.object({
   workspaceId: z.string().uuid().nullable().optional(),
 });
 
+/** ISO date/datetime (a date-only "2026-10-12" is fine) or null to clear. */
+const isoDate = z
+  .string()
+  .trim()
+  .refine((v) => !Number.isNaN(Date.parse(v)), 'Invalid date')
+  .transform((v) => new Date(v).toISOString())
+  .nullable()
+  .optional();
+
+/** Data a logist enters by hand (sea in manual mode, or a correction). */
+const manualBody = z.object({
+  status: z.enum(TRACK_STATUSES.filter((s) => s !== 'pending') as [string, ...string[]]).optional(),
+  statusText: z.string().trim().max(300).optional(),
+  origin: z.string().trim().max(200).optional(),
+  destination: z.string().trim().max(200).optional(),
+  vesselName: z.string().trim().max(120).optional(),
+  vesselImo: z.string().trim().regex(/^(\d{7})?$/, 'IMO — 7 цифр').optional(),
+  departedAt: isoDate,
+  eta: isoDate,
+  arrivedAt: isoDate,
+});
+
 const patchBody = z.object({
   label: z.string().trim().max(120).optional(),
   workspaceId: z.string().uuid().nullable().optional(),
   carrier: z.string().trim().max(40).optional(),
   archived: z.boolean().optional(),
+  manual: manualBody.optional(),
+});
+
+const eventBody = z.object({
+  at: isoDate,
+  location: z.string().trim().max(200).default(''),
+  description: z.string().trim().min(1).max(500),
+  planned: z.boolean().default(false),
 });
 
 /** Manual refresh at most once per this many ms per item (carrier pages are slow). */
@@ -155,9 +189,35 @@ export async function hubRoutes(app: FastifyInstance): Promise<void> {
         b.archived ?? null,
       ],
     );
+    if (b.manual && Object.keys(b.manual).length) {
+      await updateManual(userId, row, b.manual as Parameters<typeof updateManual>[2]);
+    }
     if (carrier) await refreshTracked(row.id);
     const fresh = await getTracked(userId, row.id);
     return reply.send({ track: serializeTracked(fresh!), events: await listEvents(row.id) });
+  });
+
+  // POST /api/hub/tracks/:id/events — a milestone entered by hand.
+  app.post('/api/hub/tracks/:id/events', async (req, reply) => {
+    const p = idParams.safeParse(req.params);
+    if (!p.success) return reply.status(404).send({ error: 'Not found' });
+    const body = eventBody.safeParse(req.body);
+    if (!body.success) return reply.status(400).send({ error: 'Вкажіть опис події.' });
+    const row = await getTracked(req.user!.sub, p.data.id);
+    if (!row) return reply.status(404).send({ error: 'Not found' });
+    await addManualEvent(row, { ...body.data, at: body.data.at ?? null });
+    const fresh = await getTracked(req.user!.sub, row.id);
+    return reply.status(201).send({ track: serializeTracked(fresh!), events: await listEvents(row.id) });
+  });
+
+  // DELETE /api/hub/tracks/:id/events/:eventId — only hand-entered events.
+  app.delete('/api/hub/tracks/:id/events/:eventId', async (req, reply) => {
+    const p = z.object({ id: z.string().uuid(), eventId: z.string().uuid() }).safeParse(req.params);
+    if (!p.success) return reply.status(404).send({ error: 'Not found' });
+    const row = await getTracked(req.user!.sub, p.data.id);
+    if (!row) return reply.status(404).send({ error: 'Not found' });
+    if (!(await deleteManualEvent(row.id, p.data.eventId))) return reply.status(404).send({ error: 'Not found' });
+    return reply.send({ track: serializeTracked(row), events: await listEvents(row.id) });
   });
 
   // DELETE /api/hub/tracks/:id — only the user who added it can delete.

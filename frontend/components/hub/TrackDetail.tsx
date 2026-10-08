@@ -3,12 +3,17 @@
 // Right-hand detail card of a tracked item: status, route + progress, ETA (and
 // how far it slipped), where the position on the map comes from, the carrier
 // event timeline, and actions (refresh, carrier page, link to a shipment,
-// archive, delete). Always shows the data source and its freshness.
+// archive, delete). Always shows the data source and its freshness. Sea lines
+// are kept by hand (track.manualOnly): the logist enters status / ETA / vessel /
+// milestones via ManualTrackForm instead of refreshing from the carrier.
 
 import { useCallback, useEffect, useState } from "react";
 import { ApiError } from "@/lib/api";
 import {
   ago,
+  countdown,
+  effDeparted,
+  effEta,
   etaShiftDays,
   fmtDate,
   hubApi,
@@ -19,6 +24,7 @@ import {
   type Track,
   type TrackEvent,
 } from "@/lib/hub";
+import { ManualEventForm, ManualTrackForm } from "./ManualTrackForm";
 import { pill, type WorkspaceRef } from "./TracksPanel";
 
 export function TrackDetail({
@@ -54,6 +60,8 @@ export function TrackDetail({
   }, [load, track.lastCheckedAt]);
 
   const [confirmDel, setConfirmDel] = useState(false);
+  const [editing, setEditing] = useState(false);
+  useEffect(() => setEditing(false), [track.id]);
 
   async function act(kind: string, fn: () => Promise<unknown>): Promise<boolean> {
     setBusy(kind);
@@ -70,6 +78,18 @@ export function TrackDetail({
       setBusy(null);
     }
   }
+
+  const removeEvent = (e: TrackEvent) => void act(`ev:${e.id}`, () => hubApi.removeEvent(track.id, e.id));
+
+  // Countdown ticks on its own; dates the logist changes flow in via `track`.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, []);
+  const eta = effEta(track);
+  const departed = effDeparted(track);
+  const left = eta && track.status !== "delivered" ? countdown(eta, now) : null;
 
   const color = statusColor(track.status);
   const shift = etaShiftDays(track);
@@ -107,19 +127,38 @@ export function TrackDetail({
             <div style={{ minWidth: 0 }}>
               <div style={label}>Звідки</div>
               <div style={{ fontWeight: 600 }}>{track.origin || "—"}</div>
-              <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{fmtDate(track.departedAt)}</div>
+              <div style={{ fontSize: 11.5, color: "var(--muted)" }}>
+                {!track.departedAt && departed ? "≈ " : ""}
+                {fmtDate(departed)}
+              </div>
             </div>
             <div style={{ minWidth: 0, textAlign: "right" }}>
               <div style={label}>Куди</div>
               <div style={{ fontWeight: 600 }}>{track.destination || "—"}</div>
               <div style={{ fontSize: 11.5, color: shift >= 2 ? "var(--err)" : "var(--muted)" }}>
-                {track.status === "delivered" ? `Доставлено ${fmtDate(track.arrivedAt)}` : `ETA ${fmtDate(track.eta)}`}
+                {track.status === "delivered"
+                  ? `Доставлено ${fmtDate(track.arrivedAt)}`
+                  : `ETA ${!track.eta && eta ? "≈ " : ""}${fmtDate(eta)}`}
               </div>
             </div>
           </div>
           <div style={{ position: "relative", height: 8, borderRadius: 6, background: "var(--hover)", marginTop: 10 }}>
             <div style={{ position: "absolute", inset: 0, width: `${Math.round(progress * 100)}%`, background: color, borderRadius: 6, transition: "width .6s" }} />
           </div>
+          {left && (
+            <div
+              data-testid="hub-countdown"
+              style={{ marginTop: 8, display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap", fontSize: 13 }}
+            >
+              <span>⏱</span>
+              <b style={{ color: left.late ? "var(--err)" : "var(--text)" }}>
+                {left.late ? `Прострочено на ${left.text}` : `До прибуття: ${left.text}`}
+              </b>
+              {track.live?.etaEstimated && (
+                <span style={{ fontSize: 11.5, color: "var(--muted)" }}>орієнтовно — розраховано за відстанню маршруту</span>
+              )}
+            </div>
+          )}
           {shift !== 0 && track.status !== "delivered" && (
             <div style={{ marginTop: 8, fontSize: 12.5, color: shift > 0 ? "var(--err)" : "var(--ok)" }}>
               ETA зсунулась на {shift > 0 ? "+" : ""}
@@ -152,11 +191,37 @@ export function TrackDetail({
           <div>
             Джерело: <b style={{ color: "var(--text)" }}>{sourceLabel(track.source)}</b> · перевірено {ago(track.lastCheckedAt)}
           </div>
-          {track.lastError && <div style={{ color: "var(--warn)" }}>⚠ {track.lastError}</div>}
-          {track.source === "none" && (
+          {track.lastError && !track.manualOnly && <div style={{ color: "var(--warn)" }}>⚠ {track.lastError}</div>}
+          {track.source === "none" && !track.manualOnly && (
             <div>Даних від перевізника поки немає — Штурман не вгадує статус. Перевірте на сайті перевізника.</div>
           )}
         </section>
+
+        {/* Manual data (sea lines are tracked by hand) */}
+        {editing ? (
+          <ManualTrackForm
+            track={track}
+            onCancel={() => setEditing(false)}
+            onSaved={() => {
+              setEditing(false);
+              onChanged();
+              load();
+            }}
+          />
+        ) : (
+          track.manualOnly &&
+          track.source !== "manual" && (
+            <section style={{ ...box, fontSize: 12.5, display: "grid", gap: 8 }} data-testid="hub-manual-hint">
+              <div>
+                Морські перевезення ведуться вручну: внесіть статус, ETA і судно з коносамента — дані побачить уся
+                команда, а судно зʼявиться на карті.
+              </div>
+              <button type="button" className="btn btn-primary" style={{ height: 32, fontSize: 12.5 }} onClick={() => setEditing(true)}>
+                ✎ Внести дані
+              </button>
+            </section>
+          )
+        )}
 
         {/* Timeline */}
         <section>
@@ -183,13 +248,14 @@ export function TrackDetail({
           ) : (
             <ol style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 0 }} data-testid="hub-timeline">
               {planned.map((e) => (
-                <TimelineItem key={e.id} e={e} color="var(--faint)" dashed />
+                <TimelineItem key={e.id} e={e} color="var(--faint)" dashed onRemove={removeEvent} />
               ))}
               {past.map((e, i) => (
-                <TimelineItem key={e.id} e={e} color={i === 0 ? color : "var(--muted)"} first={i === 0} />
+                <TimelineItem key={e.id} e={e} color={i === 0 ? color : "var(--muted)"} first={i === 0} onRemove={removeEvent} />
               ))}
             </ol>
           )}
+          {(track.manualOnly || editing) && <ManualEventForm trackId={track.id} onSaved={() => { onChanged(); load(); }} />}
         </section>
 
         {/* Link to shipment */}
@@ -228,9 +294,15 @@ export function TrackDetail({
           gap: 6,
         }}
       >
-        <button type="button" className="btn btn-primary" style={actionBtn} disabled={busy !== null} onClick={() => void act("refresh", () => hubApi.refresh(track.id))}>
-          {busy === "refresh" ? "Перевіряю…" : "↻ Оновити"}
-        </button>
+        {track.manualOnly ? (
+          <button type="button" className="btn btn-primary" style={actionBtn} disabled={busy !== null || editing} onClick={() => setEditing(true)} data-testid="hub-manual-edit">
+            ✎ Внести дані
+          </button>
+        ) : (
+          <button type="button" className="btn btn-primary" style={actionBtn} disabled={busy !== null} onClick={() => void act("refresh", () => hubApi.refresh(track.id))}>
+            {busy === "refresh" ? "Перевіряю…" : "↻ Оновити"}
+          </button>
+        )}
         {track.trackUrl && (
           <a className="btn" style={{ ...actionBtn, textDecoration: "none" }} href={track.trackUrl} target="_blank" rel="noreferrer noopener" title="Сайт перевізника">
             Сайт ↗
@@ -257,7 +329,19 @@ export function TrackDetail({
   );
 }
 
-function TimelineItem({ e, color, first, dashed }: { e: TrackEvent; color: string; first?: boolean; dashed?: boolean }) {
+function TimelineItem({
+  e,
+  color,
+  first,
+  dashed,
+  onRemove,
+}: {
+  e: TrackEvent;
+  color: string;
+  first?: boolean;
+  dashed?: boolean;
+  onRemove?: (e: TrackEvent) => void;
+}) {
   return (
     <li style={{ display: "grid", gridTemplateColumns: "16px 1fr", gap: 10 }}>
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
@@ -280,9 +364,23 @@ function TimelineItem({ e, color, first, dashed }: { e: TrackEvent; color: strin
           {e.description}
           {dashed ? " (план)" : ""}
         </div>
-        <div style={{ fontSize: 11.5, color: "var(--muted)" }}>
-          {fmtDate(e.at, true)}
-          {e.location ? ` · ${e.location}` : ""}
+        <div style={{ fontSize: 11.5, color: "var(--muted)", display: "flex", alignItems: "center", gap: 6 }}>
+          <span>
+            {fmtDate(e.at, true)}
+            {e.location ? ` · ${e.location}` : ""}
+            {e.manual ? " · вручну" : ""}
+          </span>
+          {e.manual && onRemove && (
+            <button
+              type="button"
+              onClick={() => onRemove(e)}
+              aria-label="Видалити подію"
+              title="Видалити подію"
+              style={{ border: "none", background: "none", color: "var(--muted)", cursor: "pointer", padding: 0, fontSize: 13, lineHeight: 1 }}
+            >
+              ×
+            </button>
+          )}
         </div>
       </div>
     </li>

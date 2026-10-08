@@ -732,6 +732,8 @@ CREATE TABLE IF NOT EXISTS tracking_events (
   UNIQUE (tracked_id, hash)
 );
 CREATE INDEX IF NOT EXISTS idx_tracking_events_item ON tracking_events(tracked_id, at);
+-- Events a logist entered by hand (sea in TRACKING_SEA_MODE=manual); only these can be deleted.
+ALTER TABLE tracking_events ADD COLUMN IF NOT EXISTS manual BOOLEAN NOT NULL DEFAULT FALSE;
 
 -- Latest AIS position per vessel (aisstream.io feed in the worker). Rows older
 -- than a few hours are pruned; the map treats >6h as stale.

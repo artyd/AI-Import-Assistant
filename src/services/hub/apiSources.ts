@@ -11,6 +11,7 @@ import { toIso, type TrackEventIn, type TrackResult, type TrackStatus } from './
  *  - Укрпошта    — status-tracking API, needs UKRPOSHTA_TRACKING_TOKEN.
  *  - DHL         — Shipment Tracking – Unified, needs DHL_API_KEY.
  *  - Maersk      — Track & Trace (DCSA events), needs MAERSK_API_KEY.
+ *  - 17TRACK     — parcels / express aggregator, needs TRACK17_API_KEY.
  */
 
 const TIMEOUT_MS = 15_000;
@@ -244,4 +245,110 @@ export async function trackMaersk(number: string, kind: 'container' | 'bl'): Pro
   );
   if (json == null) return { found: false, status: 'unknown', statusText: '', events: [], source: 'api:maersk' };
   return parseDcsaEvents(json, 'api:maersk');
+}
+
+// ── 17TRACK ──────────────────────────────────────────────────────────────────
+
+const T17_BASE = 'https://api.17track.net/track/v2.4';
+/** 17TRACK rejection codes (API docs, "Error codes"). */
+const T17_NOT_REGISTERED = -18019902;
+
+/** 17TRACK main status (+ sub-status) → hub status. */
+export function t17Status(status: string, subStatus = ''): TrackStatus {
+  if (/customs/i.test(subStatus)) return 'customs';
+  switch (status) {
+    case 'InfoReceived':
+      return 'info';
+    case 'InTransit':
+      return 'in_transit';
+    case 'AvailableForPickup':
+    case 'OutForDelivery':
+      return 'out_for_delivery';
+    case 'Delivered':
+      return 'delivered';
+    case 'DeliveryFailure':
+    case 'Exception':
+      return 'exception';
+    default:
+      return 'unknown'; // NotFound / Expired
+  }
+}
+
+const place = (a: Obj): string => [str(a.city), str(a.state), str(a.country)].filter(Boolean).join(', ');
+
+/** Parse one `accepted[]` entry of /gettrackinfo. */
+export function parseT17(entry: unknown): TrackResult {
+  const info = obj(obj(entry).track_info);
+  const latest = obj(info.latest_status);
+  const status = t17Status(str(latest.status), str(latest.sub_status));
+  const events: TrackEventIn[] = [];
+  const seen = new Set<string>();
+  for (const p of arr(obj(info.tracking).providers).map(obj)) {
+    for (const e of arr(p.events).map(obj)) {
+      const at = toIso(e.time_utc) ?? toIso(e.time_iso);
+      const description = str(e.description);
+      const location = str(e.location) || place(obj(e.address));
+      const key = `${at}|${location}|${description}`;
+      if (!description || seen.has(key)) continue;
+      seen.add(key);
+      events.push({ at, location, description });
+    }
+  }
+  events.sort((a, b) => (a.at ?? '').localeCompare(b.at ?? ''));
+  const ship = obj(info.shipping_info);
+  const edd = obj(obj(info.time_metrics).estimated_delivery_date);
+  const last = events[events.length - 1];
+  const found = status !== 'unknown' || events.length > 0;
+  return {
+    found,
+    status: found && status === 'unknown' ? 'in_transit' : status,
+    statusText: last ? last.description : '',
+    events,
+    origin: place(obj(ship.shipper_address)) || events[0]?.location,
+    destination: place(obj(ship.recipient_address)),
+    eta: toIso(edd.to) ?? toIso(edd.from),
+    departedAt: events[0]?.at ?? null,
+    arrivedAt: status === 'delivered' ? (last?.at ?? null) : null,
+    source: 'api:17track',
+  };
+}
+
+async function t17(path: string, body: unknown): Promise<Obj> {
+  return obj(
+    await getJson(`${T17_BASE}/${path}`, {
+      method: 'POST',
+      headers: { '17token': config.TRACK17_API_KEY, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  );
+}
+
+/**
+ * Track a parcel through 17TRACK. Reads first and registers only when 17TRACK
+ * says the number is not registered yet — registration is what costs quota, so
+ * every number is paid for once, however often the cron re-checks it.
+ */
+export async function track17(number: string): Promise<TrackResult | null> {
+  if (!config.TRACK17_API_KEY) return null;
+  const empty = (note: string): TrackResult => ({
+    found: false,
+    status: 'unknown',
+    statusText: '',
+    events: [],
+    source: 'api:17track',
+    note,
+  });
+  const read = obj((await t17('gettrackinfo', [{ number }])).data);
+  const accepted = arr(read.accepted)[0];
+  if (accepted) return parseT17(accepted);
+  const err = obj(obj(arr(read.rejected)[0]).error);
+  if (Number(err.code) !== T17_NOT_REGISTERED) {
+    return empty(`17TRACK: ${str(err.message) || 'номер відхилено'}`);
+  }
+  const reg = obj((await t17('register', [{ number }])).data);
+  if (!arr(reg.accepted).length) {
+    const e = obj(obj(arr(reg.rejected)[0]).error);
+    return empty(`17TRACK: ${str(e.message) || 'не вдалося зареєструвати номер'}`);
+  }
+  return empty('17TRACK: номер поставлено на відстеження, дані зʼявляться за кілька хвилин');
 }

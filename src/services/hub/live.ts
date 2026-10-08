@@ -1,13 +1,18 @@
 import { query } from '../../db/pool.js';
 import { legPath, pointAlong, progressOf, type LatLng, type LegMode } from './geo.js';
+import { estimateLegDays } from './plan.js';
 import { listEvents, listTracked, serializeTracked, type TrackedRow } from './track.js';
 
 /**
  * Live-map positions for the hub. For each visible tracked item:
  *
  *   ais       — a fresh (<6h) AIS fix of the item's vessel (aisstream.io)
- *   estimate  — in transit with departure + ETA known: interpolated along the
- *               mode's geometry (sea lanes / great-circle / road) by elapsed time
+ *   estimate  — in transit: interpolated along the mode's geometry (sea lanes /
+ *               great-circle / road) by elapsed time between departure and ETA.
+ *               A missing date is derived from the route length (typical transit
+ *               for the mode): no ETA → departure + transit; no departure → ETA −
+ *               transit; neither → from when the item was added.
+ *               Derived dates come back flagged (`etaEstimated`) so the UI says so.
  *   event     — the last actual carrier event that we could geocode
  *   origin / destination — before departure / after delivery
  *
@@ -25,6 +30,11 @@ export interface LiveItem {
   progress: number;
   positionSource: PositionSource | null;
   vessel: { name: string; sog: number | null; updatedAt: string } | null;
+  /** Effective departure / arrival used for the estimate and the countdown. */
+  departedAt: string | null;
+  eta: string | null;
+  /** True when `eta` was derived from the route length, not given. */
+  etaEstimated: boolean;
 }
 
 interface VesselRow {
@@ -60,11 +70,40 @@ async function vesselFor(r: TrackedRow): Promise<VesselRow | null> {
   return rows[0] ?? null;
 }
 
+const DAY_MS = 86_400_000;
+const MOVING = ['in_transit', 'info', 'customs'];
+
+/**
+ * Departure / ETA to animate and count down with. Given dates always win; a
+ * missing one is derived from the route's typical transit time for the mode.
+ */
+export function effectiveDates(
+  r: Pick<TrackedRow, 'departed_at' | 'eta' | 'status' | 'created_at'>,
+  mode: LegMode,
+  path: LatLng[],
+): { departedAt: string | null; eta: string | null; etaEstimated: boolean } {
+  const given = { departedAt: r.departed_at, eta: r.eta, etaEstimated: false };
+  if ((r.departed_at && r.eta) || path.length < 2 || r.status === 'delivered') return given;
+  const transitMs = estimateLegDays(mode === 'sea' || mode === 'air' ? mode : 'road', path) * DAY_MS;
+  if (!(transitMs > 0)) return given;
+  if (r.departed_at) {
+    return { departedAt: r.departed_at, eta: new Date(new Date(r.departed_at).getTime() + transitMs).toISOString(), etaEstimated: true };
+  }
+  if (r.eta) {
+    return { departedAt: new Date(new Date(r.eta).getTime() - transitMs).toISOString(), eta: r.eta, etaEstimated: false };
+  }
+  if (r.status !== 'in_transit') return given;
+  const t0 = new Date(r.created_at).getTime();
+  return { departedAt: new Date(t0).toISOString(), eta: new Date(t0 + transitMs).toISOString(), etaEstimated: true };
+}
+
 export async function liveItem(r: TrackedRow, now = Date.now()): Promise<LiveItem> {
   const o: LatLng | null = r.origin_lat != null && r.origin_lng != null ? [r.origin_lat, r.origin_lng] : null;
   const d: LatLng | null = r.dest_lat != null && r.dest_lng != null ? [r.dest_lat, r.dest_lng] : null;
-  const path = o && d ? legPath(geomMode(r), o, d) : [];
-  const base: LiveItem = { id: r.id, pos: null, heading: 0, path, progress: 0, positionSource: null, vessel: null };
+  const mode = geomMode(r);
+  const path = o && d ? legPath(mode, o, d) : [];
+  const dates = effectiveDates(r, mode, path);
+  const base: LiveItem = { id: r.id, pos: null, heading: 0, path, progress: 0, positionSource: null, vessel: null, ...dates };
 
   if (r.status === 'delivered' && d) return { ...base, pos: d, progress: 1, positionSource: 'destination' };
 
@@ -81,10 +120,11 @@ export async function liveItem(r: TrackedRow, now = Date.now()): Promise<LiveIte
     };
   }
 
-  const inMotion = ['in_transit', 'info', 'customs'].includes(r.status);
-  if (path.length && r.departed_at && r.eta && inMotion) {
-    const t0 = new Date(r.departed_at).getTime();
-    const t1 = new Date(r.eta).getTime();
+  // "Booked" only moves once it has really left.
+  const inMotion = MOVING.includes(r.status) && (r.status !== 'info' || !!r.departed_at);
+  if (path.length && dates.departedAt && dates.eta && inMotion) {
+    const t0 = new Date(dates.departedAt).getTime();
+    const t1 = new Date(dates.eta).getTime();
     if (t1 > t0) {
       const t = Math.max(0.02, Math.min(0.97, (now - t0) / (t1 - t0)));
       const { point, heading } = pointAlong(path, t);
