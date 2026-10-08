@@ -880,3 +880,45 @@ CREATE TABLE IF NOT EXISTS route_legs (
   notes              TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_route_legs_route ON route_legs(route_id, seq);
+
+-- ── Team Google Sheet → Штурман (hourly sync; the sheet is the source of truth) ──
+-- Logistics hub items synced from the sheet are visible to the whole team.
+ALTER TABLE tracked_items ADD COLUMN IF NOT EXISTS team BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- One row per sheet row (tab 'tracking' = Аркуш3, 'warehouse' = Аркуш5), keyed by
+-- product + tracking number so it survives rows being inserted above it.
+CREATE TABLE IF NOT EXISTS sheet_rows (
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tab            TEXT NOT NULL,
+  row_key        TEXT NOT NULL,
+  row_index      INT NOT NULL,
+  data           JSONB NOT NULL,
+  hash           TEXT NOT NULL,
+  status         TEXT NOT NULL DEFAULT 'planned',
+  active         BOOLEAN NOT NULL DEFAULT FALSE,
+  recent         BOOLEAN NOT NULL DEFAULT FALSE,
+  departure_on   DATE,
+  arrival_on     DATE,
+  status_on      DATE,
+  logist         TEXT NOT NULL DEFAULT '',
+  tracked_id     UUID REFERENCES tracked_items(id) ON DELETE SET NULL,
+  removed        BOOLEAN NOT NULL DEFAULT FALSE,
+  first_seen_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (tab, row_key)
+);
+CREATE INDEX IF NOT EXISTS idx_sheet_rows_arrival ON sheet_rows(arrival_on);
+CREATE INDEX IF NOT EXISTS idx_sheet_rows_departure ON sheet_rows(departure_on);
+CREATE INDEX IF NOT EXISTS idx_sheet_rows_tracked ON sheet_rows(tracked_id);
+
+-- Last fetch of each tab (raw grid kept for the reference tabs: rates, quantities).
+CREATE TABLE IF NOT EXISTS sheet_tabs (
+  tab        TEXT PRIMARY KEY,
+  gid        TEXT NOT NULL,
+  grid       JSONB,
+  rows       INT NOT NULL DEFAULT 0,
+  ok         BOOLEAN NOT NULL DEFAULT FALSE,
+  error      TEXT NOT NULL DEFAULT '',
+  synced_at  TIMESTAMPTZ
+);

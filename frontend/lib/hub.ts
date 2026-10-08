@@ -64,6 +64,10 @@ export interface Track {
   trackUrl: string | null;
   /** Sea in manual mode — logists enter status / ETA / vessel / events by hand. */
   manualOnly: boolean;
+  /** From the team Google Sheet — visible to the whole team. */
+  team?: boolean;
+  /** Sheet row this item comes from; its plan fields are edited in the sheet. */
+  sheet?: { rowIndex: number; url: string | null } | null;
   createdAt: string;
   live?: LiveInfo;
 }
@@ -176,6 +180,7 @@ export function sourceLabel(source: string): string {
   if (source.startsWith("api:")) return `API · ${source.slice(4)}`;
   if (source.startsWith("scrape:")) return `Сайт перевізника · ${source.slice(7)}`;
   if (source === "manual") return "Внесено вручну";
+  if (source === "sheet") return "Робоча таблиця";
   return "Немає джерела";
 }
 
@@ -253,6 +258,8 @@ export const hubApi = {
   remove: (id: string) => api<void>(`/api/hub/tracks/${id}`, { method: "DELETE" }),
   refresh: (id: string) =>
     api<{ track: Track; events: TrackEvent[] }>(`/api/hub/tracks/${id}/refresh`, { method: "POST" }),
+  workspaceMatches: (id: string) =>
+    api<{ matches: Array<{ id: string; number: string; supplier: string }> }>(`/api/hub/tracks/${id}/workspace-matches`),
   suggestions: (workspaceId: string) =>
     api<{ suggestions: TrackingSuggestion[] }>(`/api/workspaces/${workspaceId}/tracking-suggestions`),
 };

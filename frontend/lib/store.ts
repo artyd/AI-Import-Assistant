@@ -17,7 +17,7 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import type { ChatKind, Collection } from "./types";
 
-export type AppView = "chat" | "news" | "map";
+export type AppView = "chat" | "news" | "map" | "calendar";
 
 interface AppState {
   chatKind: ChatKind;

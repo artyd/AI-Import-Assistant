@@ -206,6 +206,12 @@ tunes how long to wait for indexing. Exit code is non-zero if any check fails.
 | `EXTRACTION_ENABLED` | — | `true` | Worker structured field extraction (`true`/`false`) |
 | `REMINDERS_ENABLED` | — | `true` | Daily in-app reminder job (`true`/`false`) |
 | `REMINDERS_CRON` | — | `0 6 * * *` | Cron for the reminder scan |
+| `NOVA_POSHTA_API_KEY` (or `NOVAPOSHTA_API_KEY`) | — | `` | Нова Пошта tracking (works keyless; key = richer data) |
+| `SEVENTEEN_TRACK_KEY` (or `TRACK17_API_KEY`) | — | `` | 17TRACK parcels / express tracking |
+| `TRACKING_SEA_MODE` | — | `manual` | Sea containers kept by hand / from the sheet (`auto` = scrape carrier pages) |
+| `SHEET_ID` | — | `` (off) | Team Google Sheet id (shared "anyone with the link can view") → hourly calendar + hub sync |
+| `SHEET_SYNC_CRON` | — | `5 * * * *` | Cron for the sheet sync (also runs once on worker boot) |
+| `SHEET_GID_TRACKING` / `_WAREHOUSE` / `_RATES` / `_QUANTITIES` | — | Аркуш3 / Аркуш5 / Черноморск / Аркуш4 gids | Tabs to read (empty = skip) |
 
 ## Out of scope for v1 (documented v2 additions)
 

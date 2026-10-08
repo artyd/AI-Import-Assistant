@@ -14,6 +14,7 @@ import { buildDocumentsDigest } from '../services/documentsDigest.js';
 import { runAgentTurn } from '../agent/loop.js';
 import { toolDefinitions, logistTools } from '../agent/tools.js';
 import { hubToolDefinitions } from '../agent/hubTools.js';
+import { sheetTools } from '../agent/sheetTools.js';
 import { chatRateLimitConfig } from './chatRateLimit.js';
 
 const chatSchema = z.object({
@@ -71,7 +72,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           sse,
           signal: sse.signal,
           // Shipment tools + the customs/logistics reference tools (when enabled).
-          tools: [...toolDefinitions, ...logistTools(), ...hubToolDefinitions],
+          tools: [...toolDefinitions, ...logistTools(), ...hubToolDefinitions, ...sheetTools()],
         });
 
         // Persist the turn (partial text too, on error) with its replay blocks so

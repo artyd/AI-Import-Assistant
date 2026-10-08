@@ -33,6 +33,28 @@ interface HubMockState {
   suggests?: unknown[];
   /** Serve HLCU1234567 as a manual-mode sea item and record what the logist enters. */
   manual?: { patches: unknown[]; events: unknown[] };
+  /** Serve HLCU1234567 as a team item synced from the sheet (row 214). */
+  sheet?: { patches: unknown[] };
+}
+
+/** LIVE with the Hapag item coming from the team sheet. */
+function liveWithSheetSea() {
+  return {
+    ...LIVE,
+    items: LIVE.items.map((t: { number: string }) =>
+      t.number === "HLCU1234567"
+        ? {
+            ...t,
+            manualOnly: true,
+            team: true,
+            status: "in_transit",
+            statusLabel: "В дорозі",
+            source: "sheet",
+            sheet: { rowIndex: 214, url: "https://docs.google.com/spreadsheets/d/SHEET/edit#gid=1&range=A214" },
+          }
+        : t
+    ),
+  };
 }
 
 /** LIVE with the Hapag item in manual mode (no carrier data yet). */
@@ -49,7 +71,9 @@ async function mockHub(page: Page, state: HubMockState = { added: [] }) {
   await mockWorkspace(page, async (route, pathname, method) => {
     const json = (body: unknown, status = 200) =>
       route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
-    const live = state.manual ? liveWithManualSea() : LIVE;
+    const live = state.manual ? liveWithManualSea() : state.sheet ? liveWithSheetSea() : LIVE;
+    const wm = pathname.match(/^\/api\/hub\/tracks\/([\w-]+)\/workspace-matches$/);
+    if (wm) return (await json({ matches: state.sheet ? [{ id: WSID, number: "2026-0001", supplier: "SupplierABC" }] : [] }), true);
     if (pathname === "/api/hub/live") return (await json(live), true);
     if (pathname === "/api/map/ports") return (await json({ ports: [] }), true);
     if (pathname === "/api/hub/ports") return (await json(PORTS), true);
@@ -121,6 +145,11 @@ async function mockHub(page: Page, state: HubMockState = { added: [] }) {
       return (await json({ track, events: [] }, 201), true);
     }
     const m = pathname.match(/^\/api\/hub\/tracks\/([\w-]+)$/);
+    if (m && method === "PATCH" && state.sheet) {
+      state.sheet.patches.push(route.request().postDataJSON());
+      const track = live.items.find((t: { id: string }) => t.id === m[1]);
+      return (await json({ track, events: [] }), true);
+    }
     if (m && method === "PATCH" && state.manual) {
       state.manual.patches.push(route.request().postDataJSON());
       const track = live.items.find((t: { id: string }) => t.id === m[1]);
@@ -284,6 +313,30 @@ test.describe("Logistics hub", () => {
     await evForm.getByRole("button", { name: /Додати подію/ }).click();
     await expect.poll(() => state.manual!.events.length).toBe(1);
     expect(state.manual!.events[0]).toMatchObject({ description: "Вивантажено з судна", location: "Odesa", planned: false });
+  });
+
+  test("team sheet item: plan is read-only here, links to the sheet row, suggests the shipment", async ({ page }, info) => {
+    test.skip(info.project.name === "mobile", "desktop-only feature");
+    const state: HubMockState = { added: [], sheet: { patches: [] } };
+    await mockHub(page, state);
+    await openHub(page);
+    const row = page.getByTestId("hub-track-row").filter({ hasText: "HLCU1234567" });
+    await expect(row).toContainText("З таблиці · рядок 214");
+    await row.click();
+    const card = page.getByTestId("hub-track-detail");
+    await expect(card.getByTestId("hub-sheet-source")).toContainText("рядок 214");
+    await expect(card.getByRole("link", { name: /Відкрити рядок у таблиці/ })).toHaveAttribute("href", /range=A214/);
+    await expect(card.getByTestId("hub-manual-hint")).toHaveCount(0);
+    await expect(card.getByTestId("hub-manual-edit")).toHaveCount(0);
+    await expect(card.getByRole("link", { name: "Таблиця ↗" })).toBeVisible();
+    await expect(card).toContainText("Робоча таблиця");
+    // Number found in a shipment's documents → one-click link.
+    const matches = card.getByTestId("hub-workspace-matches");
+    await expect(matches).toContainText("№2026-0001");
+    await matches.getByRole("button", { name: "Привʼязати" }).click();
+    await expect.poll(() => state.sheet!.patches.length).toBe(1);
+    expect(state.sheet!.patches[0]).toEqual({ workspaceId: WSID });
+    await page.screenshot({ path: `test-results/hub-sheet-${info.project.name}.png` });
   });
 
   test("ports tab: live statuses, favourites, team marks", async ({ page }, info) => {

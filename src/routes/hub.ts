@@ -169,6 +169,9 @@ export async function hubRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(404).send({ error: 'Workspace not found' });
     }
     if (b.carrier && !getCarrier(b.carrier)) return reply.status(400).send({ error: 'Невідомий перевізник.' });
+    if (b.manual && row.sheet_row_index) {
+      return reply.status(409).send({ error: 'Дані цього вантажу беруться з таблиці — змініть їх у таблиці (рядок ' + row.sheet_row_index + ').' });
+    }
     const carrier = b.carrier ? getCarrier(b.carrier)! : null;
     await query(
       `UPDATE tracked_items SET
@@ -208,6 +211,25 @@ export async function hubRoutes(app: FastifyInstance): Promise<void> {
     await addManualEvent(row, { ...body.data, at: body.data.at ?? null });
     const fresh = await getTracked(req.user!.sub, row.id);
     return reply.status(201).send({ track: serializeTracked(fresh!), events: await listEvents(row.id) });
+  });
+
+  // GET /api/hub/tracks/:id/workspace-matches — my shipments whose documents
+  // mention this number (to suggest linking; the logist confirms).
+  app.get('/api/hub/tracks/:id/workspace-matches', async (req, reply) => {
+    const p = idParams.safeParse(req.params);
+    if (!p.success) return reply.status(404).send({ error: 'Not found' });
+    const userId = req.user!.sub;
+    const row = await getTracked(userId, p.data.id);
+    if (!row) return reply.status(404).send({ error: 'Not found' });
+    const { rows } = await query<{ id: string; number: string; supplier: string | null }>(
+      `SELECT w.id, w.number, w.supplier FROM workspaces w
+       WHERE w.owner_id = $1 AND w.id IS DISTINCT FROM $3 AND EXISTS (
+         SELECT 1 FROM document_sections s WHERE s.workspace_id = w.id
+           AND (s.text ILIKE '%' || $2 || '%' OR regexp_replace(s.text, '[[:space:]-]', '', 'g') ILIKE '%' || $2 || '%'))
+       ORDER BY w.created_at DESC LIMIT 5`,
+      [userId, row.number, row.workspace_id],
+    );
+    return reply.send({ matches: rows.map((w) => ({ id: w.id, number: w.number, supplier: w.supplier ?? '' })) });
   });
 
   // DELETE /api/hub/tracks/:id/events/:eventId — only hand-entered events.

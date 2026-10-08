@@ -9,6 +9,7 @@ import {
   LnChevronDown,
   LnFolderPlus,
   LnGrid,
+  LnCalendar,
   LnList,
   LnPanelLeft,
   LnPencil,
@@ -145,6 +146,9 @@ export function SidebarNav(props: Props) {
         <button style={railBtn} onClick={() => onSetView("map")} title="Карта">
           <LnGrid size={18} />
         </button>
+        <button style={railBtn} onClick={() => onSetView("calendar")} title="Календар">
+          <LnCalendar size={18} />
+        </button>
         <button style={railBtn} onClick={() => setMcpOpen(true)} title="Підключити MCP" aria-label="Підключити MCP">
           <LnPlug size={18} />
         </button>
@@ -252,6 +256,17 @@ export function SidebarNav(props: Props) {
             <LnGrid size={18} />
           </span>
           Карта
+        </button>
+        <button
+          style={{ ...navBtn, background: view === "calendar" ? "var(--active)" : "transparent" }}
+          onClick={() => onSetView("calendar")}
+          className="nav-row"
+          data-testid="nav-calendar"
+        >
+          <span style={{ color: "var(--muted)", display: "flex" }}>
+            <LnCalendar size={18} />
+          </span>
+          Календар
         </button>
         <button style={navBtn} onClick={() => setMcpOpen(true)} className="nav-row" data-testid="open-mcp">
           <span style={{ color: "var(--muted)", display: "flex" }}>

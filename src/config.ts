@@ -224,6 +224,17 @@ const envSchema = z.object({
   // events by hand (no carrier-page scraping; an official API still runs when
   // its key is set); 'auto' = the full hybrid chain incl. scraping.
   TRACKING_SEA_MODE: z.enum(['manual', 'auto']).default('manual'),
+
+  // Team Google Sheet → calendar + hub. The sheet is read through its public
+  // "anyone with the link" CSV export (no write-back). Empty SHEET_ID = off.
+  SHEET_ID: z.string().trim().default(''),
+  SHEET_SYNC_CRON: z.string().default('5 * * * *'),
+  // Tab gids: Аркуш3 (tracking), Аркуш5 (БЦ warehouse intake), Черноморск
+  // (cost comparison) and Аркуш4 (quantities). Empty = tab not read.
+  SHEET_GID_TRACKING: z.string().trim().default('1401749917'),
+  SHEET_GID_WAREHOUSE: z.string().trim().default('409503827'),
+  SHEET_GID_RATES: z.string().trim().default('389453399'),
+  SHEET_GID_QUANTITIES: z.string().trim().default('873326925'),
   // aisstream.io (free) live AIS websocket — vessel positions for the live map.
   // Empty = positions are interpolated from carrier events + ETA.
   AISSTREAM_API_KEY: z.string().default(''),
