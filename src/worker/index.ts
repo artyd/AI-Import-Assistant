@@ -357,13 +357,17 @@ async function processTracking(_job: Job<TrackingJobData>): Promise<void> {
  * Team Google Sheet → sheet_rows (calendar) + team items in the hub + arrival
  * notifications. Tab failures are recorded per tab; the job always completes.
  */
-async function processSheetSync(_job: Job<SheetJobData>): Promise<void> {
+async function runSheetSync(label: string): Promise<void> {
   const r = await syncSheet();
   const tabs = Object.entries(r.tabs)
     .map(([t, v]) => `${t}=${v.ok ? v.rows : `error(${v.error})`}`)
     .join(', ');
   // eslint-disable-next-line no-console
-  console.log(`Sheet sync: ${tabs}; hub items ${r.hubLinked}, notifications ${r.notified}.`);
+  console.log(`${label}: ${tabs}; hub items ${r.hubLinked}, notifications ${r.notified}.`);
+}
+
+async function processSheetSync(_job: Job<SheetJobData>): Promise<void> {
+  await runSheetSync('Sheet sync');
 }
 
 /**
@@ -465,7 +469,7 @@ async function main(): Promise<void> {
       console.error(`Sheet sync job ${job?.id} failed:`, err.message);
     });
     // First sync right away so a fresh deploy doesn't wait up to an hour.
-    void syncSheet().catch((err: Error) => {
+    void runSheetSync('Sheet sync (startup)').catch((err: Error) => {
       // eslint-disable-next-line no-console
       console.error('Initial sheet sync failed:', err.message);
     });
