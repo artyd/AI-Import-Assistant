@@ -89,6 +89,7 @@ describe('statusFromText', () => {
     });
     expect(statusFromText(['прибыл в порт, ждем выгрузку'], TODAY)!.status).toBe('arrived');
     expect(statusFromText(['ждем букинг'], TODAY)).toBeNull();
+    expect(statusFromText(['GDANSK BALTIC HUB Vessel arrival (MAERSK SARAT) 03 Oct 2026 Discharge'], TODAY)!.status).toBe('arrived');
   });
 });
 
@@ -127,7 +128,7 @@ describe('tracking numbers', () => {
 
 describe('mapColumns', () => {
   it('maps named and unnamed columns by position', () => {
-    const c = mapColumns(HEADER);
+    const c = mapColumns(HEADER, [row({ 2: 'X', 14: 'https://www.maersk.com/tracking/MRSU6298959' })]);
     expect(c.named.product).toBe(2);
     expect(c.named.arrival).toBe(8);
     expect(c.named.trackUrl).toBe(14);
@@ -255,5 +256,88 @@ describe('periodRange', () => {
     expect(periodRange('month', TODAY)).toEqual(['2026-10-01', '2026-10-31']);
     expect(periodRange('next_month', '2026-12-03')).toEqual(['2027-01-01', '2027-01-31']);
     expect(periodRange('tomorrow', TODAY)).toEqual(['2026-10-10', '2026-10-10']);
+  });
+});
+
+// ── Layout after the 2026-10 sheet edit: «Кол-во», two «Морская линия» columns,
+//    a named «Логист» column, full dates. Synthetic data. ──────────────────────
+import { cargoType, normalizeForwarder, pickTrackLink } from '../parse.js';
+
+const HEADER2 = [
+  '№ листа', '', 'Товар', 'Кто везет', 'Кол-во', 'Морская линия', '№ контейнер', '№ ТТН', 'Дата прибытия планируемая',
+  'Место прибытия', 'Дата выхода', 'Место выхода', 'Морская Линия', 'Комментарий', 'Место растаможки', 'Склад выгрузки', 'Логист',
+];
+const row2 = (c: Record<number, string>) => HEADER2.map((_, i) => c[i] ?? '');
+
+describe('new sheet layout', () => {
+  const grid = [
+    HEADER2,
+    row2({ 2: 'Старий 2025', 3: 'мультикс', 8: '19.03.2025', 10: '27.01.2025', 12: 'https://www.maersk.com/tracking/MRSU6298959' }),
+    row2({ 2: 'Сорбітол', 3: 'дсв', 4: '24 т', 5: 'MSC', 6: 'MSBU3441255', 8: '22.10.2026', 9: 'Гданськ', 10: '24.08.2026', 12: 'https://www.msc.com/en/track-a-shipment', 16: 'Яна' }),
+    row2({ 2: 'Образцы аспирин', 3: 'ФЕДЕКС', 7: '875455189623', 8: '24.10.2026', 10: '15.10.2026', 12: 'https://www.fedex.com/fedextrack/?trknbr=875455189623' }),
+    row2({ 2: 'Сборник Китай 24', 3: 'Мультикс', 9: 'Гданськ', 10: '10.10.2026', 12: 'https://www.searates.com/container/tracking/?number=TGHU1234567&sealine=CMDU' }),
+  ];
+  const rows = parseTrackingTab(grid, TODAY);
+
+  it('finds the link column by content and the line-name column by header', () => {
+    const cols = mapColumns(HEADER2, grid.slice(1));
+    expect(cols.named.trackUrl).toBe(12);
+    expect(cols.line).toBe(5);
+    expect(cols.weight).toBe(4);
+    expect(cols.logist).toBe(16);
+  });
+
+  it('reads line, quantity, logist and the number', () => {
+    expect(rows[1]).toMatchObject({ line: 'MSC', weight: '24 т', logist: 'Яна', number: 'MSBU3441255', carrier: 'msc', forwarder: 'DSV', cargoType: 'fcl' });
+  });
+
+  it('keeps only rows of the working year in scope', () => {
+    expect(rows[0]).toMatchObject({ inScope: false, active: false });
+    expect(rows.slice(1).every((r) => r.inScope)).toBe(true);
+  });
+
+  it('prefers the sheet link unless it lacks the number', () => {
+    expect(rows[2]!.trackLink).toBe('https://www.fedex.com/fedextrack/?trknbr=875455189623');
+    expect(rows[1]!.trackLink).toContain('MSBU3441255'); // bare MSC page → carrier link with the number
+  });
+
+  it('classifies cargo type', () => {
+    expect(rows[2]!.cargoType).toBe('samples');
+    expect(rows[3]!.cargoType).toBe('groupage');
+  });
+});
+
+describe('normalizeForwarder', () => {
+  it('merges spellings and drops non-names', () => {
+    expect(normalizeForwarder('мультикс', null)).toBe('Мультикс');
+    expect(normalizeForwarder('еврофорвардинг', null)).toBe('Еврофорвард');
+    expect(normalizeForwarder('Ксиоми/ДСВ', null)).toBe('Ксиоми / DSV');
+    expect(normalizeForwarder('ДХЛ', null)).toBe('DHL');
+    expect(normalizeForwarder('Мист на ТИ', null)).toBe('Мист');
+    expect(normalizeForwarder('8843 2207 3047', null)).toBe('');
+    expect(normalizeForwarder('', 'fedex')).toBe('FedEx');
+    expect(normalizeForwarder('', 'msc')).toBe('');
+  });
+});
+
+describe('cargoType', () => {
+  it('uses keywords first, then the mode', () => {
+    expect(cargoType('Образец хлорамфеникол', 'courier')).toBe('samples');
+    expect(cargoType('Сборник Малайзия 6', 'sea')).toBe('groupage');
+    expect(cargoType('Аллопуринол БХФЗ LCL', 'sea')).toBe('lcl');
+    expect(cargoType('Цефиксим', 'air')).toBe('air');
+    expect(cargoType('Спиносад', 'courier')).toBe('parcel');
+    expect(cargoType('лизин сульфат 2 конт', null)).toBe('fcl');
+    expect(cargoType('Висмут', null)).toBe('other');
+  });
+});
+
+describe('pickTrackLink', () => {
+  it('keeps a sheet link that carries the number, else builds one', () => {
+    expect(pickTrackLink('https://x.test/?n=MSBU3441255', 'MSBU3441255', 'msc')).toBe('https://x.test/?n=MSBU3441255');
+    expect(pickTrackLink('https://www.msc.com/en/track-a-shipment', 'MSBU3441255', 'msc')).toContain('MSBU3441255');
+    expect(pickTrackLink('', '875455189623', 'fedex')).toContain('875455189623');
+    expect(pickTrackLink('https://www.lufthansa-cargo.com/x', null, null)).toBe('https://www.lufthansa-cargo.com/x');
+    expect(pickTrackLink('', null, null)).toBeNull();
   });
 });

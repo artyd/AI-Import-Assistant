@@ -48,6 +48,9 @@ export interface CalRow {
   customsPlace: string;
   warehouse: string;
   issues: Array<{ code: string; label: string }>;
+  cargoType: CargoType;
+  /** Tracking page for the number (the sheet's link, else the carrier's). */
+  trackLink: string | null;
   trackedId: string | null;
   track: { status: string; statusLabel: string; eta: string | null; source: string } | null;
   qty?: string;
@@ -85,6 +88,59 @@ export const EVENT_META: Record<CalEventType, { label: string; color: string; ic
   delivered: { label: "Доставлено", color: "var(--ok)", icon: "✓" },
   eta: { label: "ETA трекінгу", color: "var(--warn)", icon: "⏱" },
   warehouse: { label: "Склад БЦ", color: "#b45309", icon: "🏬" },
+};
+
+export type CargoType = "samples" | "groupage" | "lcl" | "fcl" | "air" | "parcel" | "other" | "warehouse";
+
+/** Cargo type → icon on the calendar mark. */
+export const CARGO_META: Record<CargoType, { label: string; icon: string }> = {
+  fcl: { label: "Контейнер", icon: "🚢" },
+  groupage: { label: "Збірник", icon: "📦" },
+  lcl: { label: "LCL", icon: "🧩" },
+  air: { label: "Авіа", icon: "✈️" },
+  parcel: { label: "Посилка", icon: "📮" },
+  samples: { label: "Зразки", icon: "🧪" },
+  other: { label: "Вантаж", icon: "•" },
+  warehouse: { label: "Склад БЦ", icon: "🏬" },
+};
+export const CARGO_ORDER: CargoType[] = ["fcl", "groupage", "lcl", "air", "parcel", "samples", "other", "warehouse"];
+
+/** Forwarder → colour of the mark (fixed for the team's forwarders, hashed for others). */
+const FORWARDER_COLORS: Record<string, string> = {
+  Мультикс: "#2563eb",
+  Еврофорвард: "#16a34a",
+  DSV: "#0891b2",
+  Ксиоми: "#db2777",
+  "Ксиоми / DSV": "#be185d",
+  Трансвосток: "#ea580c",
+  Айкарго: "#7c3aed",
+  DHL: "#ca8a04",
+  FedEx: "#9333ea",
+  Мист: "#dc2626",
+  TNT: "#f97316",
+  UPS: "#854d0e",
+  "Нова Пошта": "#e11d48",
+  Постачальник: "#475569",
+};
+const EXTRA_COLORS = ["#0d9488", "#4f46e5", "#65a30d", "#c026d3", "#0369a1", "#b45309", "#be123c", "#15803d"];
+
+export function forwarderColor(name: string): string {
+  if (!name) return "var(--muted)";
+  if (FORWARDER_COLORS[name]) return FORWARDER_COLORS[name]!;
+  let h = 0;
+  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return EXTRA_COLORS[h % EXTRA_COLORS.length]!;
+}
+
+/** Event type → shape of the mark (the colour is the forwarder's). */
+export const EVENT_SHAPE: Record<CalEventType, { border: string; mark: string }> = {
+  departure: { border: "dashed", mark: "↗" },
+  arrival: { border: "solid", mark: "⚑" },
+  eta: { border: "dotted", mark: "⏱" },
+  arrived: { border: "solid", mark: "📍" },
+  customs: { border: "double", mark: "🛃" },
+  delivered: { border: "double", mark: "✓" },
+  warehouse: { border: "solid", mark: "🏬" },
 };
 
 export const EVENT_ORDER: CalEventType[] = ["departure", "arrival", "eta", "arrived", "customs", "delivered", "warehouse"];
