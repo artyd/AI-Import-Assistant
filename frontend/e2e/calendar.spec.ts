@@ -246,7 +246,7 @@ test.describe("Logist calendar (team sheet)", () => {
     await expect(card).toContainText("MSBU1491088");
     await expect(card).toContainText("Мультикс");
     await expect(card.getByTestId("calendar-countdown")).toContainText("до прибуття 3 дн");
-    await expect(card).toContainText("рік вгадано");
+    await expect(card).not.toContainText("вгадано");
     await expect(card.getByRole("link", { name: /Відкрити рядок у таблиці/ })).toHaveAttribute("href", /range=A100/);
     await page.screenshot({ path: `test-results/calendar-week-${info.project.name}.png` });
     await card.getByRole("button", { name: "Закрити" }).click();
