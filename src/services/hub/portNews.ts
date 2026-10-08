@@ -19,7 +19,7 @@ import { addCarrierMark, type RedSea, type UaStatus } from './lines.js';
  * Pure matching (`placesMentioned`) is unit-tested; the model call is not.
  */
 
-const RUBRICS = ['ports', 'freight', 'customs', 'sanctions', 'ncts', 'adr'];
+const RUBRICS = ['ports', 'freight', 'customs', 'sanctions', 'ncts', 'adr', 'world'];
 const BATCH = 8;
 const MIN_CONFIDENCE = 0.6;
 

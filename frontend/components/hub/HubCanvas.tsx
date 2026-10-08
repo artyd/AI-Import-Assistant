@@ -61,7 +61,7 @@ import { actualProgress, buildReplay, planProgress, positionAt, type Replay } fr
 import { advance, lerp, smoothPath, splitAt } from "./geo";
 import { TracksPanel, type WorkspaceRef } from "./TracksPanel";
 import { TrackDetail } from "./TrackDetail";
-import { isIssue, PortsPanel } from "./PortsPanel";
+import { defaultPortFilter, isIssue, portMatches, PortsPanel, type PortFilter } from "./PortsPanel";
 import { PortDetail } from "./PortDetail";
 import { LinesPanel } from "./LinesPanel";
 import { CarrierDetail } from "./CarrierDetail";
@@ -221,6 +221,8 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
   const [ports, setPorts] = useState<HubPort[]>([]);
   const [tab, setTab] = useState<Tab>("tracks");
   const [selPort, setSelPort] = useState<string | null>(null);
+  // Ports-tab quick filter; null = not chosen yet (list shows the default, map shows everything).
+  const [portFilter, setPortFilter] = useState<PortFilter | null>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceRef[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -623,12 +625,15 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
     if (!map || !g) return;
     g.clearLayers();
     if (!layers.ports) return;
-    const visible = ports.filter(
-      (p) =>
-        p.kind !== "inland" &&
-        // Zoomed out, show only what matters: favourites, places with a known
-        // status, my destinations. Everything else appears from regional zoom.
-        (zoom >= 6 || p.code === selPort || p.favorite || p.status || p.trackCount > 0)
+    // A quick filter picked on the Ports tab drives the map too (every match, any zoom).
+    const picked = tab === "ports" && portFilter && portFilter !== "all" ? portFilter : null;
+    const visible = ports.filter((p) =>
+      picked
+        ? portMatches(p, picked) || p.code === selPort
+        : p.kind !== "inland" &&
+          // Zoomed out, show only what matters: favourites, places with a known
+          // status, my destinations. Everything else appears from regional zoom.
+          (zoom >= 6 || p.code === selPort || p.favorite || p.status || p.trackCount > 0 || (tab === "ports" && portFilter === "all"))
     );
     const addPort = (p: HubPort) => {
       const issue = isIssue(p);
@@ -685,7 +690,21 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
         })
         .addTo(g);
     }
-  }, [map, ports, layers.ports, zoom, selPort, selectPort, theme, narrow]);
+  }, [map, ports, layers.ports, zoom, selPort, selectPort, theme, narrow, tab, portFilter]);
+
+  // Picking a quick filter frames its places on the map.
+  const pickPortFilter = useCallback(
+    (f: PortFilter) => {
+      setPortFilter(f);
+      if (!map) return;
+      if (!layers.ports) setLayers((l) => ({ ...l, ports: true }));
+      const hits = ports.filter((p) => portMatches(p, f));
+      if (hits.length === 0) return;
+      if (hits.length === 1) map.flyTo([hits[0]!.lat, hits[0]!.lng], Math.max(map.getZoom(), 6), { duration: 0.7 });
+      else map.flyToBounds(L.latLngBounds(hits.map((p) => L.latLng(p.lat, p.lng))).pad(0.15), { maxZoom: 7, duration: 0.7 });
+    },
+    [map, ports, layers.ports]
+  );
 
   // ── Route lines (traveled solid + remaining "marching ants") ─────────────
   useEffect(() => {
@@ -1315,7 +1334,14 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
                 workspaces={workspaces}
               />
             ) : tab === "ports" ? (
-              <PortsPanel ports={ports} selectedCode={selPort} onSelect={(c) => selectPort(c)} onChanged={loadPorts} />
+              <PortsPanel
+                ports={ports}
+                selectedCode={selPort}
+                filter={portFilter ?? defaultPortFilter(ports)}
+                onFilter={pickPortFilter}
+                onSelect={(c) => selectPort(c)}
+                onChanged={loadPorts}
+              />
             ) : tab === "routes" ? (
               <RoutesPanel routes={visibleRoutes} selectedId={selRoute === "new" ? null : selRoute} onSelect={(id) => selectRoute(id)} onNew={() => selectRoute("new")} />
             ) : (
