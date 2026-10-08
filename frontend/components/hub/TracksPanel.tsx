@@ -42,7 +42,7 @@ const FILTERS: { key: Filter; label: string }[] = [
 
 /** Needs attention: a problem, no data, a slipped ETA, or a hand-kept sea item still empty. */
 const needsAttention = (t: Track) =>
-  t.status === "exception" || t.status === "unknown" || etaShiftDays(t) >= 2 || (t.manualOnly && t.source !== "manual");
+  t.status === "exception" || t.status === "unknown" || etaShiftDays(t) >= 2 || (t.manualOnly && t.source !== "manual" && t.source !== "sheet");
 
 const MODE_ICON: Record<HubMode, string> = { sea: "🚢", air: "✈️", courier: "📦", domestic: "🚚" };
 
@@ -360,7 +360,9 @@ function TrackRow({ t, selected, onClick }: { t: Track; selected: boolean; onCli
         <div style={{ width: `${Math.round(progress * 100)}%`, height: "100%", background: color, borderRadius: 4, transition: "width .6s" }} />
       </div>
       <div style={{ fontSize: 11, color: "var(--faint)" }}>
-        {t.manualOnly
+        {t.sheet
+          ? `З таблиці · рядок ${t.sheet.rowIndex} · ${ago(t.lastChangedAt ?? t.lastCheckedAt)}`
+          : t.manualOnly
           ? t.source !== "manual"
             ? "Ведеться вручну — внесіть дані"
             : `Внесено вручну ${ago(t.lastChangedAt)}`

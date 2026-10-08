@@ -8,6 +8,8 @@ import { INDEX_QUEUE, type IndexJobData } from '../queue/index.js';
 import { REMINDERS_QUEUE, scheduleReminders, type ReminderJobData } from '../queue/reminders.js';
 import { NEWS_QUEUE, scheduleNews, type NewsJobData } from '../queue/news.js';
 import { TRACKING_QUEUE, scheduleTracking, type TrackingJobData } from '../queue/tracking.js';
+import { SHEET_QUEUE, scheduleSheetSync, type SheetJobData } from '../queue/sheet.js';
+import { sheetEnabled, syncSheet } from '../services/sheet/sync.js';
 import { refreshDue } from '../services/hub/track.js';
 import { scanNewsForHubStatus } from '../services/hub/portNews.js';
 import { seedPlaces } from '../services/hub/ports.js';
@@ -352,6 +354,19 @@ async function processTracking(_job: Job<TrackingJobData>): Promise<void> {
 }
 
 /**
+ * Team Google Sheet → sheet_rows (calendar) + team items in the hub + arrival
+ * notifications. Tab failures are recorded per tab; the job always completes.
+ */
+async function processSheetSync(_job: Job<SheetJobData>): Promise<void> {
+  const r = await syncSheet();
+  const tabs = Object.entries(r.tabs)
+    .map(([t, v]) => `${t}=${v.ok ? v.rows : `error(${v.error})`}`)
+    .join(', ');
+  // eslint-disable-next-line no-console
+  console.log(`Sheet sync: ${tabs}; hub items ${r.hubLinked}, notifications ${r.notified}.`);
+}
+
+/**
  * Auto-retry sweep: re-queue files stuck in 'error' up to INGEST_MAX_RETRIES,
  * then flag the persistent ones for manual entry. See services/ingestRetry.
  */
@@ -440,6 +455,22 @@ async function main(): Promise<void> {
     });
   }
 
+  // Team Google Sheet sync (hourly). Gated by SHEET_ID.
+  let sheetWorker: Worker<SheetJobData> | null = null;
+  if (sheetEnabled()) {
+    await scheduleSheetSync();
+    sheetWorker = new Worker<SheetJobData>(SHEET_QUEUE, processSheetSync, { connection: createRedis() });
+    sheetWorker.on('failed', (job, err) => {
+      // eslint-disable-next-line no-console
+      console.error(`Sheet sync job ${job?.id} failed:`, err.message);
+    });
+    // First sync right away so a fresh deploy doesn't wait up to an hour.
+    void syncSheet().catch((err: Error) => {
+      // eslint-disable-next-line no-console
+      console.error('Initial sheet sync failed:', err.message);
+    });
+  }
+
   // Auto-retry sweep (error files → re-queue / flag). Gated by INGEST_RETRY_ENABLED.
   let ingestRetryWorker: Worker<IngestRetryJobData> | null = null;
   if (config.INGEST_RETRY_ENABLED) {
@@ -458,7 +489,8 @@ async function main(): Promise<void> {
     `Indexing worker started (env=${config.NODE_ENV}, concurrency=${config.INDEX_CONCURRENCY}, ` +
       `anthropicMaxConcurrency=${config.ANTHROPIC_MAX_CONCURRENCY}, extraction=${config.EXTRACTION_ENABLED}, ` +
       `ocr=${config.OCR_ENABLED}, reminders=${config.REMINDERS_ENABLED}, news=${config.NEWS_ENABLED}, ` +
-      `ingestRetry=${config.INGEST_RETRY_ENABLED}, tracking=${config.TRACKING_ENABLED}, ais=${aisEnabled()}).`,
+      `ingestRetry=${config.INGEST_RETRY_ENABLED}, tracking=${config.TRACKING_ENABLED}, ais=${aisEnabled()}, ` +
+      `sheet=${sheetEnabled()}).`,
   );
 
   const shutdown = async (): Promise<void> => {
@@ -466,6 +498,7 @@ async function main(): Promise<void> {
     if (remindersWorker) await remindersWorker.close();
     if (newsWorker) await newsWorker.close();
     if (trackingWorker) await trackingWorker.close();
+    if (sheetWorker) await sheetWorker.close();
     await stopAis();
     if (ingestRetryWorker) await ingestRetryWorker.close();
     await pool.end();

@@ -807,6 +807,17 @@ Manual re-check → `{ track, events }`; `429` if checked < 2 min ago.
 Everything the live map draws: `{ items: (Track & { live: LiveInfo })[],
 vessels: { mmsi, name, lat, lng, cog, sog, type }[] (ambient AIS ≤2h old), serverTime }`.
 
+### `GET /api/hub/tracks/:id/workspace-matches`
+My shipments whose documents mention this number (to suggest linking; the logist
+confirms with `PATCH { workspaceId }`): `{ matches: { id, number, supplier }[] }` (≤5).
+
+### Team sheet items
+Items synced from the team Google Sheet (see "Logist calendar") carry
+`team: true` (visible to every user) and `sheet: { rowIndex, url }` (the sheet row;
+`source: 'sheet'` for hand-kept sea items). Their plan (route, dates, status) comes
+from the sheet hourly: `PATCH { manual }` on them → `409` («змініть у таблиці»);
+events can still be added.
+
 ### `GET /api/workspaces/:id/tracking-suggestions`
 Numbers found in the shipment's documents (check-digit-valid containers / AWB,
 carrier-prefixed B/L) that are not tracked yet:
@@ -893,6 +904,48 @@ shift ≥ 24 h. Agent tools: `track_shipment`, `list_tracked_shipments`,
 
 ---
 
+## Logist calendar (team Google Sheet)
+
+The worker reads the team sheet hourly (`SHEET_SYNC_CRON`, plus once on boot)
+through its public CSV export (`SHEET_ID`, tab gids `SHEET_GID_*`). Tracking rows
+(Аркуш3) and БЦ warehouse-intake rows (Аркуш5) are parsed (any date format; a
+missing year = the one nearest to the surrounding rows / today, flagged
+`guessed`; status from the comment text) into `sheet_rows`. Active rows with a
+tracking number become team items in the hub. The responsible logist (matched by
+first name to a user; else everyone) is notified when the planned arrival changes
+and the day before / the day of an arrival. All routes are authenticated and
+team-wide (no per-user scoping).
+
+Shapes:
+- `SheetDate = { date: 'YYYY-MM-DD', guessed: boolean }`
+- `CalEvent = { id, rowId, type: departure|arrival|arrived|customs|delivered|eta|warehouse,
+  date, approx, source? }` — `eta` = what tracking says when it differs from the plan
+  (17TRACK / carrier ETA, actual delivery, or the route-based estimate).
+- `CalRow = { id, tab: tracking|warehouse, rowIndex, url, product, status
+  (planned|in_transit|arrived|customs|delivered), statusLabel, active, number, carrier,
+  carrierName, mode, forwarder, logist, origin, destination, departure: SheetDate|null,
+  arrival, statusDate, comment, weight, line, refNo, customsPlace, warehouse,
+  issues: { code, label }[], trackedId, track: { status, statusLabel, eta, source }|null,
+  qty?, when?, fits? }` (the last three for warehouse rows).
+- `SyncInfo = { enabled, sheetUrl, tabs: { tab, ok, rows, error, syncedAt }[] }`
+
+### `GET /api/calendar?from=YYYY-MM-DD&to=YYYY-MM-DD`  (≤ 400 days)
+`{ from, to, events: CalEvent[], rows: CalRow[], sync: SyncInfo }`; `400` bad range.
+
+### `GET /api/calendar/attention`
+Active / recently added tracking rows with a data problem (`overdue`,
+`date_unparsed`, `container_not_number`, `number_mangled`, `no_dates`):
+`{ rows: CalRow[] }`, newest rows first.
+
+### `GET /api/calendar/export.xlsx?from=&to=`
+The period's events as an Excel plan (one line per event).
+
+### `POST /api/sheet/sync`
+Read the sheet now → `{ result, sync }`; `409` sheet not configured; `429` if
+synced manually < 1 min ago.
+
+---
+
 ## MCP server (public reference tools)
 
 Штурман is also a remote MCP server so users can connect it to their own AI client
@@ -902,6 +955,11 @@ tools** are exposed — no shipment data: `uktzed_lookup_code`,
 `pubchem_identify_substance` (only when `LOGIST_MCP_URL` is set),
 `check_drug_registration` (`{ reg_number }`, local Держреєстр mirror) and
 `track_by_number` (`{ number, carrier? }` — live cargo status, nothing stored).
+**When `SHEET_ID` is set** the team-sheet tools are listed as well (owner's explicit
+decision, 2026-10-09 — they expose the team's shipment plan on this open endpoint):
+`sheet_shipments` (`{ period?, from?, to?, query?, logist?, attention? }`),
+`warehouse_intake` (`{ query? }`), `sheet_reference` (`{ tab: rates|quantities, query? }`).
+The same tools are available to the chat agent.
 
 ### `POST /api/mcp`  (no auth — open; `/api/mcp/<anything>` also served for old token links)
 MCP Streamable HTTP, **stateless, JSON-only** (no `Mcp-Session-Id`, no SSE).

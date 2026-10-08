@@ -39,6 +39,7 @@ import { persistAnalysis } from '../services/analyses.js';
 import type { Citation } from '../services/conversations.js';
 import type { FileType } from '../domain/folders.js';
 import { executeHubTool, isHubTool } from './hubTools.js';
+import { executeSheetTool, isSheetTool } from './sheetTools.js';
 
 /**
  * Tool execution scope. Shipment ("supply") tools need a `workspaceId`; the
@@ -537,6 +538,7 @@ export async function executeTool(
       return runPubchemIdentify(input);
     default:
       if (isHubTool(name)) return { ...(await executeHubTool(name, input, ctx)), citations: [] };
+      if (isSheetTool(name)) return { ...(await executeSheetTool(name, input)), citations: [] };
       return { result: `Невідомий інструмент: ${name}`, summary: `Невідомий інструмент`, citations: [] };
   }
 }

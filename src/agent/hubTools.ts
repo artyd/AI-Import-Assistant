@@ -166,7 +166,9 @@ function sourceLine(source: string, checkedAt: string | null): string {
       ? `публічна сторінка перевізника (${source.slice(7)})`
       : source === 'manual'
         ? 'внесено вручну логістом'
-        : 'немає';
+        : source === 'sheet'
+          ? 'робоча таблиця логістів (щогодини)'
+          : 'немає';
   return `Джерело: ${s}; перевірено: ${d(checkedAt)}.`;
 }
 
@@ -188,7 +190,7 @@ function trackedText(t: TrackedDto, events: TrackingEventRow[]): string {
   lines.push(`ETA: ${d(t.eta)}${t.firstEta && t.eta && t.firstEta !== t.eta ? ` (спершу була ${d(t.firstEta)})` : ''}`);
   if (t.workspaceNumber) lines.push(`Постачання: ${t.workspaceNumber}`);
   lines.push(sourceLine(t.source, t.lastCheckedAt));
-  if (t.manualOnly && t.source !== 'manual') {
+  if (t.manualOnly && t.source !== 'manual' && t.source !== 'sheet') {
     lines.push(`Морське перевезення ведеться вручну — логіст ще не вніс дані. Сторінка лінії: ${t.trackUrl ?? '—'}`);
   } else if (t.status === 'unknown' || t.source === 'none') {
     lines.push(`Даних від перевізника немає${t.lastError ? ` (${t.lastError})` : ''}. Перевірити вручну: ${t.trackUrl ?? '—'}`);

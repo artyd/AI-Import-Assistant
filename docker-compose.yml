@@ -86,6 +86,8 @@ services:
       MAERSK_API_KEY: ${MAERSK_API_KEY:-}
       TRACK17_API_KEY: ${TRACK17_API_KEY:-${SEVENTEEN_TRACK_KEY:-}}
       TRACKING_SEA_MODE: ${TRACKING_SEA_MODE:-manual}
+      SHEET_ID: ${SHEET_ID:-}
+      SHEET_SYNC_CRON: ${SHEET_SYNC_CRON:-5 * * * *}
       AISSTREAM_API_KEY: ${AISSTREAM_API_KEY:-}
     volumes:
       - storage_data:/data/storage
@@ -132,6 +134,8 @@ services:
       MAERSK_API_KEY: ${MAERSK_API_KEY:-}
       TRACK17_API_KEY: ${TRACK17_API_KEY:-${SEVENTEEN_TRACK_KEY:-}}
       TRACKING_SEA_MODE: ${TRACKING_SEA_MODE:-manual}
+      SHEET_ID: ${SHEET_ID:-}
+      SHEET_SYNC_CRON: ${SHEET_SYNC_CRON:-5 * * * *}
       AISSTREAM_API_KEY: ${AISSTREAM_API_KEY:-}
     volumes:
       - storage_data:/data/storage

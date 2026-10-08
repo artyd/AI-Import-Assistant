@@ -7,6 +7,7 @@ import { getCarrier, trackingUrl, type HubMode } from './carriers.js';
 import { detectNumber, normalizeNumber, type NumberKind } from './detect.js';
 import { geocode } from './geocode.js';
 import { scrapeTracking } from './scrape.js';
+import { sheetRowUrl } from '../sheet/link.js';
 import { STATUS_LABEL_UK, type TrackEventIn, type TrackResult, type TrackStatus } from './types.js';
 
 /**
@@ -54,7 +55,10 @@ export interface TrackedRow {
   last_error: string;
   archived: boolean;
   created_at: string;
+  /** Synced from the team Google Sheet → visible to everyone. */
+  team?: boolean;
   workspace_number?: string | null;
+  sheet_row_index?: number | null;
 }
 
 export interface TrackingEventRow {
@@ -102,6 +106,9 @@ export function serializeTracked(r: TrackedRow) {
     workspaceNumber: r.workspace_number ?? null,
     trackUrl: trackingUrl(r.carrier, r.number),
     manualOnly: isManualSea(r.mode, r.carrier),
+    team: !!r.team,
+    /** Row of the team sheet this item comes from (plan fields are read-only here). */
+    sheet: r.sheet_row_index ? { rowIndex: r.sheet_row_index, url: sheetRowUrl('tracking', r.sheet_row_index) } : null,
     createdAt: r.created_at,
   };
 }
@@ -223,11 +230,14 @@ export async function lookupNumber(raw: string, carrierHint?: string): Promise<L
 
 // ── Persistence ──────────────────────────────────────────────────────────────
 
-const SELECT = `SELECT t.*, w.number AS workspace_number
-  FROM tracked_items t LEFT JOIN workspaces w ON w.id = t.workspace_id`;
+const SELECT = `SELECT t.*, w.number AS workspace_number, sr.row_index AS sheet_row_index
+  FROM tracked_items t LEFT JOIN workspaces w ON w.id = t.workspace_id
+  LEFT JOIN LATERAL (
+    SELECT row_index FROM sheet_rows s WHERE s.tracked_id = t.id AND NOT s.removed ORDER BY s.updated_at DESC LIMIT 1
+  ) sr ON TRUE`;
 
-/** Items the user can see: their own, plus any linked to a shipment they own. */
-const VISIBLE = `(t.owner_id = $1 OR t.workspace_id IN (SELECT id FROM workspaces WHERE owner_id = $1))`;
+/** Items the user can see: team items (from the sheet), their own, and any linked to a shipment they own. */
+const VISIBLE = `(t.team OR t.owner_id = $1 OR t.workspace_id IN (SELECT id FROM workspaces WHERE owner_id = $1))`;
 
 export async function listTracked(
   userId: string,

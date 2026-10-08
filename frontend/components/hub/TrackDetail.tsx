@@ -63,6 +63,21 @@ export function TrackDetail({
   const [editing, setEditing] = useState(false);
   useEffect(() => setEditing(false), [track.id]);
 
+  // Shipments whose documents mention this number — offered for linking (logist confirms).
+  const [matches, setMatches] = useState<Array<{ id: string; number: string; supplier: string }>>([]);
+  useEffect(() => {
+    setMatches([]);
+    if (track.workspaceId) return;
+    let off = false;
+    hubApi
+      .workspaceMatches(track.id)
+      .then((r) => !off && setMatches(r.matches))
+      .catch(() => undefined);
+    return () => {
+      off = true;
+    };
+  }, [track.id, track.workspaceId]);
+
   async function act(kind: string, fn: () => Promise<unknown>): Promise<boolean> {
     setBusy(kind);
     setMsg(null);
@@ -197,8 +212,23 @@ export function TrackDetail({
           )}
         </section>
 
+        {/* From the team sheet: the plan lives there */}
+        {track.sheet && (
+          <section style={{ ...box, fontSize: 12.5, display: "grid", gap: 6 }} data-testid="hub-sheet-source">
+            <div>
+              📋 З робочої таблиці (рядок {track.sheet.rowIndex}) — маршрут, дати й статус оновлюються щогодини; змінюйте їх у
+              таблиці. Події можна додавати тут.
+            </div>
+            {track.sheet.url && (
+              <a className="btn" href={track.sheet.url} target="_blank" rel="noreferrer noopener" style={{ height: 30, fontSize: 12.5, textDecoration: "none", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                Відкрити рядок у таблиці ↗
+              </a>
+            )}
+          </section>
+        )}
+
         {/* Manual data (sea lines are tracked by hand) */}
-        {editing ? (
+        {editing && !track.sheet ? (
           <ManualTrackForm
             track={track}
             onCancel={() => setEditing(false)}
@@ -210,6 +240,7 @@ export function TrackDetail({
           />
         ) : (
           track.manualOnly &&
+          !track.sheet &&
           track.source !== "manual" && (
             <section style={{ ...box, fontSize: 12.5, display: "grid", gap: 8 }} data-testid="hub-manual-hint">
               <div>
@@ -276,6 +307,27 @@ export function TrackDetail({
               </option>
             ))}
           </select>
+          {!track.workspaceId && matches.length > 0 && (
+            <div style={{ marginTop: 6, display: "grid", gap: 4 }} data-testid="hub-workspace-matches">
+              {matches.map((w) => (
+                <div key={w.id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5 }}>
+                  <span style={{ flex: 1, minWidth: 0, color: "var(--muted)" }}>
+                    Номер є в документах №{w.number}
+                    {w.supplier ? ` · ${w.supplier}` : ""}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn"
+                    style={{ height: 26, padding: "0 9px", fontSize: 12 }}
+                    disabled={busy !== null}
+                    onClick={() => void act("link", () => hubApi.patch(track.id, { workspaceId: w.id }))}
+                  >
+                    Привʼязати
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
 
         {msg && (
@@ -294,7 +346,11 @@ export function TrackDetail({
           gap: 6,
         }}
       >
-        {track.manualOnly ? (
+        {track.manualOnly && track.sheet ? (
+          <a className="btn btn-primary" style={{ ...actionBtn, textDecoration: "none" }} href={track.sheet.url ?? undefined} target="_blank" rel="noreferrer noopener" title="Дані цього вантажу — у робочій таблиці">
+            Таблиця ↗
+          </a>
+        ) : track.manualOnly ? (
           <button type="button" className="btn btn-primary" style={actionBtn} disabled={busy !== null || editing} onClick={() => setEditing(true)} data-testid="hub-manual-edit">
             ✎ Внести дані
           </button>

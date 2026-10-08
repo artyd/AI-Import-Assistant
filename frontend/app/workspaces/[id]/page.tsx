@@ -36,6 +36,7 @@ import { RightPanel, type RightTab } from "@/components/RightPanel";
 import { FilesTab } from "@/components/FilesTab";
 import { NewsView } from "@/components/NewsView";
 import { MapView } from "@/components/MapView";
+import { CalendarView } from "@/components/CalendarView";
 import { CommandPalette, type PaletteAction } from "@/components/CommandPalette";
 import { IconSpinner } from "@/components/icons";
 import {
@@ -1273,7 +1274,9 @@ export default function WorkspacePage() {
                 ? "Новини"
                 : view === "map"
                   ? "Логістичний хаб"
-                  : conversations.find((c) => c.id === conversationId)?.title?.trim() ||
+                  : view === "calendar"
+                    ? "Календар логістів"
+                    : conversations.find((c) => c.id === conversationId)?.title?.trim() ||
                     "Новий чат"
             }
           />
@@ -1283,6 +1286,8 @@ export default function WorkspacePage() {
             <NewsView />
           ) : view === "map" ? (
             <MapView workspaceId={id} />
+          ) : view === "calendar" ? (
+            <CalendarView />
           ) : chatKind === "consolidated" ? (
             /* Збірний: тулбар (таблиця/експорт/новий аналіз) + опційна картка/ввід,
                а знизу — чат обговорення, прив'язаний до збірника (відповідь аналізу

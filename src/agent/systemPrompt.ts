@@ -1,5 +1,6 @@
 import { config } from '../config.js';
 import type { ChatSystem } from '../anthropic/client.js';
+import { sheetEnabled } from '../services/sheet/link.js';
 
 /**
  * Default user portrait — shared across every chat kind. The user is a Ukraine
@@ -43,6 +44,14 @@ function hubToolsPromptBlock(scope: 'supply' | 'normal'): string[] {
     '- get_carrier_status — стан морської лінії: прийом на Україну, Суец чи обхід Африки, надбавки, пунктуальність.',
     '- suggest_routes — 2–3 варіанти маршруту з урахуванням живих статусів (терміни рахує хаб); list_routes —',
     '  збережені маршрути: план проти факту, затримки, демередж.',
+    ...(sheetEnabled()
+      ? [
+          '- sheet_shipments — робоча таблиця логістів (щогодини): що виходить / прибуває за період (period),',
+          '  де конкретний вантаж (query), проблемні рядки (attention); warehouse_intake — заїзд на склад БЦ;',
+          '  sheet_reference — ставки Черноморськ/Гданськ (rates) і кількості (quantities). Таблиця — головне',
+          '  джерело плану; дати з «≈» — рік вгадано, кажи про це.',
+        ]
+      : []),
     'ПРАВИЛА: статус, місцезнаходження та ETA бери ЛИШЕ з цих інструментів і завжди називай',
     'джерело та час перевірки. Якщо інструмент каже «даних немає» — так і скажи й дай посилання',
     'на сторінку перевізника; ніколи не вгадуй статус з дат у документах чи з памʼяті.',

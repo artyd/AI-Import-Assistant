@@ -13,6 +13,7 @@ import { buildNormalSystemPrompt } from '../agent/systemPrompt.js';
 import { runAgentTurn } from '../agent/loop.js';
 import { logistTools } from '../agent/tools.js';
 import { hubToolDefinitions } from '../agent/hubTools.js';
+import { sheetTools } from '../agent/sheetTools.js';
 import { chatRateLimitConfig } from './chatRateLimit.js';
 
 const chatSchema = z.object({
@@ -63,6 +64,7 @@ export async function chatNormalRoutes(app: FastifyInstance): Promise<void> {
         tools: [
           ...logistTools(),
           ...hubToolDefinitions.filter((t) => 'name' in t && t.name !== 'find_tracking_numbers'),
+          ...sheetTools(),
         ],
       });
 

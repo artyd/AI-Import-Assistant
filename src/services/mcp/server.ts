@@ -1,15 +1,18 @@
 import { executeTool, logistTools } from '../../agent/tools.js';
 import { getRegistration } from '../drugRegistry.js';
 import { portStatusTool, publicTrackTool } from '../../agent/hubTools.js';
+import { sheetTools } from '../../agent/sheetTools.js';
 
 /**
  * Public MCP server (Streamable HTTP, stateless, JSON responses only).
  *
  * Exposes Штурман's scope-less reference lookups — УКТ ЗЕД довідка/класифікатор,
  * подвійне використання, курс НБУ, PubChem, Держреєстр ліків — to external MCP
- * clients (Claude, Cursor, Claude Code…). No shipment data is reachable here:
- * every tool is a read-only reference query, so a leaked token exposes nothing
- * private. The logist tools reuse the agent's own handlers (same digest/format).
+ * clients (Claude, Cursor, Claude Code…). The logist tools reuse the agent's own
+ * handlers (same digest/format). Exception, by the owner's explicit decision
+ * (2026-10-09): when SHEET_ID is set, the team-sheet tools (sheet_shipments,
+ * warehouse_intake, sheet_reference) are listed too — read-only, but they expose
+ * the team's shipment plan to anyone who knows this open endpoint.
  *
  * Protocol: each POST carries one JSON-RPC message (or a legacy batch array);
  * requests get a JSON response, notifications get 202. No sessions, no SSE.
@@ -46,6 +49,9 @@ const TITLES: Record<string, string> = {
   check_drug_registration: 'Держреєстр ліків України',
   track_by_number: 'Трекінг вантажу за номером',
   get_port_status: 'Чи працює порт / аеропорт / кордон',
+  sheet_shipments: 'Робоча таблиця: вантажі, прибуття, статуси',
+  warehouse_intake: 'Робоча таблиця: заїзд на склад БЦ',
+  sheet_reference: 'Робоча таблиця: ставки Черноморськ/Гданськ, кількості',
 };
 
 const REGISTRY_TOOL = {
@@ -72,7 +78,15 @@ interface CustomToolDef {
 
 function toolCatalog(): McpTool[] {
   // logistTools() are all plain custom tools (name/description/input_schema).
-  const defs = [...(logistTools() as CustomToolDef[]), REGISTRY_TOOL, publicTrackTool as CustomToolDef, portStatusTool as CustomToolDef];
+  // The team sheet tools are exposed here by the owner's explicit decision
+  // (2026-10-09): the endpoint is open, so anyone with its URL can read them.
+  const defs = [
+    ...(logistTools() as CustomToolDef[]),
+    REGISTRY_TOOL,
+    publicTrackTool as CustomToolDef,
+    portStatusTool as CustomToolDef,
+    ...(sheetTools() as CustomToolDef[]),
+  ];
   return defs.map((d) => ({
     name: d.name,
     title: TITLES[d.name] ?? d.name,
@@ -82,7 +96,7 @@ function toolCatalog(): McpTool[] {
       title: TITLES[d.name] ?? d.name,
       readOnlyHint: true,
       destructiveHint: false,
-      openWorldHint: d.name !== 'check_drug_registration',
+      openWorldHint: d.name !== 'check_drug_registration' && !d.name.startsWith('sheet_') && d.name !== 'warehouse_intake',
     },
   }));
 }

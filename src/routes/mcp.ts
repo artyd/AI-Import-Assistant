@@ -2,8 +2,9 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { handleMcpPayload } from '../services/mcp/server.js';
 
 /**
- * Штурман as an open MCP server: POST /api/mcp. No access token — it exposes only
- * public read-only reference lookups (no shipment data), and an auth challenge
+ * Штурман as an open MCP server: POST /api/mcp. No access token — it exposes
+ * read-only reference lookups (plus the team-sheet tools when SHEET_ID is set —
+ * see services/mcp/server.ts), and an auth challenge
  * makes claude.ai fall back to an OAuth sign-in we don't run. Abuse is bounded by
  * a per-IP rate limit. `/api/mcp/<anything>` is served too, so links issued while
  * the endpoint still took a personal token keep working.
