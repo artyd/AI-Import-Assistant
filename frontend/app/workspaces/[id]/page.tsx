@@ -301,6 +301,10 @@ export default function WorkspacePage() {
     };
   }, [id, user]);
 
+  // A page (re)load always opens a NEW chat; the history stays in the sidebar.
+  // Only later switches of kind / collection reopen that context's latest chat.
+  const firstListLoad = useRef(true);
+
   // Load conversations for the active (kind, entity). Re-runs whenever the user
   // switches chat kind or the selected collection — each kind/entity keeps its
   // own history (prototype `normalChats` / per-shipment / per-collection chats).
@@ -321,7 +325,9 @@ export default function WorkspacePage() {
         );
         if (cancelled) return;
         setConversations(conversations);
-        if (conversations.length > 0) {
+        const opensNewChat = firstListLoad.current;
+        firstListLoad.current = false;
+        if (conversations.length > 0 && !opensNewChat) {
           const latest = [...conversations].sort((a, b) =>
             b.updated_at.localeCompare(a.updated_at)
           )[0]!;
