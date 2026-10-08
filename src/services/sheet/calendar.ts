@@ -53,13 +53,14 @@ export const ISSUE_LABEL: Record<SheetIssue, string> = {
 };
 
 /** Tracking says something the sheet doesn't (the sheet stays the source of truth). */
-export type TrackingIssue = 'tracking_delivered' | 'tracking_eta';
+export type TrackingIssue = 'tracking_delivered' | 'tracking_eta' | 'place_unknown';
 
 /** Issues that need a logist's attention (a guessed year alone is just shown). */
 const ATTENTION: Array<SheetIssue | TrackingIssue> = [
   'overdue',
   'tracking_delivered',
   'tracking_eta',
+  'place_unknown',
   'date_unparsed',
   'date_suspicious',
   'container_not_number',
@@ -135,6 +136,17 @@ const dmy = (d: string) => `${d.slice(8, 10)}.${d.slice(5, 7)}`;
 /** Where tracking disagrees with the sheet — shown and listed in «Увага». */
 function trackingIssues(d: TrackingRow, t: TrackedRow | undefined): Array<{ code: TrackingIssue; label: string }> {
   if (!t || d.status === 'delivered' || d.status === 'customs') return [];
+  const out: Array<{ code: TrackingIssue; label: string }> = [];
+  // A place the map could not find — the item can't be drawn on its route.
+  const lost = [
+    t.origin && t.origin_lat == null ? `«${t.origin}»` : '',
+    t.destination && t.dest_lat == null ? `«${t.destination}»` : '',
+  ].filter(Boolean);
+  if (lost.length) out.push({ code: 'place_unknown', label: `Місце ${lost.join(' і ')} не знайдено на карті — уточніть у таблиці (місто / порт)` });
+  return [...out, ...carrierIssues(d, t)];
+}
+
+function carrierIssues(d: TrackingRow, t: TrackedRow): Array<{ code: TrackingIssue; label: string }> {
   const fromCarrier = !['sheet', 'manual', 'none'].includes(t.source);
   if (t.status === 'delivered' && fromCarrier) {
     const at = t.arrived_at ? ` ${dmy(new Date(t.arrived_at).toISOString().slice(0, 10))}` : '';

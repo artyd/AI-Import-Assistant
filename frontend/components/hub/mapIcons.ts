@@ -36,7 +36,7 @@ export interface EtaBadge {
   late: boolean;
 }
 
-export function trackIcon(mode: HubMode, status: TrackStatus, selected: boolean, eta?: EtaBadge | null): L.DivIcon {
+export function trackIcon(mode: HubMode, status: TrackStatus, selected: boolean, eta?: EtaBadge | null, ring?: string | null): L.DivIcon {
   const { svg } = glyph(mode);
   const color = statusColor(status);
   const moving = status === "in_transit" || status === "out_for_delivery";
@@ -44,7 +44,7 @@ export function trackIcon(mode: HubMode, status: TrackStatus, selected: boolean,
   return L.divIcon({
     className: "hub-marker",
     html:
-      `<div class="hub-mk${selected ? " is-sel" : ""}" style="--mk:${color};width:${size}px;height:${size}px">` +
+      `<div class="hub-mk${selected ? " is-sel" : ""}${ring ? " has-ring" : ""}" style="--mk:${color};${ring ? `--ring:${ring};` : ""}width:${size}px;height:${size}px">` +
       (moving ? '<span class="hub-pulse"></span>' : "") +
       `<span class="hub-core"><svg class="hub-rot" viewBox="0 0 24 24" width="${selected ? 22 : 18}" height="${selected ? 22 : 18}">${svg}</svg></span>` +
       (eta ? `<span class="hub-eta${eta.late ? " is-late" : ""}">${eta.text}</span>` : "") +
@@ -96,6 +96,8 @@ export const HUB_MAP_CSS = `
 .hub-core { position: relative; z-index: 1; display: grid; place-items: center; width: 100%; height: 100%;
   border-radius: 50%; background: var(--surface); color: var(--mk);
   box-shadow: 0 0 0 2.5px var(--mk), 0 4px 14px rgba(0,0,0,.28); }
+/* Forwarder colour (same as the calendar) as an outer ring around the status ring. */
+.hub-mk.has-ring .hub-core { box-shadow: 0 0 0 2.5px var(--mk), 0 0 0 5.5px var(--ring), 0 4px 14px rgba(0,0,0,.28); }
 .hub-mk.is-sel .hub-core { box-shadow: 0 0 0 3px var(--mk), 0 0 0 7px color-mix(in srgb, var(--mk) 22%, transparent), 0 6px 18px rgba(0,0,0,.32); }
 .hub-rot { transition: transform .6s linear; transform-origin: 50% 50%; }
 .hub-pulse { position: absolute; inset: 0; border-radius: 50%; background: var(--mk); opacity: .35; animation: hubPulse 2.2s ease-out infinite; }

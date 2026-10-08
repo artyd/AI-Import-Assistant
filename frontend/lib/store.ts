@@ -24,7 +24,10 @@ interface AppState {
   view: AppView;
   collections: Collection[];
   activeCollectionId: string | null;
+  /** Hub item to open when the map view mounts (set from the calendar). Not persisted. */
+  focusTrackId: string | null;
 
+  setFocusTrackId: (id: string | null) => void;
   setChatKind: (k: ChatKind) => void;
   setView: (v: AppView) => void;
   setCollections: (c: Collection[]) => void;
@@ -40,7 +43,9 @@ export const useAppStore = create<AppState>()(
       view: "chat",
       collections: [],
       activeCollectionId: null,
+      focusTrackId: null,
 
+      setFocusTrackId: (focusTrackId) => set({ focusTrackId }),
       // Switching kind always returns to the chat view (prototype `setChatType`).
       setChatKind: (chatKind) => set({ chatKind, view: "chat" }),
       setView: (view) => set({ view }),

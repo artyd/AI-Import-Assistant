@@ -106,6 +106,8 @@ export async function liveItem(r: TrackedRow, now = Date.now()): Promise<LiveIte
   const base: LiveItem = { id: r.id, pos: null, heading: 0, path, progress: 0, positionSource: null, vessel: null, ...dates };
 
   if (r.status === 'delivered' && d) return { ...base, pos: d, progress: 1, positionSource: 'destination' };
+  // The team sheet says it has arrived (at the destination port).
+  if (r.status === 'at_port' && r.source === 'sheet' && d) return { ...base, pos: d, progress: 1, positionSource: 'destination' };
 
   const v = await vesselFor(r);
   if (v) {

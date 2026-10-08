@@ -35,6 +35,22 @@ interface HubMockState {
   manual?: { patches: unknown[]; events: unknown[] };
   /** Serve HLCU1234567 as a team item synced from the sheet (row 214). */
   sheet?: { patches: unknown[] };
+  /** Sheet fields on the items (forwarder / cargo type / plan) — map follows the calendar. */
+  sheetMeta?: boolean;
+}
+
+/** LIVE with sheet metadata: Метопрен by Мультикс, planned 3 days before its ETA (late). */
+function liveWithSheetMeta() {
+  return {
+    ...LIVE,
+    items: LIVE.items.map((t: { id: string }) =>
+      t.id === "t1"
+        ? { ...t, forwarder: "Мультикс", cargoType: "fcl", planArrival: "2026-10-17", sheet: { rowIndex: 192, url: null }, team: true }
+        : t.id === "t2"
+          ? { ...t, forwarder: "DSV", cargoType: "groupage", planArrival: "2026-11-08" }
+          : t
+    ),
+  };
 }
 
 /** LIVE with the Hapag item coming from the team sheet. */
@@ -71,7 +87,7 @@ async function mockHub(page: Page, state: HubMockState = { added: [] }) {
   await mockWorkspace(page, async (route, pathname, method) => {
     const json = (body: unknown, status = 200) =>
       route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
-    const live = state.manual ? liveWithManualSea() : state.sheet ? liveWithSheetSea() : LIVE;
+    const live = state.manual ? liveWithManualSea() : state.sheet ? liveWithSheetSea() : state.sheetMeta ? liveWithSheetMeta() : LIVE;
     const wm = pathname.match(/^\/api\/hub\/tracks\/([\w-]+)\/workspace-matches$/);
     if (wm) return (await json({ matches: state.sheet ? [{ id: WSID, number: "2026-0001", supplier: "SupplierABC" }] : [] }), true);
     if (pathname === "/api/hub/live") return (await json(live), true);
@@ -341,6 +357,59 @@ test.describe("Logistics hub", () => {
     await expect.poll(() => state.sheet!.patches.length).toBe(1);
     expect(state.sheet!.patches[0]).toEqual({ workspaceId: WSID });
     await page.screenshot({ path: `test-results/hub-sheet-${info.project.name}.png` });
+  });
+
+  test("map follows the calendar: forwarder ring, filters, delay vs plan, no-coords tab", async ({ page }, info) => {
+    test.skip(info.project.name === "mobile", "desktop-only feature");
+    await mockHub(page, { added: [], sheetMeta: true });
+    await openHub(page);
+    // Forwarder colour ring on the marker.
+    await expect(page.locator(".hub-mk.has-ring")).toHaveCount(2);
+    // Delay against the sheet's plan, in the list row.
+    const row = page.getByTestId("hub-track-row").filter({ hasText: "MSKU1234565" });
+    await expect(row.getByTestId("hub-row-delay")).toContainText("запізнюється на 3 дн");
+    await expect(row).toContainText("Мультикс");
+    // Filter by forwarder → list and map narrow.
+    const filters = page.getByTestId("hub-track-filters");
+    await filters.getByLabel("Хто везе").selectOption("DSV");
+    await expect(page.getByTestId("hub-track-row")).toHaveCount(1);
+    await expect(page.getByTestId("hub-track-row")).toContainText("MEDU7654325");
+    await expect(page.locator(".hub-mk")).toHaveCount(1);
+    await filters.getByLabel("Хто везе").selectOption("");
+    await filters.getByLabel("Тип вантажу").selectOption("fcl");
+    await expect(page.getByTestId("hub-track-row")).toHaveCount(1);
+    await filters.getByLabel("Тип вантажу").selectOption("");
+    // Items the map can't place.
+    await page.getByRole("tab", { name: /Без координат/ }).click();
+    await expect(page.getByTestId("hub-track-row")).toHaveCount(1);
+    await expect(page.getByTestId("hub-track-row")).toContainText("HLCU1234567");
+    // Card: delay line.
+    await page.getByRole("tab", { name: /Всі/ }).click();
+    await row.click();
+    await expect(page.getByTestId("hub-plan-delay")).toContainText("Запізнюється на 3 дн");
+    await page.screenshot({ path: `test-results/hub-sheetmeta-${info.project.name}.png` });
+  });
+
+  test("positions on a chosen date: markers move along their route", async ({ page }, info) => {
+    test.skip(info.project.name === "mobile", "desktop-only feature");
+    await mockHub(page, { added: [] });
+    await openHub(page);
+    const marker = page.locator(".leaflet-marker-icon[title='Метопрен, партія 2']");
+    await expect(marker).toBeVisible();
+    await page.waitForTimeout(1500);
+    const before = await marker.boundingBox();
+    await page.getByTestId("hub-date-toggle").click();
+    const slider = page.getByTestId("hub-date-slider");
+    await expect(slider).toBeVisible();
+    await slider.getByRole("slider").fill("60");
+    await expect(page.getByTestId("hub-date-label")).not.toHaveText(/^$/);
+    await page.waitForTimeout(1500);
+    const after = await marker.boundingBox();
+    // 60 days ahead the ship is at (or near) Odesa — far from where it is today.
+    expect(Math.hypot(after!.x - before!.x, after!.y - before!.y)).toBeGreaterThan(20);
+    await page.screenshot({ path: `test-results/hub-date-${info.project.name}.png` });
+    await slider.getByRole("button", { name: "Закрити вибір дати" }).click();
+    await expect(slider).toBeHidden();
   });
 
   test("ports tab: live statuses, favourites, team marks", async ({ page }, info) => {

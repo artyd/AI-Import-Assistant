@@ -68,6 +68,10 @@ export interface Track {
   team?: boolean;
   /** Sheet row this item comes from; its plan fields are edited in the sheet. */
   sheet?: { rowIndex: number; url: string | null } | null;
+  /** From the team sheet (same as the calendar): who carries it, cargo type, planned arrival. */
+  forwarder?: string;
+  cargoType?: string | null;
+  planArrival?: string | null;
   createdAt: string;
   live?: LiveInfo;
 }
@@ -223,6 +227,19 @@ export function countdown(iso: string, now = Date.now()): { text: string; late: 
   const m = Math.floor((abs % 3_600_000) / 60_000);
   const text = d > 0 ? `${d} дн ${h} год` : h > 0 ? `${h} год ${m} хв` : `${m} хв`;
   return { text, late: ms < 0 };
+}
+
+/** Days the ETA (tracking / route estimate) is behind the sheet's plan; null without a plan. */
+export function delayDays(t: Pick<Track, "eta" | "live" | "planArrival" | "status">): number | null {
+  const eta = effEta(t);
+  if (!t.planArrival || !eta || t.status === "delivered") return null;
+  return Math.round((Date.parse(eta.slice(0, 10)) - Date.parse(t.planArrival)) / 86_400_000);
+}
+
+/** No coordinates for a named place (or no position at all) — the item can't be drawn. */
+export function lacksCoords(t: Pick<Track, "origin" | "destination" | "originPos" | "destPos" | "live" | "status">): boolean {
+  if (t.status === "delivered") return false;
+  return (!!t.origin && !t.originPos) || (!!t.destination && !t.destPos) || !t.live?.pos;
 }
 
 /** Days between the first and current ETA (positive = later). */

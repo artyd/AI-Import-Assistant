@@ -39,6 +39,9 @@ export function kyivToday(now = new Date()): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Kyiv' }).format(now);
 }
 
+/** A sheet day as a timestamp at noon UTC — the same calendar day in any time zone. */
+const noon = (d: string | null | undefined) => (d ? `${d}T12:00:00Z` : null);
+
 const addDays = (d: string, n: number) => new Date(Date.parse(`${d}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 const fmt = (d: string) => `${d.slice(8, 10)}.${d.slice(5, 7)}.${d.slice(0, 4)}`;
 
@@ -252,10 +255,10 @@ async function linkToHub(r: TrackingRow, rowId: string, prevTracked: string | nu
         d !== undefined,
         d?.[0] ?? null,
         d?.[1] ?? null,
-        r.departure?.date ?? null,
-        r.arrival?.date ?? null,
+        noon(r.departure?.date),
+        noon(r.arrival?.date),
         status,
-        r.statusDate?.date ?? null,
+        noon(r.statusDate?.date),
         (r.comment || r.extra).slice(0, 300),
       ],
     );
@@ -288,7 +291,7 @@ async function closeInHub(trackedId: string, r: TrackingRow | null): Promise<voi
       `UPDATE tracked_items SET status = 'delivered', arrived_at = COALESCE($2, arrived_at, now()),
          last_changed_at = CASE WHEN status <> 'delivered' THEN now() ELSE last_changed_at END
        WHERE id = $1`,
-      [trackedId, r.statusDate?.date ?? r.arrival?.date ?? null],
+      [trackedId, noon(r.statusDate?.date ?? r.arrival?.date)],
     );
   }
 }
@@ -403,6 +406,61 @@ async function syncWarehouse(grid: string[][], today: string): Promise<number> {
   return parsed.length;
 }
 
+// ── Morning digest ───────────────────────────────────────────────────────────
+
+/** Hour of the day in Kyiv (0–23). */
+export function kyivHour(now = new Date()): number {
+  return Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Kyiv', hour: '2-digit', hourCycle: 'h23' }).format(now));
+}
+
+interface DigestRow {
+  product: string;
+  forwarder: string;
+  arrival_on: string | null;
+  t_eta: string | null;
+  t_source: string | null;
+}
+
+/**
+ * Once a day (first sync after 08:00 Kyiv) every user gets a bell digest: what
+ * arrives this week, what is past its planned arrival, and where carrier
+ * tracking says it will be ≥ 2 days later than the sheet. Deduped per day.
+ */
+export async function sendDailyDigest(today: string, users: UserRef[], now = new Date()): Promise<boolean> {
+  if (kyivHour(now) < 8 || !users.length) return false;
+  const dow = (new Date(`${today}T00:00:00Z`).getUTCDay() + 6) % 7;
+  const monday = addDays(today, -dow);
+  const sunday = addDays(monday, 6);
+  const { rows } = await query<DigestRow>(
+    `SELECT s.data->>'product' AS product, COALESCE(s.data->>'forwarder', '') AS forwarder,
+            s.arrival_on::text AS arrival_on, t.eta AS t_eta, t.source AS t_source
+     FROM sheet_rows s LEFT JOIN tracked_items t ON t.id = s.tracked_id
+     WHERE s.tab = 'tracking' AND NOT s.removed AND s.active`,
+  );
+  const week = rows.filter((r) => r.arrival_on && r.arrival_on >= monday && r.arrival_on <= sunday);
+  const overdue = rows.filter((r) => r.arrival_on && r.arrival_on < today);
+  const late = rows.filter((r) => {
+    if (!r.arrival_on || !r.t_eta || !r.t_source?.startsWith('api:')) return false;
+    const eta = new Date(r.t_eta).toISOString().slice(0, 10);
+    return Date.parse(eta) - Date.parse(r.arrival_on) >= 2 * 86_400_000;
+  });
+  if (!week.length && !overdue.length && !late.length) return false;
+  const name = (r: DigestRow) => `${r.product}${r.forwarder ? ` (${r.forwarder})` : ''}`;
+  const parts = [`☀️ Зведення на ${fmt(today)}.`];
+  if (week.length) {
+    const list = week
+      .sort((a, b) => a.arrival_on!.localeCompare(b.arrival_on!))
+      .slice(0, 8)
+      .map((r) => `${name(r)} — ${fmt(r.arrival_on!).slice(0, 5)}`);
+    parts.push(`Цього тижня прибуває ${week.length}: ${list.join('; ')}${week.length > 8 ? '…' : ''}.`);
+  }
+  if (overdue.length) parts.push(`План минув, статусу «розмитнено / доставлено» немає: ${overdue.length} (${overdue.slice(0, 5).map(name).join('; ')}${overdue.length > 5 ? '…' : ''}).`);
+  if (late.length) parts.push(`Трекінг показує запізнення ≥ 2 дн: ${late.slice(0, 5).map(name).join('; ')}${late.length > 5 ? '…' : ''}.`);
+  const message = parts.join(' ').slice(0, 1200);
+  for (const u of users) await insertNotification(u.id, null, `digest:${today}`, message);
+  return true;
+}
+
 let running: Promise<SyncResult> | null = null;
 
 /** Run one sync (concurrent callers share the same run). */
@@ -434,6 +492,7 @@ async function doSync(now: Date): Promise<SyncResult> {
         rows = t.rows;
         result.hubLinked += t.linked;
         result.notified += t.notified;
+        if (await sendDailyDigest(today, users, now).catch(() => false)) result.notified += 1;
       } else if (tab === 'warehouse') {
         rows = await syncWarehouse(grid, today);
       } else {

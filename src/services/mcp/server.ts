@@ -1,6 +1,6 @@
 import { executeTool, logistTools } from '../../agent/tools.js';
 import { getRegistration } from '../drugRegistry.js';
-import { portStatusTool, publicTrackTool } from '../../agent/hubTools.js';
+import { portStatusTool, publicTrackTool, whereNowTool } from '../../agent/hubTools.js';
 import { sheetTools } from '../../agent/sheetTools.js';
 
 /**
@@ -50,6 +50,7 @@ const TITLES: Record<string, string> = {
   track_by_number: 'Трекінг вантажу за номером',
   get_port_status: 'Чи працює порт / аеропорт / кордон',
   sheet_shipments: 'Робоча таблиця: вантажі, прибуття, статуси',
+  where_are_shipments: 'Де зараз вантажі (позиція, ETA, запізнення)',
   warehouse_intake: 'Робоча таблиця: заїзд на склад БЦ',
   sheet_reference: 'Робоча таблиця: ставки Черноморськ/Гданськ, кількості',
 };
@@ -86,6 +87,7 @@ function toolCatalog(): McpTool[] {
     publicTrackTool as CustomToolDef,
     portStatusTool as CustomToolDef,
     ...(sheetTools() as CustomToolDef[]),
+    ...(sheetTools().length ? [whereNowTool as CustomToolDef] : []),
   ];
   return defs.map((d) => ({
     name: d.name,

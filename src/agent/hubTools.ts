@@ -12,6 +12,7 @@ import {
   type TrackingEventRow,
 } from '../services/hub/track.js';
 import { STATUS_LABEL_UK, type TrackResult } from '../services/hub/types.js';
+import { whereNow, whereNowText } from '../services/hub/whereNow.js';
 import { findPorts, getPort, serializePort } from '../services/hub/ports.js';
 import { getCarrierDetail, listCarriers, SEA_CARRIERS } from '../services/hub/lines.js';
 import { suggestRoutes, SuggestError } from '../services/hub/suggestRoutes.js';
@@ -102,6 +103,21 @@ export const routeTools: ChatTool[] = [
   },
 ];
 
+export const whereNowTool: ChatTool = {
+  name: 'where_are_shipments',
+  description:
+    'Де зараз вантажі: для кожного активного вантажу з Логістичного хабу — де він (біля якого порту / ~км від нього), ' +
+    'звідки це відомо (AIS, розрахунок за маршрутом, остання подія перевізника), скільки шляху пройдено, ETA, план з ' +
+    'робочої таблиці і запізнення. query — фільтр (товар, номер, місце, хто везе); only_delayed=true — лише ті, що запізнюються.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      query: { type: 'string', description: 'Фільтр: товар, номер, місце, експедитор.' },
+      only_delayed: { type: 'boolean', description: 'Лише вантажі, що запізнюються проти плану.' },
+    },
+  },
+};
+
 export const hubToolDefinitions: ChatTool[] = [
   ...routeTools,
   {
@@ -129,6 +145,7 @@ export const hubToolDefinitions: ChatTool[] = [
   },
   portStatusTool,
   carrierStatusTool,
+  whereNowTool,
   {
     name: 'find_tracking_numbers',
     description:
@@ -151,7 +168,7 @@ export const publicTrackTool: ChatTool = {
   },
 };
 
-const HUB_NAMES = new Set(['track_shipment', 'list_tracked_shipments', 'find_tracking_numbers', 'track_by_number', 'get_port_status', 'get_carrier_status', 'suggest_routes', 'list_routes']);
+const HUB_NAMES = new Set(['track_shipment', 'list_tracked_shipments', 'find_tracking_numbers', 'track_by_number', 'get_port_status', 'get_carrier_status', 'suggest_routes', 'list_routes', 'where_are_shipments']);
 export function isHubTool(name: string): boolean {
   return HUB_NAMES.has(name);
 }
@@ -263,6 +280,21 @@ export async function executeHubTool(name: string, input: unknown, ctx: HubToolC
         if (err instanceof HubError) return { result: err.message, summary: 'Хаб: помилка' };
         throw err;
       }
+    }
+    case 'where_are_shipments': {
+      const a = (input ?? {}) as { query?: unknown; only_delayed?: unknown };
+      const list = await whereNow({
+        userId: ctx.ownerId,
+        query: a.query ? String(a.query) : undefined,
+        onlyDelayed: a.only_delayed === true,
+      });
+      const delayed = list.filter((w) => (w.delayDays ?? 0) >= 1).length;
+      return {
+        result: `${whereNowText(list)}
+
+Позиції «орієнтовно» — розрахунок за датами з таблиці / трекінгу, не GPS.`,
+        summary: `Де вантажі: ${list.length}${delayed ? `, запізнюються ${delayed}` : ''}`,
+      };
     }
     case 'list_tracked_shipments': {
       if (!ctx.ownerId) return { result: 'Хаб недоступний у цьому контексті.', summary: 'Хаб: помилка' };

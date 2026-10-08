@@ -59,6 +59,10 @@ export interface TrackedRow {
   team?: boolean;
   workspace_number?: string | null;
   sheet_row_index?: number | null;
+  /** From the sheet row: normalised forwarder, cargo type, planned arrival (YYYY-MM-DD). */
+  sheet_forwarder?: string | null;
+  sheet_cargo?: string | null;
+  sheet_plan?: string | null;
 }
 
 export interface TrackingEventRow {
@@ -109,6 +113,10 @@ export function serializeTracked(r: TrackedRow) {
     team: !!r.team,
     /** Row of the team sheet this item comes from (plan fields are read-only here). */
     sheet: r.sheet_row_index ? { rowIndex: r.sheet_row_index, url: sheetRowUrl('tracking', r.sheet_row_index) } : null,
+    /** Who carries it / cargo type / planned arrival — from the team sheet (same as the calendar). */
+    forwarder: r.sheet_forwarder ?? '',
+    cargoType: r.sheet_cargo ?? null,
+    planArrival: r.sheet_plan ?? null,
     createdAt: r.created_at,
   };
 }
@@ -230,10 +238,12 @@ export async function lookupNumber(raw: string, carrierHint?: string): Promise<L
 
 // ── Persistence ──────────────────────────────────────────────────────────────
 
-const SELECT = `SELECT t.*, w.number AS workspace_number, sr.row_index AS sheet_row_index
+const SELECT = `SELECT t.*, w.number AS workspace_number, sr.row_index AS sheet_row_index,
+    sr.data->>'forwarder' AS sheet_forwarder, sr.data->>'cargoType' AS sheet_cargo,
+    sr.data->'arrival'->>'date' AS sheet_plan
   FROM tracked_items t LEFT JOIN workspaces w ON w.id = t.workspace_id
   LEFT JOIN LATERAL (
-    SELECT row_index FROM sheet_rows s WHERE s.tracked_id = t.id AND NOT s.removed ORDER BY s.updated_at DESC LIMIT 1
+    SELECT row_index, data FROM sheet_rows s WHERE s.tracked_id = t.id AND NOT s.removed ORDER BY s.updated_at DESC LIMIT 1
   ) sr ON TRUE`;
 
 /** Items the user can see: team items (from the sheet), their own, and any linked to a shipment they own. */
@@ -251,6 +261,12 @@ export async function listTracked(
   }
   if (!opts.includeArchived) where += ' AND NOT t.archived';
   const { rows } = await query<TrackedRow>(`${SELECT} WHERE ${where} ORDER BY t.created_at DESC LIMIT 500`, params);
+  return rows;
+}
+
+/** Team items (synced from the sheet) — for the public MCP, which has no user. */
+export async function listTeamTracked(): Promise<TrackedRow[]> {
+  const { rows } = await query<TrackedRow>(`${SELECT} WHERE t.team AND NOT t.archived ORDER BY t.created_at DESC LIMIT 500`);
   return rows;
 }
 

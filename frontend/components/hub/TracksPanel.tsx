@@ -10,7 +10,9 @@ import {
   ago,
   countdown,
   effEta,
+  delayDays,
   etaShiftDays,
+  lacksCoords,
   fmtDate,
   hubApi,
   KIND_LABEL,
@@ -22,6 +24,7 @@ import {
   type Track,
   type TrackingSuggestion,
 } from "@/lib/hub";
+import { CARGO_META, forwarderColor, type CargoType } from "@/lib/calendar";
 
 export interface WorkspaceRef {
   id: string;
@@ -29,7 +32,7 @@ export interface WorkspaceRef {
   supplier: string;
 }
 
-type Filter = "all" | HubMode | "problems";
+type Filter = "all" | HubMode | "problems" | "nogeo";
 
 const FILTERS: { key: Filter; label: string }[] = [
   { key: "all", label: "Всі" },
@@ -38,16 +41,24 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: "courier", label: "Курʼєр" },
   { key: "domestic", label: "Україна" },
   { key: "problems", label: "Увага" },
+  { key: "nogeo", label: "Без координат" },
 ];
 
 /** Needs attention: a problem, no data, a slipped ETA, or a hand-kept sea item still empty. */
 const needsAttention = (t: Track) =>
-  t.status === "exception" || t.status === "unknown" || etaShiftDays(t) >= 2 || (t.manualOnly && t.source !== "manual" && t.source !== "sheet");
+  t.status === "exception" ||
+  t.status === "unknown" ||
+  etaShiftDays(t) >= 2 ||
+  (delayDays(t) ?? 0) >= 2 ||
+  (t.manualOnly && t.source !== "manual" && t.source !== "sheet");
 
 const MODE_ICON: Record<HubMode, string> = { sea: "🚢", air: "✈️", courier: "📦", domestic: "🚚" };
 
 export function TracksPanel({
   items,
+  trackFilter,
+  onTrackFilter,
+  facets,
   selectedId,
   onSelect,
   onChanged,
@@ -55,6 +66,10 @@ export function TracksPanel({
   workspaces,
 }: {
   items: Track[];
+  /** Who carries it / cargo type — shared with the map (same as the calendar). */
+  trackFilter?: { forwarder: string; type: string };
+  onTrackFilter?: (f: { forwarder: string; type: string }) => void;
+  facets?: { forwarders: string[]; types: string[] };
   selectedId: string | null;
   onSelect: (id: string) => void;
   onChanged: (selectId?: string) => void;
@@ -154,7 +169,9 @@ export function TracksPanel({
           ? true
           : filter === "problems"
             ? needsAttention(t)
-            : t.mode === filter
+            : filter === "nogeo"
+              ? lacksCoords(t)
+              : t.mode === filter
       ),
     [items, filter]
   );
@@ -305,7 +322,9 @@ export function TracksPanel({
               ? items.length
               : f.key === "problems"
                 ? items.filter(needsAttention).length
-                : items.filter((t) => t.mode === f.key).length;
+                : f.key === "nogeo"
+                  ? items.filter(lacksCoords).length
+                  : items.filter((t) => t.mode === f.key).length;
           if (f.key !== "all" && count === 0) return null;
           return (
             <button key={f.key} type="button" role="tab" aria-selected={filter === f.key} onClick={() => setFilter(f.key)} style={filterBtn(filter === f.key, f.key === "problems")}>
@@ -314,6 +333,46 @@ export function TracksPanel({
           );
         })}
       </div>
+
+      {trackFilter && onTrackFilter && facets && (facets.forwarders.length > 0 || facets.types.length > 0) && (
+        <div style={{ display: "flex", gap: 6, padding: "0 12px 6px", flexWrap: "wrap" }} data-testid="hub-track-filters">
+          {facets.forwarders.length > 0 && (
+            <select
+              aria-label="Хто везе"
+              value={trackFilter.forwarder}
+              onChange={(e) => onTrackFilter({ ...trackFilter, forwarder: e.target.value })}
+              style={selectStyle(!!trackFilter.forwarder)}
+            >
+              <option value="">Хто везе: усі</option>
+              {facets.forwarders.map((f) => (
+                <option key={f} value={f}>
+                  {f}
+                </option>
+              ))}
+            </select>
+          )}
+          {facets.types.length > 0 && (
+            <select
+              aria-label="Тип вантажу"
+              value={trackFilter.type}
+              onChange={(e) => onTrackFilter({ ...trackFilter, type: e.target.value })}
+              style={selectStyle(!!trackFilter.type)}
+            >
+              <option value="">Тип: усі</option>
+              {facets.types.map((t) => (
+                <option key={t} value={t}>
+                  {CARGO_META[t as CargoType]?.icon ?? ""} {CARGO_META[t as CargoType]?.label ?? t}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+      )}
+      {filter === "nogeo" && visible.length > 0 && (
+        <p style={{ margin: "0 12px 6px", fontSize: 12, color: "var(--muted)", lineHeight: 1.45 }}>
+          Ці вантажі не вдалося покласти на карту: місце не розпізнано. Уточніть місто або порт у таблиці / картці.
+        </p>
+      )}
 
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "4px 8px 12px" }} data-testid="hub-track-list">
         {items.length === 0 ? (
@@ -328,8 +387,24 @@ export function TracksPanel({
   );
 }
 
+function selectStyle(active: boolean): React.CSSProperties {
+  return {
+    height: 28,
+    maxWidth: 170,
+    borderRadius: 8,
+    border: `1px solid ${active ? "var(--accent)" : "var(--border)"}`,
+    background: "var(--surface)",
+    color: "var(--text)",
+    font: "inherit",
+    fontSize: 12,
+    padding: "0 6px",
+  };
+}
+
 function TrackRow({ t, selected, onClick }: { t: Track; selected: boolean; onClick: () => void }) {
   const color = statusColor(t.status);
+  const delay = delayDays(t);
+  const noGeo = lacksCoords(t);
   const progress = t.status === "delivered" ? 1 : (t.live?.progress ?? 0);
   const shift = etaShiftDays(t);
   const eta = effEta(t);
@@ -365,10 +440,17 @@ function TrackRow({ t, selected, onClick }: { t: Track; selected: boolean; onCli
             {t.label || t.number}
           </div>
           <div style={{ fontSize: 11.5, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {t.cargoType && CARGO_META[t.cargoType as CargoType] ? `${CARGO_META[t.cargoType as CargoType].icon} ` : ""}
             {t.label ? `${t.number} · ` : ""}
             {t.carrierName}
             {t.workspaceNumber ? ` · №${t.workspaceNumber}` : ""}
           </div>
+          {t.forwarder && (
+            <div style={{ fontSize: 11.5, display: "flex", alignItems: "center", gap: 5, color: "var(--muted)" }}>
+              <span style={{ width: 8, height: 8, borderRadius: 2, background: forwarderColor(t.forwarder), flex: "none" }} />
+              {t.forwarder}
+            </div>
+          )}
         </div>
         <span style={pill(color)}>{t.statusLabel}</span>
       </div>
@@ -388,6 +470,14 @@ function TrackRow({ t, selected, onClick }: { t: Track; selected: boolean; onCli
           </span>
         )}
       </div>
+      {delay != null && delay >= 1 && (
+        <div style={{ fontSize: 12, color: "var(--err)", fontWeight: 600 }} data-testid="hub-row-delay">
+          ⚠ запізнюється на {delay} дн проти плану ({fmtDate(`${t.planArrival}T00:00:00Z`).slice(0, 5)})
+        </div>
+      )}
+      {noGeo && (
+        <div style={{ fontSize: 11.5, color: "var(--warn)" }}>📍 Немає координат — місце не розпізнано</div>
+      )}
       <div style={{ height: 4, borderRadius: 4, background: "var(--hover)", overflow: "hidden" }} aria-hidden>
         <div style={{ width: `${Math.round(progress * 100)}%`, height: "100%", background: color, borderRadius: 4, transition: "width .6s" }} />
       </div>

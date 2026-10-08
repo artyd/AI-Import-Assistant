@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiError } from "@/lib/api";
+import { useAppStore } from "@/lib/store";
 import {
   addDays,
   calendarApi,
@@ -646,6 +647,8 @@ function EventChip({ e, row, onPick, selected, wide }: { e: CalEvent; row: CalRo
 // ── Side panels ──────────────────────────────────────────────────────────────
 
 function RowDetail({ row, events, today, onClose }: { row: CalRow; events: CalEvent[]; today: string; onClose: () => void }) {
+  const setView = useAppStore((s) => s.setView);
+  const setFocusTrackId = useAppStore((s) => s.setFocusTrackId);
   const left = row.arrival && !["customs", "delivered"].includes(row.status) ? daysFrom(today, row.arrival.date) : null;
   const facts: Array<[string, string]> = [
     ["Тип", `${CARGO_META[row.cargoType].icon} ${CARGO_META[row.cargoType].label}`],
@@ -766,11 +769,27 @@ function RowDetail({ row, events, today, onClose }: { row: CalRow; events: CalEv
           </section>
         )}
       </div>
-      {row.url && (
-        <div style={{ padding: 12, borderTop: "1px solid var(--border)" }}>
-          <a className="btn" href={row.url} target="_blank" rel="noreferrer noopener" style={{ ...toolBtn, width: "100%", justifyContent: "center", textDecoration: "none", display: "inline-flex", alignItems: "center" }}>
-            Відкрити рядок у таблиці ↗
-          </a>
+      {(row.url || row.trackedId) && (
+        <div style={{ padding: 12, borderTop: "1px solid var(--border)", display: "grid", gap: 6 }}>
+          {row.trackedId && (
+            <button
+              type="button"
+              className="btn btn-primary"
+              data-testid="calendar-show-on-map"
+              style={{ ...toolBtn, width: "100%", justifyContent: "center", display: "inline-flex", alignItems: "center" }}
+              onClick={() => {
+                setFocusTrackId(row.trackedId);
+                setView("map");
+              }}
+            >
+              🗺 Показати на карті
+            </button>
+          )}
+          {row.url && (
+            <a className="btn" href={row.url} target="_blank" rel="noreferrer noopener" style={{ ...toolBtn, width: "100%", justifyContent: "center", textDecoration: "none", display: "inline-flex", alignItems: "center" }}>
+              Відкрити рядок у таблиці ↗
+            </a>
+          )}
         </div>
       )}
     </div>

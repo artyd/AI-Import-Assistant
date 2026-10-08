@@ -813,7 +813,9 @@ confirms with `PATCH { workspaceId }`): `{ matches: { id, number, supplier }[] }
 
 ### Team sheet items
 Items synced from the team Google Sheet (see "Logist calendar") carry
-`team: true` (visible to every user) and `sheet: { rowIndex, url }` (the sheet row;
+`team: true` (visible to every user), `forwarder` / `cargoType` / `planArrival`
+(same as the calendar — the map rings markers in the forwarder's colour and flags
+an ETA later than `planArrival`) and `sheet: { rowIndex, url }` (the sheet row;
 `source: 'sheet'` for hand-kept sea items). Their plan (route, dates, status) comes
 from the sheet hourly: `PATCH { manual }` on them → `409` («змініть у таблиці»);
 events can still be added.
@@ -915,7 +917,9 @@ comment text; warehouse rows are dated only when a date is written — «на э
 неделе» gets none) into `sheet_rows`. Active rows with a
 tracking number become team items in the hub. The responsible logist (matched by
 first name to a user; else everyone) is notified when the planned arrival changes
-and the day before / the day of an arrival. All routes are authenticated and
+and the day before / the day of an arrival; every user gets a daily «☀️ Зведення»
+(first sync after 08:00 Kyiv: arrivals this week, plans that passed, tracking
+delays ≥ 2 days). All routes are authenticated and
 team-wide (no per-user scoping).
 
 Shapes:
@@ -941,7 +945,8 @@ Shapes:
 ### `GET /api/calendar/attention`
 Active / recently added tracking rows with a data problem (`overdue`,
 `tracking_delivered` / `tracking_eta` — the carrier tracking disagrees with the
-sheet, `date_unparsed`, `container_not_number`, `number_mangled`, `no_dates`):
+sheet, `place_unknown` — the map could not locate the origin / destination text,
+`date_suspicious` — a written year far from the working year, `date_unparsed`, `container_not_number`, `number_mangled`, `no_dates`):
 `{ rows: CalRow[] }`, newest rows first.
 
 ### `GET /api/calendar/export.xlsx?from=&to=`
@@ -965,7 +970,10 @@ tools** are exposed — no shipment data: `uktzed_lookup_code`,
 **When `SHEET_ID` is set** the team-sheet tools are listed as well (owner's explicit
 decision, 2026-10-09 — they expose the team's shipment plan on this open endpoint):
 `sheet_shipments` (`{ period?, from?, to?, query?, logist?, attention? }`),
-`warehouse_intake` (`{ query? }`), `sheet_reference` (`{ tab: rates|quantities, query? }`).
+`warehouse_intake` (`{ query? }`), `sheet_reference` (`{ tab: rates|quantities, query? }`),
+`where_are_shipments` (`{ query?, only_delayed? }` — team hub items: nearest port /
+distance, position source (AIS / route estimate / carrier event), % of the route,
+ETA, sheet plan, delay).
 The same tools are available to the chat agent.
 
 ### `POST /api/mcp`  (no auth — open; `/api/mcp/<anything>` also served for old token links)

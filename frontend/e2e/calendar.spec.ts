@@ -1,5 +1,9 @@
 import { test, expect, type Page } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { mockWorkspace, WSID } from "./mocks";
+
+const LIVE = JSON.parse(readFileSync(join(__dirname, "fixtures", "hub-live.json"), "utf8"));
 
 /**
  * Logist calendar over the team Google Sheet — against a mocked backend with a
@@ -63,6 +67,7 @@ const ROWS = [
     departure: { date: plus(-20), guessed: true },
     arrival: { date: plus(3), guessed: false },
     track: { status: "in_transit", statusLabel: "В дорозі", eta: `${plus(5)}T00:00:00.000Z`, source: "sheet" },
+    trackedId: "t1",
   }),
   row("r2", {
     rowIndex: 230,
@@ -137,7 +142,8 @@ async function mockCalendar(page: Page, state: CalState) {
       await route.fulfill({ status: 200, contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", body: "xlsx" });
       return true;
     }
-    if (pathname === "/api/hub/live") return (await json({ items: [], vessels: [], serverTime: new Date().toISOString() }), true);
+    if (pathname === "/api/hub/live") return (await json(LIVE), true);
+    if (pathname.startsWith("/api/hub/") || pathname.startsWith("/api/map/")) return (await json({ ports: [], carriers: [], lanes: [], routes: [], tracks: [], suggestions: [] }), true);
     return false;
   });
 }
@@ -234,6 +240,17 @@ test.describe("Logist calendar (team sheet)", () => {
     await expect(track).toContainText("MSBU1491088");
     await expect(track.getByRole("link", { name: /Відстежити на сайті/ })).toHaveAttribute("href", /MSBU1491088/);
     await page.screenshot({ path: `test-results/calendar-marks-${info.project.name}.png` });
+  });
+
+  test("«Показати на карті» opens the hub with that shipment selected", async ({ page }) => {
+    const state: CalState = { ranges: [], syncs: 0, exports: [] };
+    await mockCalendar(page, state);
+    await page.addInitScript(() => localStorage.setItem("aia_calendar_view", "week"));
+    await openCalendar(page);
+    await page.getByTestId("calendar-event").filter({ hasText: "Холіна" }).first().click();
+    await page.getByTestId("calendar-show-on-map").click();
+    await expect(page.getByTestId("hub-map")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId("hub-track-detail")).toContainText("MSKU1234565");
   });
 
   test("event → row card with countdown, sheet link; «Увага» list; sync + Excel", async ({ page }, info) => {

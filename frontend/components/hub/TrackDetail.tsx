@@ -12,6 +12,7 @@ import { ApiError } from "@/lib/api";
 import {
   ago,
   countdown,
+  delayDays,
   effDeparted,
   effEta,
   etaShiftDays,
@@ -174,6 +175,14 @@ export function TrackDetail({
               )}
             </div>
           )}
+          {(() => {
+            const d = delayDays(track);
+            return d != null && track.planArrival && d !== 0 ? (
+              <div data-testid="hub-plan-delay" style={{ marginTop: 6, fontSize: 12.5, color: d > 0 ? "var(--err)" : "var(--ok)", fontWeight: 600 }}>
+                {d > 0 ? "⚠ Запізнюється" : "Випереджає"} на {Math.abs(d)} дн проти плану таблиці ({fmtDate(`${track.planArrival}T00:00:00Z`)})
+              </div>
+            ) : null;
+          })()}
           {shift !== 0 && track.status !== "delivered" && (
             <div style={{ marginTop: 8, fontSize: 12.5, color: shift > 0 ? "var(--err)" : "var(--ok)" }}>
               ETA зсунулась на {shift > 0 ? "+" : ""}

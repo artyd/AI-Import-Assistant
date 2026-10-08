@@ -36,11 +36,15 @@ import {
   type LiveSnapshot,
   type Track,
   type TrackEvent,
+  delayDays,
   effDeparted,
   effEta,
   etaShiftDays,
+  fmtDate,
 } from "@/lib/hub";
 import { IconSpinner } from "@/components/icons";
+import { forwarderColor, todayKyiv } from "@/lib/calendar";
+import { useAppStore } from "@/lib/store";
 import {
   aisIcon,
   clusterIcon,
@@ -167,9 +171,33 @@ function etaBadge(t: Track, now: number): EtaBadge | null {
   const eta = effEta(t);
   if (!eta || ["delivered", "pending", "unknown", "exception"].includes(t.status)) return null;
   const days = Math.ceil((new Date(eta).getTime() - now) / 86_400_000);
-  const late = etaShiftDays(t) >= 1 || days < 0;
+  const late = etaShiftDays(t) >= 1 || days < 0 || (delayDays(t) ?? 0) >= 1;
   const text = days < 0 ? `+${-days} дн` : days === 0 ? "сьогодні" : `${days} дн`;
   return { text, late };
+}
+
+export interface TrackFilter {
+  forwarder: string;
+  type: string;
+}
+
+/**
+ * Where the route estimate puts an item on a given day: before departure at the
+ * origin, after the ETA at the destination, in between along its lane. Items
+ * without a route or dates stay where they are.
+ */
+function positionOn(t: Track, day: string): { point: LatLng; heading: number } | null {
+  const path = t.live?.path ?? [];
+  const dep = effDeparted(t);
+  const eta = effEta(t);
+  if (path.length < 2) return null;
+  if (t.status === "delivered") return { point: path[path.length - 1]!, heading: 0 };
+  if (!dep || !eta) return null;
+  const t0 = Date.parse(dep);
+  const t1 = Date.parse(eta);
+  if (!(t1 > t0)) return null;
+  const f = Math.max(0, Math.min(1, (Date.parse(`${day}T12:00:00Z`) - t0) / (t1 - t0)));
+  return splitAt(smoothPath(path), f);
 }
 
 type LayerKey = "tracks" | "routes" | "ais" | "ports" | "lanes" | "risk";
@@ -256,6 +284,14 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
   const [basemap, setBasemap] = useState<BasemapKey>("auto");
   const [onlyShipment, setOnlyShipment] = useState(false);
   const [replay, setReplay] = useState<Replay | null>(null);
+  // Same filters as the calendar (who carries it / cargo type) — narrow the map, list and HUD.
+  const [trackFilter, setTrackFilter] = useState<TrackFilter>({ forwarder: "", type: "" });
+  // "Позиції на дату": markers move to where the route estimate puts them on that day.
+  const [atDate, setAtDate] = useState<string | null>(null);
+  const atDateRef = useRef<string | null>(null);
+  atDateRef.current = atDate;
+  const focusTrackId = useAppStore((s) => s.focusTrackId);
+  const setFocusTrackId = useAppStore((s) => s.setFocusTrackId);
   const [replayT, setReplayT] = useState(0);
   const replayLayer = useRef<L.LayerGroup | null>(null);
   const replayMarks = useRef<{ actual: L.Marker; plan: L.Marker; trail: L.Polyline } | null>(null);
@@ -293,9 +329,18 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
   // shipment the hub was opened from.
   const shipmentFilter = onlyShipment && !!workspaceId;
   const items = useMemo(
-    () => (shipmentFilter ? allItems.filter((t) => t.workspaceId === workspaceId) : allItems),
-    [allItems, shipmentFilter, workspaceId]
+    () =>
+      (shipmentFilter ? allItems.filter((t) => t.workspaceId === workspaceId) : allItems).filter(
+        (t) =>
+          (!trackFilter.forwarder || (t.forwarder ?? "") === trackFilter.forwarder) &&
+          (!trackFilter.type || (t.cargoType ?? "") === trackFilter.type)
+      ),
+    [allItems, shipmentFilter, workspaceId, trackFilter]
   );
+  const trackFacets = useMemo(() => {
+    const uniq = (xs: string[]) => [...new Set(xs.filter(Boolean))].sort((a, b) => a.localeCompare(b, "uk"));
+    return { forwarders: uniq(allItems.map((t) => t.forwarder ?? "")), types: uniq(allItems.map((t) => t.cargoType ?? "")) };
+  }, [allItems]);
   const selected = items.find((t) => t.id === selectedId) ?? null;
 
   // ── Data ─────────────────────────────────────────────────────────────────
@@ -742,12 +787,14 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
     const t0 = performance.now();
     if (layers.tracks) {
       for (const t of items) {
-        const pos = t.live?.pos;
+        const at = atDate ? positionOn(t, atDate) : null;
+        const pos = at?.point ?? t.live?.pos;
         if (!pos) continue;
         seen.add(t.id);
         const isSel = t.id === selectedId;
         const badge = narrow ? null : etaBadge(t, now);
-        const iconKey = `${t.mode}|${t.status}|${isSel}|${badge?.text ?? ""}|${badge?.late ? 1 : 0}`;
+        const ring = t.forwarder ? forwarderColor(t.forwarder) : null;
+        const iconKey = `${t.mode}|${t.status}|${isSel}|${badge?.text ?? ""}|${badge?.late ? 1 : 0}|${ring ?? ""}`;
         const cur = anims.get(t.id);
         if (cur) {
           const ll = cur.marker.getLatLng();
@@ -755,15 +802,15 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
           cur.to = pos;
           cur.start = t0;
           cur.item = t;
-          cur.heading = t.live?.heading ?? 0;
+          cur.heading = at?.heading ?? t.live?.heading ?? 0;
           if (cur.iconKey !== iconKey) {
-            cur.marker.setIcon(trackIcon(t.mode, t.status, isSel, badge));
+            cur.marker.setIcon(trackIcon(t.mode, t.status, isSel, badge, ring));
             cur.iconKey = iconKey;
           }
           cur.marker.setZIndexOffset(isSel ? 1000 : 0);
           if (glyphRotates(t.mode)) setRotation(cur.marker, cur.heading);
         } else {
-          const marker = L.marker(pos, { icon: trackIcon(t.mode, t.status, isSel, badge), zIndexOffset: isSel ? 1000 : 0, keyboard: true, title: t.label || t.number })
+          const marker = L.marker(pos, { icon: trackIcon(t.mode, t.status, isSel, badge, ring), zIndexOffset: isSel ? 1000 : 0, keyboard: true, title: t.label || t.number })
             .on("click", () => {
               setTab("tracks");
               selectTrack(t.id);
@@ -782,7 +829,7 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
         anims.delete(id);
       }
     }
-  }, [map, items, selectedId, layers.tracks, selectTrack, now, narrow]);
+  }, [map, items, selectedId, layers.tracks, selectTrack, now, narrow, atDate]);
 
   // ── "Програти рейс": ghost markers for fact vs plan along the path ───────
   const startReplay = useCallback(
@@ -901,8 +948,9 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
       if (!reduce && ts - lastSlow > 1000) {
         lastSlow = ts;
         const wall = Date.now();
-        // In-transit estimates keep creeping along their lane between polls.
-        for (const a of trackAnims.current.values()) {
+        // In-transit estimates keep creeping along their lane between polls
+        // (not while the map shows positions on a chosen date).
+        for (const a of atDateRef.current ? [] : trackAnims.current.values()) {
           const it = a.item;
           const dep = effDeparted(it);
           const eta = effEta(it);
@@ -941,6 +989,18 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
     },
     []
   );
+
+  // Opened from the calendar («Показати на карті»): select that item once it's loaded.
+  useEffect(() => {
+    if (!focusTrackId || !snap) return;
+    if (allItems.some((t) => t.id === focusTrackId)) {
+      setTrackFilter({ forwarder: "", type: "" });
+      setOnlyShipment(false);
+      setTab("tracks");
+      selectTrack(focusTrackId);
+    }
+    setFocusTrackId(null);
+  }, [focusTrackId, snap, allItems, selectTrack, setFocusTrackId]);
 
   // Fly to a newly selected item.
   useEffect(() => {
@@ -1324,6 +1384,9 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
             {tab === "tracks" ? (
               <TracksPanel
                 items={items}
+                trackFilter={trackFilter}
+                onTrackFilter={setTrackFilter}
+                facets={trackFacets}
                 selectedId={selectedId}
                 onSelect={(id) => selectTrack(id)}
                 onChanged={(id) => {
@@ -1511,6 +1574,34 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
         />
       )}
       {!narrow && <MapLegend right={rightInset} bottom={replay ? 150 : 40} />}
+      {atDate && !replay && (
+        <div style={{ position: "absolute", left: leftInset, right: rightInset, bottom: 70, zIndex: 1200, display: "flex", justifyContent: "center", pointerEvents: "none" }}>
+          <div
+            style={{ ...glass, pointerEvents: "auto", display: "flex", alignItems: "center", gap: 10, padding: "8px 14px", fontSize: 12.5, width: "min(560px, 100%)" }}
+            data-testid="hub-date-slider"
+          >
+            <span style={{ whiteSpace: "nowrap", fontWeight: 650 }} data-testid="hub-date-label">
+              📅 {fmtDate(`${atDate}T00:00:00Z`)}
+            </span>
+            <input
+              type="range"
+              min={-30}
+              max={120}
+              step={1}
+              value={Math.round((Date.parse(atDate) - Date.parse(todayKyiv())) / 86_400_000)}
+              onChange={(e) => setAtDate(new Date(Date.parse(todayKyiv()) + Number(e.target.value) * 86_400_000).toISOString().slice(0, 10))}
+              aria-label="День, на який показати позиції"
+              style={{ flex: 1, minWidth: 0 }}
+            />
+            <button type="button" className="btn" style={{ height: 26, padding: "0 8px", fontSize: 12 }} onClick={() => setAtDate(todayKyiv())}>
+              Сьогодні
+            </button>
+            <button type="button" className="btn" aria-label="Закрити вибір дати" style={{ height: 26, width: 26, padding: 0, fontSize: 14 }} onClick={() => setAtDate(null)}>
+              ×
+            </button>
+          </div>
+        </div>
+      )}
       {!replay && !(narrow && (showPanel || hasDetail)) && (
         <div
           style={{ position: "absolute", left: leftInset, right: rightInset, bottom: 18, zIndex: 1200, display: "flex", justifyContent: "center", pointerEvents: "none" }}
@@ -1526,6 +1617,16 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
             <Stat icon="✓" n={stats.done} label="доставлено" color="var(--ok)" compact={compactHud} />
             <Stat icon="⛔" n={portIssues} label="портів і кордонів зі збоями" color="var(--err)" compact={compactHud} />
             <span style={{ width: 1, alignSelf: "stretch", background: "var(--border)" }} />
+            <button
+              type="button"
+              onClick={() => setAtDate((d) => (d ? null : todayKyiv()))}
+              aria-pressed={!!atDate}
+              data-testid="hub-date-toggle"
+              title="Де будуть вантажі в обраний день (розрахунок за маршрутом і датами)"
+              style={{ ...segBtn(!!atDate), height: 26, padding: "0 8px", fontSize: 12 }}
+            >
+              📅 {compactHud ? "" : "На дату"}
+            </button>
             <span style={{ color: "var(--muted)" }} title="Живі позиції суден (aisstream.io)">
               <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: (snap?.vessels.length ?? 0) > 0 ? "var(--ok)" : "var(--faint)", marginRight: 6 }} />
               AIS: {(snap?.vessels.length ?? 0) > 0 ? `${snap!.vessels.length}${compactHud ? "" : " суден"}` : "—"}
