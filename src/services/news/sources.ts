@@ -1,7 +1,7 @@
 /**
  * News rubrics + the public RSS/Atom feeds they ingest from.
  *
- * The 8 rubric KEYS below are a frozen contract with the frontend filter bar
+ * The rubric KEYS below are a frozen contract with the frontend filter bar
  * (do not rename — see API_CONTRACT.md). The aggregate "Всі новини" tab is a
  * frontend-only concept (pass no `rubric`, or `rubric=all`, to GET /api/news).
  *
@@ -28,6 +28,7 @@ export const RUBRIC_KEYS = [
   'fx',
   'pharma',
   'adr',
+  'world',
 ] as const;
 
 export type RubricKey = (typeof RUBRIC_KEYS)[number];
@@ -42,6 +43,7 @@ export const RUBRICS: Record<RubricKey, string> = {
   fx: 'Курси валют / ПДВ',
   pharma: 'Фарм/хім регулювання',
   adr: 'ADR / небезпечні',
+  world: 'Світова логістика',
 };
 
 export function isRubricKey(v: string): v is RubricKey {
@@ -102,4 +104,17 @@ export const NEWS_SOURCES: NewsSource[] = [
   // ── ADR / небезпечні ─────────────────────────────────────────────────────────
   // [confirmed] Bulk Distributor — tank/bulk/hazmat road transport (WordPress feed).
   { rubric: 'adr', name: 'Bulk Distributor', url: 'https://www.bulk-distributor.com/feed/' },
+
+  // ── Світова логістика ────────────────────────────────────────────────────────
+  // Worldwide disruptions — port congestion / strikes / closures, canals and
+  // chokepoints, carrier networks, air cargo, supply chains. Also fed to the hub's
+  // AI port / carrier status reader, so world ports get live statuses too.
+  // [confirmed 2026-10-09] all return valid RSS/Atom with same-week items.
+  { rubric: 'world', name: 'The Maritime Executive', url: 'https://maritime-executive.com/articles.rss' },
+  { rubric: 'world', name: 'Hellenic Shipping News', url: 'https://www.hellenicshippingnews.com/feed/' },
+  { rubric: 'world', name: 'Container News', url: 'https://container-news.com/feed/' },
+  { rubric: 'world', name: 'Seatrade Maritime', url: 'https://www.seatrade-maritime.com/rss.xml' },
+  { rubric: 'world', name: 'MarineLink', url: 'https://www.marinelink.com/news/rss' },
+  { rubric: 'world', name: 'Air Cargo Week', url: 'https://aircargoweek.com/feed/' },
+  { rubric: 'world', name: 'Supply Chain Dive', url: 'https://www.supplychaindive.com/feeds/news/' },
 ];

@@ -2,7 +2,8 @@
 
 // "Порти" tab of the hub: every sea port, cargo airport and border crossing with
 // its live operating status (AI from news or a logist's mark), personal ★
-// favourites, quick filters and search.
+// favourites, quick filters and search. The quick filter is owned by HubCanvas
+// so the map shows the same selection as the list.
 
 import { useMemo, useState } from "react";
 import {
@@ -15,7 +16,8 @@ import {
 } from "@/lib/hub";
 import { pill } from "./TracksPanel";
 
-type Filter = "fav" | "issues" | "all" | PlaceKind;
+export type PortFilter = "fav" | "issues" | "all" | PlaceKind;
+type Filter = PortFilter;
 
 const FILTERS: { key: Filter; label: string }[] = [
   { key: "fav", label: "★ Обрані" },
@@ -32,19 +34,35 @@ export function isIssue(p: HubPort): boolean {
   return p.status?.status === "closed" || p.status?.status === "disrupted" || p.status?.status === "congested";
 }
 
+/** Does a place pass the quick filter? (shared by the list and the map). */
+export function portMatches(p: HubPort, f: PortFilter): boolean {
+  if (p.kind === "inland") return false;
+  if (f === "fav") return p.favorite;
+  if (f === "issues") return isIssue(p);
+  if (f === "all") return true;
+  return p.kind === f;
+}
+
+/** The filter shown before the user picks one: favourites if any, else problems. */
+export function defaultPortFilter(ports: HubPort[]): PortFilter {
+  return ports.some((p) => p.favorite) ? "fav" : "issues";
+}
+
 export function PortsPanel({
   ports,
   selectedCode,
+  filter,
+  onFilter,
   onSelect,
   onChanged,
 }: {
   ports: HubPort[];
   selectedCode: string | null;
+  filter: PortFilter;
+  onFilter: (f: PortFilter) => void;
   onSelect: (code: string) => void;
   onChanged: () => void;
 }) {
-  const hasFav = ports.some((p) => p.favorite);
-  const [filter, setFilter] = useState<Filter>(hasFav ? "fav" : "issues");
   const [q, setQ] = useState("");
   const [pending, setPending] = useState<string | null>(null);
 
@@ -68,9 +86,7 @@ export function PortsPanel({
       list = list.filter(
         (p) => p.name.toLowerCase().includes(t) || p.nameEn.toLowerCase().includes(t) || p.code.toLowerCase() === t
       );
-    } else if (filter === "fav") list = list.filter((p) => p.favorite);
-    else if (filter === "issues") list = list.filter(isIssue);
-    else if (filter !== "all") list = list.filter((p) => p.kind === filter);
+    } else list = list.filter((p) => portMatches(p, filter));
     const rank = (p: HubPort) =>
       ({ closed: 0, disrupted: 1, congested: 2, ok: 3 })[p.status?.status ?? "ok"] + (p.status ? 0 : 4);
     return [...list].sort((a, b) => Number(b.favorite) - Number(a.favorite) || rank(a) - rank(b) || a.name.localeCompare(b.name, "uk"));
@@ -105,7 +121,7 @@ export function PortsPanel({
               role="tab"
               aria-selected={filter === f.key && !q}
               onClick={() => {
-                setFilter(f.key);
+                onFilter(f.key);
                 setQ("");
               }}
               style={{

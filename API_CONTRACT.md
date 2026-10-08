@@ -662,7 +662,7 @@ served read-only. **Retention:** only *fresh* news is ever returned or counted �
 items with `published_at` older than `NEWS_RETENTION_DAYS` (default `14`) are
 excluded from the API and purged on each ingest run. Not workspace-scoped.
 
-**Rubric keys** (frozen; the 8 keys the FE filter bar renders — the aggregate
+**Rubric keys** (frozen; the 9 keys the FE filter bar renders — the aggregate
 "Всі новини" tab is FE-only, requested by omitting `rubric` or passing `all`):
 
 | key | Ukrainian label |
@@ -675,14 +675,17 @@ excluded from the API and purged on each ingest run. Not workspace-scoped.
 | `fx` | Курси валют / ПДВ |
 | `pharma` | Фарм/хім регулювання |
 | `adr` | ADR / небезпечні |
+| `world` | Світова логістика |
 
 ### `GET /api/news?rubric=<key>`  (auth)
 Fresh news within the retention window, newest first (`published_at DESC`, capped
-at 200 items). `rubric` omitted or `all` ⇒ every rubric; any of the 8 keys ⇒
-that rubric only (an unknown value is treated as `all`).
+at 200 items). `rubric` omitted or `all` ⇒ every rubric; any of the 9 keys ⇒
+that rubric only (an unknown value is treated as `all`). Rubric `world`
+(«Світова логістика») = worldwide disruptions: ports, canals, carriers, air cargo,
+supply chains.
 Response `200`: `{ "items": NewsItem[], "counts": { <rubric>: number, …, "total": number } }`
 where `NewsItem = { id, rubric, title, summary, source, url, published_at }`
-(`published_at` is an ISO string or `null`). `counts` has all 8 rubric keys
+(`published_at` is an ISO string or `null`). `counts` has all 9 rubric keys
 (zero-filled) plus `total`, computed over the same retention window.
 
 ---

@@ -1,10 +1,11 @@
 // News rubric metadata + helpers for the Новини view.
-// The 8 rubric keys + Ukrainian labels are backend-frozen (see GET /api/news);
+// The rubric keys + Ukrainian labels are backend-frozen (see GET /api/news);
 // "all" is a client-side aggregate tab. Colors reuse existing CSS tokens and
 // rotate through them so adjacent rubrics stay visually distinct.
 
 // Order matters — this drives the filter-pill order in NewsView (after "all").
 export const NEWS_RUBRIC_ORDER = [
+  "world",
   "customs",
   "ncts",
   "freight",
@@ -20,6 +21,7 @@ export type NewsRubricKey = (typeof NEWS_RUBRIC_ORDER)[number];
 // Ukrainian labels (backend-frozen). "all" is the aggregate tab label.
 export const NEWS_RUBRICS: Record<string, string> = {
   all: "Всі новини",
+  world: "Світова логістика",
   customs: "Митниця України",
   ncts: "Транзит ЄС / NCTS",
   freight: "Фрахтові ставки",
@@ -33,6 +35,7 @@ export const NEWS_RUBRICS: Record<string, string> = {
 // Rubric → accent color (CSS token). Rotates accent/ok/warn/err across the 8
 // keys; adjacent rubrics differ. Unknown rubrics fall back to var(--accent).
 export const NEWS_RUBRIC_COLORS: Record<string, string> = {
+  world: "var(--warn)",
   customs: "var(--accent)",
   ncts: "var(--ok)",
   freight: "var(--warn)",

@@ -320,6 +320,33 @@ test.describe("Logistics hub", () => {
     await expect.poll(() => state.favs!).toContain("DELETE:UAODS");
   });
 
+  test("ports quick filters drive the map, not just the list", async ({ page }, info) => {
+    test.skip(info.project.name === "mobile", "desktop map check");
+    await mockHub(page);
+    await openHub(page);
+    await page.getByRole("tab", { name: /Порти/ }).click();
+    const kinds = new Map<string, string>(PORTS.ports.map((p: { name: string; kind: string }) => [p.name, p.kind]));
+    const filters = page.getByRole("tablist", { name: "Фільтр портів" });
+    const mapKinds = async () => {
+      await page.waitForTimeout(1200); // fly-to animation
+      const titles = await page.locator(".leaflet-marker-icon:has(.hub-port)").evaluateAll((els) => els.map((e) => e.getAttribute("title") ?? ""));
+      return titles.map((t) => kinds.get(t));
+    };
+
+    await filters.getByRole("tab", { name: /Кордон/ }).click();
+    const rows = page.getByTestId("hub-port-row");
+    await expect(rows).toHaveCount(PORTS.ports.filter((p: { kind: string }) => p.kind === "customs").length);
+    let onMap = await mapKinds();
+    expect(onMap.length).toBeGreaterThan(0);
+    expect(new Set(onMap)).toEqual(new Set(["customs"]));
+
+    await filters.getByRole("tab", { name: /Аеропорти/ }).click();
+    onMap = await mapKinds();
+    expect(onMap.length).toBeGreaterThan(0);
+    expect(new Set(onMap)).toEqual(new Set(["air"]));
+    await page.screenshot({ path: `test-results/hub-port-filter-${info.project.name}.png` });
+  });
+
   test("lines tab: carrier statuses, corridors, services", async ({ page }, info) => {
     const state: HubMockState = { added: [], services: [], carrierMarks: [] };
     await mockHub(page, state);
