@@ -45,7 +45,8 @@ export const SHEET_STATUS_LABEL: Record<SheetStatus, string> = {
 export const ISSUE_LABEL: Record<SheetIssue, string> = {
   overdue: 'План прибуття минув, а «розмитнено / доставлено» немає',
   date_unparsed: 'Дату не розпізнано',
-  year_guessed: 'Рік у даті не вказано — вгадано',
+  year_guessed: 'Рік у даті не вказано',
+  date_suspicious: 'Рік у даті виглядає помилковим (перевірте дату)',
   container_not_number: 'У колонці «№ контейнер» не номер',
   number_mangled: 'Номер зіпсовано форматом (1,42551E+11)',
   no_dates: 'Немає дат',
@@ -60,6 +61,7 @@ const ATTENTION: Array<SheetIssue | TrackingIssue> = [
   'tracking_delivered',
   'tracking_eta',
   'date_unparsed',
+  'date_suspicious',
   'container_not_number',
   'number_mangled',
   'no_dates',
@@ -273,10 +275,10 @@ function rowEvents(r: DbRow, row: CalendarRow): CalendarEvent[] {
     if (row.arrival) ev.push({ id: `${r.id}:wh`, rowId: r.id, type: 'warehouse', date: row.arrival.date, approx: true });
     return ev;
   }
-  if (row.departure) ev.push({ id: `${r.id}:dep`, rowId: r.id, type: 'departure', date: row.departure.date, approx: row.departure.guessed });
-  if (row.arrival) ev.push({ id: `${r.id}:arr`, rowId: r.id, type: 'arrival', date: row.arrival.date, approx: row.arrival.guessed });
+  if (row.departure) ev.push({ id: `${r.id}:dep`, rowId: r.id, type: 'departure', date: row.departure.date, approx: false });
+  if (row.arrival) ev.push({ id: `${r.id}:arr`, rowId: r.id, type: 'arrival', date: row.arrival.date, approx: false });
   if (row.statusDate && ['arrived', 'customs', 'delivered'].includes(row.status)) {
-    ev.push({ id: `${r.id}:st`, rowId: r.id, type: row.status as EventType, date: row.statusDate.date, approx: row.statusDate.guessed });
+    ev.push({ id: `${r.id}:st`, rowId: r.id, type: row.status as EventType, date: row.statusDate.date, approx: false });
   }
   return ev;
 }

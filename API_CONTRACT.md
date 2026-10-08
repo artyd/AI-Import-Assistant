@@ -909,8 +909,10 @@ shift ≥ 24 h. Agent tools: `track_shipment`, `list_tracked_shipments`,
 The worker reads the team sheet hourly (`SHEET_SYNC_CRON`, plus once on boot)
 through its public CSV export (`SHEET_ID`, tab gids `SHEET_GID_*`). Tracking rows
 (Аркуш3) and БЦ warehouse-intake rows (Аркуш5) are parsed (any date format; a
-missing year = the one nearest to the surrounding rows / today, flagged
-`guessed`; status from the comment text) into `sheet_rows`. Active rows with a
+missing year = the one of the surrounding rows — not flagged in the UI; a written
+year more than a year off the working year → `date_suspicious`; status from the
+comment text; warehouse rows are dated only when a date is written — «на этой
+неделе» gets none) into `sheet_rows`. Active rows with a
 tracking number become team items in the hub. The responsible logist (matched by
 first name to a user; else everyone) is notified when the planned arrival changes
 and the day before / the day of an arrival. All routes are authenticated and

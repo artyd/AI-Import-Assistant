@@ -22,7 +22,7 @@ export const sheetToolDefinitions: ChatTool[] = [
       'Робоча таблиця логістів (Google Sheet, оновлюється щогодини): що виходить / прибуває за період і де зараз ' +
       'конкретний вантаж. Повертає план з таблиці (вихід, плановe прибуття, статус «в дорозі / прибуло / розмитнено / ' +
       'доставлено», хто везе, логіст, рядок таблиці) і що каже трекінг (17TRACK / Нова Пошта / розрахунок). ' +
-      'Для «що приходить цього тижня» — period=week; для «де Холіна хлорид» — query. Дати з «≈» — рік вгадано.',
+      'Для «що приходить цього тижня» — period=week; для «де Холіна хлорид» — query. Дати з «≈» — орієнтовні (розрахунок).',
     input_schema: {
       type: 'object',
       properties: {
@@ -118,8 +118,8 @@ function rowLine(r: CalendarRow): string {
     r.tab === 'tracking' ? CARGO_LABEL[r.cargoType] : '',
     r.number ? `№ ${r.number}${r.carrierName ? ` (${r.carrierName})` : ''}${r.trackLink ? ` — трекінг: ${r.trackLink}` : ''}` : '',
     r.origin || r.destination ? `${r.origin || '—'} → ${r.destination || '—'}` : '',
-    r.departure ? `вихід ${dmy(r.departure.date)}${r.departure.guessed ? '≈' : ''}` : '',
-    r.arrival ? `план ${dmy(r.arrival.date)}${r.arrival.guessed ? '≈' : ''}` : '',
+    r.departure ? `вихід ${dmy(r.departure.date)}` : '',
+    r.arrival ? `план ${dmy(r.arrival.date)}` : '',
     `статус: ${r.statusLabel}${r.statusDate ? ` ${dmy(r.statusDate.date)}` : ''}`,
     r.track ? `трекінг: ${r.track.statusLabel}${r.track.eta ? `, ETA ${dmy(r.track.eta.slice(0, 10))}` : ''}` : '',
     r.forwarder ? `везе: ${r.forwarder}` : '',

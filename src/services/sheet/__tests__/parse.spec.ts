@@ -173,7 +173,8 @@ describe('parseTrackingTab', () => {
     });
     expect(r.departure).toEqual({ date: '2026-09-22', guessed: true });
     expect(r.arrival).toEqual({ date: '2026-11-27', guessed: true });
-    expect(r.issues).toContain('year_guessed');
+    // A year-less date simply takes the year — no "guessed" issue any more.
+    expect(r.issues).not.toContain('year_guessed');
   });
 
   it('marks cleared / old rows inactive and keeps the status date', () => {
@@ -216,10 +217,10 @@ describe('warehouse tab', () => {
     expect(rows.map((r) => r.product)).toEqual(['лизин сульфат', 'сорбитол']);
     expect(rows[1]).toMatchObject({ qty: '24000', when: 'на этой неделе', fits: 'не влезет' });
   });
-  it('anchors relative "when" to the week the row appeared', () => {
-    expect(approxWarehouseDate('на этой неделе', '2026-10-07')).toEqual({ date: '2026-10-07', guessed: true });
-    expect(approxWarehouseDate('конец этой недели-след', '2026-10-07')).toEqual({ date: '2026-10-09', guessed: true });
-    expect(approxWarehouseDate('на следующей неделе', '2026-10-07')).toEqual({ date: '2026-10-12', guessed: true });
+  it('dates only what is written; relative phrases get no date', () => {
+    expect(approxWarehouseDate('на этой неделе', '2026-10-07')).toBeNull();
+    expect(approxWarehouseDate('конец этой недели-след', '2026-10-07')).toBeNull();
+    expect(approxWarehouseDate('на следующей неделе', '2026-10-07')).toBeNull();
     expect(approxWarehouseDate('12.10', '2026-10-07')).toEqual({ date: '2026-10-12', guessed: true });
     expect(approxWarehouseDate('когда-нибудь', '2026-10-07')).toBeNull();
     expect(approxWarehouseDate('16.01 в порт', '2026-10-08')).toEqual({ date: '2026-01-16', guessed: true });
@@ -289,6 +290,12 @@ describe('new sheet layout', () => {
 
   it('reads line, quantity, logist and the number', () => {
     expect(rows[1]).toMatchObject({ line: 'MSC', weight: '24 т', logist: 'Яна', number: 'MSBU3441255', carrier: 'msc', forwarder: 'DSV', cargoType: 'fcl' });
+  });
+
+  it('flags a written year far from the working year as a likely typo', () => {
+    const typo = parseTrackingTab([HEADER2, row2({ 2: 'Цефотаксим', 8: '03.09', 10: '28.08.2028' })], TODAY)[0]!;
+    expect(typo.issues).toContain('date_suspicious');
+    expect(rows[1]!.issues).not.toContain('date_suspicious');
   });
 
   it('keeps only rows of the working year in scope', () => {

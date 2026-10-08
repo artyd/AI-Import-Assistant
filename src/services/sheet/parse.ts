@@ -497,7 +497,14 @@ export function cargoType(product: string, mode: HubMode | null): CargoType {
 
 // ── Rows ─────────────────────────────────────────────────────────────────────
 
-export type SheetIssue = 'overdue' | 'date_unparsed' | 'year_guessed' | 'container_not_number' | 'number_mangled' | 'no_dates';
+export type SheetIssue =
+  | 'overdue'
+  | 'date_unparsed'
+  | 'date_suspicious'
+  | 'year_guessed'
+  | 'container_not_number'
+  | 'number_mangled'
+  | 'no_dates';
 
 export interface TrackingRow {
   /** 1-based row number in the sheet (for the "open row" link). */
@@ -584,7 +591,12 @@ export function parseTrackingRow(
 
   const issues: SheetIssue[] = [];
   if ((depRaw && !departure) || (arrRaw && !arrival)) issues.push('date_unparsed');
-  if (departure?.guessed || arrival?.guessed) issues.push('year_guessed');
+  // A year-less date takes the year of the surrounding rows (2026 in practice) — not
+  // an issue. A written year far from the working year is likely a typo (28.08.2028).
+  const yr = Number(year);
+  if ([departure, arrival].some((d) => d && !d.guessed && Math.abs(Number(d.date.slice(0, 4)) - yr) > 1)) {
+    issues.push('date_suspicious');
+  }
   if (containerRaw && !/[A-Z]{3}[UJZ]\s?\d{6}\s?\d/i.test(containerRaw) && !/\d{6}/.test(containerRaw)) {
     issues.push('container_not_number');
   }
@@ -739,28 +751,16 @@ export function parseWarehouseTab(grid: string[][]): WarehouseRow[] {
   return out;
 }
 
-const mondayOf = (d: string) => {
-  const t = utc(d);
-  const dow = (new Date(t).getUTCDay() + 6) % 7;
-  return new Date(t - dow * DAY).toISOString().slice(0, 10);
-};
-
-/** Free-text "when" → an approximate date, relative to when the row appeared. */
+/**
+ * The date written in the free-text "when" ("16.01 в порт"), or null. Relative
+ * phrases («на этой неделе») have no anchor — the row may be months old — so
+ * they get no calendar date (the chat tool still lists them).
+ */
 export function approxWarehouseDate(when: string, firstSeen: string): SheetDate | null {
   const explicit = parseSheetDate(when, firstSeen);
   // Intake is near-term: a year-less date far ahead of when the row appeared was written last year.
   if (explicit?.guessed && utc(explicit.date) - utc(firstSeen) > 60 * DAY) return shiftYear(explicit, -1);
-  if (explicit) return explicit;
-  const w = fold(when);
-  if (!w) return null;
-  const mon = mondayOf(firstSeen);
-  const plus = (days: number) => new Date(utc(mon) + days * DAY).toISOString().slice(0, 10);
-  if (/конец (этой|цієї|цiєї) недел|кінець (цього|цієї) тижн/.test(w)) return { date: plus(4), guessed: true };
-  if (/(след|наступн)[а-яіїєґ]*\s*(недел|тижн)/.test(w)) return { date: plus(7), guessed: true };
-  if (/(этой|этот|цьому|цього|цієї)\s*(недел|тижн)/.test(w)) return { date: plus(2), guessed: true };
-  if (/сегодня|сьогодні/.test(w)) return { date: firstSeen, guessed: true };
-  if (/завтра/.test(w)) return { date: new Date(utc(firstSeen) + DAY).toISOString().slice(0, 10), guessed: true };
-  return null;
+  return explicit;
 }
 
 /** Trim a reference grid (rates / quantities) to its non-empty area. */
