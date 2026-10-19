@@ -3,10 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatKind, ChatUsage, DocsStatus, Folder, Message } from "@/lib/types";
 import { ContextMeters } from "./ContextMeters";
-import { streamChat } from "@/lib/sse";
+import { runTurn, turnContent } from "@/lib/chat/turn";
 import { Notice } from "../ui/Notice";
 import {
-  SURVEY_QUESTIONS,
   type SurveyAnswers,
   type SurveyIntakeField,
   type SurveyOption,
@@ -18,6 +17,7 @@ import { IconAttach, IconFile, IconFolder, IconCheck, IconSearch } from "../ui/i
 import { UPLOAD_ACCEPT, fileKey, acceptFiles } from "@/lib/files/policy";
 import { type ClassifyCard, type QuestionCard, DateSeparator, UserBubble, ClassifyBubble, QuestionBubble, AssistantBubble } from "./bubbles";
 import { type EntitySelector, Composer } from "./Composer";
+import { activeQuestions, answersRecord, intakePatch, surveyMessage, withAnswer, type SurveyAnswer } from "@/lib/chat/survey";
 export type { EntitySelector } from "./Composer";
 export { CHAT_TYPES } from "./Composer";
 
@@ -148,7 +148,6 @@ export function Chat({
   const [sel, setSel] = useState<{ text: string; x: number; y: number } | null>(null);
   const convRef = useRef<string | undefined>(conversationId);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const streamTextRef = useRef("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const manifestInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -377,7 +376,6 @@ export function Chat({
     const text = raw.trim();
     if (!text || streaming) return;
     setStreaming(true);
-    streamTextRef.current = "";
     abortRef.current?.abort();
     const ctrl = new AbortController();
     abortRef.current = ctrl;
@@ -405,34 +403,20 @@ export function Chat({
       );
 
     try {
-      await streamChat(
+      await runTurn(
         postPath,
         { message: text, conversationId: convRef.current },
         {
-          onToken: (e) => {
-            streamTextRef.current += e.text;
-            updateAssistant({ content: streamTextRef.current });
-          },
+          onUpdate: (t) =>
+            updateAssistant(
+              t.phase === "done" && t.done
+                ? { id: t.done.messageId || assistantId, content: turnContent(t), citations: t.done.citations }
+                : { content: turnContent(t) }
+            ),
           onToolCall: (e) =>
-            onLog({
-              id: `l${logSeq++}`,
-              time: hhmm(),
-              text: labelToolCall(e.tool, e.input),
-              kind: "call",
-            }),
-          onToolResult: (e) =>
-            onLog({
-              id: `l${logSeq++}`,
-              time: hhmm(),
-              text: e.summary,
-              kind: "result",
-            }),
+            onLog({ id: `l${logSeq++}`, time: hhmm(), text: labelToolCall(e.tool, e.input), kind: "call" }),
+          onToolResult: (e) => onLog({ id: `l${logSeq++}`, time: hhmm(), text: e.summary, kind: "result" }),
           onDone: (e) => {
-            updateAssistant({
-              id: e.messageId || assistantId,
-              content: e.message || streamTextRef.current,
-              citations: e.citations,
-            });
             if (e.usage) setUsage(e.usage);
             if (e.conversationId && convRef.current !== e.conversationId) {
               convRef.current = e.conversationId;
@@ -440,26 +424,9 @@ export function Chat({
             }
             onTurnComplete?.();
           },
-          onError: (e) =>
-            updateAssistant({
-              content:
-                (streamTextRef.current ? streamTextRef.current + "\n\n" : "") +
-                `⚠️ ${e.message}`,
-            }),
         },
         ctrl.signal
       );
-      // Stopped by the user: keep what arrived and mark it. (On unmount or a
-      // conversation switch the bubble is already gone, so this is a no-op.)
-      if (ctrl.signal.aborted) {
-        updateAssistant({
-          content:
-            (streamTextRef.current ? streamTextRef.current + "\n\n" : "") +
-            "⏹ Відповідь зупинено.",
-        });
-      }
-    } catch {
-      if (!ctrl.signal.aborted) updateAssistant({ content: "⚠️ Помилка з’єднання з сервером." });
     } finally {
       if (abortRef.current === ctrl) abortRef.current = null;
       setStreaming(false);
@@ -473,58 +440,29 @@ export function Chat({
   // so the agent persists everything in a single turn (cheaper than a turn per
   // question) while still honouring "answer = normal chat message". State (answers
   // + status) is also persisted to the workspace via onSurveyPersist for resume.
-  const surveyAnswersRef = useRef<
-    { id: string; question: string; label: string; value: string; q: SurveyQuestion }[]
-  >([]);
+  const surveyAnswersRef = useRef<SurveyAnswer[]>([]);
   // The active (filtered) question list for the current run — questions whose
   // intake field is already filled (autopilot) are skipped.
   const activeQuestionsRef = useRef<SurveyQuestion[]>([]);
 
-  const answersRecord = useCallback(
-    (): SurveyAnswers =>
-      Object.fromEntries(
-        surveyAnswersRef.current.map((a) => [a.id, { question: a.question, answer: a.label }])
-      ),
-    []
-  );
-
-  // Build the deterministic intake patch (contract_type / transport_mode /
-  // product_category) from the answers using each question's `intake` mapping.
-  const intakePatch = useCallback((): Partial<Record<SurveyIntakeField, string>> => {
-    const patch: Partial<Record<SurveyIntakeField, string>> = {};
-    for (const a of surveyAnswersRef.current) {
-      const m = a.q.intake;
-      if (!m || a.value === "other") continue;
-      if (m.skipValues?.includes(a.value)) continue;
-      patch[m.field] = m.use === "value" ? a.value : a.label;
-    }
-    return patch;
-  }, []);
-
   const submitSurvey = useCallback(() => {
     const answers = surveyAnswersRef.current;
     if (answers.length === 0) return;
-    const record = answersRecord();
-    const patch = intakePatch();
-    const lines = answers.map((a) => `• ${a.question}\n  → ${a.label}`).join("\n");
-    const msg =
-      "Я пройшов коротке опитування про постачання (дані вже збережено в картці постачання). " +
-      "Ось відповіді — коротко підсумуй план перевірки з урахуванням пріоритету і що ще варто уточнити:\n\n" +
-      lines;
+    const record = answersRecord(answers);
+    const patch = intakePatch(answers);
+    const msg = surveyMessage(answers);
     surveyAnswersRef.current = [];
     activeQuestionsRef.current = [];
     // Deterministic sidebar update (does not wait for the agent).
     if (Object.keys(patch).length > 0) onSurveyIntake?.(patch);
     onSurveyPersist?.({ answers: record, status: "completed" });
     void runMessage(msg);
-  }, [runMessage, onSurveyPersist, onSurveyIntake, answersRecord, intakePatch]);
+  }, [runMessage, onSurveyPersist, onSurveyIntake]);
 
   const startSurvey = useCallback(() => {
     if (streaming) return;
     // Skip questions whose intake field is already filled (autopilot).
-    const active = SURVEY_QUESTIONS.filter(
-      (q) => !q.skipIfFilled || !surveyPrefilled?.[q.skipIfFilled]
-    );
+    const active = activeQuestions(surveyPrefilled);
     activeQuestionsRef.current = active;
     surveyAnswersRef.current = [];
     const first = active[0];
@@ -538,10 +476,13 @@ export function Chat({
 
   const answerQuestion = useCallback(
     (card: QuestionCard, answer: SurveyOption) => {
-      surveyAnswersRef.current = [
-        ...surveyAnswersRef.current.filter((a) => a.id !== card.q.id),
-        { id: card.q.id, question: card.q.question, label: answer.label, value: answer.value, q: card.q },
-      ];
+      surveyAnswersRef.current = withAnswer(surveyAnswersRef.current, {
+        id: card.q.id,
+        question: card.q.question,
+        label: answer.label,
+        value: answer.value,
+        q: card.q,
+      });
       const active = activeQuestionsRef.current;
       const nextQ = active[card.index]; // index is 1-based → next lives at [index]
       setItems((m) => {
@@ -565,9 +506,9 @@ export function Chat({
           : marked;
       });
       if (!nextQ) submitSurvey();
-      else onSurveyPersist?.({ answers: answersRecord(), status: "in_progress" });
+      else onSurveyPersist?.({ answers: answersRecord(surveyAnswersRef.current), status: "in_progress" });
     },
-    [submitSurvey, onSurveyPersist, answersRecord]
+    [submitSurvey, onSurveyPersist]
   );
 
   const skipSurvey = useCallback(

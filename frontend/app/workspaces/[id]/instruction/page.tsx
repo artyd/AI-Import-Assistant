@@ -11,7 +11,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { api, ApiError, downloadBlob } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { streamChat } from "@/lib/sse";
+import { runTurn, turnContent } from "@/lib/chat/turn";
 import { Markdown } from "@/components/ui/Markdown";
 import { IconSpinner } from "@/components/ui/icons";
 import type { Workspace } from "@/lib/types";
@@ -713,6 +713,9 @@ function InstructionChat({
   const conv = useRef<string | undefined>(undefined);
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => end.current?.scrollIntoView({ block: "end" }), [msgs]);
+  // Closing the drawer stops the answer that is still streaming into it.
+  const abort = useRef<AbortController | null>(null);
+  useEffect(() => () => abort.current?.abort(), []);
 
   const send = async (text: string) => {
     if (!text.trim() || busy) return;
@@ -722,21 +725,21 @@ function InstructionChat({
     try {
       const v = await ensureSaved(); // the agent reads the SAVED draft
       const message = `[Екран «Інструкція постачальнику», версія v${v.version}. Допоможи з інструкцією: читай get_instruction_draft, значення пропонуй через propose_instruction_fields.]\n${text}`;
-      const patch = (fn: (last: ChatMsg) => ChatMsg) => setMsgs((m) => [...m.slice(0, -1), fn(m[m.length - 1]!)]);
-      await streamChat(
+      const ctrl = new AbortController();
+      abort.current = ctrl;
+      const final = await runTurn(
         `/api/workspaces/${workspaceId}/chat`,
         { message, conversationId: conv.current },
         {
-          onToken: (e) => patch((l) => ({ ...l, text: l.text + e.text })),
-          onToolCall: (e) => patch((l) => ({ ...l, tools: [...l.tools, e.tool] })),
+          onUpdate: (t) =>
+            setMsgs((m) => [...m.slice(0, -1), { role: "assistant", text: turnContent(t), tools: t.tools }]),
           onDone: (e) => {
             conv.current = e.conversationId;
-            patch((l) => ({ ...l, text: e.message || l.text }));
           },
-          onError: (e) => patch((l) => ({ ...l, text: `${l.text}\n⚠ ${e.message}` })),
-        }
+        },
+        ctrl.signal
       );
-      await onAnswered();
+      if (final.phase === "done") await onAnswered();
     } catch (e) {
       const msg = e instanceof ApiError ? e.message : String(e);
       setMsgs((m) => [...m.slice(0, -1), { role: "assistant", text: `⚠ Не вдалося: ${msg}`, tools: [] }]);
