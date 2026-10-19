@@ -25,7 +25,7 @@ import { Combobox } from "../ui/Combobox";
 import { VerificationModal } from "./VerificationModal";
 import { IconDownload, IconSpinner } from "../ui/icons";
 import { PARTY_SLOTS, STATUS_OPTIONS, RISK_CLS, CONTRACT_TYPE_LABEL, ROLE_SYNONYMS } from "./labels";
-import { Result, ResultView, lbl, CompletenessHeader, Field, Section } from "./parts";
+import { type Result, ResultView, lbl, CompletenessHeader, Field, Section } from "./parts";
 
 const countryOptions = COUNTRIES.map((c: Country) => ({ value: c.uk, label: c.uk }));
 const countrySearch = (q: string) => searchCountries(q).map((c) => ({ value: c.uk, label: c.uk }));

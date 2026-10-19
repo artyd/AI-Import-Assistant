@@ -16,8 +16,8 @@ import {
 import type { LogEntry } from "./AgentLog";
 import { IconAttach, IconFile, IconFolder, IconCheck, IconSearch } from "../ui/icons";
 import { UPLOAD_ACCEPT, fileKey, acceptFiles } from "./upload";
-import { ClassifyCard, QuestionCard, DateSeparator, UserBubble, ClassifyBubble, QuestionBubble, AssistantBubble } from "./bubbles";
-import { EntitySelector, Composer } from "./Composer";
+import { type ClassifyCard, type QuestionCard, DateSeparator, UserBubble, ClassifyBubble, QuestionBubble, AssistantBubble } from "./bubbles";
+import { type EntitySelector, Composer } from "./Composer";
 export type { EntitySelector } from "./Composer";
 export { CHAT_TYPES } from "./Composer";
 

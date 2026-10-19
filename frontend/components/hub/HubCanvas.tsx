@@ -35,7 +35,7 @@ import { CarrierDetail } from "./CarrierDetail";
 import { RoutesPanel } from "./RoutesPanel";
 import { RouteDetail, type PickedPoint } from "./RouteDetail";
 import { haversineKm } from "./geo";
-import { BasemapKey, BASEMAPS, BASEMAP_STORE, TILE_LIGHT, TILE_DARK, ATTRIB, FIT_BOUNDS, POLL_MS, PORTS_POLL_MS, GLIDE_MS, MAX_DR_MS, AIS_MIN_ZOOM, CLUSTER_MAX_ZOOM, LABEL_MIN_ZOOM, statusRank, etaBadge, positionOn, LayerKey, Tab, TABS, LAYERS, resolveCssColor } from "./canvasConfig";
+import { type BasemapKey, BASEMAPS, BASEMAP_STORE, TILE_LIGHT, TILE_DARK, ATTRIB, FIT_BOUNDS, POLL_MS, PORTS_POLL_MS, GLIDE_MS, MAX_DR_MS, AIS_MIN_ZOOM, CLUSTER_MAX_ZOOM, LABEL_MIN_ZOOM, statusRank, etaBadge, positionOn, type LayerKey, type Tab, TABS, LAYERS, resolveCssColor } from "./canvasConfig";
 import { Stat, segBtn } from "./Stat";
 
 export interface TrackFilter {

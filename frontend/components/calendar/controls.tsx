@@ -1,6 +1,6 @@
 "use client";
 import { type CalRow, fmtDay, type SyncInfo } from "@/lib/calendar";
-import { Load } from "./load";
+import { type Load } from "./load";
 
 export function LoadBadge({ load, small }: { load: Load; small?: boolean }) {
   return (
