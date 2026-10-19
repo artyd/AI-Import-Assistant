@@ -6,7 +6,7 @@
 // — a deterministic template, 0 tokens. Штурман helps in a side chat by PROPOSING
 // values that the user accepts here; «Доопрацювати з ШІ» proposes extra clauses.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { api, ApiError, downloadBlob } from "@/lib/api";
@@ -30,6 +30,7 @@ import {
   type InstructionVersion,
   type Transport,
 } from "@/lib/instruction";
+import { emptySession, isLocked, saveRequest, sessionReducer } from "@/lib/instructionSession";
 import s from "./instruction.module.css";
 
 type Preview = { en: string; uk: string; subject: string; missing: { path: string; label: string }[] };
@@ -49,10 +50,9 @@ export default function InstructionPage() {
   const { user, loading: authLoading } = useAuth();
 
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
-  const [versions, setVersions] = useState<InstructionVersion[]>([]);
-  const [current, setCurrent] = useState<InstructionVersion | null>(null); // null = unsaved prefill
-  const [draft, setDraft] = useState<InstructionDraft | null>(null);
-  const [dirty, setDirty] = useState(false);
+  // Versions / shown version / draft / unsaved edits / resolved proposals (lib/instructionSession).
+  const [session, dispatch] = useReducer(sessionReducer, emptySession);
+  const { versions, current, draft, dirty } = session;
   const [preview, setPreview] = useState<Preview | null>(null);
   const [lang, setLang] = useState<"en" | "uk">("en");
   const [dir, setDir] = useState<DirectoryEntry[]>([]);
@@ -61,14 +61,6 @@ export default function InstructionPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [refineOpen, setRefineOpen] = useState(false);
-  // Proposals are server-owned (Штурман writes them); the screen only reports
-  // which ones the user accepted/rejected, so a save never wipes new ones.
-  const resolved = useRef<Set<string>>(new Set());
-  // Latest `current` for callbacks that outlive a render (chat streaming).
-  const currentRef = useRef<InstructionVersion | null>(null);
-  useEffect(() => {
-    currentRef.current = current;
-  }, [current]);
 
   useEffect(() => {
     if (!authLoading && !user) router.replace("/login");
@@ -82,17 +74,11 @@ export default function InstructionPage() {
       api<{ entries: DirectoryEntry[] }>(`/api/directory`),
     ]);
     setWorkspace(w.workspace);
-    setVersions(v.versions);
     setDir(d.entries);
-    if (v.versions[0]) {
-      setCurrent(v.versions[0]);
-      setDraft(v.versions[0].draft);
-    } else {
-      const p = await api<{ draft: InstructionDraft }>(`/api/workspaces/${id}/instruction/prefill`);
-      setCurrent(null);
-      setDraft(p.draft);
-    }
-    setDirty(false);
+    const prefill = v.versions[0]
+      ? undefined
+      : (await api<{ draft: InstructionDraft }>(`/api/workspaces/${id}/instruction/prefill`)).draft;
+    dispatch({ type: "loaded", versions: v.versions, prefill });
   }, [id]);
 
   useEffect(() => {
@@ -110,41 +96,31 @@ export default function InstructionPage() {
     return () => clearTimeout(t);
   }, [draft, id]);
 
-  const edit = (fn: (d: InstructionDraft) => InstructionDraft) => {
-    setDraft((d) => (d ? fn(d) : d));
-    setDirty(true);
-  };
+  const edit = (fn: (d: InstructionDraft) => InstructionDraft) => dispatch({ type: "edit", fn });
   const setF = (path: string, value: string, source: FieldSource = "manual") => edit((d) => setField(d, path, value, source));
 
   const missing = preview?.missing ?? [];
   const isMissing = (path: string) => missing.some((m) => m.path === path);
-  const locked = current?.status === "approved" || current?.status === "sent";
+  const locked = isLocked(session);
 
   // ── persistence ───────────────────────────────────────────────────────────
   /** Saves the screen; an approved/sent version is never edited in place → new version. */
   const save = useCallback(async (): Promise<InstructionVersion> => {
-    if (!draft) throw new Error("no draft");
-    if (current && !dirty) return current;
-    let v: InstructionVersion;
-    if (!current || locked) {
-      v = (await api<{ version: InstructionVersion }>(`/api/workspaces/${id}/instructions`, { method: "POST", body: { draft } })).version;
-    } else {
-      v = (
-        await api<{ version: InstructionVersion }>(`/api/workspaces/${id}/instructions/${current.version}`, {
-          method: "PATCH",
-          body: { draft, resolvedProposals: [...resolved.current] },
-        })
-      ).version;
-    }
-    resolved.current = new Set();
-    setCurrent(v);
-    currentRef.current = v;
-    // Keep the screen's fields; take the server's proposals (Штурман may have added some).
-    setDraft((d) => (d ? { ...d, proposals: v.draft.proposals } : v.draft));
-    setDirty(false);
-    setVersions((vs) => [v, ...vs.filter((x) => x.version !== v.version)].sort((a, b) => b.version - a.version));
+    const req = saveRequest(session);
+    if (!req) throw new Error("no draft");
+    if (req.kind === "none") return req.version;
+    const v =
+      req.kind === "create"
+        ? (await api<{ version: InstructionVersion }>(`/api/workspaces/${id}/instructions`, { method: "POST", body: { draft: req.draft } })).version
+        : (
+            await api<{ version: InstructionVersion }>(`/api/workspaces/${id}/instructions/${req.version}`, {
+              method: "PATCH",
+              body: { draft: req.draft, resolvedProposals: req.resolvedProposals },
+            })
+          ).version;
+    dispatch({ type: "saved", version: v });
     return v;
-  }, [draft, current, dirty, locked, id]);
+  }, [session, id]);
 
   const run = async (key: string, fn: () => Promise<void>) => {
     setBusy(key);
@@ -163,8 +139,7 @@ export default function InstructionPage() {
     run(status, async () => {
       const v0 = await save();
       const v = (await api<{ version: InstructionVersion }>(`/api/workspaces/${id}/instructions/${v0.version}`, { method: "PATCH", body: { status } })).version;
-      setCurrent(v);
-      setVersions((vs) => vs.map((x) => (x.version === v.version ? v : x)));
+      dispatch({ type: "statusChanged", version: v });
       setNotice(status === "approved" ? `Версію v${v.version} затверджено — за нею перевірятимуться документи постачальника.` : `v${v.version} позначено як надіслану.`);
     });
 
@@ -195,9 +170,7 @@ export default function InstructionPage() {
     const v = versions.find((x) => x.version === ver);
     if (!v) return;
     if (dirty && !confirm("Незбережені зміни буде втрачено. Продовжити?")) return;
-    setCurrent(v);
-    setDraft(v.draft);
-    setDirty(false);
+    dispatch({ type: "opened", version: v });
   };
 
   // ── directory templates ───────────────────────────────────────────────────
@@ -212,38 +185,13 @@ export default function InstructionPage() {
     });
 
   // ── proposals from Штурман ────────────────────────────────────────────────
-  const acceptProposal = (i: number) =>
-    edit((d) => {
-      const p = d.proposals[i];
-      if (!p) return d;
-      resolved.current.add(p.path);
-      const next = setField(d, p.path, p.value, "documents");
-      next.proposals = d.proposals.filter((_, j) => j !== i);
-      return next;
-    });
-  const rejectProposal = (i: number) =>
-    edit((d) => {
-      const p = d.proposals[i];
-      if (p) resolved.current.add(p.path);
-      return { ...d, proposals: d.proposals.filter((_, j) => j !== i) };
-    });
+  const acceptProposal = (index: number) => dispatch({ type: "accept", index });
+  const rejectProposal = (index: number) => dispatch({ type: "reject", index });
 
   /** After Штурман answered: pull its proposals in without touching local edits. */
   const syncProposals = useCallback(async () => {
     const r = await api<{ versions: InstructionVersion[] }>(`/api/workspaces/${id}/instructions`);
-    const latest = r.versions[0];
-    if (!latest) return;
-    setVersions(r.versions);
-    const cur = currentRef.current; // not the closure's — the chat may have outlived renders
-    const pending = (ps: InstructionDraft["proposals"]) => ps.filter((p) => !resolved.current.has(p.path));
-    if (!cur || latest.version > cur.version) {
-      // Штурман wrote into a newer draft version (e.g. the shown one was approved).
-      setCurrent(latest);
-      currentRef.current = latest;
-      setDraft((d) => (d ? { ...d, proposals: pending(latest.draft.proposals) } : latest.draft));
-    } else if (latest.version === cur.version) {
-      setDraft((d) => (d ? { ...d, proposals: pending(latest.draft.proposals) } : d));
-    }
+    dispatch({ type: "synced", versions: r.versions });
   }, [id]);
 
   if (!draft) {
