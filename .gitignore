@@ -8,11 +8,12 @@ storage/
 # Personal Claude Code overrides (project harness in .claude/ IS committed)
 .claude/settings.local.json
 
-# Installed third-party skills (personal tooling, not product code — run with
-# full agent permissions; keep out of the product repo). Added 2026-09-10.
+# mattpocock/skills are vendored into .claude/skills/ and committed (2026-10-19,
+# see .claude/skills/README.md). Keep a stray `npx skills` install out of git, and
+# keep the personal server-deploy skill local.
 .agents/
-.claude/skills/
 skills-lock.json
+.claude/skills/deploy/
 
 # Python bytecode (logist-mcp)
 __pycache__/
