@@ -9,7 +9,6 @@ import type {
   Party,
   PartyRole,
   PartySuggestion,
-  Risk,
   UserLite,
   Workspace,
   WorkspaceStatus,
@@ -26,6 +25,7 @@ import { VerificationModal } from "./VerificationModal";
 import { IconDownload, IconSpinner } from "../ui/icons";
 import { PARTY_SLOTS, STATUS_OPTIONS, RISK_CLS, CONTRACT_TYPE_LABEL, ROLE_SYNONYMS } from "./labels";
 import { type Result, ResultView, lbl, CompletenessHeader, Field, Section } from "./parts";
+import { useShipmentData } from "@/lib/shipment/shipmentData";
 
 const countryOptions = COUNTRIES.map((c: Country) => ({ value: c.uk, label: c.uk }));
 const countrySearch = (q: string) => searchCountries(q).map((c) => ({ value: c.uk, label: c.uk }));
@@ -39,24 +39,26 @@ export function ShipmentPanel({
   workspaceId,
   workspace,
   onPatch,
-  refreshKey = 0,
 }: {
   workspaceId: string;
   workspace: Workspace;
   onPatch: (partial: Partial<Workspace>) => void;
   // Bumped by the parent to force a re-load after the workspace changed out-of-band
   // (agent turn, survey intake) so the panel never shows stale data.
-  refreshKey?: number;
 }) {
   const router = useRouter();
   const [users, setUsers] = useState<UserLite[]>([]);
   const [parties, setParties] = useState<Party[]>([]);
-  const [risks, setRisks] = useState<Risk[] | null>(null);
+  // Server data of the shipment (shared store; the page invalidates it).
+  const risks = useShipmentData((s) => s.risks);
+  const serverParties = useShipmentData((s) => s.parties);
+  const revision = useShipmentData((s) => s.revision);
+  const reloadShipmentRisks = useShipmentData((s) => s.reloadRisks);
   const [verifyOpen, setVerifyOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [result, setResult] = useState<Result | null>(null);
   // Auto-loaded completeness (mock's "Комплектність" progress header).
-  const [checklist, setChecklist] = useState<ChecklistItem[] | null>(null);
+  const checklist = useShipmentData((s) => s.checklist);
   const [suggestedContractType, setSuggestedContractType] = useState<
     "bilateral" | "trilateral" | null
   >(null);
@@ -89,37 +91,31 @@ export function ShipmentPanel({
       origin_country: workspace.origin_country ?? "",
       destination_country: workspace.destination_country ?? "",
     });
-    // Re-seed on refreshKey too, so a survey/agent-driven intake change is
+    // Re-seed on a new revision too, so a survey/agent-driven intake change is
     // reflected (may discard an unsaved in-progress edit — acceptable: the panel
     // must show the latest saved server state).
-  }, [workspace.id, refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [workspace.id, revision]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     api<{ users: UserLite[] }>("/api/users")
       .then((r) => setUsers(r.users))
       .catch(() => setUsers([]));
+  }, [workspaceId]);
+
+  // The editable parties form is seeded from the server copy on every new
+  // revision (open / out-of-band change); the one-time auto-fill re-arms then.
+  useEffect(() => {
     setPartiesLoaded(false);
     autoFilledRef.current = false;
-    api<{ parties: Party[] }>(`/api/workspaces/${workspaceId}/parties`)
-      // Normalise any legacy role labels into the three fixed slots on load.
-      .then((r) => setParties(r.parties.map((p) => ({ ...p, role: canonRole(p.role) }))))
-      .catch(() => setParties([]))
-      .finally(() => setPartiesLoaded(true));
-    // Proactively surface current/upcoming problems on open.
-    api<{ risks: Risk[] }>(`/api/workspaces/${workspaceId}/risks`)
-      .then((r) => setRisks(r.risks))
-      .catch(() => setRisks(null));
-    // Completeness for the progress header (non-blocking).
-    api<{ items: ChecklistItem[]; status: string }>(`/api/workspaces/${workspaceId}/checklist`)
-      .then((r) => setChecklist(r.items))
-      .catch(() => setChecklist(null));
-  }, [workspaceId, refreshKey]);
+  }, [workspaceId, revision]);
+  useEffect(() => {
+    if (serverParties === null || partiesLoaded) return;
+    // Normalise any legacy role labels into the three fixed slots on load.
+    setParties(serverParties.map((p) => ({ ...p, role: canonRole(p.role) })));
+    setPartiesLoaded(true);
+  }, [serverParties, partiesLoaded]);
 
-  const reloadRisks = () =>
-    run("risks", async () => {
-      const r = await api<{ risks: Risk[] }>(`/api/workspaces/${workspaceId}/risks`);
-      setRisks(r.risks);
-    });
+  const reloadRisks = () => run("risks", reloadShipmentRisks);
 
   const run = useCallback(
     async (key: string, fn: () => Promise<void>) => {

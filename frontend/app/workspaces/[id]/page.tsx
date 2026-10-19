@@ -10,7 +10,6 @@ import { streamAnalyze } from "@/lib/sse";
 import { useShipmentFiles } from "@/lib/files/useShipmentFiles";
 import type {
   AnalysisResult,
-  ChecklistItem,
   Collection,
   ConversationMeta,
   FileItem,
@@ -38,6 +37,7 @@ import { MapView } from "@/components/hub/MapView";
 import { CalendarView } from "@/components/calendar/CalendarView";
 import { CommandPalette, type PaletteAction } from "@/components/layout/CommandPalette";
 import { IconSpinner } from "@/components/ui/icons";
+import { useShipmentData } from "@/lib/shipment/shipmentData";
 import {
   LnExport,
   LnFolder,
@@ -87,7 +87,11 @@ export default function WorkspacePage() {
   const [log, setLog] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
-  const [checklist, setChecklist] = useState<ChecklistItem[] | null>(null);
+  // Completeness / risks / parties of the open shipment (shared with the panel).
+  const checklist = useShipmentData((s) => s.checklist);
+  const loadShipmentData = useShipmentData((s) => s.load);
+  const refreshChecklist = useShipmentData((s) => s.refreshChecklist);
+  const invalidateShipment = useShipmentData((s) => s.invalidate);
 
   // In-app notice banner (replaces blocking alert()).
   const [notice, setNotice] = useState<{ text: string; tone: NoticeTone } | null>(null);
@@ -108,7 +112,6 @@ export default function WorkspacePage() {
     renameFile,
     deleteFile,
     moveFile,
-    classifyFile,
     uploadSmart,
     uploadAndClassify,
     sortInbox,
@@ -270,14 +273,12 @@ export default function WorkspacePage() {
   }, [user, endpoints]);
 
   // Completeness for the top-bar step dots + right-panel badge.
-  const refreshChecklist = useCallback(() => {
-    api<{ items: ChecklistItem[] }>(`/api/workspaces/${id}/checklist`)
-      .then((r) => setChecklist(r.items))
-      .catch(() => setChecklist(null));
-  }, [id]);
+  useEffect(() => {
+    if (user) void loadShipmentData(id);
+  }, [user, id, loadShipmentData]);
 
   useEffect(() => {
-    if (user && workspace) refreshChecklist();
+    if (user && workspace) void refreshChecklist();
   }, [user, workspace, refreshChecklist]);
 
   const onLog = useCallback((entry: LogEntry) => setLog((l) => [...l, entry]), []);
@@ -300,9 +301,6 @@ export default function WorkspacePage() {
     [id, onPatch]
   );
 
-  // Bumped to force the ShipmentPanel to re-load its data (parties / checklist /
-  // intake) after the workspace changed out-of-band (agent turn, survey intake).
-  const [sidebarRefreshKey, setSidebarRefreshKey] = useState(0);
 
   // Deterministic survey → intake: write contract_type/transport_mode/product_category
   // straight to the workspace so the sidebar reflects the survey immediately.
@@ -318,10 +316,10 @@ export default function WorkspacePage() {
         } catch {
           /* non-blocking */
         }
-        setSidebarRefreshKey((k) => k + 1);
+        invalidateShipment();
       })();
     },
-    [id]
+    [id, invalidateShipment]
   );
 
   // After a supply chat turn the agent may have changed workspace context via tools;
@@ -335,9 +333,9 @@ export default function WorkspacePage() {
       } catch {
         /* ignore */
       }
-      setSidebarRefreshKey((k) => k + 1);
+      invalidateShipment();
     })();
-  }, [id]);
+  }, [id, invalidateShipment]);
 
   const onUploadVersion = useCallback(
     async (replacesFileId: string, fileList: FileList) => {
@@ -1220,7 +1218,6 @@ export default function WorkspacePage() {
               workspaceId={id}
               workspace={workspace}
               onPatch={onPatch}
-              refreshKey={sidebarRefreshKey}
             />
           }
         />
