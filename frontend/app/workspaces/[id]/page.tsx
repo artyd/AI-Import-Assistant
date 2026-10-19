@@ -6,7 +6,6 @@ import { api, ApiError } from "@/lib/api";
 import { NoticeBanner, type NoticeTone } from "@/components/ui/Notice";
 import { useAuth } from "@/lib/auth";
 import { useTheme } from "@/lib/theme";
-import { streamAnalyze } from "@/lib/sse";
 import { useShipmentFiles } from "@/lib/files/useShipmentFiles";
 import type {
   AnalysisResult,
@@ -23,7 +22,8 @@ import { AnalyzePanel } from "@/components/analysis/AnalyzePanel";
 import { ArchiveList } from "@/components/analysis/ArchiveModal";
 import { AiSettingsModal } from "@/components/analysis/AiSettingsModal";
 import { useAppStore } from "@/lib/store";
-import { resolveChatEndpoints } from "@/lib/chatContext";
+import { fetchConversation, fetchConversations, newestConversation, resolveChatEndpoints } from "@/lib/chatContext";
+import { analyzeBody, fetchLatestAnalysis, runAnalysis } from "@/lib/analysis/run";
 import { AgentLog, type LogEntry } from "@/components/chat/AgentLog";
 import { ShipmentPanel } from "@/components/shipment/ShipmentPanel";
 import { VersionsModal } from "@/components/files/VersionsModal";
@@ -237,20 +237,14 @@ export default function WorkspacePage() {
     let cancelled = false;
     (async () => {
       try {
-        const { conversations } = await api<{ conversations: ConversationMeta[] }>(
-          endpoints.convListPath
-        );
+        const conversations = await fetchConversations(endpoints);
         if (cancelled) return;
         setConversations(conversations);
         const opensNewChat = firstListLoad.current;
         firstListLoad.current = false;
-        if (conversations.length > 0 && !opensNewChat) {
-          const latest = [...conversations].sort((a, b) =>
-            b.updated_at.localeCompare(a.updated_at)
-          )[0]!;
-          const conv = await api<{ conversationId: string; messages: Message[] }>(
-            endpoints.convMsgPath(latest.id)
-          );
+        const latest = newestConversation(conversations);
+        if (latest && !opensNewChat) {
+          const conv = await fetchConversation(endpoints, latest.id);
           if (!cancelled) {
             setConversationId(conv.conversationId);
             setInitialMessages(conv.messages);
@@ -361,10 +355,7 @@ export default function WorkspacePage() {
   const refreshConversations = useCallback(async () => {
     if (!endpoints) return;
     try {
-      const { conversations } = await api<{ conversations: ConversationMeta[] }>(
-        endpoints.convListPath
-      );
-      setConversations(conversations);
+      setConversations(await fetchConversations(endpoints));
     } catch {
       /* ignore */
     }
@@ -374,9 +365,7 @@ export default function WorkspacePage() {
     async (convId: string) => {
       if (!endpoints || convId === conversationId) return;
       try {
-        const conv = await api<{ conversationId: string; messages: Message[] }>(
-          endpoints.convMsgPath(convId)
-        );
+        const conv = await fetchConversation(endpoints, convId);
         setConversationId(conv.conversationId);
         setInitialMessages(conv.messages);
       } catch {
@@ -517,45 +506,19 @@ export default function WorkspacePage() {
         notify("Не вдалося визначити збірник.");
         return;
       }
-      const path = `/api/collections/${cid}/analyze`;
-      let body: Record<string, unknown> | FormData;
-      if (source.file) {
-        const form = new FormData();
-        if (conversationId) form.append("conversationId", conversationId);
-        form.append("files", source.file, source.file.name || "manifest");
-        body = form;
-      } else {
-        body = conversationId
-          ? { sheetUrl: source.url, conversationId }
-          : { sheetUrl: source.url };
-      }
+      const body = analyzeBody(source.file ? { file: source.file } : { input: source.url ?? "" }, conversationId);
       setAnalyzeProgress({ pct: 0, step: "Готую аналіз…" });
       analyzeAbortRef.current?.abort();
       const ctrl = new AbortController();
       analyzeAbortRef.current = ctrl;
-      try {
-        await streamAnalyze(
-          path,
-          body,
-          {
-            onProgress: (e) => setAnalyzeProgress(e),
-            onDone: (d) => {
-              setAnalyzeProgress(null);
-              setAnalysis(d.analysis);
-              if (d.conversationId) void showAnalysisConversation(cid, d.conversationId);
-            },
-            onError: (m) => {
-              setAnalyzeProgress(null);
-              notify(m || "Не вдалося виконати аналіз.");
-            },
-          },
-          ctrl.signal
-        );
-      } catch {
-        notify("Не вдалося виконати аналіз.");
-      } finally {
-        if (analyzeAbortRef.current === ctrl) analyzeAbortRef.current = null;
-        setAnalyzeProgress(null);
+      const outcome = await runAnalysis(cid, body, (e) => setAnalyzeProgress(e), ctrl.signal);
+      if (analyzeAbortRef.current === ctrl) analyzeAbortRef.current = null;
+      setAnalyzeProgress(null);
+      if (outcome.kind === "done") {
+        setAnalysis(outcome.done.analysis);
+        if (outcome.done.conversationId) void showAnalysisConversation(cid, outcome.done.conversationId);
+      } else if (outcome.kind === "error") {
+        notify(outcome.message);
       }
     },
     [analyzeProgress, ensureCollectionForAnalysis, conversationId, showAnalysisConversation, notify]
@@ -566,10 +529,8 @@ export default function WorkspacePage() {
   const reloadLatestAnalysis = useCallback(async () => {
     if (!activeCollectionId) return;
     try {
-      const r = await api<{ analysis: AnalysisResult | null }>(
-        `/api/collections/${activeCollectionId}/analysis/latest`
-      );
-      if (r.analysis) setAnalysis(r.analysis);
+      const latest = await fetchLatestAnalysis(activeCollectionId);
+      if (latest) setAnalysis(latest);
     } catch {
       /* ignore */
     }
@@ -623,10 +584,8 @@ export default function WorkspacePage() {
     setAnalysis(null);
     (async () => {
       try {
-        const r = await api<{ analysis: AnalysisResult | null }>(
-          `/api/collections/${activeCollectionId}/analysis/latest`
-        );
-        if (!cancelled) setAnalysis(r.analysis);
+        const latest = await fetchLatestAnalysis(activeCollectionId);
+        if (!cancelled) setAnalysis(latest);
       } catch {
         if (!cancelled) setAnalysis(null);
       }

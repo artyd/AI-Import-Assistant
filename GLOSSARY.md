@@ -78,6 +78,17 @@ _Avoid_: Failed file, empty file
 
 ## Reconciliation
 
+**Verdicts**:
+Everything the app concludes about a shipment from its documents — completeness,
+discrepancies, risks and the pipeline status. They are always derived together,
+from the same documents, never reasoned out by the agent.
+_Avoid_: Checks, results, analysis (that is consolidated analysis)
+
+**Pipeline status** (Чернетка → Документи в роботі → Документи повні → Готово до митниці):
+How far a shipment's paperwork is. It only moves forward on its own; a person can
+set it by hand, including the final «Готово».
+_Avoid_: State, stage
+
 **Completeness** (Комплектність):
 Which required document types a shipment has and which are missing.
 _Avoid_: Checklist status, coverage

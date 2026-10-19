@@ -9,7 +9,7 @@
 // back with the returned AnalysisResult. A stepped loader runs while in flight.
 
 import { useEffect, useRef, useState } from "react";
-import { streamAnalyze } from "@/lib/sse";
+import { analyzeBody, runAnalysis } from "@/lib/analysis/run";
 import type { AnalysisResult } from "@/lib/types";
 import { LnSettings } from "../ui/LineIcons";
 
@@ -74,47 +74,27 @@ export function AnalyzePanel({
     }
     setStep("Готую аналіз…");
 
-    const path = `/api/collections/${cid}/analyze`;
-    let body: Record<string, unknown> | FormData;
-    if (file) {
-      const form = new FormData();
-      // conversationId BEFORE the file so the server sees it in part.fields.
-      if (conversationId) form.append("conversationId", conversationId);
-      form.append("files", file, file.name || "manifest");
-      body = form;
-    } else {
-      const base = /^https?:\/\//i.test(trimmed) ? { sheetUrl: trimmed } : { text: trimmed };
-      body = conversationId ? { ...base, conversationId } : base;
-    }
-
-    let done = false;
-    let failed = false;
+    const body = analyzeBody(file ? { file } : { input: trimmed }, conversationId);
     abortRef.current?.abort();
     const ctrl = new AbortController();
     abortRef.current = ctrl;
-    try {
-      await streamAnalyze(path, body, {
-        onProgress: (e) => {
-          setPct(e.pct);
-          setStep(e.step);
-        },
-        onDone: (d) => {
-          done = true;
-          onResult(d.analysis, { conversationId: d.conversationId, collectionId: cid });
-          setText("");
-          setFile(null);
-        },
-        onError: (message) => {
-          failed = true;
-          setError(message || "Не вдалося виконати аналіз.");
-        },
-      }, ctrl.signal);
-      if (!done && !failed && !ctrl.signal.aborted) setError("Аналіз перервано. Спробуйте ще раз.");
-    } catch {
-      setError("Не вдалося виконати аналіз.");
-    } finally {
-      setRunning(false);
+    const outcome = await runAnalysis(
+      cid,
+      body,
+      (e) => {
+        setPct(e.pct);
+        setStep(e.step);
+      },
+      ctrl.signal
+    );
+    if (outcome.kind === "done") {
+      onResult(outcome.done.analysis, { conversationId: outcome.done.conversationId, collectionId: cid });
+      setText("");
+      setFile(null);
+    } else if (outcome.kind === "error") {
+      setError(outcome.message);
     }
+    setRunning(false);
   };
 
   return (

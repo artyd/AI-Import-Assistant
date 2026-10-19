@@ -13,17 +13,17 @@ src/                     backend: Node 20 + TS (ESM/NodeNext), Fastify 5, pg, Bu
   lib/                   infrastructure: config (zod env), anthropic client, BullMQ queues, events, sse, storage, pdf, zip, mime
   agent/                 Штурман: loop.ts, systemPrompt.ts, tools.ts (definitions + dispatcher), tools/<area>.ts handlers
   chat/                  chat routes for the 3 chat kinds, conversations + history
-  shipments/             shipments + collections, ownership checks, folder skeleton, status, auto-context
+  shipments/             shipments + collections, ownership, folder skeleton; state.ts = shipmentChanged; autopilot context
   documents/             file upload/preview/export routes, classify, versions, artifacts
   ingest/                file → Markdown (vision), full-text sections, field extraction, retry sweep
-  reconciliation/        completeness, discrepancies (reconcile.ts), risks, parties, verification
+  reconciliation/        verdicts.ts: snapshot → completeness, discrepancies (reconcile.ts), risks, status; parties, verification
   customs/               logist-mcp client (qdpro, NBU, PubChem, dual-use), drug registry
   instruction/ report/   supplier instruction constructor; one-page management report
   analysis/              consolidated analysis engine + data/*.json; byok/ (user AI keys)
   hub/ sheet/            logistics hub (tracks, ports, lines, routes); team Google Sheet sync + calendar
   news/ notifications/ mcp/   RSS news; in-app bell + reminders; public MCP endpoint
   <area>/*.routes.ts     a Fastify route plugin; <area>/__tests__/*.spec.ts vitest
-frontend/                Next.js 15 app (own package): app/ routes, components/<area>/, lib/ (api, types, stores)
+frontend/                Next.js 15 app (own package): app/ routes, components/<area>/, lib/<area>/ pure modules + hooks (vitest)
 logist-mcp/              internal Python service: qdpro/NBU/PubChem scrapers over plain REST
 eval/                    golden-set eval for extraction + reconciliation (npm run eval:golden)
 scripts/                 build asset copy, smoke test, drug-registry ingest, grounding eval
@@ -41,7 +41,7 @@ DEPLOYMENT.md            server setup, host Caddy block, env
    - Route: `src/<area>/<name>.routes.ts`, then register it in `server.ts` and document it in `API_CONTRACT.md` (`/add-route`).
    - Agent tool: definition in `agent/tools.ts`, handler in `agent/tools/<area>.ts` (`/add-agent-tool`).
    - File format: `convertToMarkdown` + `inferFileType` + the allow-list in `lib/storage.ts`.
-3. **Check**: `npm run typecheck && npm test && npm run build` for the backend (`/verify`), and `cd frontend && npm run typecheck && npm run build && npx playwright test` for the frontend. Run `npm run eval:grounding` when you touch the prompt or tools.
+3. **Check**: `npm run typecheck && npm test && npm run build` for the backend (`/verify`), and `cd frontend && npm run typecheck && npm test && npm run build && npx playwright test` for the frontend. Run `npm run eval:grounding` when you touch the prompt or tools.
 4. **Commit** on `main` and push only when asked. A push to `main` can deploy to production (see Deploy).
 
 ## Invariants
@@ -57,6 +57,7 @@ DEPLOYMENT.md            server setup, host Caddy block, env
 - **Model**: `ANTHROPIC_MODEL` (default `claude-sonnet-5-5`) with adaptive thinking. Never force `tool_choice` (Sonnet 5.5 returns 400); preserved-thinking models need `block_binding: drop_block`.
 - **The Anthropic key stays server-side** (`lib/anthropic/client.ts`). BYOK keys serve consolidated analysis only (ADR-0011).
 - **Wire contract is frozen**: chat SSE `token|tool_call|tool_result|done|error`, events SSE `file_status`, file status `queued|indexing|ready|error` (the frontend shows `ready` as `done`). Change it only together with `API_CONTRACT.md`.
+- **Shipment changed**: every write to what the verdicts read — files (delete, move, new version), extractions, parties, context, an approved instruction — ends with `shipmentChanged(id, change)` (`shipments/state.ts`). It owns the order autopilot → intake → verdicts → alert; `shipments/__tests__/state.spec.ts` fails on a writer that skips it.
 - **Access**: every shipment-scoped route calls `getOwnedWorkspace(userId, id)` and returns 404 on a miss. SSE authenticates with one-time tickets, never a JWT in the URL (ADR-0007). `/api/mcp` is deliberately open (ADR-0008).
 - **Code**: local ESM imports end in `.js`. Strict TS with `noUncheckedIndexedAccess`. Every request body is validated with zod. "Workspace" in code means "shipment" (Постачання).
 - **Team sheet is read-only**: never write to it, and never commit real sheet rows (ADR-0009).

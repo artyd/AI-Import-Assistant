@@ -19,6 +19,9 @@ files), verify and report — do NOT edit:
 4. **Conventions:** local ESM imports end in `.js`; request bodies validated with
    `zod`; workspace-scoped routes use `getOwnedWorkspace`; file status
    `queued|indexing|ready|error` (frontend maps `ready→done`).
+   Any write to what the shipment verdicts read (files, extractions, parties,
+   context, an approved instruction) ends with `shipmentChanged(...)`
+   (`src/shipments/state.ts`); `npm test` enforces it.
 5. Run `npm run typecheck` and report the result.
 
 Output a short checklist with ✅/⚠️/❌ per item and a one-line rationale for each

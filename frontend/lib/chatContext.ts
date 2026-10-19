@@ -8,7 +8,8 @@
 //   normal       → /api/chats                          + /api/chats[/:cid]
 //   consolidated → /api/collections/:id/chat           + /conversations[/:cid]
 
-import type { ChatKind } from "./types";
+import { api } from "./api";
+import type { ChatKind, ConversationMeta, Message } from "./types";
 
 export interface ChatEndpoints {
   /** POST target for streaming a message. */
@@ -52,4 +53,20 @@ export function resolveChatEndpoints(
     convListPath: `${base}/conversations`,
     convMsgPath: (cid) => `${base}/conversations/${cid}`,
   };
+}
+
+/** The conversation list of a chat kind/entity. */
+export async function fetchConversations(e: ChatEndpoints): Promise<ConversationMeta[]> {
+  const { conversations } = await api<{ conversations: ConversationMeta[] }>(e.convListPath);
+  return conversations;
+}
+
+/** One conversation's messages. */
+export function fetchConversation(e: ChatEndpoints, id: string) {
+  return api<{ conversationId: string; messages: Message[] }>(e.convMsgPath(id));
+}
+
+/** The most recently updated conversation, if any. */
+export function newestConversation(list: ConversationMeta[]): ConversationMeta | null {
+  return [...list].sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0] ?? null;
 }
