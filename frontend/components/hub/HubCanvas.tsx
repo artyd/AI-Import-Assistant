@@ -15,7 +15,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { api } from "@/lib/api";
 import { useTheme } from "@/lib/theme";
-import { hubApi, lineApi, routeApi, ROUTE_MODE_COLOR, portApi, RISK_ZONES, portStatusColor, statusColor, type AmbientVessel, type CarrierDetailData, type CarrierRef, type LegDraft, type PlannedRoute, type CarrierSummary, type Lane, type HubPort, type LatLng, type LiveSnapshot, type Track, type TrackEvent, effDeparted, effEta, fmtDate } from "@/lib/hub";
+import { hubApi, lineApi, routeApi, ROUTE_MODE_COLOR, portApi, RISK_ZONES, portStatusColor, statusColor, type AmbientVessel, type CarrierDetailData, type CarrierRef, type LegDraft, type PlannedRoute, type CarrierSummary, type Lane, type HubPort, type LatLng, type LiveSnapshot, type Track, type TrackEvent, fmtDate } from "@/lib/hub";
 import { IconSpinner } from "@/components/ui/icons";
 import { forwarderColor, todayKyiv } from "@/lib/calendar";
 import { useAppStore } from "@/lib/store";
@@ -25,7 +25,7 @@ import { MapLegend } from "./MapLegend";
 import { MapSearch } from "./MapSearch";
 import { PlaybackBar } from "./PlaybackBar";
 import { actualProgress, buildReplay, planProgress, positionAt, type Replay } from "./playback";
-import { advance, lerp, smoothPath, splitAt } from "./geo";
+import { smoothPath, splitAt } from "./geo";
 import { TracksPanel, type WorkspaceRef } from "./TracksPanel";
 import { TrackDetail } from "./TrackDetail";
 import { defaultPortFilter, isIssue, portMatches, PortsPanel, type PortFilter } from "./PortsPanel";
@@ -37,11 +37,16 @@ import { RouteDetail, type PickedPoint } from "./RouteDetail";
 import { haversineKm } from "./geo";
 import { type BasemapKey, BASEMAPS, BASEMAP_STORE, TILE_LIGHT, TILE_DARK, ATTRIB, FIT_BOUNDS, POLL_MS, PORTS_POLL_MS, GLIDE_MS, MAX_DR_MS, AIS_MIN_ZOOM, CLUSTER_MAX_ZOOM, LABEL_MIN_ZOOM, statusRank, etaBadge, positionOn, type LayerKey, type Tab, TABS, LAYERS, resolveCssColor } from "./canvasConfig";
 import { Stat, segBtn } from "./Stat";
+import { usePolling } from "@/lib/usePolling";
+import { deadReckon, estimatePosition, glidePosition } from "./motion";
 
 export interface TrackFilter {
   forwarder: string;
   type: string;
 }
+
+/** The one thing the side card shows. */
+type HubSelection = { kind: "track" | "port" | "carrier" | "route"; id: string } | null;
 
 interface TrackAnim {
   marker: L.Marker;
@@ -66,13 +71,17 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
   const [snap, setSnap] = useState<LiveSnapshot | null>(null);
   const [ports, setPorts] = useState<HubPort[]>([]);
   const [tab, setTab] = useState<Tab>("tracks");
-  const [selPort, setSelPort] = useState<string | null>(null);
   // Ports-tab quick filter; null = not chosen yet (list shows the default, map shows everything).
   const [portFilter, setPortFilter] = useState<PortFilter | null>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceRef[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // What the side card shows: one thing at a time (a track, port, carrier or route).
+  const [selection, setSelection] = useState<HubSelection>(null);
+  const selectedId = selection?.kind === "track" ? selection.id : null;
+  const selPort = selection?.kind === "port" ? selection.id : null;
+  const selCarrier = selection?.kind === "carrier" ? selection.id : null;
+  const selRoute = selection?.kind === "route" ? selection.id : null;
   const [panelOpen, setPanelOpen] = useState(true);
   const [layers, setLayers] = useState<Record<LayerKey, boolean>>({
     tracks: true,
@@ -84,11 +93,9 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
   });
   const [carriers, setCarriers] = useState<CarrierSummary[]>([]);
   const [lanes, setLanes] = useState<Lane[]>([]);
-  const [selCarrier, setSelCarrier] = useState<string | null>(null);
   const [selLane, setSelLane] = useState<string | null>(null);
   const [carrierDetail, setCarrierDetail] = useState<CarrierDetailData | null>(null);
   const [routes, setRoutes] = useState<PlannedRoute[]>([]);
-  const [selRoute, setSelRoute] = useState<string | null>(null);
   const [draftLegs, setDraftLegs] = useState<LegDraft[] | null>(null);
   const [carrierRefs, setCarrierRefs] = useState<CarrierRef[]>([]);
   const [picking, setPicking] = useState(false);
@@ -168,7 +175,7 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
       snapAt.current = Date.now();
       setSnap(s);
       setError(null);
-      if (selectId) setSelectedId(selectId);
+      if (selectId) setSelection({ kind: "track", id: selectId });
     } catch {
       setError("Не вдалося завантажити дані хабу.");
     } finally {
@@ -176,11 +183,7 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
     }
   }, []);
 
-  useEffect(() => {
-    void reload();
-    const t = setInterval(() => void reload(), POLL_MS);
-    return () => clearInterval(t);
-  }, [reload]);
+  usePolling(() => void reload(), POLL_MS);
 
   const loadPorts = useCallback(() => {
     portApi
@@ -189,11 +192,7 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
       .catch(() => {});
   }, []);
 
-  useEffect(() => {
-    loadPorts();
-    const t = setInterval(loadPorts, PORTS_POLL_MS);
-    return () => clearInterval(t);
-  }, [loadPorts]);
+  usePolling(loadPorts, PORTS_POLL_MS);
 
   const loadLines = useCallback(() => {
     lineApi
@@ -205,11 +204,7 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
       .catch(() => {});
   }, []);
 
-  useEffect(() => {
-    loadLines();
-    const t = setInterval(loadLines, PORTS_POLL_MS);
-    return () => clearInterval(t);
-  }, [loadLines]);
+  usePolling(loadLines, PORTS_POLL_MS);
 
   const loadRoutes = useCallback(() => {
     routeApi
@@ -218,45 +213,25 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
       .catch(() => {});
   }, []);
 
+  usePolling(loadRoutes, POLL_MS);
   useEffect(() => {
-    loadRoutes();
     hubApi
       .carriers()
       .then((r) => setCarrierRefs(r.carriers))
       .catch(() => {});
-    const t = setInterval(loadRoutes, POLL_MS);
-    return () => clearInterval(t);
-  }, [loadRoutes]);
+  }, []);
 
   const setPick = useCallback((cb: ((p: PickedPoint) => void) | null) => {
     pickRef.current = cb;
     setPicking(!!cb);
   }, []);
 
-  const selectTrack = useCallback((id: string | null) => {
-    setSelPort(null);
-    setSelCarrier(null);
-    setSelRoute(null);
-    setSelectedId(id);
-  }, []);
-  const selectRoute = useCallback((id: string | null) => {
-    setSelectedId(null);
-    setSelPort(null);
-    setSelCarrier(null);
-    setSelRoute(id);
-  }, []);
-  const selectPort = useCallback((code: string | null) => {
-    setSelectedId(null);
-    setSelCarrier(null);
-    setSelRoute(null);
-    setSelPort(code);
-  }, []);
+  const selectTrack = useCallback((id: string | null) => setSelection(id ? { kind: "track", id } : null), []);
+  const selectRoute = useCallback((id: string | null) => setSelection(id ? { kind: "route", id } : null), []);
+  const selectPort = useCallback((code: string | null) => setSelection(code ? { kind: "port", id: code } : null), []);
   const selectCarrier = useCallback((id: string | null) => {
-    setSelectedId(null);
-    setSelPort(null);
-    setSelRoute(null);
     setCarrierDetail(null);
-    setSelCarrier(id);
+    setSelection(id ? { kind: "carrier", id } : null);
   }, []);
   const selectedPort = ports.find((p) => p.code === selPort) ?? null;
 
@@ -657,7 +632,7 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
       setReplay(r);
       setReplayT(r.start);
       // The voyage needs the map: close the card so the bar gets the full width.
-      setSelectedId(null);
+      setSelection(null);
       // Frame the whole voyage clear of the side panel (left) and the replay bar (bottom).
       if (map)
         map.flyToBounds(L.latLngBounds(r.path.map((p) => L.latLng(p[0], p[1]))), {
@@ -757,11 +732,8 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const tick = (ts: number) => {
       for (const a of trackAnims.current.values()) {
-        const f = Math.min(1, (ts - a.start) / GLIDE_MS);
-        if (f < 1) {
-          const e = 1 - (1 - f) ** 3;
-          a.marker.setLatLng(lerp(a.from, a.to, e));
-        }
+        const p = glidePosition(a.from, a.to, a.start, ts, GLIDE_MS);
+        if (p) a.marker.setLatLng(p);
       }
       if (!reduce && ts - lastSlow > 1000) {
         lastSlow = ts;
@@ -769,26 +741,17 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
         // In-transit estimates keep creeping along their lane between polls
         // (not while the map shows positions on a chosen date).
         for (const a of atDateRef.current ? [] : trackAnims.current.values()) {
-          const it = a.item;
-          const dep = effDeparted(it);
-          const eta = effEta(it);
-          if (it.live?.positionSource !== "estimate" || !dep || !eta) continue;
           if (ts - a.start < GLIDE_MS) continue;
-          const t0 = new Date(dep).getTime();
-          const t1 = new Date(eta).getTime();
-          if (t1 <= t0) continue;
-          const t = Math.max(0.02, Math.min(0.97, (wall - t0) / (t1 - t0)));
-          const { point, heading } = splitAt(smoothPath(it.live.path), t);
-          a.marker.setLatLng(point);
-          a.to = point;
-          if (glyphRotates(it.mode)) setRotation(a.marker, heading);
+          const est = estimatePosition(a.item, wall);
+          if (!est) continue;
+          a.marker.setLatLng(est.point);
+          a.to = est.point;
+          if (glyphRotates(a.item.mode)) setRotation(a.marker, est.heading);
         }
         // AIS vessels drift by course/speed since their last fix.
         for (const a of aisAnims.current.values()) {
-          const { sog, cog } = a.v;
-          if (sog == null || cog == null || sog < 0.5) continue;
-          const dt = Math.min(wall - a.baseAt, MAX_DR_MS);
-          a.marker.setLatLng(advance(a.base, cog, (sog * 1.852 * dt) / 3_600_000));
+          const p = deadReckon(a.base, a.baseAt, a.v, wall, MAX_DR_MS);
+          if (p) a.marker.setLatLng(p);
         }
       }
       raf = requestAnimationFrame(tick);
@@ -988,12 +951,7 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
               style={iconBtn}
               onClick={() => {
                 setPanelOpen(true);
-                if (narrow) {
-                  setSelectedId(null);
-                  setSelPort(null);
-                  setSelCarrier(null);
-                  setSelRoute(null);
-                }
+                if (narrow) setSelection(null);
               }}
               aria-label="Показати панель хабу"
               title="Панель хабу"
@@ -1259,7 +1217,7 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
           <PortDetail
             key={selectedPort.code}
             code={selectedPort.code}
-            onClose={() => setSelPort(null)}
+            onClose={() => selectPort(null)}
             onChanged={loadPorts}
             onOpenTrack={(id) => {
               setTab("tracks");
@@ -1295,7 +1253,7 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
             onClose={() => selectRoute(null)}
             onSaved={(r) => {
               loadRoutes();
-              setSelRoute(r.id);
+              selectRoute(r.id);
             }}
             onDeleted={() => {
               selectRoute(null);
@@ -1372,7 +1330,7 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
             onClose={() => selectTrack(null)}
             onChanged={() => void reload()}
             onRemoved={() => {
-              setSelectedId(null);
+              setSelection(null);
               void reload();
             }}
           />
