@@ -5,7 +5,7 @@ import { pool } from './pool.js';
 /**
  * One-time data migration: merges the two certificate folders into a single
  * `03_Certificates` folder and renumbers the trailing folders so numbering stays
- * contiguous (8 → 7 folders). See domain/folders.ts. NOT auto-run on boot:
+ * contiguous (8 → 7 folders). See shipments/folders.ts. NOT auto-run on boot:
  *
  *   npm run migrate:cert-merge            # dry-run: prints the plan, writes nothing
  *   npm run migrate:cert-merge -- --apply # executes the moves

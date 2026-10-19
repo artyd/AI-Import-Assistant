@@ -32,8 +32,8 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve, isAbsolute } from 'node:path';
 import { z } from 'zod';
-import { reconcile, type Discrepancy, type ReconcileDoc } from '../src/services/reconcile.js';
-import type { ExtractedFields } from '../src/services/extraction/extractFields.js';
+import { reconcile, type Discrepancy, type ReconcileDoc } from '../src/reconciliation/reconcile.js';
+import type { ExtractedFields } from '../src/ingest/extraction/extractFields.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '..');
@@ -181,11 +181,11 @@ type RealExtractors = {
   extractDocumentFields: (text: string) => Promise<ExtractedFields | null>;
   extractDocumentFieldsFromDocument: (
     buf: Buffer,
-    type: import('../src/domain/folders.js').FileType,
+    type: import('../src/shipments/folders.js').FileType,
     name: string,
   ) => Promise<ExtractedFields | null>;
-  extractText: (data: Buffer, type: import('../src/domain/folders.js').FileType) => Promise<{ text: string }[]>;
-  inferFileType: (name: string) => import('../src/domain/folders.js').FileType;
+  extractText: (data: Buffer, type: import('../src/shipments/folders.js').FileType) => Promise<{ text: string }[]>;
+  inferFileType: (name: string) => import('../src/shipments/folders.js').FileType;
 };
 let realExtractors: RealExtractors | null = null;
 
@@ -193,9 +193,9 @@ async function getRealExtractors(): Promise<RealExtractors> {
   if (realExtractors) return realExtractors;
   // Dynamic import so dry-run never loads config.ts (which exits on a missing key).
   const [extract, ex, folders] = await Promise.all([
-    import('../src/services/extraction/extractFields.js'),
-    import('../src/services/extract/index.js'),
-    import('../src/domain/folders.js'),
+    import('../src/ingest/extraction/extractFields.js'),
+    import('../src/ingest/extract/index.js'),
+    import('../src/shipments/folders.js'),
   ]);
   realExtractors = {
     extractDocumentFields: extract.extractDocumentFields,

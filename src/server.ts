@@ -2,38 +2,38 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import multipart from '@fastify/multipart';
-import { config } from './config.js';
+import { config } from './lib/config.js';
 import { pool } from './db/pool.js';
 import { runMigrations } from './db/migrate.js';
-import { seedPlaces } from './services/hub/ports.js';
-import { authRoutes } from './routes/auth.js';
-import { workspaceRoutes } from './routes/workspaces.js';
-import { collectionRoutes } from './routes/collections.js';
-import { collectionFileRoutes } from './routes/collectionFiles.js';
-import { analysisRoutes } from './routes/analysis.js';
-import { fileRoutes } from './routes/files.js';
-import { chatRoutes } from './routes/chat.js';
-import { chatNormalRoutes } from './routes/chatNormal.js';
-import { chatConsolidatedRoutes } from './routes/chatConsolidated.js';
-import { conversationRoutes } from './routes/conversations.js';
-import { eventRoutes } from './routes/events.js';
-import { checklistRoutes } from './routes/checklist.js';
-import { discrepancyRoutes } from './routes/discrepancies.js';
-import { verificationRoutes } from './routes/verification.js';
-import { riskRoutes } from './routes/risks.js';
-import { supplierInstructionRoutes } from './routes/supplierInstruction.js';
-import { directoryRoutes } from './routes/directory.js';
-import { userRoutes } from './routes/users.js';
-import { notificationRoutes } from './routes/notifications.js';
-import { aiConfigRoutes } from './routes/aiConfig.js';
-import { newsRoutes } from './routes/news.js';
-import { partiesRoutes } from './routes/parties.js';
-import { reportRoutes } from './routes/report.js';
-import { exportRoutes } from './routes/export.js';
-import { mapRoutes } from './routes/map.js';
-import { hubRoutes } from './routes/hub.js';
-import { sheetRoutes } from './routes/sheet.js';
-import { mcpRoutes } from './routes/mcp.js';
+import { seedPlaces } from './hub/ports.js';
+import { authRoutes } from './auth/auth.routes.js';
+import { workspaceRoutes } from './shipments/workspaces.routes.js';
+import { collectionRoutes } from './shipments/collections.routes.js';
+import { collectionFileRoutes } from './documents/collectionFiles.routes.js';
+import { analysisRoutes } from './analysis/analysis.routes.js';
+import { fileRoutes } from './documents/files.routes.js';
+import { chatRoutes } from './chat/chat.routes.js';
+import { chatNormalRoutes } from './chat/chatNormal.routes.js';
+import { chatConsolidatedRoutes } from './chat/chatConsolidated.routes.js';
+import { conversationRoutes } from './chat/conversations.routes.js';
+import { eventRoutes } from './documents/events.routes.js';
+import { checklistRoutes } from './reconciliation/checklist.routes.js';
+import { discrepancyRoutes } from './reconciliation/discrepancies.routes.js';
+import { verificationRoutes } from './reconciliation/verification.routes.js';
+import { riskRoutes } from './reconciliation/risks.routes.js';
+import { supplierInstructionRoutes } from './instruction/supplierInstruction.routes.js';
+import { directoryRoutes } from './instruction/directory.routes.js';
+import { userRoutes } from './auth/users.routes.js';
+import { notificationRoutes } from './notifications/notifications.routes.js';
+import { aiConfigRoutes } from './analysis/byok/aiConfig.routes.js';
+import { newsRoutes } from './news/news.routes.js';
+import { partiesRoutes } from './reconciliation/parties.routes.js';
+import { reportRoutes } from './report/report.routes.js';
+import { exportRoutes } from './documents/export.routes.js';
+import { mapRoutes } from './hub/map.routes.js';
+import { hubRoutes } from './hub/hub.routes.js';
+import { sheetRoutes } from './sheet/sheet.routes.js';
+import { mcpRoutes } from './mcp/mcp.routes.js';
 
 async function buildServer() {
   const app = Fastify({
@@ -101,6 +101,10 @@ async function buildServer() {
 
   app.get('/health', async () => ({ status: 'ok' }));
 
+  // Route plugins live in their area folders (`<area>/*.routes.ts`). Keep this
+  // registration order (and the import order above) as is: Fastify applies
+  // plugins and their hooks in registration order, and it matches the order the
+  // app has always booted in.
   await app.register(authRoutes);
   await app.register(workspaceRoutes);
   await app.register(collectionRoutes);

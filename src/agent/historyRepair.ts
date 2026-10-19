@@ -1,4 +1,4 @@
-import type { ChatContentBlockParam, ChatMessageParam } from '../anthropic/client.js';
+import type { ChatContentBlockParam, ChatMessageParam } from '../lib/anthropic/client.js';
 
 /**
  * Replay-safety for persisted conversation blocks. The Messages API rejects a

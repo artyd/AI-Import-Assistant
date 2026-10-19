@@ -1,4 +1,4 @@
-// Client-side geometry for smooth map animation (mirrors src/services/hub/geo.ts).
+// Client-side geometry for smooth map animation (mirrors src/hub/geo.ts).
 
 import type { LatLng } from "@/lib/hub";
 

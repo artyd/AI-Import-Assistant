@@ -1,7 +1,7 @@
 /* eslint-disable no-console */
 import { pool, query } from './pool.js';
-import { enqueueIndexJob, indexingQueue } from '../queue/index.js';
-import { publishFileStatus } from '../events/fileStatus.js';
+import { enqueueIndexJob, indexingQueue } from '../lib/queue/index.js';
+import { publishFileStatus } from '../lib/events/fileStatus.js';
 
 /**
  * One-time backfill for the Claude-only Markdown pipeline: re-queues every current

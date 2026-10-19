@@ -1,6 +1,6 @@
-import { config } from '../config.js';
-import type { ChatSystem } from '../anthropic/client.js';
-import { sheetEnabled } from '../services/sheet/link.js';
+import { config } from '../lib/config.js';
+import type { ChatSystem } from '../lib/anthropic/client.js';
+import { sheetEnabled } from '../sheet/link.js';
 
 /**
  * Default user portrait — shared across every chat kind. The user is a Ukraine

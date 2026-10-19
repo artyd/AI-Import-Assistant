@@ -4,7 +4,7 @@ import { pool } from './pool.js';
 
 /**
  * One-time data migration: converts existing workspaces from the old 10-folder
- * customs skeleton to the new 8-folder one (see domain/folders.ts). This is NOT
+ * customs skeleton to the new 8-folder one (see shipments/folders.ts). This is NOT
  * auto-run on boot — invoke it explicitly:
  *
  *   npm run migrate:folders            # dry-run: prints the plan, writes nothing

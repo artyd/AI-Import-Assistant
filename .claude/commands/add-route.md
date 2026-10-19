@@ -4,7 +4,7 @@ description: Scaffold a new REST route following the codebase conventions
 
 Add a new REST route: **$ARGUMENTS**
 
-Conventions (mirror `src/routes/workspaces.ts` / `files.ts`):
+Conventions (mirror `src/shipments/workspaces.routes.ts` / `files.ts`):
 
 1. Create `src/routes/<name>.ts` exporting `async function <name>Routes(app: FastifyInstance)`.
 2. `app.addHook('preHandler', authenticate)` (all routes need auth except login).

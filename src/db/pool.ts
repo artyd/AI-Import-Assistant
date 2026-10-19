@@ -1,5 +1,5 @@
 import pg from 'pg';
-import { config } from '../config.js';
+import { config } from '../lib/config.js';
 
 /**
  * Shared PostgreSQL connection pool. Import { pool, query } wherever DB access

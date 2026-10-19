@@ -25,7 +25,7 @@ is not used.
   removed 2026-09-30): every file is converted ONCE at ingest to Markdown
   (`file_markdown`) — PDFs/scans/photos by Claude vision in 5-page windows,
   docx/xlsx/csv locally, legacy .doc via LibreOffice — and everything reads that.
-- **Anthropic key server-side only** (`src/anthropic/client.ts`). The browser
+- **Anthropic key server-side only** (`src/lib/anthropic/client.ts`). The browser
   never calls Anthropic directly.
 - **Model:** `claude-sonnet-5-5` (env `ANTHROPIC_MODEL`, backend + worker) with `thinking: { type: 'adaptive' }`;
   no forced `tool_choice` (400 on Sonnet 5.5), `block_binding: drop_block` on preserved-thinking models.
@@ -84,7 +84,7 @@ src/
   queue/               BullMQ queue + Redis connection
   events/              fileStatus pub/sub (live indexing status)
   worker/index.ts      indexing worker: convert → Markdown (+ FTS sections) → status → extraction
-domain/folders.ts      folder skeleton + file-type inference
+shipments/folders.ts      folder skeleton + file-type inference
 scripts/               copy-assets.mjs (build), smoke-test.mjs
 docker-compose.yml  Caddyfile  .env.example  Dockerfile
 API_CONTRACT.md  DEPLOYMENT.md
@@ -121,8 +121,8 @@ API_CONTRACT.md  DEPLOYMENT.md
   `executeTool` (`src/agent/tools.ts`); it returns `{ result, summary, citations }`.
 - **Backfill Markdown** for files indexed before the pipeline →
   `npm run migrate:markdown -- --apply` (dry-run without `--apply`).
-- **A new file format** → extend `convertToMarkdown` (`src/services/markdown/convert.ts`)
-  and `inferFileType` (`domain/folders.ts`) + the allow-list in `storage.ts`.
+- **A new file format** → extend `convertToMarkdown` (`src/ingest/markdown/convert.ts`)
+  and `inferFileType` (`shipments/folders.ts`) + the allow-list in `storage.ts`.
 
 Out of scope (documented v2): OCR for images; native structured agent blocks
 (diff-tables/checklists arrive as Markdown in the answer for now).

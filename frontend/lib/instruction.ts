@@ -1,5 +1,5 @@
 // Supplier-instruction builder — client types mirroring the backend draft schema
-// (src/services/instruction/types.ts). The letter itself is rendered server-side
+// (src/instruction/types.ts). The letter itself is rendered server-side
 // (POST /instruction/preview) so EN/UK text, DOCX and PDF never drift apart.
 
 export type Category = "substance" | "finished" | "chemical" | "food" | "other";

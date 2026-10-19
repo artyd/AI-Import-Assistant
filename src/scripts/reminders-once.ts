@@ -1,6 +1,6 @@
 /* eslint-disable no-console */
 import { pool } from '../db/pool.js';
-import { scanAndNotify } from '../services/reminders.js';
+import { scanAndNotify } from '../notifications/reminders.js';
 
 /**
  * Runs the reminder scan once and exits — for verifying reminders without waiting

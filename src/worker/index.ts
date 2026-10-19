@@ -1,44 +1,44 @@
 import { Worker, type Job } from 'bullmq';
-import { config } from '../config.js';
+import { config } from '../lib/config.js';
 import { pool, query } from '../db/pool.js';
 import { runMigrations } from '../db/migrate.js';
-import { MODEL } from '../anthropic/client.js';
-import { createRedis } from '../queue/connection.js';
-import { INDEX_QUEUE, type IndexJobData } from '../queue/index.js';
-import { REMINDERS_QUEUE, scheduleReminders, type ReminderJobData } from '../queue/reminders.js';
-import { NEWS_QUEUE, scheduleNews, type NewsJobData } from '../queue/news.js';
-import { TRACKING_QUEUE, scheduleTracking, type TrackingJobData } from '../queue/tracking.js';
-import { SHEET_QUEUE, scheduleSheetSync, type SheetJobData } from '../queue/sheet.js';
-import { sheetEnabled, syncSheet } from '../services/sheet/sync.js';
-import { refreshDue } from '../services/hub/track.js';
-import { scanNewsForHubStatus } from '../services/hub/portNews.js';
-import { seedPlaces } from '../services/hub/ports.js';
-import { startAis, stopAis, aisEnabled } from '../services/hub/ais.js';
+import { MODEL } from '../lib/anthropic/client.js';
+import { createRedis } from '../lib/queue/connection.js';
+import { INDEX_QUEUE, type IndexJobData } from '../lib/queue/index.js';
+import { REMINDERS_QUEUE, scheduleReminders, type ReminderJobData } from '../lib/queue/reminders.js';
+import { NEWS_QUEUE, scheduleNews, type NewsJobData } from '../lib/queue/news.js';
+import { TRACKING_QUEUE, scheduleTracking, type TrackingJobData } from '../lib/queue/tracking.js';
+import { SHEET_QUEUE, scheduleSheetSync, type SheetJobData } from '../lib/queue/sheet.js';
+import { sheetEnabled, syncSheet } from '../sheet/sync.js';
+import { refreshDue } from '../hub/track.js';
+import { scanNewsForHubStatus } from '../hub/portNews.js';
+import { seedPlaces } from '../hub/ports.js';
+import { startAis, stopAis, aisEnabled } from '../hub/ais.js';
 import {
   INGEST_RETRY_QUEUE,
   scheduleIngestRetry,
   type IngestRetryJobData,
-} from '../queue/ingestRetry.js';
-import { sweepStuckFiles } from '../services/ingestRetry.js';
-import { readStoredFile } from '../services/storage.js';
-import { convertToMarkdown, type ConversionResult } from '../services/markdown/convert.js';
-import { saveFileMarkdown } from '../services/markdown/store.js';
+} from '../lib/queue/ingestRetry.js';
+import { sweepStuckFiles } from '../ingest/ingestRetry.js';
+import { readStoredFile } from '../lib/storage.js';
+import { convertToMarkdown, type ConversionResult } from '../ingest/markdown/convert.js';
+import { saveFileMarkdown } from '../ingest/markdown/store.js';
 import {
   extractFieldsFromMarkdown,
   extractDocumentFieldsFromDocumentWithMeta,
   type ExtractedFields,
-} from '../services/extraction/extractFields.js';
-import { classifyAndFile } from '../services/classify.js';
-import { getWorkspaceById } from '../services/workspaceAccess.js';
-import { refreshWorkspaceState } from '../services/status.js';
-import { autoFillWorkspaceContext } from '../services/autoContext.js';
-import { computeRisks } from '../services/risks.js';
-import { maybeReconcileBatch } from '../services/reconcileBatch.js';
-import { insertNotification } from '../services/notifications.js';
-import { scanAndNotify } from '../services/reminders.js';
-import { ingestNews, purgeOldNews } from '../services/news/index.js';
-import { publishFileStatus } from '../events/fileStatus.js';
-import type { FileType } from '../domain/folders.js';
+} from '../ingest/extraction/extractFields.js';
+import { classifyAndFile } from '../documents/classify.js';
+import { getWorkspaceById } from '../shipments/workspaceAccess.js';
+import { refreshWorkspaceState } from '../shipments/status.js';
+import { autoFillWorkspaceContext } from '../shipments/autoContext.js';
+import { computeRisks } from '../reconciliation/risks.js';
+import { maybeReconcileBatch } from '../reconciliation/reconcileBatch.js';
+import { insertNotification } from '../notifications/notifications.js';
+import { scanAndNotify } from '../notifications/reminders.js';
+import { ingestNews, purgeOldNews } from '../news/index.js';
+import { publishFileStatus } from '../lib/events/fileStatus.js';
+import type { FileType } from '../shipments/folders.js';
 
 interface FileJobRow {
   id: string;
@@ -391,7 +391,7 @@ async function main(): Promise<void> {
     concurrency: config.INDEX_CONCURRENCY,
     // Coarse job-rate guard so a huge upload drains steadily. The finer control
     // on external-AI fan-out is the Anthropic concurrency semaphore (see
-    // src/anthropic/limiter.ts) applied inside OCR + extraction.
+    // src/lib/anthropic/limiter.ts) applied inside OCR + extraction.
     limiter: { max: config.INDEX_RATE_MAX, duration: config.INDEX_RATE_DURATION_MS },
   });
 

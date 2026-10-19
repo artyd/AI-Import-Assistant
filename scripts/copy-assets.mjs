@@ -11,8 +11,8 @@ console.log('Copied src/db/schema.sql -> dist/db/schema.sql');
 // Analysis engines read their reference data (*.json) at runtime relative to the
 // compiled module (new URL('./x.json', import.meta.url)). tsc does not emit JSON,
 // so copy the whole data dir into dist to keep the loader working in production.
-const analysisDataSrc = 'src/services/analysis/data';
-const analysisDataDst = 'dist/services/analysis/data';
+const analysisDataSrc = 'src/analysis/data';
+const analysisDataDst = 'dist/analysis/data';
 mkdirSync(analysisDataDst, { recursive: true });
 let jsonCount = 0;
 for (const file of readdirSync(analysisDataSrc)) {

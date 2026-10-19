@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ChatMessageParam } from '../../anthropic/client.js';
+import type { ChatMessageParam } from '../../lib/anthropic/client.js';
 import { repairBlocks, stripToolBlocks } from '../historyRepair.js';
 
 const toolUse = (id: string) => ({ type: 'tool_use' as const, id, name: 'read_file', input: {} });

@@ -6,10 +6,10 @@ import {
   type ChatContentBlockParam,
   type ChatSystem,
   type ChatTool,
-} from '../anthropic/client.js';
-import { config } from '../config.js';
-import type { SseStream } from '../sse/sse.js';
-import type { Citation, ToolCallRecord } from '../services/conversations.js';
+} from '../lib/anthropic/client.js';
+import { config } from '../lib/config.js';
+import type { SseStream } from '../lib/sse.js';
+import type { Citation, ToolCallRecord } from '../chat/conversations.js';
 import { toolDefinitions, executeTool, type ToolContext } from './tools.js';
 import { repairBlocks, stripToolBlocks } from './historyRepair.js';
 

@@ -546,7 +546,7 @@ Response `200`: `{ "instruction": string, "artifactId": uuid, "version": number|
 Response `400`: `{ "error":"missing_context", "missing": ["Номер контракту", …] }` (required fields empty).
 
 ### Supplier-instruction builder  (auth) — screen `/workspaces/:id/instruction`
-The draft is a structured object (see `src/services/instruction/types.ts`: parties,
+The draft is a structured object (see `src/instruction/types.ts`: parties,
 product, contract, terms, document / label checklists, originals contact, extra
 clauses, per-field `sources`, Штурман `proposals`). The letter is ALWAYS rendered
 from it by a deterministic template (EN for the supplier, UK check copy).
