@@ -5,6 +5,7 @@ import { getOwnedWorkspace } from '../shipments/workspaceAccess.js';
 import { upsertParties, validateParties, listParties } from './parties.js';
 import { analyzeParties } from './partyExtraction.js';
 import { suggestIncoterms } from './incoterms.js';
+import { shipmentChanged } from '../shipments/state.js';
 
 const partySchema = z.object({
   role: z.string().min(1),
@@ -35,6 +36,8 @@ export async function partiesRoutes(app: FastifyInstance): Promise<void> {
     }
     const warnings = validateParties(ws.contract_type, parsed.data.parties);
     const parties = await upsertParties(ws.id, parsed.data.parties);
+    // The intermediary drives the checklist and the trilateral discrepancy checks.
+    await shipmentChanged(ws.id, 'parties');
     return reply.send({ parties, warnings });
   });
 

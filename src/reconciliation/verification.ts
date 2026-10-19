@@ -4,8 +4,7 @@ import {
   type ConfidenceField,
   type FieldConfidence,
 } from '../ingest/extraction/extractFields.js';
-import { getWorkspaceById } from '../shipments/workspaceAccess.js';
-import { refreshWorkspaceState } from '../shipments/status.js';
+import { shipmentChanged } from '../shipments/state.js';
 
 /**
  * Human-in-the-loop field verification (plan Q9/Q17/Q29). Backs the batch
@@ -133,7 +132,7 @@ export async function saveVerification(
   );
   await query(`UPDATE files SET extraction_status = 'ok' WHERE id = $1`, [fileId]);
 
-  const ws = await getWorkspaceById(workspaceId);
-  if (ws) await refreshWorkspaceState(ws);
+  // Corrected fields feed the autopilot context (Incoterms, parties…) and the verdicts.
+  await shipmentChanged(workspaceId, 'verification');
   return true;
 }

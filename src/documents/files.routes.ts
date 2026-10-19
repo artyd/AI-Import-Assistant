@@ -17,6 +17,7 @@ import { inferFileType } from '../shipments/folders.js';
 import { enqueueIndexJob } from '../lib/queue/index.js';
 import { publishFileStatus } from '../lib/events/fileStatus.js';
 import { classifyAndFile, sortInbox } from './classify.js';
+import { shipmentChanged } from '../shipments/state.js';
 import { isZipUpload, unpackZip, ZipGuardError } from '../lib/zip.js';
 import { contentType } from '../lib/mime.js';
 
@@ -260,6 +261,8 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       } else {
         await query('DELETE FROM ingest_batches WHERE id = $1', [batchId]);
       }
+      // A new version replaced the latest file: the old one no longer counts.
+      if (replaceConsumed) await shipmentChanged(ws.id, 'files');
 
       if (created.length === 0 && rejected.length > 0) {
         return reply.code(415).send({ error: 'no_valid_files', rejected });
@@ -304,6 +307,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       await deleteStoredFile(file.disk_path);
       await query('DELETE FROM files WHERE id = $1', [req.params.fileId]);
       await publishFileStatus(ws.id, { fileId: req.params.fileId, status: 'deleted' });
+      await shipmentChanged(ws.id, 'files');
       return reply.send({ ok: true });
     },
   );
@@ -334,6 +338,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
     const ws = await getOwnedWorkspace(req.user!.sub, req.params.id);
     if (!ws) return reply.code(404).send({ error: 'not_found' });
     const result = await sortInbox(ws.id);
+    if (result.moved.length > 0) await shipmentChanged(ws.id, 'files');
     return reply.send(result);
   });
 
@@ -362,6 +367,8 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
         [req.params.fileId, ws.id, name ?? null, folderId !== undefined, folderId ?? null],
       );
       if (!rows[0]) return reply.code(404).send({ error: 'not_found' });
+      // The folder is a completeness signal ("received").
+      if (folderId !== undefined) await shipmentChanged(ws.id, 'files');
       return reply.send({ file: rows[0] });
     },
   );
@@ -439,6 +446,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
 
       const res = await classifyAndFile(ws.id, req.params.fileId);
       if (!res) return reply.code(404).send({ error: 'not_found' });
+      if (res.to) await shipmentChanged(ws.id, 'files');
 
       // res.to === null → left in inbox (unmapped / 'other' / folder missing) → the
       // chat asks the user to pick. Otherwise the file was moved into res.to.

@@ -1,6 +1,8 @@
 import { countryToUk } from '../lib/countries.js';
 import { incotermCode } from '../reconciliation/reconcile.js';
 import type { WorkspaceRow } from './workspaceAccess.js';
+import type { PartiesAnalysis } from '../reconciliation/partyExtraction.js';
+import type { PartyInput } from '../reconciliation/parties.js';
 
 /**
  * Pure derivation of shipment intake context from stored extractions (+ the
@@ -177,4 +179,100 @@ export function changedFields(
     if (v === undefined || !AUTO_FIELDS.includes(k as AutoField)) return false;
     return (v ?? null) !== (ws[k as AutoField] ?? null);
   });
+}
+
+/**
+ * The "required five" that make intake complete (incoming Incoterm, with the
+ * legacy `incoterm` column as fallback). destination_country is deliberately
+ * not part of it. One definition for every writer.
+ */
+export function isIntakeComplete(
+  ws: Pick<WorkspaceRow, 'contract_type' | 'product_category' | 'incoterm_in' | 'incoterm' | 'transport_mode' | 'origin_country'>,
+): boolean {
+  return Boolean(
+    ws.contract_type &&
+      ws.product_category &&
+      (ws.incoterm_in ?? ws.incoterm) &&
+      ws.transport_mode &&
+      ws.origin_country,
+  );
+}
+
+/** What the document autopilot will write, decided without touching the database. */
+export interface ContextPlan {
+  /** Column → value to set (contract mode columns, auto fields, the legacy `incoterm` mirror). */
+  columns: Record<string, unknown>;
+  /** Auto fields newly written by the autopilot (merged into `auto_context_fields`). */
+  written: AutoField[];
+  /** Parties to seed — only applied when the shipment has none yet. */
+  parties: PartyInput[];
+}
+
+/**
+ * The autopilot's decision (pure). Provenance rules:
+ *  - a field is written only when it is empty, or the autopilot wrote it before
+ *    (`auto_context_fields`), or it holds a legacy value the UI could not have
+ *    produced; a `manual:<field>` marker always wins, even over an empty value;
+ *  - an AUTO contract mode follows the documents as they arrive; a manual
+ *    (sidebar/survey) one is never touched;
+ *  - product_category is never guessed.
+ */
+export function planContextUpdate(
+  ws: WorkspaceRow,
+  analysis: PartiesAnalysis,
+  docs: DeriveDoc[],
+): ContextPlan {
+  const columns: Record<string, unknown> = {};
+
+  const manualMode = ws.contract_type_source === 'sidebar' || ws.contract_type_source === 'survey';
+  // The first files read can say "bilateral" before the resale chain (supplier →
+  // trader → buyer) is indexed — an auto value is refined as the package arrives.
+  const autoOwned = ws.contract_type === null || ws.contract_type_source === 'auto';
+  const autoChanged =
+    !!analysis.contract_type &&
+    (analysis.contract_type !== ws.contract_type ||
+      // REAL column: 0.7 reads back as 0.699999… — compare with a tolerance.
+      Math.abs(analysis.contract_type_confidence - (ws.contract_type_confidence ?? -1)) > 0.01);
+  if (!manualMode && autoOwned && autoChanged) {
+    columns.contract_type = analysis.contract_type;
+    columns.contract_type_source = 'auto';
+    columns.contract_type_confidence = analysis.contract_type_confidence;
+    columns.contract_type_reason = analysis.contract_type_reason;
+  }
+  const mode = manualMode
+    ? ws.contract_type
+    : autoOwned
+      ? (analysis.contract_type ?? ws.contract_type)
+      : (ws.contract_type ?? analysis.contract_type);
+
+  const sender = analysis.suggestions.find((s) => s.role === 'sender');
+  const intermediary = analysis.suggestions.find((s) => s.role === 'intermediary');
+  const recipient = analysis.suggestions.find((s) => s.role === 'recipient');
+  const incoterms = deriveIncoterms(docs, mode, intermediary?.company_name ?? null);
+  const derived: Record<AutoField, string | null> = {
+    incoterm_in: incoterms.incoterm_in,
+    incoterm_out: incoterms.incoterm_out,
+    transport_mode: deriveTransportMode(docs),
+    // Fallback origin = the manufacturer's country (a trader's country is not origin).
+    origin_country: deriveOriginCountry(docs, analysis.manufacturer?.country ?? sender?.country ?? null),
+    destination_country: countryToUk(recipient?.country ?? null),
+  };
+
+  const autoFields = new Set(ws.auto_context_fields ?? []);
+  const writable = (f: AutoField): boolean =>
+    !autoFields.has(`manual:${f}`) && (ws[f] === null || autoFields.has(f) || !isUiValue(f, ws[f]));
+  const written: AutoField[] = [];
+  for (const f of Object.keys(derived) as AutoField[]) {
+    const v = derived[f];
+    if (v === null || !writable(f) || ws[f] === v) continue;
+    columns[f] = v;
+    if (f === 'incoterm_in') columns.incoterm = v; // legacy column mirrors incoterm_in
+    written.push(f);
+  }
+
+  const parties: PartyInput[] = analysis.suggestions
+    .filter((s) => s.company_name.trim())
+    .map((s) => ({ role: s.role, company_name: s.company_name, country: s.country ?? null, is_internal: false }));
+
+  return { columns, written, parties };
 }

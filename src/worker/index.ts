@@ -29,12 +29,8 @@ import {
   type ExtractedFields,
 } from '../ingest/extraction/extractFields.js';
 import { classifyAndFile } from '../documents/classify.js';
-import { getWorkspaceById } from '../shipments/workspaceAccess.js';
-import { refreshWorkspaceState } from '../shipments/status.js';
-import { autoFillWorkspaceContext } from '../shipments/autoContext.js';
-import { shipmentVerdicts } from '../reconciliation/verdicts.js';
+import { shipmentChanged } from '../shipments/state.js';
 import { maybeReconcileBatch } from '../reconciliation/reconcileBatch.js';
-import { insertNotification } from '../notifications/notifications.js';
 import { scanAndNotify } from '../notifications/reminders.js';
 import { ingestNews, purgeOldNews } from '../news/index.js';
 import { publishFileStatus } from '../lib/events/fileStatus.js';
@@ -179,40 +175,6 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
           await query('UPDATE files SET extraction_status = $2 WHERE id = $1', [file.id, 'no_fields']);
         }
         extractionStored = true;
-        const ws = await getWorkspaceById(file.workspace_id);
-        if (ws) {
-          await refreshWorkspaceState(ws);
-          // AUTOPILOT: persist document-derived context (parties, contract_type,
-          // Incoterms, origin) so the agent/sidebar don't ask for what the docs
-          // already state. NULL-only + manual-lock-respecting; best-effort.
-          try {
-            await autoFillWorkspaceContext(ws.id);
-          } catch (err) {
-            // eslint-disable-next-line no-console
-            console.error(`Auto-fill context failed for workspace ${ws.id}:`, (err as Error).message);
-          }
-          // Proactive risk scan: notify the responsible user about NEW critical
-          // (error-level) risks. De-duped per (user, workspace, type) per day.
-          // Single uploads only — a batch gets ONE risk scan in its auto-reconcile
-          // (maybeReconcileBatch) instead of a full-workspace rescan per file.
-          if (ws.responsible_user_id && !file.batch_id) {
-            try {
-              const { risks } = await shipmentVerdicts(ws);
-              const critical = risks.filter((r) => r.severity === 'error');
-              if (critical.length > 0) {
-                await insertNotification(
-                  ws.responsible_user_id,
-                  ws.id,
-                  'risk_alert',
-                  `Постачання №${ws.number}: критичні ризики (${critical.length}) — ${critical[0]!.title}.`,
-                );
-              }
-            } catch (err) {
-              // eslint-disable-next-line no-console
-              console.error(`Risk scan failed for workspace ${ws.id}:`, (err as Error).message);
-            }
-          }
-        }
 
         // Auto-file the document into its skeleton folder using the CLAUDE
         // classifier (structured extraction → filename heuristic → LLM-on-Markdown). High/medium confidence
@@ -233,6 +195,11 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
             console.log(`Suggested folder for ${file.id} (${file.name}) → ${res.suggested} (needs confirm).`);
           }
         }
+
+        // The shipment's documents changed: autopilot context → intake → verdicts.
+        // Single uploads also get a critical-risk alert; a batch gets ONE scan in
+        // its auto-reconcile (maybeReconcileBatch) instead of one per file.
+        await shipmentChanged(file.workspace_id, 'documents', { alertRisks: !file.batch_id });
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error(

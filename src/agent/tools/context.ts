@@ -3,10 +3,10 @@ import { query } from '../../db/pool.js';
 import { insertNotification } from '../../notifications/notifications.js';
 import { getWorkspaceById } from '../../shipments/workspaceAccess.js';
 import { realignPartiesForMode, proposePartyFieldsForMode } from '../../instruction/realign.js';
-import { refreshWorkspaceState } from '../../shipments/status.js';
+import { shipmentChanged } from '../../shipments/state.js';
 import { getMissingContext, upsertParties, type PartyInput } from '../../reconciliation/parties.js';
 import { analyzeParties } from '../../reconciliation/partyExtraction.js';
-import { stampManualEdit, changedFields } from '../../shipments/autoContext.js';
+import { writeManualContext } from '../../shipments/autoContext.js';
 import { type ToolContext, type ToolOutcome, requireWorkspace } from './shared.js';
 
 export async function runMissingContext(ctx: ToolContext): Promise<ToolOutcome> {
@@ -62,41 +62,16 @@ export async function runSaveContext(input: unknown, ctx: ToolContext): Promise<
     'origin_country',
     'destination_country',
   ] as const;
-  const sets: string[] = [];
-  const vals: unknown[] = [ws.id];
-  for (const key of scalarKeys) {
-    const value = parsed.data[key];
-    if (value === undefined) continue;
-    sets.push(`${key} = $${vals.length + 1}`);
-    vals.push(value);
-  }
-  // A contract_type gathered from the user in conversation is a human-confirmed
-  // value → stamp provenance so auto-detection (set_contract_mode source="auto")
-  // won't overwrite it. The dedicated set_contract_mode tool is preferred for the
-  // mode; this keeps the invariant when the agent bundles it into intake context.
-  if (parsed.data.contract_type !== undefined) {
-    sets.push(`contract_type_source = $${vals.length + 1}`);
-    vals.push('survey');
-    sets.push(`contract_type_confidence = $${vals.length + 1}`);
-    vals.push(null);
-    sets.push(`contract_type_reason = $${vals.length + 1}`);
-    vals.push('Зібрано в розмові з користувачем.');
-  }
-  // Context the user gave in conversation is a manual value — the document
-  // autopilot must not overwrite it later.
-  stampManualEdit(changedFields(ws, parsed.data), sets, vals);
-  if (sets.length > 0) {
-    await query(`UPDATE workspaces SET ${sets.join(', ')} WHERE id = $1`, vals);
-  }
-  if (parsed.data.incoterm_in !== undefined) {
-    await query('UPDATE workspaces SET incoterm = incoterm_in WHERE id = $1', [ws.id]);
-  }
+  // Context the user gave in conversation is a manual value: a contract_type is
+  // locked against auto-detection (set_contract_mode source="auto") and the
+  // document autopilot must not overwrite the fields later.
+  const columns = Object.fromEntries(scalarKeys.map((k) => [k, parsed.data[k]]));
+  await writeManualContext(ws, columns, { by: 'survey', reason: 'Зібрано в розмові з користувачем.' });
   if (parsed.data.parties) {
     await upsertParties(ws.id, parsed.data.parties as PartyInput[]);
   }
 
-  // Recompute intake_complete and refresh derived state.
-  await refreshAfterWorkspaceWrite(ws.id);
+  await shipmentChanged(ws.id, 'context');
   const changed = [
     ...scalarKeys.filter((k) => parsed.data[k] !== undefined),
     ...(parsed.data.parties ? ['parties'] : []),
@@ -127,22 +102,6 @@ async function notifyAgentContextChange(wsId: string, what: string): Promise<voi
     'agent_context_change',
     `Постачання №${ws.number}: Штурман змінив контекст — ${what}. Перевірте на панелі.`,
   ).catch(() => undefined);
-}
-
-async function refreshAfterWorkspaceWrite(wsId: string): Promise<void> {
-  const merged = (await getWorkspaceById(wsId))!;
-  const complete = Boolean(
-    merged.contract_type &&
-      merged.product_category &&
-      (merged.incoterm_in ?? merged.incoterm) &&
-      merged.transport_mode &&
-      merged.origin_country,
-  );
-  if (complete !== merged.intake_complete) {
-    await query('UPDATE workspaces SET intake_complete = $2 WHERE id = $1', [wsId, complete]);
-  }
-  const finalWs = (await getWorkspaceById(wsId))!;
-  if (finalWs.intake_complete) await refreshWorkspaceState(finalWs);
 }
 
 // Ukrainian labels for the two contract structures, used in tool output.
@@ -232,7 +191,7 @@ export async function runSetContractMode(input: unknown, ctx: ToolContext): Prom
          contract_type_confidence = $3, contract_type_reason = $4 WHERE id = $1`,
       [wsId, analysis.contract_type, analysis.contract_type_confidence, analysis.contract_type_reason],
     );
-    await refreshAfterWorkspaceWrite(wsId);
+    await shipmentChanged(wsId, 'context');
     return {
       result:
         `Збережено режим (авто): ${CONTRACT_MODE_UK[analysis.contract_type]}, впевненість ` +
@@ -260,7 +219,7 @@ export async function runSetContractMode(input: unknown, ctx: ToolContext): Prom
   // so the user doesn't have to retype the consignor/consignee by hand.
   const partiesNote = await realignPartiesForMode(wsId, ct);
   const proposed = await proposePartyFieldsForMode(wsId, ct);
-  await refreshAfterWorkspaceWrite(wsId);
+  await shipmentChanged(wsId, 'context');
   await notifyAgentContextChange(wsId, `режим контракту → ${CONTRACT_MODE_UK[ct]}`);
   return {
     result:

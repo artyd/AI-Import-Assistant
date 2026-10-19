@@ -4,9 +4,9 @@ import { pool, query } from '../db/pool.js';
 import { authenticate } from '../auth/hook.js';
 import { getOwnedWorkspace, WORKSPACE_STATUSES } from './workspaceAccess.js';
 import { FOLDER_SKELETON } from './folders.js';
-import { refreshWorkspaceState } from './status.js';
+import { shipmentChanged } from './state.js';
 import { deleteWorkspaceStorage } from '../lib/storage.js';
-import { changedFields, stampManualEdit } from './autoContext.js';
+import { writeManualContext } from './autoContext.js';
 import { proposePartyFieldsForMode, realignPartiesForMode } from '../instruction/realign.js';
 
 const createSchema = z.object({
@@ -22,28 +22,17 @@ function defaultNumber(): string {
   return `${year}-${seq}`;
 }
 
-/**
- * A manual `contract_type` edit (sidebar / intake) is an override: stamp
- * provenance so auto-detection never silently overwrites the human choice.
- * Setting it to null ("Auto" in the UI) clears the lock so auto-detection may
- * repopulate it. No-op when the request didn't touch contract_type. Mutates the
- * caller's `sets`/`vals` (same $N convention as the surrounding UPDATE builder,
- * where $1 is the workspace id).
- */
-function stampContractTypeOverride(
-  contractType: 'bilateral' | 'trilateral' | null | undefined,
-  sets: string[],
-  vals: unknown[],
-): void {
-  if (contractType === undefined) return;
-  const manual = contractType !== null;
-  sets.push(`contract_type_source = $${vals.length + 1}`);
-  vals.push(manual ? 'sidebar' : null);
-  sets.push(`contract_type_confidence = $${vals.length + 1}`);
-  vals.push(null); // a human choice carries no numeric confidence
-  sets.push(`contract_type_reason = $${vals.length + 1}`);
-  vals.push(manual ? 'Встановлено вручну.' : null);
-}
+// Context columns: a PATCH touching any of them recomputes intake_complete.
+const INTAKE_KEYS = [
+  'contract_type',
+  'product_category',
+  'incoterm',
+  'incoterm_in',
+  'incoterm_out',
+  'transport_mode',
+  'origin_country',
+  'destination_country',
+] as const;
 
 export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('preHandler', authenticate);
@@ -201,10 +190,8 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
 
         await client.query('COMMIT');
 
-        // If the copy is intake-complete, compute its checklist + derived status
-        // to match the create/patch convention.
-        const created = (await getOwnedWorkspace(req.user!.sub, newId))!;
-        if (created.intake_complete) await refreshWorkspaceState(created);
+        // The copy carries the source's context and parties: compute its verdicts.
+        await shipmentChanged(newId, 'context', { keepIntakeFlag: true });
         const workspace = (await getOwnedWorkspace(req.user!.sub, newId))!;
         return reply.code(201).send({ workspace });
       } catch (err) {
@@ -248,24 +235,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
     }
 
     // Whitelisted columns from the zod schema — safe to interpolate the names.
-    const sets: string[] = [];
-    const vals: unknown[] = [ws.id];
-    for (const [key, value] of Object.entries(parsed.data)) {
-      if (value === undefined) continue;
-      sets.push(`${key} = $${vals.length + 1}`);
-      vals.push(value);
-    }
-    // A manual contract_type edit locks provenance against auto-detection.
-    stampContractTypeOverride(parsed.data.contract_type, sets, vals);
-    // Fields the user set by hand are off-limits to the document autopilot.
-    stampManualEdit(changedFields(ws, parsed.data), sets, vals);
-    if (sets.length > 0) {
-      await query(`UPDATE workspaces SET ${sets.join(', ')} WHERE id = $1`, vals);
-    }
-    // Keep the legacy `incoterm` column in sync with the incoming Incoterm.
-    if (parsed.data.incoterm_in !== undefined) {
-      await query('UPDATE workspaces SET incoterm = incoterm_in WHERE id = $1', [ws.id]);
-    }
+    await writeManualContext(ws, parsed.data, { by: 'sidebar' });
     // A mode the user picked by hand also realigns the parties card and proposes
     // the matching consignor/consignee in an open instruction draft.
     const mode = parsed.data.contract_type;
@@ -274,16 +244,16 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       await proposePartyFieldsForMode(ws.id, mode);
     }
 
-    const updated = (await getOwnedWorkspace(req.user!.sub, req.params.id))!;
-    // If intake is complete, refresh checklist + derived status.
-    if (updated.intake_complete) {
-      const state = await refreshWorkspaceState(updated);
-      return reply.send({
-        workspace: { ...updated, status: state.status },
-        checklist: state.checklist,
-      });
+    // intake_complete is recomputed only when context changed and the caller
+    // did not set it explicitly.
+    const touchesContext = INTAKE_KEYS.some((k) => parsed.data[k] !== undefined);
+    const state = (await shipmentChanged(ws.id, 'context', {
+      keepIntakeFlag: parsed.data.intake_complete !== undefined || !touchesContext,
+    }))!;
+    if (state.workspace.intake_complete) {
+      return reply.send({ workspace: state.workspace, checklist: state.checklist });
     }
-    return reply.send({ workspace: updated });
+    return reply.send({ workspace: state.workspace });
   });
 
   // PATCH /api/workspaces/:id/status — manual status override.
@@ -326,43 +296,14 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: 'invalid_request', issues: parsed.error.issues });
     }
 
-    const sets: string[] = [];
-    const vals: unknown[] = [ws.id];
-    for (const [key, value] of Object.entries(parsed.data)) {
-      if (value === undefined) continue;
-      sets.push(`${key} = $${vals.length + 1}`);
-      vals.push(value);
-    }
-    // A manual contract_type edit locks provenance against auto-detection.
-    stampContractTypeOverride(parsed.data.contract_type, sets, vals);
-    // Fields the user set by hand are off-limits to the document autopilot.
-    stampManualEdit(changedFields(ws, parsed.data), sets, vals);
-    if (sets.length > 0) {
-      await query(`UPDATE workspaces SET ${sets.join(', ')} WHERE id = $1`, vals);
-    }
-    if (parsed.data.incoterm_in !== undefined) {
-      await query('UPDATE workspaces SET incoterm = incoterm_in WHERE id = $1', [ws.id]);
-    }
+    await writeManualContext(ws, parsed.data, { by: 'sidebar' });
 
-    // Recompute intake_complete from the required five fields (incoming Incoterm).
-    const merged = (await getOwnedWorkspace(req.user!.sub, req.params.id))!;
-    const complete = Boolean(
-      merged.contract_type &&
-        merged.product_category &&
-        (merged.incoterm_in ?? merged.incoterm) &&
-        merged.transport_mode &&
-        merged.origin_country,
-    );
-    if (complete !== merged.intake_complete) {
-      await query('UPDATE workspaces SET intake_complete = $2 WHERE id = $1', [ws.id, complete]);
+    // intake_complete is recomputed from the required five fields.
+    const state = (await shipmentChanged(ws.id, 'context'))!;
+    if (state.workspace.intake_complete) {
+      return reply.send({ workspace: state.workspace, checklist: state.checklist });
     }
-
-    const updated = (await getOwnedWorkspace(req.user!.sub, req.params.id))!;
-    if (updated.intake_complete) {
-      const state = await refreshWorkspaceState(updated);
-      return reply.send({ workspace: { ...updated, status: state.status }, checklist: state.checklist });
-    }
-    return reply.send({ workspace: updated });
+    return reply.send({ workspace: state.workspace });
   });
 
   // PATCH /api/workspaces/:id/survey — persist the shipment-survey state (answers

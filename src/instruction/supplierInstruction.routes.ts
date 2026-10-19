@@ -11,6 +11,7 @@ import { instructionDocx, instructionPdf } from './exportFormats.js';
 import { proposeRefinement } from './refine.js';
 import { userRateLimit } from '../chat/chatRateLimit.js';
 import { query } from '../db/pool.js';
+import { shipmentChanged } from '../shipments/state.js';
 
 /** Allowed status moves (server-enforced; the screen mirrors them). */
 const NEXT: Record<string, string[]> = { draft: ['approved'], approved: ['sent'], sent: [] };
@@ -104,6 +105,8 @@ export async function supplierInstructionRoutes(app: FastifyInstance): Promise<v
       if (missing.length) return reply.code(400).send({ error: 'missing_fields', missing });
     }
     const v = await updateVersion(ws.id, ver.data, { draft: parsed.data.draft ? draft : undefined, status: parsed.data.status });
+    // An approved instruction is the reference for the compliance discrepancies.
+    if (parsed.data.status) await shipmentChanged(ws.id, 'instruction');
     return reply.send({ version: { ...v!, missing: missingFields(v!.draft) } });
   });
 

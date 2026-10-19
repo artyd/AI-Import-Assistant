@@ -5,12 +5,15 @@ import { publishFileStatus } from '../../lib/events/fileStatus.js';
 import { classifyAndFile, sortInbox } from '../../documents/classify.js';
 import { previousVersionId, compareFileVersions } from '../../documents/versions.js';
 import { type ToolContext, type ToolOutcome, requireWorkspace } from './shared.js';
+import { shipmentChanged } from '../../shipments/state.js';
 
 export async function runClassifyAndFile(input: unknown, ctx: ToolContext): Promise<ToolOutcome> {
   const fileId = String((input as { file_id?: unknown })?.file_id ?? '').trim();
   if (!fileId) return { result: 'Не вказано file_id.', summary: 'Класифікація: помилка', citations: [] };
-  const res = await classifyAndFile(requireWorkspace(ctx), fileId);
+  const wsId = requireWorkspace(ctx);
+  const res = await classifyAndFile(wsId, fileId);
   if (!res) return { result: 'Файл не знайдено.', summary: 'Класифікація: не знайдено', citations: [] };
+  if (res.to) await shipmentChanged(wsId, 'files');
   if (!res.to) {
     // Low-confidence guess left in inbox with a suggestion, or truly unclassified.
     const suggestion = res.suggested
@@ -64,7 +67,9 @@ function fmt(v: unknown): string {
 }
 
 export async function runSortInbox(ctx: ToolContext): Promise<ToolOutcome> {
-  const { moved, unclassified } = await sortInbox(requireWorkspace(ctx));
+  const wsId = requireWorkspace(ctx);
+  const { moved, unclassified } = await sortInbox(wsId);
+  if (moved.length > 0) await shipmentChanged(wsId, 'files');
   if (moved.length === 0 && unclassified.length === 0) {
     return { result: 'Інбокс порожній — нема чого сортувати.', summary: 'Сортування: 0', citations: [] };
   }
