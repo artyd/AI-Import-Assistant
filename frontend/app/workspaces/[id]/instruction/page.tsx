@@ -12,8 +12,8 @@ import { useParams, useRouter } from "next/navigation";
 import { api, ApiError, downloadBlob } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { streamChat } from "@/lib/sse";
-import { Markdown } from "@/components/Markdown";
-import { IconSpinner } from "@/components/icons";
+import { Markdown } from "@/components/ui/Markdown";
+import { IconSpinner } from "@/components/ui/icons";
 import type { Workspace } from "@/lib/types";
 import {
   CATEGORY_LABEL,

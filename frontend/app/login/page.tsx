@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { api, ApiError } from "@/lib/api";
 import { useTheme } from "@/lib/theme";
-import { IconMoon, IconSun, IconSpinner } from "@/components/icons";
+import { IconMoon, IconSun, IconSpinner } from "@/components/ui/icons";
 
 export default function LoginPage() {
   const { user, loading, login, loginWithCode } = useAuth();

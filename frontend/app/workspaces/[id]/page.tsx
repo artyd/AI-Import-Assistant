@@ -19,26 +19,26 @@ import type {
   Message,
   Workspace,
 } from "@/lib/types";
-import { Chat, type EntitySelector } from "@/components/Chat";
+import { Chat, type EntitySelector } from "@/components/chat/Chat";
 import type { SurveyAnswers, SurveyIntakeField, SurveyStatus } from "@/lib/surveyQuestions";
-import { AnalyzePanel } from "@/components/AnalyzePanel";
-import { ArchiveList } from "@/components/ArchiveModal";
-import { AiSettingsModal } from "@/components/AiSettingsModal";
+import { AnalyzePanel } from "@/components/analysis/AnalyzePanel";
+import { ArchiveList } from "@/components/analysis/ArchiveModal";
+import { AiSettingsModal } from "@/components/analysis/AiSettingsModal";
 import { useAppStore } from "@/lib/store";
 import { resolveChatEndpoints } from "@/lib/chatContext";
-import { AgentLog, type LogEntry } from "@/components/AgentLog";
-import { ShipmentPanel } from "@/components/ShipmentPanel";
-import { VersionsModal } from "@/components/VersionsModal";
-import { FilePreviewModal } from "@/components/FilePreviewModal";
-import { SidebarNav } from "@/components/SidebarNav";
-import { TopBar, type CompletenessStep } from "@/components/TopBar";
-import { RightPanel, type RightTab } from "@/components/RightPanel";
-import { FilesTab } from "@/components/FilesTab";
-import { NewsView } from "@/components/NewsView";
-import { MapView } from "@/components/MapView";
-import { CalendarView } from "@/components/CalendarView";
-import { CommandPalette, type PaletteAction } from "@/components/CommandPalette";
-import { IconSpinner } from "@/components/icons";
+import { AgentLog, type LogEntry } from "@/components/chat/AgentLog";
+import { ShipmentPanel } from "@/components/shipment/ShipmentPanel";
+import { VersionsModal } from "@/components/files/VersionsModal";
+import { FilePreviewModal } from "@/components/files/FilePreviewModal";
+import { SidebarNav } from "@/components/layout/SidebarNav";
+import { TopBar, type CompletenessStep } from "@/components/layout/TopBar";
+import { RightPanel, type RightTab } from "@/components/shipment/RightPanel";
+import { FilesTab } from "@/components/files/FilesTab";
+import { NewsView } from "@/components/news/NewsView";
+import { MapView } from "@/components/hub/MapView";
+import { CalendarView } from "@/components/calendar/CalendarView";
+import { CommandPalette, type PaletteAction } from "@/components/layout/CommandPalette";
+import { IconSpinner } from "@/components/ui/icons";
 import {
   LnExport,
   LnFolder,
@@ -49,7 +49,7 @@ import {
   LnPencil,
   LnSettings,
   LnUpload,
-} from "@/components/LineIcons";
+} from "@/components/ui/LineIcons";
 
 // Run an async mapper over items with bounded concurrency, preserving order.
 async function mapLimit<T, R>(

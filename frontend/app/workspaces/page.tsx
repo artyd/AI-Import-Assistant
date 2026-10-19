@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import type { Workspace } from "@/lib/types";
-import { Header } from "@/components/Header";
-import { IconFolderPlus, IconSpinner } from "@/components/icons";
+import { Header } from "@/components/layout/Header";
+import { IconFolderPlus, IconSpinner } from "@/components/ui/icons";
 
 // In the ШТУРМАН design there is no separate shipment list — the shell's sidebar
 // dropdown switches between them. So this route just lands the user in the most

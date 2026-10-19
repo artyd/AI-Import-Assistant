@@ -15,48 +15,11 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { api } from "@/lib/api";
 import { useTheme } from "@/lib/theme";
-import {
-  hubApi,
-  lineApi,
-  routeApi,
-  ROUTE_MODE_COLOR,
-  portApi,
-  RISK_ZONES,
-  portStatusColor,
-  statusColor,
-  type AmbientVessel,
-  type CarrierDetailData,
-  type CarrierRef,
-  type LegDraft,
-  type PlannedRoute,
-  type CarrierSummary,
-  type Lane,
-  type HubPort,
-  type LatLng,
-  type LiveSnapshot,
-  type Track,
-  type TrackEvent,
-  delayDays,
-  effDeparted,
-  effEta,
-  etaShiftDays,
-  fmtDate,
-} from "@/lib/hub";
-import { IconSpinner } from "@/components/icons";
+import { hubApi, lineApi, routeApi, ROUTE_MODE_COLOR, portApi, RISK_ZONES, portStatusColor, statusColor, type AmbientVessel, type CarrierDetailData, type CarrierRef, type LegDraft, type PlannedRoute, type CarrierSummary, type Lane, type HubPort, type LatLng, type LiveSnapshot, type Track, type TrackEvent, effDeparted, effEta, fmtDate } from "@/lib/hub";
+import { IconSpinner } from "@/components/ui/icons";
 import { forwarderColor, todayKyiv } from "@/lib/calendar";
 import { useAppStore } from "@/lib/store";
-import {
-  aisIcon,
-  clusterIcon,
-  endpointIcon,
-  glyphRotates,
-  HUB_MAP_CSS,
-  HUB_PORT_CSS,
-  portIcon,
-  setRotation,
-  trackIcon,
-  type EtaBadge,
-} from "./mapIcons";
+import { aisIcon, clusterIcon, endpointIcon, glyphRotates, HUB_MAP_CSS, HUB_PORT_CSS, portIcon, setRotation, trackIcon } from "./mapIcons";
 import { clusterByPixels } from "./cluster";
 import { MapLegend } from "./MapLegend";
 import { MapSearch } from "./MapSearch";
@@ -72,152 +35,13 @@ import { CarrierDetail } from "./CarrierDetail";
 import { RoutesPanel } from "./RoutesPanel";
 import { RouteDetail, type PickedPoint } from "./RouteDetail";
 import { haversineKm } from "./geo";
-
-type BasemapKey = "auto" | "streets" | "light" | "dark" | "satellite" | "terrain" | "ocean";
-
-interface Basemap {
-  key: BasemapKey;
-  label: string;
-  swatch: string;
-  url: string;
-  attribution: string;
-  maxZoom: number;
-}
-
-const ESRI = "Tiles © Esri";
-
-/** Map styles the logist can switch between (persisted per browser). */
-const BASEMAPS: Basemap[] = [
-  { key: "auto", label: "Авто (за темою)", swatch: "linear-gradient(135deg,#e9eef5 50%,#2a2d33 50%)", url: "", attribution: "", maxZoom: 18 },
-  {
-    key: "streets",
-    label: "Вулиці",
-    swatch: "#f2efe6",
-    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
-    attribution: `${ESRI} — Esri, HERE, Garmin, © OpenStreetMap contributors`,
-    maxZoom: 18,
-  },
-  {
-    key: "light",
-    label: "Світла мінімал",
-    swatch: "#f5f5f3",
-    url: "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
-    attribution: `${ESRI} — Esri, HERE, Garmin, © OpenStreetMap contributors`,
-    maxZoom: 16,
-  },
-  {
-    key: "dark",
-    label: "Темна мінімал",
-    swatch: "#1d1f24",
-    url: "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
-    attribution: `${ESRI} — Esri, HERE, Garmin, © OpenStreetMap contributors`,
-    maxZoom: 16,
-  },
-  {
-    key: "satellite",
-    label: "Супутник",
-    swatch: "linear-gradient(135deg,#2f4a2b,#1c3b5a)",
-    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-    attribution: `${ESRI} — Maxar, Earthstar Geographics`,
-    maxZoom: 18,
-  },
-  {
-    key: "terrain",
-    label: "Рельєф",
-    swatch: "linear-gradient(135deg,#d9e4c4,#c7b48e)",
-    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
-    attribution: `${ESRI} — Esri, HERE, Garmin, USGS`,
-    maxZoom: 18,
-  },
-  {
-    key: "ocean",
-    label: "Океан",
-    swatch: "linear-gradient(135deg,#9cc3e0,#d7e6ef)",
-    url: "https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}",
-    attribution: `${ESRI} — GEBCO, NOAA, National Geographic`,
-    maxZoom: 13,
-  },
-];
-const BASEMAP_STORE = "hub-basemap";
-
-const TILE_LIGHT = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}";
-const TILE_DARK =
-  "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}";
-const ATTRIB = "Tiles © Esri — Esri, HERE, Garmin, © OpenStreetMap contributors · AIS © aisstream.io";
-
-const FIT_BOUNDS: L.LatLngBoundsExpression = [
-  [58, -14],
-  [0, 124],
-];
-const POLL_MS = 60_000;
-const PORTS_POLL_MS = 5 * 60_000;
-const GLIDE_MS = 1400;
-/** Never dead-reckon an AIS vessel further than this past its last fix. */
-const MAX_DR_MS = 20 * 60_000;
-/** Ambient AIS clutters a world view — show it from regional zoom. */
-const AIS_MIN_ZOOM = 4;
-/** Ports are grouped into count bubbles below this zoom. */
-const CLUSTER_MAX_ZOOM = 6;
-/** Permanent name labels from this zoom. */
-const LABEL_MIN_ZOOM = 7;
-
-const STATUS_RANK: Record<string, number> = { closed: 0, disrupted: 1, congested: 2, ok: 3 };
-function statusRank(p: HubPort): number {
-  return p.status ? (STATUS_RANK[p.status.status] ?? 4) : 5;
-}
-
-/** Days-to-ETA badge for a moving item; red when the ETA slipped or passed. */
-function etaBadge(t: Track, now: number): EtaBadge | null {
-  const eta = effEta(t);
-  if (!eta || ["delivered", "pending", "unknown", "exception"].includes(t.status)) return null;
-  const days = Math.ceil((new Date(eta).getTime() - now) / 86_400_000);
-  const late = etaShiftDays(t) >= 1 || days < 0 || (delayDays(t) ?? 0) >= 1;
-  const text = days < 0 ? `+${-days} дн` : days === 0 ? "сьогодні" : `${days} дн`;
-  return { text, late };
-}
+import { BasemapKey, BASEMAPS, BASEMAP_STORE, TILE_LIGHT, TILE_DARK, ATTRIB, FIT_BOUNDS, POLL_MS, PORTS_POLL_MS, GLIDE_MS, MAX_DR_MS, AIS_MIN_ZOOM, CLUSTER_MAX_ZOOM, LABEL_MIN_ZOOM, statusRank, etaBadge, positionOn, LayerKey, Tab, TABS, LAYERS, resolveCssColor } from "./canvasConfig";
+import { Stat, segBtn } from "./Stat";
 
 export interface TrackFilter {
   forwarder: string;
   type: string;
 }
-
-/**
- * Where the route estimate puts an item on a given day: before departure at the
- * origin, after the ETA at the destination, in between along its lane. Items
- * without a route or dates stay where they are.
- */
-function positionOn(t: Track, day: string): { point: LatLng; heading: number } | null {
-  const path = t.live?.path ?? [];
-  const dep = effDeparted(t);
-  const eta = effEta(t);
-  if (path.length < 2) return null;
-  if (t.status === "delivered") return { point: path[path.length - 1]!, heading: 0 };
-  if (!dep || !eta) return null;
-  const t0 = Date.parse(dep);
-  const t1 = Date.parse(eta);
-  if (!(t1 > t0)) return null;
-  const f = Math.max(0, Math.min(1, (Date.parse(`${day}T12:00:00Z`) - t0) / (t1 - t0)));
-  return splitAt(smoothPath(path), f);
-}
-
-type LayerKey = "tracks" | "routes" | "ais" | "ports" | "lanes" | "risk";
-type Tab = "tracks" | "ports" | "lines" | "routes";
-
-const TABS: { key: Tab; label: string }[] = [
-  { key: "tracks", label: "Вантажі" },
-  { key: "ports", label: "Порти" },
-  { key: "lines", label: "Лінії" },
-  { key: "routes", label: "Маршрути" },
-];
-
-const LAYERS: { key: LayerKey; label: string; dot: string }[] = [
-  { key: "tracks", label: "Вантажі", dot: "var(--accent)" },
-  { key: "routes", label: "Маршрути", dot: "var(--accent)" },
-  { key: "ais", label: "Судна AIS", dot: "#0f9b8e" },
-  { key: "ports", label: "Порти", dot: "var(--ok)" },
-  { key: "lanes", label: "Коридори ліній", dot: "var(--warn)" },
-  { key: "risk", label: "Зони воєнного ризику", dot: "var(--err)" },
-];
 
 interface TrackAnim {
   marker: L.Marker;
@@ -234,12 +58,6 @@ interface AisAnim {
   base: LatLng;
   baseAt: number;
   v: AmbientVessel;
-}
-
-function resolveCssColor(v: string): string {
-  if (typeof document === "undefined" || !v.startsWith("var(")) return v;
-  const name = v.slice(4, -1).trim();
-  return getComputedStyle(document.body).getPropertyValue(name).trim() || "#2f6feb";
 }
 
 export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
@@ -1647,16 +1465,6 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
   );
 }
 
-function Stat({ icon, n, label, color, compact }: { icon: string; n: number; label: string; color: string; compact?: boolean }) {
-  return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }} title={label} aria-label={`${n} ${label}`}>
-      <span aria-hidden>{icon}</span>
-      <b style={{ color, fontSize: 14 }}>{n}</b>
-      {!compact && <span style={{ color: "var(--muted)" }}>{label}</span>}
-    </span>
-  );
-}
-
 const glass: React.CSSProperties = {
   background: "color-mix(in srgb, var(--surface) 84%, transparent)",
   backdropFilter: "blur(12px) saturate(1.2)",
@@ -1682,25 +1490,6 @@ const iconBtn: React.CSSProperties = {
   fontWeight: 600,
   cursor: "pointer",
 };
-
-function segBtn(active: boolean): React.CSSProperties {
-  return {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 6,
-    height: 32,
-    padding: "0 10px",
-    borderRadius: 9,
-    border: `1px solid ${active ? "var(--border)" : "transparent"}`,
-    background: active ? "var(--surface)" : "transparent",
-    color: active ? "var(--text)" : "var(--muted)",
-    font: "inherit",
-    fontSize: 12.5,
-    fontWeight: 600,
-    cursor: "pointer",
-    whiteSpace: "nowrap",
-  };
-}
 
 const overlayCenter: React.CSSProperties = {
   position: "absolute",

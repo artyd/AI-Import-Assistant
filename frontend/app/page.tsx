@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
-import { IconSpinner } from "@/components/icons";
+import { IconSpinner } from "@/components/ui/icons";
 
 export default function IndexPage() {
   const { user, loading } = useAuth();
