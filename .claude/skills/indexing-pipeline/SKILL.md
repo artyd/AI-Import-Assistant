@@ -1,61 +1,50 @@
 ---
 name: indexing-pipeline
-description: Reference for the document indexing + hybrid retrieval pipeline in the AI Import Assistant backend. Use when changing text extraction, chunking, embeddings (Voyage/provider), Qdrant storage/search, the BullMQ worker, live file-status events, or the agent's search_documents/read_file tools.
+description: Reference for the ingest pipeline (upload → File Markdown → full-text sections → extraction → auto-file → reconcile) and the agent's search_documents/read_file tools. Use when changing conversion/vision OCR, document sections or search, extraction, the BullMQ worker, or live file-status events.
 ---
 
-# Indexing & retrieval pipeline
+# Ingest & retrieval pipeline
 
-Upload → background index → the agent retrieves at query time.
+Upload → the worker converts the file **once** into File Markdown → everything else
+reads that Markdown. No embeddings (ADR-0002).
 
 ## Flow
 
-1. **Upload** (`src/routes/files.ts`): allow-list check (`storage.ts`
-   `isAllowedUpload`), store to disk (`STORAGE_DIR/<workspaceId>/<fileId>-<name>`),
-   insert `files` row `status=queued`, `enqueueIndexJob(fileId)`, publish
-   `file_status: queued`.
-2. **Worker** (`src/worker/index.ts`, BullMQ, concurrency 3):
-   `status=indexing` → `extractText` → `chunkPages` → `deleteFileChunks` (re-index
-   safety) → `embed(document)` → `upsertChunks` → `status=ready`. On throw:
-   `status=error` with reason, then rethrow so BullMQ records/retries.
-3. **Live status** (`src/events/fileStatus.ts`): worker publishes to Redis
-   pub/sub `file_status:<workspaceId>`; `GET /api/workspaces/:id/events` (SSE)
-   forwards `file_status` events to the browser.
+1. **Upload** — `src/documents/files.routes.ts` (shipments) and
+   `collectionFiles.routes.ts` (collections): allow-list (`src/lib/storage.ts`),
+   content-hash dedup, store to disk, `files` row `status=queued`,
+   `enqueueIndexJob` (`src/lib/queue/index.ts`), publish `file_status`.
+2. **Worker** — `src/worker/index.ts` (BullMQ, `INDEX_CONCURRENCY`):
+   `indexing` → reuse Markdown by content hash or `convertToMarkdown`
+   (`src/ingest/markdown/convert.ts`; PDFs/scans/photos via Claude vision in
+   5-page windows, `vision.ts`) → `saveFileMarkdown` (`store.ts`: `file_markdown`
+   + `document_sections` with a `tsvector`) → `extractFieldsFromMarkdown`
+   (`src/ingest/extraction/extractFields.ts` → `document_extractions`) →
+   auto-file from the inbox (`src/documents/classify.ts`) → `maybeReconcileBatch`
+   (`src/reconciliation/reconcileBatch.ts`) → `ready` | `error` + reason.
+3. **Stuck/failed files** — `src/ingest/ingestRetry.ts` sweep, scheduled by
+   `src/lib/queue/ingestRetry.ts`.
+4. **Live status** — `src/lib/events/fileStatus.ts` (Redis pub/sub) →
+   `GET /api/workspaces/:id/events` (`src/documents/events.routes.ts`, SSE, auth
+   via one-time `?ticket=`).
 
-## Modules
+## Agent tools (`src/agent/tools/retrieval.ts`)
 
-- **Extraction** `src/services/extract/index.ts` — `extractText(buf, type)` →
-  `{ page, text }[]`. PDF keeps per-page (via `pdf-parse` `pagerender`; imported
-  from `pdf-parse/lib/pdf-parse.js` to avoid the package's import-time crash).
-  docx→mammoth, xlsx/csv→SheetJS (one "page" per sheet, `page:null`), md→raw,
-  image→`[]` (OCR is v2). To add a format: extend this + `inferFileType`
-  (`domain/folders.ts`) + the allow-list in `storage.ts`.
-- **Chunking** `src/services/extract/chunk.ts` — ~800 tokens (≈3200 chars) with
-  ~100-token overlap, split on paragraph/sentence boundaries, one page per chunk
-  so citations stay precise.
-- **Embeddings** `src/services/embeddings/` — `EmbeddingProvider` interface
-  (`embed(texts, 'document'|'query')`, `dimension`). `voyage.ts` calls Voyage via
-  `fetch` (multilingual → good for Ukrainian), batches of 64. Swap vendors by
-  adding an impl + branching in `getEmbeddingProvider()`. Dimension must match
-  the Qdrant collection.
-- **Qdrant** `src/services/qdrant.ts` — one `documents` collection, Cosine,
-  sized to the provider dimension, payload indexes on `workspace_id` + `file_id`.
-  `searchWorkspace` filters `must: workspace_id` — retrieval is always
-  workspace-scoped. `deleteFileChunks` filters `file_id`.
+- `search_documents` → Postgres FTS over `document_sections`
+  (`src/ingest/markdown/store.ts`, query builder `searchQuery.ts`).
+- `read_file` → the whole stored Markdown of one file.
+- `list_files` / `find_files` → the shipment's files with status and version hints.
+- **Both search + read must stay**; the model chooses per query.
 
-## Agent tools (`src/agent/tools.ts`)
+## Adding a file format
 
-- `search_documents(query)` → `searchWorkspace` (semantic). `read_file(path,
-  range?)` → resolve by filename, `extractText` on demand (works even before
-  indexing), optional page/char range, truncated to 12k chars. `list_files()` →
-  workspace tree with status. Each returns `{ result, summary, citations }`.
-- **Both search + read must stay** — hybrid retrieval is a hard constraint; the
-  model picks per query (see `agent/loop.ts`).
+Extend `convertToMarkdown`, `inferFileType` (`src/shipments/folders.ts`) and the
+allow-list in `src/lib/storage.ts`.
 
 ## Gotchas
 
-- Qdrant point ids are UUIDs; dedupe/replace is by `file_id` payload filter.
-- If you change `EMBEDDING_MODEL` to a different dimension, the existing
-  collection is wrong — recreate it (drop the `documents` collection) or version
-  the name.
-- Voyage/Anthropic calls need real keys; the smoke test's indexing + chat steps
-  hit them for real.
+- Files indexed before the Markdown pipeline: `npm run migrate:markdown -- --apply`
+  (dry-run without `--apply`).
+- An all-null extraction is downgraded to `no_fields`/`unreadable` so it reaches
+  verification instead of looking read (see the gate at the top of the worker).
+- Vision and extraction call Anthropic for real; tests never do.

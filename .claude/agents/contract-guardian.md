@@ -14,7 +14,7 @@ files), verify and report — do NOT edit:
    `API_CONTRACT.md`; flag drift.
 2. **REST shapes** in `API_CONTRACT.md` still match the routes.
 3. **Hard constraints** (see `CLAUDE.md`): single agent; both `search_documents`
-   and `read_file` present; Anthropic/Voyage keys never sent to the browser;
+   and `read_file` present; the Anthropic key never sent to the browser;
    `claude-sonnet-5-5` (env) + adaptive thinking; no forced tool_choice.
 4. **Conventions:** local ESM imports end in `.js`; request bodies validated with
    `zod`; workspace-scoped routes use `getOwnedWorkspace`; file status

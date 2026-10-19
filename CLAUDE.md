@@ -1,135 +1,73 @@
-# AI Import Assistant — backend
+# AI Import Assistant
 
-Backend for an IDE-style workspace for **Ukrainian import/customs logistics**. A
-single Claude agent **"Штурман"** reconciles shipment documents (invoice vs PO vs
-packing list), tracks document-package completeness, and suggests УКТ ЗЕД codes.
-The frontend is a Next.js app that lives in **`frontend/`** in this repo; backend
-and frontend are served from **one origin** by the host's system Caddy (backend at
-`127.0.0.1:8006` for `/api/*` + `/health`, frontend at `127.0.0.1:8007` for the
-rest — see `DEPLOYMENT.md`). The wire contract is `API_CONTRACT.md`; the browser
-uses **relative paths** (`/api/...`), so there is no separate backend URL. Vercel
-is not used.
+A workspace for Ukrainian import logistics in which one Claude agent, **Штурман**, checks a shipment's documents against each other, tracks how complete the document package is, gives advisory УКТ ЗЕД codes, and tracks cargo. Domain terms are in `GLOSSARY.md`; decisions and their reasons are in `docs/adr/`.
 
-> The `AI Import Assistant prototype.zip` at the root is a **static design mock**
-> (HTML + a React/Babel canvas runtime), NOT a functional app. Use it only for UI
-> data shapes; `API_CONTRACT.md` is the source of truth for the wire contract.
-
-## Hard constraints (do not violate)
-
-- **Single agent only.** One Claude conversation per chat, using tools. No
-  multi-agent orchestration / sub-agent hand-off in the product runtime.
-- **Hybrid retrieval — both, Claude-only.** The agent must keep BOTH
-  `search_documents` (Postgres full-text over `document_sections`) and `read_file`
-  (the whole stored Markdown of a file). The model chooses at runtime; never
-  hardcode a fixed retrieval pipeline. **No embedding vendor** (Voyage/Qdrant were
-  removed 2026-09-30): every file is converted ONCE at ingest to Markdown
-  (`file_markdown`) — PDFs/scans/photos by Claude vision in 5-page windows,
-  docx/xlsx/csv locally, legacy .doc via LibreOffice — and everything reads that.
-- **Anthropic key server-side only** (`src/lib/anthropic/client.ts`). The browser
-  never calls Anthropic directly.
-- **Model:** `claude-sonnet-5-5` (env `ANTHROPIC_MODEL`, backend + worker) with `thinking: { type: 'adaptive' }`;
-  no forced `tool_choice` (400 on Sonnet 5.5), `block_binding: drop_block` on preserved-thinking models.
-
-## Штурман grounding rules (Phase 4 — enforced in `src/agent/systemPrompt.ts`)
-
-The agent must not answer domain questions from its own reasoning when a
-deterministic source exists. These four rules are a hard contract in the system
-prompt (with inline example exchanges); the eval `npm run eval:grounding`
-re-checks them manually.
-
-1. **Context gate.** Before `generate_supplier_instruction`, `get_discrepancies`,
-   an HS-code suggestion, or `generate_report`, the agent calls
-   `get_missing_context` first; if anything is unset it **asks the user and
-   stops** — no defaults/assumptions.
-2. **Tools over free reasoning.** Completeness ⇒ `get_checklist`; invoice/PO/PL
-   discrepancies ⇒ `get_discrepancies` (backed by `document_extractions`); report
-   ⇒ `generate_report`. Retrieval tools locate/quote source text, they do not
-   compute verdicts.
-3. **HS codes advisory, verified against qdpro.** Ask product clarifiers first,
-   offer **multiple** candidates with reasoning, and state that a customs
-   specialist must confirm — never one code as fact. But the **source of truth**
-   for the code, origin, duties/VAT/preferences, restrictions and required
-   documents (EU transit / UA import) is now the **official qdpro source via the
-   `logist-mcp` tools** (`uktzed_lookup_code`/`browse`/`dualuse`, gated on
-   `LOGIST_MCP_URL`). The self-written static base (`uktzed_code_db.json`,
-   `product_origin_kb.json`, `hs_duty_table.json`, `ua_mfn*.json`) is a **fallback
-   only** — used when qdpro is unavailable, and the agent must say so. The
-   consolidated-analysis engine keeps its static numeric calc but cross-checks
-   each line against qdpro (`/rest/uktzed/flags`) and flags divergences.
-
-   **User portrait** (encoded in every system prompt): a Ukraine trading-company
-   import specialist who most often ships chemical/pharma **substances** (APIs) —
-   "substance" is the default assumed form; any other form (finished product,
-   in-bulk, equipment) must be clarified because it changes the code/regime/docs.
-4. **No fabrication on empty data.** If a tool returns "no data", say so; never
-   infer from memory or filename.
-
-## Stack & layout (everything flat in the repo root)
-
-Node 20 + TypeScript (ESM, `NodeNext`) · Fastify 5 · `@anthropic-ai/sdk` ·
-PostgreSQL (`pg`, incl. full-text search) · `pdf-lib` (page windows) · LibreOffice (.doc) ·
-BullMQ + Redis worker · Caddy · Docker Compose.
+## Map
 
 ```
-src/
-  server.ts            Fastify bootstrap: CORS, rate-limit, multipart, routes, boot
-  config.ts            zod-validated env (fails fast)
-  db/                  pool, schema.sql, migrate
-  auth/                passwords (bcrypt), jwt, authenticate hook, seed script
-  routes/              auth, workspaces, files, chat (SSE), conversations, events (SSE),
-                       checklist, discrepancies, supplierInstruction, parties, report, export, users, notifications
-  agent/               loop.ts (tool-use loop), tools.ts (agent tools), systemPrompt.ts
-  services/            storage, extract/ (raw text + chunking), markdown/ (convert, vision, store/FTS), conversations, workspaceAccess,
-                       checklist, discrepancies, status, parties, classify, extraction/, artifacts, supplierInstruction, notifications, report, export
-  queue/               BullMQ queue + Redis connection
-  events/              fileStatus pub/sub (live indexing status)
-  worker/index.ts      indexing worker: convert → Markdown (+ FTS sections) → status → extraction
-shipments/folders.ts      folder skeleton + file-type inference
-scripts/               copy-assets.mjs (build), smoke-test.mjs
-docker-compose.yml  Caddyfile  .env.example  Dockerfile
-API_CONTRACT.md  DEPLOYMENT.md
+src/                     backend: Node 20 + TS (ESM/NodeNext), Fastify 5, pg, BullMQ
+  server.ts              entry → dist/server.js: builds Fastify, registers route plugins (order matters)
+  worker/index.ts        entry → dist/worker/index.js: ingest worker + repeatable jobs
+  db/                    pool, schema.sql, migrate (dist/db/migrate.js), one-off migrations
+  auth/                  JWT, bcrypt, SSE tickets, login throttle, seed (dist/auth/seed.js), auth/users routes
+  lib/                   infrastructure: config (zod env), anthropic client, BullMQ queues, events, sse, storage, pdf, zip, mime
+  agent/                 Штурман: loop.ts, systemPrompt.ts, tools.ts (definitions + dispatcher), tools/<area>.ts handlers
+  chat/                  chat routes for the 3 chat kinds, conversations + history
+  shipments/             shipments + collections, ownership checks, folder skeleton, status, auto-context
+  documents/             file upload/preview/export routes, classify, versions, artifacts
+  ingest/                file → Markdown (vision), full-text sections, field extraction, retry sweep
+  reconciliation/        completeness, discrepancies (reconcile.ts), risks, parties, verification
+  customs/               logist-mcp client (qdpro, NBU, PubChem, dual-use), drug registry
+  instruction/ report/   supplier instruction constructor; one-page management report
+  analysis/              consolidated analysis engine + data/*.json; byok/ (user AI keys)
+  hub/ sheet/            logistics hub (tracks, ports, lines, routes); team Google Sheet sync + calendar
+  news/ notifications/ mcp/   RSS news; in-app bell + reminders; public MCP endpoint
+  <area>/*.routes.ts     a Fastify route plugin; <area>/__tests__/*.spec.ts vitest
+frontend/                Next.js 15 app (own package): app/ routes, components/<area>/, lib/ (api, types, stores)
+logist-mcp/              internal Python service: qdpro/NBU/PubChem scrapers over plain REST
+eval/                    golden-set eval for extraction + reconciliation (npm run eval:golden)
+scripts/                 build asset copy, smoke test, drug-registry ingest, grounding eval
+docs/                    adr/ decisions · specs/ specs + tickets · audits/ dated reports · agents/ skill config
+API_CONTRACT.md          wire contract (REST + SSE) the frontend depends on
+DEPLOYMENT.md            server setup, host Caddy block, env
 ```
 
-## Commands
+`AI Import Assistant prototype.zip` is a static design mock (HTML + canvas runtime). Use it for UI data shapes only.
 
-- `npm run dev` / `npm run dev:worker` — hot-reload server / worker (tsx)
-- `npm run build` — tsc + copy schema.sql into dist
-- `npm run typecheck` — `tsc --noEmit` (run before finishing any change)
-- `npm run migrate` — apply schema (idempotent)
-- `npm run seed -- <email> <password> [name]` — create a user (no public signup)
-- `npm run smoke` — end-to-end API smoke test (needs a running stack + seeded user)
-- `docker compose up -d --build` — full stack (postgres, redis, backend, worker, frontend, logist-mcp)
+## Workflow
 
-## Conventions
+1. **Spec**: for anything bigger than a fix, write or extend `docs/specs/NNN-slug.md` (tickets in `docs/specs/NNN-slug/`). Use the GLOSSARY's terms.
+2. **Small changes**: put new code in its area folder.
+   - Route: `src/<area>/<name>.routes.ts`, then register it in `server.ts` and document it in `API_CONTRACT.md` (`/add-route`).
+   - Agent tool: definition in `agent/tools.ts`, handler in `agent/tools/<area>.ts` (`/add-agent-tool`).
+   - File format: `convertToMarkdown` + `inferFileType` + the allow-list in `lib/storage.ts`.
+3. **Check**: `npm run typecheck && npm test && npm run build` for the backend (`/verify`), and `cd frontend && npm run typecheck && npm run build && npx playwright test` for the frontend. Run `npm run eval:grounding` when you touch the prompt or tools.
+4. **Commit** on `main` and push only when asked. A push to `main` can deploy to production (see Deploy).
 
-- **ESM imports of local files MUST end in `.js`** (e.g. `import { x } from './y.js'`)
-  even though the source is `.ts` — this is `NodeNext` resolution.
-- Strict TS incl. `noUncheckedIndexedAccess`. Validate all request bodies with `zod`.
-- **Terminology:** the brief's *workspace* == the prototype's *shipment*
-  (`Постачання`; fields `number`/`supplier`/`status`). REST paths use `/api/workspaces`.
-- **File status:** backend emits `queued|indexing|ready|error`; the frontend maps
-  `ready → done`. `error` carries `errorReason`.
-- **SSE events** (chat): `token`, `tool_call`, `tool_result`, `done`, `error`;
-  (events channel): `file_status`. Keep these stable — the FE depends on them.
-- Every workspace-scoped route calls `getOwnedWorkspace(userId, id)` and 404s on miss.
+## Invariants
 
-## Where to add things
+- **One agent, tools only** (ADR-0001). The chat kinds change the prompt and the tools; they never add agents.
+- **Both retrieval tools stay**: `search_documents` (Postgres FTS) and `read_file` (the whole Markdown). Files become Markdown once, at ingest, and there is no embedding vendor (ADR-0002).
+- **Grounding rules** are a hard contract in `agent/systemPrompt.ts` (ADR-0003, ADR-0004):
+  1. Call `get_missing_context` before supplier instructions, discrepancies, HS suggestions or reports, and ask the user instead of assuming.
+  2. Verdicts come from tools (`get_checklist`, `get_discrepancies`, `generate_report`). Retrieval tools only locate text.
+  3. HS codes are advisory: give several candidates and say that a specialist confirms. Rates, restrictions and required documents come from qdpro via logist-mcp; the static tables in `analysis/data` are a fallback the agent must name.
+  4. Empty data means saying "no data", never guessing.
+- **User portrait**: a UA trading-company import specialist who mostly ships chemical/pharma **substances**. Any other product form must be clarified.
+- **Model**: `ANTHROPIC_MODEL` (default `claude-sonnet-5-5`) with adaptive thinking. Never force `tool_choice` (Sonnet 5.5 returns 400); preserved-thinking models need `block_binding: drop_block`.
+- **The Anthropic key stays server-side** (`lib/anthropic/client.ts`). BYOK keys serve consolidated analysis only (ADR-0011).
+- **Wire contract is frozen**: chat SSE `token|tool_call|tool_result|done|error`, events SSE `file_status`, file status `queued|indexing|ready|error` (the frontend shows `ready` as `done`). Change it only together with `API_CONTRACT.md`.
+- **Access**: every shipment-scoped route calls `getOwnedWorkspace(userId, id)` and returns 404 on a miss. SSE authenticates with one-time tickets, never a JWT in the URL (ADR-0007). `/api/mcp` is deliberately open (ADR-0008).
+- **Code**: local ESM imports end in `.js`. Strict TS with `noUncheckedIndexedAccess`. Every request body is validated with zod. "Workspace" in code means "shipment" (Постачання).
+- **Team sheet is read-only**: never write to it, and never commit real sheet rows (ADR-0009).
 
-- **A new REST route** → `src/routes/<name>.ts` (async plugin), register in
-  `server.ts`, add `authenticate` preHandler, scope by `getOwnedWorkspace`.
-- **A new agent tool** → add a definition to `toolDefinitions` and a handler in
-  `executeTool` (`src/agent/tools.ts`); it returns `{ result, summary, citations }`.
-- **Backfill Markdown** for files indexed before the pipeline →
-  `npm run migrate:markdown -- --apply` (dry-run without `--apply`).
-- **A new file format** → extend `convertToMarkdown` (`src/ingest/markdown/convert.ts`)
-  and `inferFileType` (`shipments/folders.ts`) + the allow-list in `storage.ts`.
+## Deploy
 
-Out of scope (documented v2): OCR for images; native structured agent blocks
-(diff-tables/checklists arrive as Markdown in the answer for now).
+CI (`.github/workflows/ci.yml`) runs on every push to `main`. When it is green, `deploy.yml` deploys over SSH, but only if the repo variable `DEPLOY_ENABLED=true`. Otherwise deploy by hand: on `alliance-server` run `cd /opt/AI-Import-Assistant && git pull && docker compose up -d --build backend worker frontend`. Migrations run on boot. Host Caddy and `.env` are covered in `DEPLOYMENT.md`.
 
 ## Agent skills
 
-Vendored mattpocock skills live in `.claude/skills/` (see its `README.md`; `code-review`/`research`/`prototype` are `mp-*`).
+Vendored mattpocock skills live in `.claude/skills/` (see its `README.md`); `code-review`, `research` and `prototype` are installed as `mp-*`. Project skills: `indexing-pipeline`, `run-project`. Project commands: `/verify`, `/smoke`, `/add-route`, `/add-agent-tool`.
 
 ### Issue tracker
 
@@ -137,7 +75,7 @@ Specs and tickets are local markdown: `docs/specs/NNN-slug.md` + `docs/specs/NNN
 
 ### Triage labels
 
-The five default roles (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`) as a `Status:` line. See `docs/agents/triage-labels.md`.
+The five default roles (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`), written as a `Status:` line. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 

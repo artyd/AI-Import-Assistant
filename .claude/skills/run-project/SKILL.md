@@ -1,58 +1,56 @@
 ---
 name: run-project
-description: How to run, build, and verify the AI Import Assistant backend locally or via Docker, seed users, run the smoke test, and troubleshoot common boot errors. Use when starting the stack, debugging startup/env/DB/Qdrant/Redis issues, or verifying a change end-to-end.
+description: How to run, build and verify the AI Import Assistant locally or via Docker, seed users, run tests and the smoke test, and troubleshoot boot errors. Use when starting the stack, debugging startup/env/DB/Redis issues, or verifying a change end-to-end.
 ---
 
-# Running & verifying the backend
+# Running & verifying
 
-## Local dev (needs Postgres + Redis + Qdrant reachable)
+## Local dev (needs Postgres + Redis reachable)
 
 ```bash
 npm install
-cp .env.example .env          # set the three service URLs + keys for local
-npm run dev                   # API (tsx watch)
-npm run dev:worker            # indexing worker (separate terminal)
+cp .env.example .env          # set DATABASE_URL, REDIS_URL, ANTHROPIC_API_KEY, JWT_SECRET, CORS_ORIGIN
+npm run dev                   # API (tsx watch), :8080
+npm run dev:worker            # ingest worker (separate terminal)
 npm run seed -- you@x.com pass 'Name'
+cd frontend && npm install && npm run dev   # Next.js, relative /api/* paths
 ```
 
-Env for local (outside compose) — set explicitly:
-`DATABASE_URL`, `REDIS_URL`, `QDRANT_URL`, plus `ANTHROPIC_API_KEY`,
-`EMBEDDING_API_KEY`, `JWT_SECRET`, `CORS_ORIGIN`. Full list + defaults:
-`src/config.ts` (zod schema — boot fails fast with the offending var).
+Every env var, with its default: `src/lib/config.ts` (zod; boot fails fast and
+names the offending var).
 
 ## Full stack (Docker)
 
 ```bash
-cp .env.example .env          # secrets + API_DOMAIN + CORS_ORIGIN + POSTGRES_*
-docker compose up -d --build
+cp .env.example .env
+docker compose up -d --build   # postgres, redis, backend, worker, frontend, logist-mcp
 docker compose exec backend node dist/auth/seed.js you@x.com pass 'Name'
 docker compose logs -f backend worker
 ```
 
-Compose derives `DATABASE_URL`/`REDIS_URL`/`QDRANT_URL` from service names, so
-they are NOT set in `.env`. Backend + worker share the `storage_data` volume.
+Compose derives `DATABASE_URL`/`REDIS_URL` from service names. The public domain
+is routed by the host's system Caddy, which is not part of this repo (ADR-0006,
+`DEPLOYMENT.md`).
 
 ## Verify
 
-- `npm run typecheck` — always run before finishing a change.
-- `npm run build` — must emit `dist/server.js`, `dist/worker/index.js`,
-  `dist/db/schema.sql` (schema is copied by `scripts/copy-assets.mjs`).
-- `npm run smoke` — end-to-end (health→login→workspace→upload→index→chat→delete).
-  Needs a running stack + seeded user: `EMAIL=... PASSWORD=... npm run smoke`.
-  `SKIP_CHAT=1` avoids Anthropic cost.
+- Backend: `npm run typecheck`, `npm test` (vitest, infra-free), `npm run build`
+  (must emit `dist/server.js`, `dist/worker/index.js`, `dist/db/schema.sql`,
+  `dist/analysis/data/*.json`, the last two copied by `scripts/copy-assets.mjs`).
+- Frontend: `cd frontend && npm run typecheck && npm run build && npx playwright test`.
+  Specs that need the live API skip unless `PW_BACKEND=1`.
+- End-to-end: `EMAIL=... PASSWORD=... npm run smoke` against a running stack
+  (`SKIP_CHAT=1` avoids Anthropic cost).
 
 ## Troubleshooting
 
-- **Boot exits with an env list** → a required var failed zod validation
-  (`src/config.ts`). Fix `.env`.
-- **`pg`/`ECONNREFUSED`** → Postgres not up/reachable; in compose it waits on
-  healthchecks, locally it doesn't.
-- **Qdrant dimension mismatch on upsert** → `EMBEDDING_MODEL` dimension ≠
-  collection size; recreate the `documents` collection.
-- **BullMQ connection warning** → connections use `maxRetriesPerRequest: null`
-  (`src/queue/connection.ts`); required for workers.
-- **SSE not streaming through the proxy** → Caddy uses `flush_interval -1`
-  (`Caddyfile`); don't add buffering.
-- **Chat 401 on the browser** → chat is SSE-over-POST; the FE must use
-  `fetch`+`ReadableStream` (sets `Authorization`), not native `EventSource`.
-  The `/events` channel is GET and uses `?access_token=`.
+- **Boot exits with an env list** → a required var failed validation in
+  `src/lib/config.ts`.
+- **`ECONNREFUSED` from pg** → Postgres not reachable. Compose waits on
+  healthchecks; local dev doesn't.
+- **BullMQ connection warning** → connections need `maxRetriesPerRequest: null`
+  (`src/lib/queue/connection.ts`).
+- **Every browser POST returns 500, curl works** → a stale `CORS_ORIGIN` in `.env`.
+- **SSE 401** → chat is SSE-over-POST (`fetch` + `Authorization`). `/events`
+  uses a one-time `?ticket=` from `POST /api/auth/sse-ticket`; a JWT in the
+  query string is rejected.
