@@ -10,7 +10,7 @@ export interface ComboOption {
 /**
  * Lightweight searchable combobox (no UI library). Free text is allowed — the
  * typed value is kept even if it isn't in the option list, so messy import data
- * still saves. Click-outside closes the panel (pattern from WorkspaceSelector).
+ * still saves. Click-outside closes the panel.
  */
 export function Combobox({
   value,
