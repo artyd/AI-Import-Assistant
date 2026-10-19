@@ -1,5 +1,5 @@
 /* Supplier-instruction builder — the approved mockup
-   (docs/instruction-builder-and-report/mockups/instruction-builder.html),
+   (docs/specs/005-instruction-builder-and-report/mockups/instruction-builder.html),
    scaled up ~12% on request: base 15px, roomier fields. Theme tokens from globals.css. */
 
 .root { height: 100vh; display: flex; flex-direction: column; background: var(--bg); color: var(--text); font-size: 15px }

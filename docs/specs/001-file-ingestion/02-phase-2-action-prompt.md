@@ -19,7 +19,7 @@ what trips a per-minute rate limit in a burst.
 
 ## Role & constraints
 
-Same stack/conventions as `phase-1-action-prompt.md`: Fastify + TypeScript, ESM/NodeNext, strict
+Same stack/conventions as `01-phase-1-action-prompt.md`: Fastify + TypeScript, ESM/NodeNext, strict
 TS. **Stop at `npm run typecheck` + `npm run build` green.** No production migration/live-test
 needed for this phase — it's pure application logic, no schema change.
 

@@ -69,8 +69,8 @@ Frontend:
 - `frontend/components/ShipmentPanel.tsx:563-564` — the **intermediary party slot is only rendered when `contract_type === "trilateral"`**.
 
 Design intent / open TODOs:
-- `docs/sidebar-enhancement/phase-4-action-prompt.md:32-46, 51-71, 74-85` — the original "2/3-party logic + docs checklist" spec, incl. explicit TODO to confirm the real trilateral required-doc list with the domain owner.
-- `docs/sidebar-enhancement/00-audit-and-plan.md:86-100` — notes `party_count` is **not stored** (derived from `contract_type`).
+- `docs/specs/002-sidebar-enhancement/04-phase-4-action-prompt.md:32-46, 51-71, 74-85` — the original "2/3-party logic + docs checklist" spec, incl. explicit TODO to confirm the real trilateral required-doc list with the domain owner.
+- `docs/specs/002-sidebar-enhancement.md:86-100` — notes `party_count` is **not stored** (derived from `contract_type`).
 
 **Missing:** no `contract_type_source`, no `contract_type_confidence`, no persisted reason,
 no override lock, no survey.

@@ -126,3 +126,19 @@ API_CONTRACT.md  DEPLOYMENT.md
 
 Out of scope (documented v2): OCR for images; native structured agent blocks
 (diff-tables/checklists arrive as Markdown in the answer for now).
+
+## Agent skills
+
+Vendored mattpocock skills live in `.claude/skills/` (see its `README.md`; `code-review`/`research`/`prototype` are `mp-*`).
+
+### Issue tracker
+
+Specs and tickets are local markdown: `docs/specs/NNN-slug.md` + `docs/specs/NNN-slug/NN-*.md`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five default roles (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`) as a `Status:` line. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `GLOSSARY.md` + `docs/adr/` at the root. See `docs/agents/domain.md`.

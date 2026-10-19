@@ -2,7 +2,7 @@ import type { ReportFacts } from './facts.js';
 
 /**
  * One-page A4 management report — the approved mockup
- * (docs/instruction-builder-and-report/mockups/report-a4.html) as a template.
+ * (docs/specs/005-instruction-builder-and-report/mockups/report-a4.html) as a template.
  * Pure: facts (+ optional AI summary) in, self-contained HTML out. The same
  * HTML is served as-is and printed to PDF by `pdf.ts`.
  */

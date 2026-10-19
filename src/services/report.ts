@@ -6,7 +6,7 @@ import { htmlToPdf } from './pdf.js';
 
 /**
  * One-page A4 management report (approved mockup:
- * docs/instruction-builder-and-report/mockups/report-a4.html). Facts are
+ * docs/specs/005-instruction-builder-and-report/mockups/report-a4.html). Facts are
  * assembled deterministically from extractions, parties, checklist and risks
  * (`report/facts.ts`); the only model call is the optional cached 3–5 sentence
  * summary. The HTML is persisted as the `shipment_report_html` artifact; PDF is

@@ -8,7 +8,7 @@ lies.** It scores, against a labeled set of real shipments:
 2. **Discrepancy detection** — precision / recall / F1 of the deterministic
    reconciliation (`reconcile()`) vs. the discrepancies the pilot expects.
 
-One command, hard numbers, non-zero exit when below threshold — see MVP_PLAN.md
+One command, hard numbers, non-zero exit when below threshold — see docs/specs/003-mvp-declarant.md
 §"Фаза 0".
 
 ## Layout

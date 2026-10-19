@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 /**
  * Supplier-instruction draft — the structured state of the constructor screen
- * (docs/instruction-builder-and-report/TZ.md §1). Stored per version as JSONB;
+ * (docs/specs/005-instruction-builder-and-report.md §1). Stored per version as JSONB;
  * the letter text is ALWAYS rendered from it by `render.ts` (deterministic, no
  * LLM), and the approved version drives the instruction-compliance check.
  */

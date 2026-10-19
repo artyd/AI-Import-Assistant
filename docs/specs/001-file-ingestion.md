@@ -1,7 +1,7 @@
 # Read-Only Audit — File Ingestion Robustness (6 failed files, "Метопрен" shipment)
 
 > **Status: AUDIT + PLAN ONLY.** No files were modified, no migrations run, nothing committed.
-> This document is the findings report. The next step is `phase-1-action-prompt.md`.
+> This document is the findings report. The next step is `001-file-ingestion/01-phase-1-action-prompt.md`.
 
 ## Context
 
@@ -110,7 +110,7 @@ out to genuinely be filename-related (it would show up plainly in `error_reason`
 
 ## Plan
 
-One small, additive phase — see `phase-1-action-prompt.md`:
+One small, additive phase — see `001-file-ingestion/01-phase-1-action-prompt.md`:
 1. `content_hash` column + index (idempotent `ALTER TABLE`, following the existing pattern).
 2. `contentHashOf()` helper in `storage.ts`, reused by both the upload path and the backfill.
 3. Upload-path dedup in `files.ts` (DB-scoped **and** within the same upload batch).

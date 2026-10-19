@@ -1,7 +1,7 @@
 # Action Prompt — Phase 1: Content-hash dedup + `normalize_shipment_files` chat tool
 
 > Standalone action prompt derived from the file-ingestion-robustness audit
-> (`00-audit-and-plan.md`). Scope is intentionally small and additive: stop the same file from
+> (`../001-file-ingestion.md`). Scope is intentionally small and additive: stop the same file from
 > being indexed twice under different names/folders, and give Shturman a chat command to backfill
 > this for already-uploaded shipments. **Do not** add filename sanitization/renaming — the audit
 > found it isn't needed (see Finding F1–F3 in the audit doc).
