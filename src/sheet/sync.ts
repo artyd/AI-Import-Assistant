@@ -3,7 +3,8 @@ import { config } from '../lib/config.js';
 import { query } from '../db/pool.js';
 import { insertNotification } from '../notifications/notifications.js';
 import { geocode } from '../hub/geocode.js';
-import { isManualSea, refreshTracked } from '../hub/track.js';
+import { applyManualUpdate, isManualSea, refreshTracked, type TrackedRow } from '../hub/track.js';
+import type { ManualInput } from '../hub/manualPlan.js';
 import type { TrackStatus } from '../hub/types.js';
 import {
   approxWarehouseDate,
@@ -201,7 +202,7 @@ async function upsertRow(
 // ── Hub link ─────────────────────────────────────────────────────────────────
 
 /** Hub status for a hand-kept (sea) item from the sheet's status. */
-function hubStatus(r: TrackingRow): TrackStatus {
+export function hubStatus(r: TrackingRow): TrackStatus {
   switch (r.status) {
     case 'delivered':
       return 'delivered';
@@ -216,14 +217,19 @@ function hubStatus(r: TrackingRow): TrackStatus {
   }
 }
 
-interface HubItem {
-  id: string;
-  mode: string;
-  carrier: string;
-  origin: string;
-  destination: string;
-  status: string;
-  source: string;
+/** What the sheet says about a sea item kept by hand. */
+export function sheetManualInput(r: TrackingRow): ManualInput {
+  const status = hubStatus(r);
+  return {
+    origin: r.origin,
+    destination: r.destination,
+    departedAt: noon(r.departure?.date),
+    eta: noon(r.arrival?.date),
+    status,
+    // A delivered row's status date is the arrival; otherwise keep the stored one.
+    arrivedAt: status === 'delivered' ? (noon(r.statusDate?.date) ?? undefined) : undefined,
+    statusText: r.comment || r.extra,
+  };
 }
 
 async function geoPair(text: string, mode: string): Promise<[number | null, number | null] | null> {
@@ -266,45 +272,13 @@ async function linkToHub(r: TrackingRow, rowId: string, prevTracked: string | nu
   await query('UPDATE sheet_rows SET tracked_id = $2 WHERE id = $1', [rowId, id]);
   await query(`UPDATE tracked_items SET team = TRUE, label = $2, archived = FALSE WHERE id = $1`, [id, r.product.slice(0, 120)]);
 
-  const { rows } = await query<HubItem>(
-    'SELECT id, mode, carrier, origin, destination, status, source FROM tracked_items WHERE id = $1',
-    [id],
-  );
+  const { rows } = await query<TrackedRow>('SELECT * FROM tracked_items WHERE id = $1', [id]);
   const item = rows[0]!;
   const origin = r.origin.slice(0, 200);
   const destination = r.destination.slice(0, 200);
   if (isManualSea(item.mode, item.carrier)) {
-    const o = origin !== item.origin ? await geoPair(origin, item.mode) : undefined;
-    const d = destination !== item.destination ? await geoPair(destination, item.mode) : undefined;
-    const status = hubStatus(r);
-    await query(
-      `UPDATE tracked_items SET
-         origin = $2, destination = $3,
-         origin_lat = CASE WHEN $4 THEN $5 ELSE origin_lat END, origin_lng = CASE WHEN $4 THEN $6 ELSE origin_lng END,
-         dest_lat = CASE WHEN $7 THEN $8 ELSE dest_lat END, dest_lng = CASE WHEN $7 THEN $9 ELSE dest_lng END,
-         departed_at = $10, eta = $11, first_eta = COALESCE(first_eta, $11),
-         arrived_at = CASE WHEN $12 = 'delivered' THEN COALESCE($13, arrived_at, now()) ELSE arrived_at END,
-         status = $12, status_text = $14,
-         source = CASE WHEN source IN ('none', 'manual', 'sheet') THEN 'sheet' ELSE source END,
-         last_changed_at = CASE WHEN status <> $12 THEN now() ELSE last_changed_at END
-       WHERE id = $1`,
-      [
-        id,
-        origin,
-        destination,
-        o !== undefined,
-        o?.[0] ?? null,
-        o?.[1] ?? null,
-        d !== undefined,
-        d?.[0] ?? null,
-        d?.[1] ?? null,
-        noon(r.departure?.date),
-        noon(r.arrival?.date),
-        status,
-        noon(r.statusDate?.date),
-        (r.comment || r.extra).slice(0, 300),
-      ],
-    );
+    // Same rules as a logist's edit in the hub (planManualUpdate).
+    await applyManualUpdate(item, sheetManualInput(r), 'sheet');
   } else {
     // Carrier data wins for API-tracked items; the sheet only fills blanks.
     if (!item.origin && origin) {
@@ -322,7 +296,7 @@ async function linkToHub(r: TrackingRow, rowId: string, prevTracked: string | nu
 
 /** A row that left play: hand-kept items close; vanished rows archive. */
 async function closeInHub(trackedId: string, r: TrackingRow | null): Promise<void> {
-  const { rows } = await query<HubItem>('SELECT id, mode, carrier, origin, destination, status, source FROM tracked_items WHERE id = $1', [trackedId]);
+  const { rows } = await query<TrackedRow>('SELECT * FROM tracked_items WHERE id = $1', [trackedId]);
   const item = rows[0];
   if (!item || !isManualSea(item.mode, item.carrier)) return;
   if (!r) {
@@ -330,11 +304,10 @@ async function closeInHub(trackedId: string, r: TrackingRow | null): Promise<voi
     return;
   }
   if (r.status === 'delivered' || r.status === 'customs') {
-    await query(
-      `UPDATE tracked_items SET status = 'delivered', arrived_at = COALESCE($2, arrived_at, now()),
-         last_changed_at = CASE WHEN status <> 'delivered' THEN now() ELSE last_changed_at END
-       WHERE id = $1`,
-      [trackedId, noon(r.statusDate?.date ?? r.arrival?.date)],
+    await applyManualUpdate(
+      item,
+      { status: 'delivered', arrivedAt: noon(r.statusDate?.date ?? r.arrival?.date) ?? undefined },
+      'sheet',
     );
   }
 }
@@ -356,6 +329,41 @@ async function saveTabState(tab: SheetTab, gid: string, ok: boolean, rows: numbe
        ok = EXCLUDED.ok, error = EXCLUDED.error, synced_at = now()`,
     [tab, gid, grid ? JSON.stringify(grid) : null, rows, ok, error.slice(0, 300)],
   );
+}
+
+/**
+ * The logist's notifications for one sheet row (pure): plan change, arrival
+ * tomorrow / today, port free time running out. Keys dedupe them per day.
+ */
+export function rowNotifications(
+  r: TrackingRow,
+  prevArrival: unknown,
+  hadRow: boolean,
+  rowId: string,
+  today: string,
+): { key: string; text: string }[] {
+  const out: { key: string; text: string }[] = [];
+  // Planned arrival changed in the sheet → tell the responsible logist.
+  const oldArr = toDay(prevArrival);
+  const newArr = r.arrival?.date ?? null;
+  if (hadRow && oldArr && newArr && oldArr !== newArr && r.active) {
+    out.push({ key: `sheet:${rowId}:plan:${newArr}`, text: `📅 ${r.product}: план прибуття змінено ${fmt(oldArr)} → ${fmt(newArr)} (таблиця, рядок ${r.rowIndex}).` });
+  }
+  if (r.active && newArr === addDays(today, 1)) {
+    out.push({ key: `sheet:${rowId}:d1:${newArr}`, text: `🗓 Завтра прибуває: ${r.product}${r.destination ? ` → ${r.destination}` : ''}.` });
+  } else if (r.active && newArr === today) {
+    out.push({ key: `sheet:${rowId}:d0:${newArr}`, text: `🗓 Сьогодні прибуття: ${r.product}${r.destination ? ` → ${r.destination}` : ''}.` });
+  }
+  // Port free time running out → demurrage soon.
+  const ft = r.active ? freeTimeOf(r) : null;
+  if (ft && (ft.end === addDays(today, 2) || ft.end === today)) {
+    const when = ft.end === today ? 'сьогодні останній день' : `закінчується ${fmt(ft.end)} (за 2 дні)`;
+    out.push({
+      key: `sheet:${rowId}:free:${ft.end}:${ft.end === today ? 0 : 2}`,
+      text: `⏳ ${r.product}${r.destination ? ` (${r.destination})` : ''}: безкоштовне зберігання в порту — ${when}; далі демередж.`,
+    });
+  }
+  return out;
 }
 
 async function syncTracking(grid: string[][], today: string, users: UserRef[]): Promise<{ rows: number; linked: number; notified: number }> {
@@ -385,30 +393,8 @@ async function syncTracking(grid: string[][], today: string, users: UserRef[]): 
       prev,
     );
 
-    // Planned arrival changed in the sheet → tell the responsible logist.
-    const oldArr = toDay(prev?.arrival_on);
-    const newArr = r.arrival?.date ?? null;
-    if (prev && oldArr && newArr && oldArr !== newArr && r.active) {
-      await notifyFor(users, r.logist, `sheet:${id}:plan:${newArr}`, `📅 ${r.product}: план прибуття змінено ${fmt(oldArr)} → ${fmt(newArr)} (таблиця, рядок ${r.rowIndex}).`);
-      notified += 1;
-    }
-    if (r.active && newArr === addDays(today, 1)) {
-      await notifyFor(users, r.logist, `sheet:${id}:d1:${newArr}`, `🗓 Завтра прибуває: ${r.product}${r.destination ? ` → ${r.destination}` : ''}.`);
-      notified += 1;
-    } else if (r.active && newArr === today) {
-      await notifyFor(users, r.logist, `sheet:${id}:d0:${newArr}`, `🗓 Сьогодні прибуття: ${r.product}${r.destination ? ` → ${r.destination}` : ''}.`);
-      notified += 1;
-    }
-    // Port free time running out → demurrage soon.
-    const ft = r.active ? freeTimeOf(r) : null;
-    if (ft && (ft.end === addDays(today, 2) || ft.end === today)) {
-      const when = ft.end === today ? 'сьогодні останній день' : `закінчується ${fmt(ft.end)} (за 2 дні)`;
-      await notifyFor(
-        users,
-        r.logist,
-        `sheet:${id}:free:${ft.end}:${ft.end === today ? 0 : 2}`,
-        `⏳ ${r.product}${r.destination ? ` (${r.destination})` : ''}: безкоштовне зберігання в порту — ${when}; далі демередж.`,
-      );
+    for (const n of rowNotifications(r, prev?.arrival_on ?? null, !!prev, id, today)) {
+      await notifyFor(users, r.logist, n.key, n.text);
       notified += 1;
     }
 

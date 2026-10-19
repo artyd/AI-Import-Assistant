@@ -9,6 +9,7 @@ import { geocode } from './geocode.js';
 import { scrapeTracking } from './scrape.js';
 import { sheetRowUrl } from '../sheet/link.js';
 import { STATUS_LABEL_UK, type TrackEventIn, type TrackResult, type TrackStatus } from './types.js';
+import { planManualUpdate, type ManualInput, type ManualVia } from './manualPlan.js';
 
 /**
  * Tracking orchestrator for the logistics hub.
@@ -454,46 +455,37 @@ export async function refreshTracked(id: string): Promise<void> {
 
 // ── Manual data (sea in TRACKING_SEA_MODE=manual, or a correction by hand) ──
 
-export interface ManualInput {
-  status?: TrackStatus;
-  statusText?: string;
-  origin?: string;
-  destination?: string;
-  vesselName?: string;
-  vesselImo?: string;
-  departedAt?: string | null;
-  eta?: string | null;
-  arrivedAt?: string | null;
-}
-
-const IMPORTANT: TrackStatus[] = ['delivered', 'at_port', 'exception', 'customs', 'out_for_delivery'];
+export type { ManualInput } from './manualPlan.js';
 
 /**
- * Apply what a logist typed in; only the fields present change. Origin /
- * destination are geocoded for the map; a new vessel name/IMO re-arms the AIS
- * resolver (vessel_mmsi reset) so the vessel shows up live. Teammates — not the
- * editor — get the same important-only notifications as for carrier updates.
+ * Apply hand-kept data — a logist's edit in the hub (`via: 'hand'`, the editor
+ * is not notified) or the team sheet for a sea item kept by hand (`via:
+ * 'sheet'`). One rule set (`planManualUpdate`) for both: origin / destination
+ * are geocoded for the map, a new vessel name/IMO re-arms the AIS resolver,
+ * teammates get the same important-only notifications.
  */
-export async function updateManual(actorId: string, item: TrackedRow, m: ManualInput): Promise<void> {
-  const pick = <T>(v: T | undefined, old: T): T => (v === undefined ? old : v);
+export async function applyManualUpdate(
+  item: TrackedRow,
+  m: ManualInput,
+  via: ManualVia,
+  actorId?: string,
+): Promise<void> {
+  const plan = planManualUpdate(item, m, via, new Date().toISOString());
   const prefer = item.mode === 'air' ? 'air' : item.mode === 'sea' ? 'sea' : undefined;
-  const origin = pick(m.origin, item.origin);
-  const destination = pick(m.destination, item.destination);
-  const oPos = origin !== item.origin ? (origin ? await geocode(origin, prefer) : null) : undefined;
-  const dPos = destination !== item.destination ? (destination ? await geocode(destination, prefer) : null) : undefined;
-  const vesselName = pick(m.vesselName, item.vessel_name);
-  const vesselImo = pick(m.vesselImo, item.vessel_imo);
-  const status = pick(m.status, item.status);
-  const eta = pick(m.eta, item.eta);
-  let arrivedAt = pick(m.arrivedAt, item.arrived_at);
-  if (status === 'delivered' && !arrivedAt) arrivedAt = new Date().toISOString();
-  // Marked "in transit" without a departure date → it left now (editable in the form);
-  // this anchors the estimated position and the countdown.
-  let departedAt = pick(m.departedAt, item.departed_at);
-  if (status === 'in_transit' && item.status !== 'in_transit' && !departedAt) departedAt = new Date().toISOString();
+  const oPos = plan.originChanged ? (plan.origin ? await geocode(plan.origin, prefer) : null) : undefined;
+  const dPos = plan.destinationChanged ? (plan.destination ? await geocode(plan.destination, prefer) : null) : undefined;
 
+  // A hub edit makes the item 'manual'; the sheet marks it 'sheet' unless a
+  // carrier source owns it. The sheet runs hourly, so it bumps last_changed_at
+  // only on a real status change.
+  const sourceSql =
+    via === 'hand'
+      ? `source = 'manual', last_error = '', last_checked_at = now(), last_changed_at = now()`
+      : `source = CASE WHEN source IN ('none', 'manual', 'sheet') THEN 'sheet' ELSE source END,
+         last_changed_at = CASE WHEN status <> $2 THEN now() ELSE last_changed_at END`;
   await query(
     `UPDATE tracked_items SET
+       ${sourceSql},
        status = $2, status_text = $3, origin = $4, destination = $5,
        origin_lat = CASE WHEN $6 THEN $7 ELSE origin_lat END,
        origin_lng = CASE WHEN $6 THEN $8 ELSE origin_lng END,
@@ -501,41 +493,34 @@ export async function updateManual(actorId: string, item: TrackedRow, m: ManualI
        dest_lng = CASE WHEN $9 THEN $11 ELSE dest_lng END,
        vessel_name = $12, vessel_imo = $13,
        vessel_mmsi = CASE WHEN $14 THEN '' ELSE vessel_mmsi END,
-       departed_at = $15, eta = $16, first_eta = COALESCE(first_eta, $16), arrived_at = $17,
-       source = 'manual', last_error = '', last_checked_at = now(), last_changed_at = now()
+       departed_at = $15, eta = $16, first_eta = COALESCE(first_eta, $16), arrived_at = $17
      WHERE id = $1`,
     [
       item.id,
-      status,
-      pick(m.statusText, item.status_text).slice(0, 300),
-      origin.slice(0, 200),
-      destination.slice(0, 200),
+      plan.status,
+      plan.statusText,
+      plan.origin,
+      plan.destination,
       oPos !== undefined,
       oPos?.[0] ?? null,
       oPos?.[1] ?? null,
       dPos !== undefined,
       dPos?.[0] ?? null,
       dPos?.[1] ?? null,
-      vesselName.slice(0, 120),
-      vesselImo.slice(0, 20),
-      vesselName !== item.vessel_name || vesselImo !== item.vessel_imo,
-      departedAt,
-      eta,
-      arrivedAt,
+      plan.vesselName,
+      plan.vesselImo,
+      plan.vesselChanged,
+      plan.departedAt,
+      plan.eta,
+      plan.arrivedAt,
     ],
   );
+  for (const n of plan.notifications) await notify(item, n.kind, n.text, actorId);
+}
 
-  if (status !== item.status && item.status !== 'pending' && IMPORTANT.includes(status)) {
-    const where = status !== 'exception' && destination ? ` — ${destination}` : '';
-    await notify(item, status, `${STATUS_LABEL_UK[status]}${where} (внесено вручну).`, actorId);
-  }
-  if (item.eta && eta) {
-    const shiftH = (new Date(eta).getTime() - new Date(item.eta).getTime()) / 3_600_000;
-    if (Math.abs(shiftH) >= 24) {
-      const days = Math.round(shiftH / 24);
-      await notify(item, 'eta', `ETA зсунулась на ${days > 0 ? '+' : ''}${days} дн. (тепер ${fmtDate(eta)}, внесено вручну).`, actorId);
-    }
-  }
+/** A logist's edit in the hub form. */
+export async function updateManual(actorId: string, item: TrackedRow, m: ManualInput): Promise<void> {
+  await applyManualUpdate(item, m, 'hand', actorId);
 }
 
 export async function addManualEvent(
