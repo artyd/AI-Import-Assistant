@@ -17,7 +17,7 @@
  *     document's source file/text. Costs money.
  *
  * Discrepancy scoring uses `reconcile()` directly (the pure, DB-free core of
- * `computeDiscrepancies`) so no Postgres is required.
+ * `computeVerdicts`) so no Postgres is required.
  *
  * Usage:
  *   npm run eval:golden                 # dry-run over eval/golden/*.json

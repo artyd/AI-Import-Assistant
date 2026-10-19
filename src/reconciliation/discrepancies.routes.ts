@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { authenticate } from '../auth/hook.js';
 import { getOwnedWorkspace } from '../shipments/workspaceAccess.js';
-import { computeDiscrepancies } from './discrepancies.js';
+import { shipmentVerdicts } from './verdicts.js';
 import { saveArtifact } from '../documents/artifacts.js';
 import { compareFileVersions } from '../documents/versions.js';
 
@@ -15,7 +15,7 @@ export async function discrepancyRoutes(app: FastifyInstance): Promise<void> {
     async (req, reply) => {
       const ws = await getOwnedWorkspace(req.user!.sub, req.params.id);
       if (!ws) return reply.code(404).send({ error: 'not_found' });
-      const discrepancies = await computeDiscrepancies(ws.id);
+      const { discrepancies } = await shipmentVerdicts(ws);
       const { id: artifactId } = await saveArtifact(
         ws.id,
         'discrepancy_report',

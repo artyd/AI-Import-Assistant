@@ -6,7 +6,8 @@ import { sameCompany } from '../shipments/contextDerive.js';
  * Deterministic document-completeness checklist. Requirements come from
  * `checklist_templates` matched against the workspace's product/incoterm/mode;
  * each requirement's status is resolved from the files actually present (folder
- * hint) and their structured extraction (`document_extractions.doc_type`):
+ * hint) and their structured extraction (`document_extractions.doc_type`)
+ * — computed by `verdicts.ts`, persisted here:
  *   missing  — no latest file attributable to this requirement
  *   received — a latest file's folder covers it, but it isn't extraction-verified
  *   verified — a latest file has an extraction whose doc_type == requirement
@@ -32,7 +33,7 @@ const FOLDER_CATEGORIES: Record<string, string[]> = {
   '05_Transport': ['transport'],
 };
 
-interface LatestFileRow {
+export interface LatestFileRow {
   file_id: string;
   folder_name: string | null;
   doc_type: string | null;
@@ -41,7 +42,8 @@ interface LatestFileRow {
   buyer: string | null;
 }
 
-async function requiredKeys(ws: WorkspaceRow): Promise<string[]> {
+/** Requirement keys from `checklist_templates` that match the shipment's context. */
+export async function requiredDocumentTypes(ws: WorkspaceRow): Promise<string[]> {
   const { rows } = await query<{ required_document_types: string[] }>(
     `SELECT required_document_types FROM checklist_templates
      WHERE (product_category IS NULL OR product_category = $1)
@@ -108,47 +110,22 @@ export function resolveItems(
   });
 }
 
-/** Computes the checklist and replaces the persisted items for the workspace. */
-export async function computeChecklist(ws: WorkspaceRow): Promise<ChecklistItem[]> {
-  const required = await requiredKeys(ws);
-  if (required.length === 0) return [];
-
-  const { rows: files } = await query<LatestFileRow>(
-    `SELECT f.id AS file_id, fo.name AS folder_name,
-            de.extracted_fields->>'doc_type' AS doc_type,
-            de.extracted_fields->'also_contains' AS also_contains,
-            de.extracted_fields->>'seller' AS seller,
-            de.extracted_fields->>'buyer' AS buyer
-     FROM files f
-     LEFT JOIN folders fo ON fo.id = f.folder_id
-     LEFT JOIN document_extractions de ON de.file_id = f.id
-     WHERE f.workspace_id = $1 AND f.is_latest = true
-     ORDER BY f.created_at, f.name, f.id`,
-    [ws.id],
-  );
-  const { rows: inter } = await query<{ company_name: string }>(
-    `SELECT company_name FROM parties
-     WHERE workspace_id = $1 AND role = 'intermediary' AND company_name <> ''
-     ORDER BY created_at LIMIT 1`,
-    [ws.id],
-  );
-
-  const items = resolveItems(required, files, inter[0]?.company_name ?? null);
-
+/** Replaces the persisted checklist items for the shipment (what the sidebar reads). */
+export async function persistChecklist(workspaceId: string, items: ChecklistItem[]): Promise<void> {
   // Replace persisted items atomically.
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     // Concurrent recomputes (3 index jobs in one workspace) each DELETE+INSERT;
     // under READ COMMITTED both inserts survived → duplicate checklist items.
-    await client.query("SELECT pg_advisory_xact_lock(hashtext('checklist:' || $1))", [ws.id]);
-    await client.query('DELETE FROM workspace_checklist_items WHERE workspace_id = $1', [ws.id]);
+    await client.query("SELECT pg_advisory_xact_lock(hashtext('checklist:' || $1))", [workspaceId]);
+    await client.query('DELETE FROM workspace_checklist_items WHERE workspace_id = $1', [workspaceId]);
     for (const item of items) {
       await client.query(
         `INSERT INTO workspace_checklist_items
            (workspace_id, requirement_key, status, source_file_id, updated_at)
          VALUES ($1, $2, $3, $4, now())`,
-        [ws.id, item.requirement_key, item.status, item.source_file_id],
+        [workspaceId, item.requirement_key, item.status, item.source_file_id],
       );
     }
     await client.query('COMMIT');
@@ -158,11 +135,4 @@ export async function computeChecklist(ws: WorkspaceRow): Promise<ChecklistItem[
   } finally {
     client.release();
   }
-
-  return items;
-}
-
-/** Seeds checklist items the first time intake completes (idempotent recompute). */
-export async function seedChecklistItems(ws: WorkspaceRow): Promise<ChecklistItem[]> {
-  return computeChecklist(ws);
 }

@@ -1,16 +1,14 @@
-import { query } from '../db/pool.js';
-import type { ExtractedFields } from '../ingest/extraction/extractFields.js';
-import { reconcile, type ReconcileDoc } from './reconcile.js';
-import { latestApproved } from '../instruction/store.js';
+import { reconcile, type Discrepancy, type ReconcileDoc } from './reconcile.js';
 import { checkInstructionCompliance } from '../instruction/compliance.js';
-import { getWorkspaceById } from '../shipments/workspaceAccess.js';
+import type { InstructionVersion } from '../instruction/store.js';
+import type { WorkspaceRow } from '../shipments/workspaceAccess.js';
 
 /**
- * Workspace-scoped cross-document reconciliation. Reads the latest structured
- * extractions for the invoice / purchase-order / packing-list / contract of a
- * workspace and hands them to the pure `reconcile()` core (`reconcile.ts`), which
- * does the actual comparison. It NEVER re-reads raw document text — findings are a
- * pure function of `document_extractions`.
+ * Shipment-scoped cross-document reconciliation: the latest structured
+ * extractions go to the pure `reconcile()` core (`reconcile.ts`), plus the
+ * approved supplier instruction's compliance check. It NEVER re-reads raw
+ * document text — findings are a pure function of `document_extractions`
+ * (loaded once by `verdicts.ts`).
  *
  * The ranking contract (🔴 confirmed with two citations / 🟡 suspected) lives in
  * `reconcile.ts`; see there for the full rationale.
@@ -24,52 +22,28 @@ export type {
   Discrepancy,
 } from './reconcile.js';
 
-type Fields = Partial<ExtractedFields> & Record<string, unknown>;
+export interface DiscrepancyContext {
+  ws: Pick<WorkspaceRow, 'contract_type' | 'incoterm_in' | 'incoterm' | 'incoterm_out'>;
+  intermediary: string | null;
+  approvedInstruction: InstructionVersion | null;
+}
 
-type Row = { file_id: string | null; file_name: string | null; doc_type: string | null; fields: Fields };
-
-export async function computeDiscrepancies(workspaceId: string): Promise<
-  import('./reconcile.js').Discrepancy[]
-> {
-  const { rows } = await query<Row>(
-    `SELECT f.id   AS file_id,
-            f.name AS file_name,
-            de.extracted_fields->>'doc_type' AS doc_type,
-            de.extracted_fields AS fields
-     FROM document_extractions de
-     JOIN files f ON f.id = de.file_id
-     WHERE de.workspace_id = $1 AND f.is_latest = true
-     -- Stable order: when several files share a doc_type the reconciler picks
-     -- among them, and the verdict must not change between calls.
-     ORDER BY f.created_at, f.name, f.id`,
-    [workspaceId],
-  );
-
-  const docs: ReconcileDoc[] = rows.map((r) => ({
-    file_id: r.file_id,
-    file_name: r.file_name,
-    doc_type: r.doc_type,
-    fields: r.fields,
-  }));
-
+export function findDiscrepancies(
+  docs: ReconcileDoc[],
+  { ws, intermediary, approvedInstruction }: DiscrepancyContext,
+): Discrepancy[] {
   // Pass the shipment's contract mode + Incoterms so trilateral (3-party) gets
   // the two-leg checks; bilateral/unknown keeps the single-invoice behaviour.
-  const ws = await getWorkspaceById(workspaceId);
-  const { rows: inter } = await query<{ company_name: string }>(
-    `SELECT company_name FROM parties
-     WHERE workspace_id = $1 AND role = 'intermediary' AND company_name <> ''
-     ORDER BY created_at LIMIT 1`,
-    [workspaceId],
-  );
   const findings = reconcile(docs, {
-    contractMode: ws?.contract_type ?? null,
-    incotermIn: ws?.incoterm_in ?? ws?.incoterm ?? null,
-    incotermOut: ws?.incoterm_out ?? null,
-    intermediaryName: inter[0]?.company_name ?? null,
+    contractMode: ws.contract_type ?? null,
+    incotermIn: ws.incoterm_in ?? ws.incoterm ?? null,
+    incotermOut: ws.incoterm_out ?? null,
+    intermediaryName: intermediary,
   });
   // Did the supplier follow our approved instruction? (no-op until one is approved
   // and shipping documents have arrived)
-  const approved = await latestApproved(workspaceId);
-  if (approved) findings.push(...checkInstructionCompliance(approved.draft, docs, approved.version));
+  if (approvedInstruction) {
+    findings.push(...checkInstructionCompliance(approvedInstruction.draft, docs, approvedInstruction.version));
+  }
   return findings;
 }

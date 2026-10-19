@@ -13,8 +13,7 @@ const { ZipArchive } = require('archiver') as {
 import { query } from '../db/pool.js';
 import type { WorkspaceRow } from '../shipments/workspaceAccess.js';
 import { readStoredFile } from '../lib/storage.js';
-import { computeChecklist } from '../reconciliation/checklist.js';
-import { computeDiscrepancies } from '../reconciliation/discrepancies.js';
+import { shipmentVerdicts } from '../reconciliation/verdicts.js';
 import { DOC_TYPE_TO_FOLDER } from './classify.js';
 import { buildAndSaveReport } from '../report/report.js';
 import { saveArtifact, getLatestArtifacts, type ArtifactType } from './artifacts.js';
@@ -52,13 +51,14 @@ async function regenerateStaleArtifacts(ws: WorkspaceRow): Promise<void> {
   // supplier_instruction is intentionally not force-generated here (it can fail
   // on missing intake context) — the latest existing one is included as-is.
   if (isStale('shipment_report_html')) await buildAndSaveReport(ws);
-  if (isStale('discrepancy_report')) {
-    const d = await computeDiscrepancies(ws.id);
-    await saveArtifact(ws.id, 'discrepancy_report', JSON.stringify(d, null, 2), 'json');
-  }
-  if (isStale('checklist_snapshot')) {
-    const c = await computeChecklist(ws);
-    await saveArtifact(ws.id, 'checklist_snapshot', JSON.stringify(c, null, 2), 'json');
+  if (isStale('discrepancy_report') || isStale('checklist_snapshot')) {
+    const verdicts = await shipmentVerdicts(ws);
+    if (isStale('discrepancy_report')) {
+      await saveArtifact(ws.id, 'discrepancy_report', JSON.stringify(verdicts.discrepancies, null, 2), 'json');
+    }
+    if (isStale('checklist_snapshot')) {
+      await saveArtifact(ws.id, 'checklist_snapshot', JSON.stringify(verdicts.checklist, null, 2), 'json');
+    }
   }
 }
 

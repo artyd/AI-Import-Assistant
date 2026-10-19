@@ -1,15 +1,14 @@
-import { query } from '../db/pool.js';
-import type { WorkspaceRow } from '../shipments/workspaceAccess.js';
-import { computeDiscrepancies } from './discrepancies.js';
-import { computeRegistryChecks } from '../customs/drugRegistry.js';
+import type { Discrepancy } from './reconcile.js';
+import type { RegistryFinding } from '../customs/drugRegistry.js';
 
 /**
  * Proactive risk engine. Unlike discrepancies (which only compares invoice/PO/PL
  * figures), this surfaces CURRENT and UPCOMING problems a logistician should act
  * on: expiring/expired certificates, documents still missing for the shipment,
- * numeric mismatches, and delivery-deadline pressure. Deterministic — computed
- * from `document_extractions`, the persisted checklist, and intake context. It
- * NEVER invents data; a shipment with no extractions simply yields no risks.
+ * numeric mismatches, and delivery-deadline pressure. Pure — computed from the
+ * shipment verdict inputs (`verdicts.ts`): extractions, the freshly computed
+ * checklist, discrepancies and registry findings. It NEVER invents data; a
+ * shipment with no extractions simply yields no risks.
  */
 
 export type RiskSeverity = 'error' | 'warning' | 'info';
@@ -88,7 +87,7 @@ export function label(key: string): string {
   return DOC_LABELS[key] ?? key;
 }
 
-interface ExtractionRow {
+export interface RiskExtraction {
   file_id: string;
   file_name: string;
   doc_type: string | null;
@@ -97,23 +96,19 @@ interface ExtractionRow {
   delivery_deadline: string | null;
 }
 
-/** Computes the current risk list for a workspace. Read-only (no persistence). */
-export async function computeRisks(ws: WorkspaceRow): Promise<Risk[]> {
-  const now = Date.now();
-  const risks: Risk[] = [];
+export interface RiskInput {
+  /** Latest extractions of the shipment. */
+  extractions: RiskExtraction[];
+  /** Requirement keys the checklist marks `missing`, sorted. */
+  missing: string[];
+  discrepancies: Discrepancy[];
+  registry: RegistryFinding[];
+  now: number;
+}
 
-  const { rows: extractions } = await query<ExtractionRow>(
-    `SELECT de.file_id,
-            f.name AS file_name,
-            de.extracted_fields->>'doc_type' AS doc_type,
-            de.extracted_fields->>'expiry_date' AS expiry_date,
-            de.extracted_fields->>'shipment_date' AS shipment_date,
-            de.extracted_fields->>'delivery_deadline' AS delivery_deadline
-     FROM document_extractions de
-     JOIN files f ON f.id = de.file_id
-     WHERE de.workspace_id = $1 AND f.is_latest = true`,
-    [ws.id],
-  );
+/** The current risk list for a shipment, most severe first. */
+export function assessRisks({ extractions, missing, discrepancies, registry, now }: RiskInput): Risk[] {
+  const risks: Risk[] = [];
   // A customs declaration in the package means the goods have been declared —
   // a passed delivery date is history then, not a pending risk.
   const declared = extractions.some((r) => r.doc_type === 'customs_declaration');
@@ -158,25 +153,19 @@ export async function computeRisks(ws: WorkspaceRow): Promise<Risk[]> {
     }
   }
 
-  // 2. Missing required documents (from the persisted checklist).
-  const { rows: missing } = await query<{ requirement_key: string }>(
-    `SELECT requirement_key FROM workspace_checklist_items
-     WHERE workspace_id = $1 AND status = 'missing' ORDER BY requirement_key`,
-    [ws.id],
-  );
+  // 2. Missing required documents (from the computed checklist).
   if (missing.length > 0) {
     risks.push({
       code: 'docs_missing',
       category: 'missing_docs',
       severity: 'warning',
       title: `Бракує документів: ${missing.length}`,
-      detail: `Ще не отримано: ${missing.map((m) => label(m.requirement_key)).join(', ')}.`,
+      detail: `Ще не отримано: ${missing.map((m) => label(m)).join(', ')}.`,
       source_file_id: null,
     });
   }
 
-  // 3. Numeric / field discrepancies (reuse the reconciliation engine).
-  const discrepancies = await computeDiscrepancies(ws.id);
+  // 3. Numeric / field discrepancies (from the reconciliation engine).
   for (const d of discrepancies) {
     risks.push({
       code: `discrepancy_${d.field}`,
@@ -189,24 +178,16 @@ export async function computeRisks(ws: WorkspaceRow): Promise<Risk[]> {
   }
 
   // 3b. Drug-registry cross-check (Phase 6): validity, manufacturer vs registry,
-  //     MAH present in documents. Advisory — a specialist confirms. Runs offline
-  //     against the local register mirror; a shipment with no reg numbers yields
-  //     nothing. Never fails the whole risk scan.
-  try {
-    const registry = await computeRegistryChecks(ws.id);
-    for (const r of registry) {
-      risks.push({
-        code: r.code,
-        category: 'registry',
-        severity: r.severity,
-        title: r.title,
-        detail: r.detail,
-        source_file_id: null,
-      });
-    }
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error(`Registry check failed for workspace ${ws.id}:`, (err as Error).message);
+  //     MAH present in documents. Advisory — a specialist confirms.
+  for (const r of registry) {
+    risks.push({
+      code: r.code,
+      category: 'registry',
+      severity: r.severity,
+      title: r.title,
+      detail: r.detail,
+      source_file_id: null,
+    });
   }
 
   // 4. Delivery-deadline pressure (only meaningful while docs are incomplete).

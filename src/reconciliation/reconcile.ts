@@ -8,7 +8,7 @@ import type {
 /**
  * Pure, DB-free cross-document reconciliation core.
  *
- * `reconcile()` is the deterministic comparison engine that `computeDiscrepancies`
+ * `reconcile()` is the deterministic comparison engine that the shipment verdicts
  * (in `discrepancies.ts`) wraps: that function loads the latest structured
  * extractions for a workspace from Postgres and hands them here as plain objects.
  * Keeping the logic in this dependency-free module (it imports only *types*) lets
@@ -52,7 +52,7 @@ type Fields = Partial<ExtractedFields> & Record<string, unknown>;
 
 /**
  * One structured extraction as fed to `reconcile()`. This is the shape
- * `computeDiscrepancies` builds from `document_extractions` rows, but callers can
+ * the verdicts module (`verdicts.ts`) builds from `document_extractions` rows, but callers can
  * construct it directly from any in-memory `ExtractedFields` object.
  */
 export interface ReconcileDoc {
@@ -146,7 +146,7 @@ export interface ReconcileOptions {
 /**
  * Deterministic cross-document reconciliation over already-extracted fields.
  * Pure: no I/O, no DB, no network. Same findings the workspace-scoped
- * `computeDiscrepancies` returns, but on caller-supplied documents.
+ * the shipment verdicts return, but on caller-supplied documents.
  *
  * Bilateral (default) keeps the single-invoice logic. Trilateral (3-party) adds
  * two-leg handling: it treats two invoices as EXPECTED (not a duplicate), checks

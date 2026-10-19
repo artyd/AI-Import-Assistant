@@ -92,7 +92,7 @@ export async function getRegistration(regNumber: string): Promise<RegistryRecord
   return rows[0] ?? null;
 }
 
-interface DocFields {
+export interface DocFields {
   file_name: string;
   fields: Record<string, unknown>;
 }
@@ -129,6 +129,18 @@ export async function computeRegistryChecks(workspaceId: string): Promise<Regist
        AND COALESCE(de.extracted_fields->>'doc_type', 'other') <> 'other'`,
     [workspaceId],
   );
+  return registryChecksForDocs(docs);
+}
+
+/**
+ * The registry cross-check over already-loaded documents (latest extractions,
+ * `doc_type` other than 'other'). `lookup` is the registry seam — the local
+ * mirror in production, a fake in tests.
+ */
+export async function registryChecksForDocs(
+  docs: DocFields[],
+  lookup: (regNumber: string) => Promise<RegistryRecord | null> = getRegistration,
+): Promise<RegistryFinding[]> {
 
   // Distinct drug/vet registration numbers stated in the documents. AWB / CMR /
   // MRN / declaration numbers the extractor sometimes files under
@@ -149,7 +161,7 @@ export async function computeRegistryChecks(workspaceId: string): Promise<Regist
   const out: RegistryFinding[] = [];
 
   for (const reg of regNumbers) {
-    const rec = await getRegistration(reg);
+    const rec = await lookup(reg);
     if (!rec) {
       out.push({
         code: 'registry_not_found',

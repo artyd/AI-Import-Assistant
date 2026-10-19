@@ -1,16 +1,15 @@
 import { config } from '../lib/config.js';
 import { query } from '../db/pool.js';
 import { getWorkspaceById } from '../shipments/workspaceAccess.js';
-import { computeDiscrepancies } from './discrepancies.js';
-import { computeRisks } from './risks.js';
+import { shipmentVerdicts } from './verdicts.js';
 import { insertNotification } from '../notifications/notifications.js';
 
 /**
  * Auto-reconcile when an upload batch is fully read (user's "auto-reconcile when
  * ready" + "readiness = ALL files read"). Called after every file finishes (in
  * the worker) and after the retry sweep flags a file — whichever completes the
- * batch last actually fires it. Deterministic: uses computeDiscrepancies +
- * computeRisks (single-agent constraint — no second Claude agent), then drops an
+ * batch last actually fires it. Deterministic: uses the shipment verdicts
+ * (single-agent constraint — no second Claude agent), then drops an
  * in-app notification. The full chat summary / discrepancy table / report doc
  * rendering is the frontend half of this phase; the findings are already
  * available via the discrepancies + ingest-status endpoints.
@@ -55,8 +54,7 @@ export async function maybeReconcileBatch(batchId: string | null | undefined): P
   const ws = await getWorkspaceById(batch.workspace_id);
   if (!ws) return false;
 
-  const discrepancies = await computeDiscrepancies(ws.id).catch(() => []);
-  const risks = await computeRisks(ws).catch(() => []);
+  const { discrepancies, risks } = await shipmentVerdicts(ws).catch(() => ({ discrepancies: [], risks: [] }));
   const confirmed = discrepancies.filter((d) => d.kind === 'confirmed').length;
   const critical = risks.filter((r) => r.severity === 'error').length;
 

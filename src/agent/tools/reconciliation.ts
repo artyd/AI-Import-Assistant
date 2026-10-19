@@ -1,7 +1,7 @@
 import { getWorkspaceById } from '../../shipments/workspaceAccess.js';
-import { computeDiscrepancies } from '../../reconciliation/discrepancies.js';
 import { computeRegistryChecks } from '../../customs/drugRegistry.js';
-import { fieldLabel, computeRisks } from '../../reconciliation/risks.js';
+import { fieldLabel } from '../../reconciliation/risks.js';
+import { shipmentVerdicts } from '../../reconciliation/verdicts.js';
 import { refreshWorkspaceState } from '../../shipments/status.js';
 import type { Citation } from '../../chat/conversations.js';
 import { type ToolContext, type ToolOutcome, requireWorkspace } from './shared.js';
@@ -30,7 +30,9 @@ function statusUa(s: string): string {
 }
 
 export async function runDiscrepancies(ctx: ToolContext): Promise<ToolOutcome> {
-  const findings = await computeDiscrepancies(requireWorkspace(ctx));
+  const ws = await getWorkspaceById(requireWorkspace(ctx));
+  if (!ws) return { result: 'Постачання не знайдено.', summary: 'Розбіжності: помилка', citations: [] };
+  const { discrepancies: findings } = await shipmentVerdicts(ws);
   if (findings.length === 0) {
     return {
       result: 'Розбіжностей між контрактом / інвойсом / пакувальним листом не виявлено (за наявними даними).',
@@ -97,7 +99,7 @@ export async function runRegistryCheck(ctx: ToolContext): Promise<ToolOutcome> {
 export async function runRisks(ctx: ToolContext): Promise<ToolOutcome> {
   const ws = await getWorkspaceById(requireWorkspace(ctx));
   if (!ws) return { result: 'Постачання не знайдено.', summary: 'Ризики: помилка', citations: [] };
-  const risks = await computeRisks(ws);
+  const { risks } = await shipmentVerdicts(ws);
   if (risks.length === 0) {
     return {
       result: 'Наразі ризиків не виявлено (за наявними даними).',

@@ -32,7 +32,7 @@ import { classifyAndFile } from '../documents/classify.js';
 import { getWorkspaceById } from '../shipments/workspaceAccess.js';
 import { refreshWorkspaceState } from '../shipments/status.js';
 import { autoFillWorkspaceContext } from '../shipments/autoContext.js';
-import { computeRisks } from '../reconciliation/risks.js';
+import { shipmentVerdicts } from '../reconciliation/verdicts.js';
 import { maybeReconcileBatch } from '../reconciliation/reconcileBatch.js';
 import { insertNotification } from '../notifications/notifications.js';
 import { scanAndNotify } from '../notifications/reminders.js';
@@ -197,7 +197,7 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
           // (maybeReconcileBatch) instead of a full-workspace rescan per file.
           if (ws.responsible_user_id && !file.batch_id) {
             try {
-              const risks = await computeRisks(ws);
+              const { risks } = await shipmentVerdicts(ws);
               const critical = risks.filter((r) => r.severity === 'error');
               if (critical.length > 0) {
                 await insertNotification(

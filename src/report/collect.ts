@@ -4,15 +4,14 @@ import { anthropic } from '../lib/anthropic/client.js';
 import { runWithAnthropicLimit } from '../lib/anthropic/limiter.js';
 import { config } from '../lib/config.js';
 import type { WorkspaceRow } from '../shipments/workspaceAccess.js';
-import { computeChecklist } from '../reconciliation/checklist.js';
-import { computeRisks } from '../reconciliation/risks.js';
+import { shipmentVerdicts } from '../reconciliation/verdicts.js';
 import { listParties } from '../reconciliation/parties.js';
 import { logistEnabled, uktzedFlags } from '../customs/logist/index.js';
 import { buildFacts, type FactsDoc, type FactsQdpro, type ReportFacts } from './facts.js';
 
 /** Loads everything the report needs and assembles the facts (no LLM). */
 export async function collectFacts(ws: WorkspaceRow): Promise<ReportFacts> {
-  const [{ rows: docs }, parties, checklist, risks, { rows: cnt }, { rows: user }] = await Promise.all([
+  const [{ rows: docs }, parties, { checklist, risks }, { rows: cnt }, { rows: user }] = await Promise.all([
     query<FactsDoc>(
       `SELECT f.name AS file_name, de.extracted_fields->>'doc_type' AS doc_type, de.extracted_fields AS fields
        FROM document_extractions de JOIN files f ON f.id = de.file_id
@@ -21,8 +20,7 @@ export async function collectFacts(ws: WorkspaceRow): Promise<ReportFacts> {
       [ws.id],
     ),
     listParties(ws.id),
-    computeChecklist(ws),
-    computeRisks(ws),
+    shipmentVerdicts(ws),
     query<{ n: string }>('SELECT count(*)::text AS n FROM files WHERE workspace_id = $1 AND is_latest = true', [ws.id]),
     ws.responsible_user_id
       ? query<{ name: string | null; email: string }>('SELECT name, email FROM users WHERE id = $1', [ws.responsible_user_id])
