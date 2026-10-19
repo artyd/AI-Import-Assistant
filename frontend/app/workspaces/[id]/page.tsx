@@ -2,19 +2,18 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { api, ApiError, uploadWithProgress } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { NoticeBanner, type NoticeTone } from "@/components/ui/Notice";
 import { useAuth } from "@/lib/auth";
 import { useTheme } from "@/lib/theme";
-import { openEventsChannel, streamAnalyze } from "@/lib/sse";
+import { streamAnalyze } from "@/lib/sse";
+import { useShipmentFiles } from "@/lib/files/useShipmentFiles";
 import type {
   AnalysisResult,
   ChecklistItem,
   Collection,
   ConversationMeta,
-  DocsStatus,
   FileItem,
-  FileStatusEvent,
   Folder,
   Message,
   Workspace,
@@ -51,87 +50,6 @@ import {
   LnUpload,
 } from "@/components/ui/LineIcons";
 
-// Run an async mapper over items with bounded concurrency, preserving order.
-async function mapLimit<T, R>(
-  items: T[],
-  limit: number,
-  fn: (item: T) => Promise<R>
-): Promise<R[]> {
-  const results = new Array<R>(items.length);
-  let next = 0;
-  async function worker() {
-    while (next < items.length) {
-      const idx = next++;
-      results[idx] = await fn(items[idx]!);
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-  return results;
-}
-
-// Apply one live file_status event to the file list (pure — also used to
-// replay events on top of a refreshed snapshot).
-function applyFileStatus(prev: FileItem[], ev: FileStatusEvent): FileItem[] {
-  if (ev.status === "deleted") return prev.filter((f) => f.id !== ev.fileId);
-  const idx = prev.findIndex((f) => f.id === ev.fileId);
-  if (idx === -1) {
-    if (!ev.name) return prev;
-    return [
-      ...prev,
-      {
-        id: ev.fileId,
-        folderId: ev.folderId ?? null,
-        name: ev.name,
-        type: "",
-        status: ev.status,
-        errorReason: ev.errorReason ?? null,
-      },
-    ];
-  }
-  const next = [...prev];
-  next[idx] = {
-    ...next[idx]!,
-    status: ev.status,
-    errorReason: ev.errorReason ?? next[idx]!.errorReason,
-    folderId: ev.folderId !== undefined ? ev.folderId : next[idx]!.folderId,
-  };
-  return next;
-}
-
-// Upload limits — mirror the backend (MAX_UPLOAD_BYTES / MAX_ZIP_BYTES) so an
-// oversize file is refused up front instead of after a long upload.
-const MAX_FILE_BYTES = 100 * 1024 * 1024;
-const MAX_ZIP_BYTES = 200 * 1024 * 1024;
-// Batching: well under the backend MAX_UPLOAD_FILES, and ~100 MB per request.
-const CLIENT_BATCH_FILES = 40;
-const CLIENT_BATCH_BYTES = 100 * 1024 * 1024;
-
-const isZip = (f: File) => f.name.toLowerCase().endsWith(".zip");
-const fmtMb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} МБ`;
-
-/** Drop oversize files and split the rest into count- AND byte-bounded batches. */
-function planUpload(all: File[]): { batches: File[][]; skipped: File[] } {
-  const skipped: File[] = [];
-  const batches: File[][] = [];
-  let cur: File[] = [];
-  let curBytes = 0;
-  for (const f of all) {
-    if (f.size > (isZip(f) ? MAX_ZIP_BYTES : MAX_FILE_BYTES)) {
-      skipped.push(f);
-      continue;
-    }
-    if (cur.length && (cur.length >= CLIENT_BATCH_FILES || curBytes + f.size > CLIENT_BATCH_BYTES)) {
-      batches.push(cur);
-      cur = [];
-      curBytes = 0;
-    }
-    cur.push(f);
-    curBytes += f.size;
-  }
-  if (cur.length) batches.push(cur);
-  return { batches, skipped };
-}
-
 // Starter prompts for a NEW consolidated (Збірний) chat — analysis-oriented.
 const CONSOLIDATED_STARTERS: { text: string; icon: React.ReactNode }[] = [
   { text: "Проаналізуй збірник за посиланням на Google Sheets", icon: <LnList size={15} /> },
@@ -162,7 +80,6 @@ export default function WorkspacePage() {
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
-  const [files, setFiles] = useState<FileItem[]>([]);
   const [initialMessages, setInitialMessages] = useState<Message[]>([]);
   const [conversationId, setConversationId] = useState<string | undefined>();
   const [conversations, setConversations] = useState<ConversationMeta[]>([]);
@@ -179,11 +96,24 @@ export default function WorkspacePage() {
     []
   );
   const closeNotice = useCallback(() => setNotice(null), []);
-  // Upload progress (bytes sent across all batches of the current upload).
-  const [uploadProgress, setUploadProgress] = useState<{ pct: number; files: number } | null>(
-    null
-  );
 
+  // The shipment's files: list, live status, uploads and file operations.
+  const {
+    files,
+    setFiles,
+    uploadProgress,
+    docsStatus,
+    refreshFiles,
+    upload,
+    renameFile,
+    deleteFile,
+    moveFile,
+    classifyFile,
+    uploadSmart,
+    uploadAndClassify,
+    sortInbox,
+    reindexFile,
+  } = useShipmentFiles(id, { live: !!user && workspace != null, folders, notify });
   // Collection (Збірник) files/folders for the right panel when consolidated is active.
   const [colFolders, setColFolders] = useState<Folder[]>([]);
   const [colFiles, setColFiles] = useState<FileItem[]>([]);
@@ -217,22 +147,6 @@ export default function WorkspacePage() {
 
   // Chat endpoints for the active (kind, entity). null = consolidated without a
   // selected collection (the UI then prompts to create/select one).
-  // «Документи» meter under the chat input: how much of the shipment the agent
-  // can already read. Follows the live file_status stream (files state).
-  const docsStatus = useMemo<DocsStatus | null>(() => {
-    const latest = files.filter((f) => f.isLatest !== false);
-    if (latest.length === 0) return null;
-    return {
-      total: latest.length,
-      ready: latest.filter((f) => f.status === "ready").length,
-      inProgress: latest.filter((f) => f.status === "queued" || f.status === "indexing").length,
-      errors: latest.filter((f) => f.status === "error").length,
-      needsAttention: latest.filter(
-        (f) => f.status === "ready" && (f.extractionStatus === "unreadable" || f.extractionStatus === "failed")
-      ).length,
-    };
-  }, [files]);
-
   const endpoints = useMemo(
     () => resolveChatEndpoints(chatKind, id, activeCollectionId),
     [chatKind, id, activeCollectionId]
@@ -425,220 +339,12 @@ export default function WorkspacePage() {
     })();
   }, [id]);
 
-  // file_status events that arrive while a files refresh is in flight are
-  // re-applied on top of its (possibly older) snapshot, so a resync can never
-  // roll a file back to a stale status.
-  const refreshInFlight = useRef(0);
-  const bufferedEvents = useRef<FileStatusEvent[]>([]);
-
-  const refreshFiles = useCallback(async () => {
-    refreshInFlight.current += 1;
-    try {
-      const r = await api<{ files: FileItem[] }>(`/api/workspaces/${id}/files`);
-      const replay = bufferedEvents.current.slice();
-      setFiles(replay.reduce(applyFileStatus, r.files));
-    } finally {
-      refreshInFlight.current -= 1;
-      if (refreshInFlight.current === 0) bufferedEvents.current = [];
-    }
-  }, [id]);
-
-  // Live file-status channel. Depends only on stable values (NOT the workspace
-  // object, which changes on every patch/turn and used to re-open the channel,
-  // dropping events in the gap). The channel reconnects itself with backoff and
-  // a fresh SSE ticket; every (re)open resyncs the file list.
-  const workspaceLoaded = workspace != null;
-  useEffect(() => {
-    if (!user || !workspaceLoaded) return;
-    const channel = openEventsChannel(id, {
-      onFileStatus: (raw) => {
-        const ev = raw as FileStatusEvent;
-        if (refreshInFlight.current > 0) bufferedEvents.current.push(ev);
-        setFiles((prev) => applyFileStatus(prev, ev));
-      },
-      onOpen: () => {
-        void refreshFiles().catch(() => {});
-      },
-    });
-    return () => channel.close();
-  }, [id, user, workspaceLoaded, refreshFiles]);
-
-  const upload = useCallback(
-    async (
-      folderId: string | null,
-      fileList: FileList | File[],
-      replacesFileId?: string
-    ): Promise<FileItem[]> => {
-      // Oversize files (>100 MB, or >200 MB for a .zip) are skipped up front and
-      // reported. The rest is split into batches bounded by count (40) AND
-      // bytes (~100 MB) and POSTed sequentially, so a big drag-drop never trips
-      // the server's per-request caps and nothing is silently dropped. A .zip
-      // counts as one part here and is expanded server-side.
-      const { batches, skipped } = planUpload(Array.from(fileList));
-      const sp = new URLSearchParams();
-      if (folderId) sp.set("folderId", folderId);
-      // A version-replace targets a single existing file — only the very first
-      // chunk carries it.
-      if (replacesFileId) sp.set("replacesFileId", replacesFileId);
-      const qs = sp.toString() ? `?${sp.toString()}` : "";
-
-      const skippedText = skipped.length
-        ? "Пропущено — файл завеликий (макс. 100 МБ, архів .zip — 200 МБ):\n" +
-          skipped.map((f) => `• ${f.name} — ${fmtMb(f.size)}`).join("\n")
-        : "";
-      if (batches.length === 0) {
-        if (skippedText) notify(skippedText);
-        return [];
-      }
-
-      const totalBytes = batches.flat().reduce((s, f) => s + f.size, 0) || 1;
-      const totalFiles = batches.reduce((s, b) => s + b.length, 0);
-      let sentBytes = 0;
-      setUploadProgress({ pct: 0, files: totalFiles });
-
-      const created: FileItem[] = [];
-      const rejected: { name: string; reason: string }[] = [];
-      let failure: string | null = null;
-      try {
-        for (let i = 0; i < batches.length; i++) {
-          const chunk = batches[i]!;
-          const chunkBytes = chunk.reduce((s, f) => s + f.size, 0);
-          const form = new FormData();
-          for (const f of chunk) form.append("files", f, f.name || "file");
-          // replacesFileId only applies to the first request.
-          const chunkQs = i === 0 ? qs : folderId ? `?folderId=${encodeURIComponent(folderId)}` : "";
-          const res = await uploadWithProgress<{
-            files: FileItem[];
-            rejected?: { name: string; reason: string }[];
-          }>(`/api/workspaces/${id}/files${chunkQs}`, form, (loaded, total) => {
-            // XHR's total includes multipart overhead → scale to this chunk's bytes.
-            const done = sentBytes + (total > 0 ? (loaded / total) * chunkBytes : 0);
-            setUploadProgress({
-              pct: Math.min(100, Math.round((done / totalBytes) * 100)),
-              files: totalFiles,
-            });
-          });
-          sentBytes += chunkBytes;
-          created.push(...res.files);
-          if (res.rejected) rejected.push(...res.rejected);
-          setFiles((prev) => {
-            const known = new Set(prev.map((p) => p.id));
-            return [...prev, ...res.files.filter((f) => !known.has(f.id))];
-          });
-        }
-      } catch (err) {
-        if (err instanceof ApiError && err.status === 401) failure = null; // → /login
-        else if (err instanceof ApiError && err.code === "no_valid_files")
-          failure = "Жоден файл не підійшов (дозволені: pdf, doc, docx, xls, xlsx, csv, png, jpg, zip).";
-        else failure = "Не вдалося завантажити файли.";
-      } finally {
-        setUploadProgress(null);
-      }
-      const parts = [
-        failure,
-        rejected.length
-          ? "Відхилено:\n" + rejected.map((r) => `• ${r.name} — ${r.reason}`).join("\n")
-          : "",
-        skippedText,
-      ].filter(Boolean);
-      if (parts.length) notify(parts.join("\n\n"));
-      return created;
-    },
-    [id, notify]
-  );
-
   const onUploadVersion = useCallback(
     async (replacesFileId: string, fileList: FileList) => {
       await upload(versionsFile?.folderId ?? null, fileList, replacesFileId);
       await refreshFiles();
     },
     [upload, refreshFiles, versionsFile]
-  );
-
-  const renameFile = useCallback(
-    async (file: FileItem, name: string) => {
-      setFiles((prev) => prev.map((f) => (f.id === file.id ? { ...f, name } : f)));
-      try {
-        await api(`/api/workspaces/${id}/files/${file.id}`, { method: "PATCH", body: { name } });
-      } catch {
-        setFiles((prev) => prev.map((f) => (f.id === file.id ? { ...f, name: file.name } : f)));
-      }
-    },
-    [id]
-  );
-
-  const deleteFile = useCallback(
-    async (file: FileItem) => {
-      const prev = files;
-      setFiles((p) => p.filter((f) => f.id !== file.id));
-      try {
-        await api(`/api/workspaces/${id}/files/${file.id}`, { method: "DELETE" });
-      } catch {
-        setFiles(prev);
-      }
-    },
-    [id, files]
-  );
-
-  const moveFile = useCallback(
-    async (fileId: string, folderId: string) => {
-      const prev = files;
-      setFiles((p) => p.map((f) => (f.id === fileId ? { ...f, folderId } : f)));
-      try {
-        await api(`/api/workspaces/${id}/files/${fileId}`, { method: "PATCH", body: { folderId } });
-      } catch {
-        setFiles(prev);
-        throw new Error("move_failed");
-      }
-    },
-    [id, files]
-  );
-
-  const classifyFile = useCallback(
-    async (fileId: string): Promise<string | null> => {
-      const { folderName } = await api<{ fileId: string; folderName: string | null }>(
-        `/api/workspaces/${id}/files/${fileId}/classify`,
-        { method: "POST" }
-      );
-      if (folderName) {
-        const target = folders.find((f) => f.name === folderName);
-        if (target)
-          setFiles((p) => p.map((f) => (f.id === fileId ? { ...f, folderId: target.id } : f)));
-      }
-      return folderName;
-    },
-    [id, folders]
-  );
-
-  // Upload + auto-distribute: when 2+ files land in the root (inbox), classify
-  // each into its skeleton folder automatically (single files are left in the
-  // root for the user to place). Folder-targeted uploads are never reclassified.
-  const uploadSmart = useCallback(
-    async (folderId: string | null, fileList: FileList | File[]): Promise<FileItem[]> => {
-      const created = await upload(folderId, fileList);
-      if (folderId == null && created.length >= 2) {
-        await mapLimit(created, 4, (f) => classifyFile(f.id).catch(() => null));
-      }
-      return created;
-    },
-    [upload, classifyFile]
-  );
-
-  const uploadAndClassify = useCallback(
-    async (
-      fileList: FileList | File[]
-    ): Promise<{ fileId: string; name: string; folderName: string | null }[]> => {
-      const created = await upload(null, fileList);
-      return mapLimit(created, 4, async (f) => {
-        try {
-          const folderName = await classifyFile(f.id);
-          return { fileId: f.id, name: f.name, folderName };
-        } catch {
-          return { fileId: f.id, name: f.name, folderName: null };
-        }
-      });
-    },
-    [upload, classifyFile]
   );
 
   const createFolder = useCallback(async () => {
@@ -653,23 +359,6 @@ export default function WorkspacePage() {
       notify("Не вдалося створити теку.");
     }
   }, [id, notify]);
-
-  const sortInbox = useCallback(async () => {
-    try {
-      const res = await api<{
-        moved: { fileId: string; name: string; to: string }[];
-        unclassified: { fileId: string; name: string }[];
-      }>(`/api/workspaces/${id}/sort-inbox`, { method: "POST" });
-      await refreshFiles();
-      const left = res.unclassified.length;
-      notify(
-        `Розкладено: ${res.moved.length}.` + (left ? `\nНе вдалося визначити: ${left}.` : ""),
-        "info"
-      );
-    } catch {
-      notify("Не вдалося розкласти інбокс.");
-    }
-  }, [id, refreshFiles, notify]);
 
   const refreshConversations = useCallback(async () => {
     if (!endpoints) return;
@@ -711,21 +400,6 @@ export default function WorkspacePage() {
       void refreshConversations();
     },
     [refreshConversations]
-  );
-
-  const reindexFile = useCallback(
-    async (file: FileItem) => {
-      setFiles((p) =>
-        p.map((f) => (f.id === file.id ? { ...f, status: "queued", errorReason: null } : f))
-      );
-      try {
-        await api(`/api/workspaces/${id}/files/${file.id}/reindex`, { method: "POST" });
-      } catch {
-        notify("Не вдалося запустити переіндексацію.");
-        await refreshFiles();
-      }
-    },
-    [id, refreshFiles, notify]
   );
 
   // Shell actions.

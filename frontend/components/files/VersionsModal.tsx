@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import type { FileVersion } from "@/lib/types";
 import { IconUpload, IconSpinner } from "../ui/icons";
 
+import { VERSION_ACCEPT } from "@/lib/files/policy";
 interface Diff {
   field: string;
   a: unknown;
@@ -125,7 +126,7 @@ export function VersionsModal({
           ref={inputRef}
           type="file"
           hidden
-          accept=".pdf,.docx,.xlsx,.csv,.png,.jpg,.jpeg"
+          accept={VERSION_ACCEPT}
           onChange={(e) => {
             if (e.target.files && e.target.files.length) uploadNew(e.target.files);
             e.target.value = "";

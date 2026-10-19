@@ -15,7 +15,7 @@ import {
 } from "@/lib/surveyQuestions";
 import type { LogEntry } from "./AgentLog";
 import { IconAttach, IconFile, IconFolder, IconCheck, IconSearch } from "../ui/icons";
-import { UPLOAD_ACCEPT, fileKey, acceptFiles } from "./upload";
+import { UPLOAD_ACCEPT, fileKey, acceptFiles } from "@/lib/files/policy";
 import { type ClassifyCard, type QuestionCard, DateSeparator, UserBubble, ClassifyBubble, QuestionBubble, AssistantBubble } from "./bubbles";
 import { type EntitySelector, Composer } from "./Composer";
 export type { EntitySelector } from "./Composer";

@@ -3,7 +3,7 @@ import { memo, useState } from "react";
 import type { ChatKind } from "@/lib/types";
 import { IconFile, IconAttach, IconSend } from "../ui/icons";
 import { LnChevronDown } from "../ui/LineIcons";
-import { fileKey } from "./upload";
+import { fileKey } from "@/lib/files/policy";
 
 // The composer's kind switcher + entity selector (see prototype `typeTabs` /
 // `selectorLabel`/`selectorOptions`). The selector is hidden for the `normal`

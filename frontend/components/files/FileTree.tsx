@@ -17,6 +17,7 @@ import {
   IconRefresh,
 } from "../ui/icons";
 
+import { UPLOAD_ACCEPT } from "@/lib/files/policy";
 interface Props {
   folders: Folder[];
   files: FileItem[];
@@ -76,7 +77,7 @@ export function FileTree({
         type="file"
         multiple
         hidden
-        accept=".pdf,.docx,.doc,.xlsx,.xls,.csv,.png,.jpg,.jpeg,.zip"
+        accept={UPLOAD_ACCEPT}
         onChange={(e) => {
           if (e.target.files && e.target.files.length)
             onUpload(uploadTarget.current, e.target.files);

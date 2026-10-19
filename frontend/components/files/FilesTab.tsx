@@ -19,8 +19,8 @@ import {
   LnUpload,
 } from "../ui/LineIcons";
 
-const UPLOAD_ACCEPT = ".pdf,.docx,.doc,.xlsx,.xls,.csv,.png,.jpg,.jpeg,.zip";
 
+import { UPLOAD_ACCEPT } from "@/lib/files/policy";
 interface Props {
   workspaceNumber: string | null;
   folders: Folder[];
