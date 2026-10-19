@@ -1,7 +1,7 @@
 {
   "shipment_id": "metopren",
   "title": "Метопрен — single-SKU import, invoice+packing 2-in-1",
-  "notes": "Reference shipment. Single line item (S-Methoprene, 25kg net / 32kg gross, 3 boxes). Invoice EXP/26-27/N/0091, USD 8750 CPT. Seller Prime Force (UK), buyer TEKHINFORM PLUS, origin India. The invoice and packing list are ONE file (2-in-1), so also_contains must include 'packing_list'. Clean commercially; the only deterministic finding is the yellow 'HS code absent from invoice' (the УКТ ЗЕД lives only in the customs declaration, per plan §2).",
+  "notes": "Reference shipment. Single line item (S-Methoprene, 25kg net / 32kg gross, 3 boxes). Invoice EXP/26-27/N/0091, USD 8750 CPT. Seller Prime Force (UK), buyer TEKHINFORM PLUS, origin India. The invoice and packing list are ONE file (2-in-1), so also_contains must include 'packing_list'. Clean commercially; the deterministic findings are the yellow 'HS code absent from invoice' (the УКТ ЗЕД lives only in the customs declaration, per plan §2) and the info note 'contract missing' (no contract in this set).",
 
   "documents": [
     {
@@ -28,6 +28,7 @@
   ],
 
   "expected_discrepancies": [
-    { "field": "hs_code", "kind": "suspected", "severity": "warning", "note": "HS code is absent from the invoice (it is stated only in the customs declaration). Deterministic yellow verify-flag — not a real error." }
+    { "field": "hs_code", "kind": "suspected", "severity": "warning", "note": "HS code is absent from the invoice (it is stated only in the customs declaration). Deterministic yellow verify-flag — not a real error." },
+    { "field": "documents", "kind": "suspected", "severity": "info", "note": "Only the invoice+packing file is in this set, no contract. Since 2026-09-24 the price/currency/Incoterms are checked against the CONTRACT (not a PO), so a missing contract is an honest info-level 'not reconciled' note — expected." }
   ]
 }
