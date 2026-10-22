@@ -1,6 +1,6 @@
 # 07 — Штурман у чаті збірника
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 06
 
 ## Що зробити

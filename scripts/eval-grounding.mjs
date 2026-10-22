@@ -73,8 +73,8 @@ async function readSse(res) {
   return events;
 }
 
-async function chat(workspaceId, message) {
-  const res = await api('POST', `/api/workspaces/${workspaceId}/chat`, { body: { message }, raw: true });
+async function chat(workspaceId, message, base = 'workspaces') {
+  const res = await api('POST', `/api/${base}/${workspaceId}/chat`, { body: { message }, raw: true });
   if (res.status !== 200) return { toolCalls: [], text: `<HTTP ${res.status}>` };
   const events = await readSse(res);
   const toolCalls = events.filter((e) => e.event === 'tool_call').map((e) => e.data.tool);
@@ -154,6 +154,18 @@ async function main() {
       'ставить уточнюючі запитання про товар (склад/обробка/пакування/призначення)',
       'НЕ подає один код як остаточний факт',
       'пропонує кілька кандидатів + застереження про підтвердження спеціалістом',
+    ]);
+  }
+
+  // Case D — an empty Збірник (FCL): must use the FCL tools and say «no data».
+  {
+    const c = await api('POST', '/api/collections', { body: { number: 'Eval FCL' } });
+    const colId = c.json.collection.id;
+    const res = await chat(colId, 'Що з комплектністю цього збірника і які партії в ньому?', 'collections');
+    report('D · FCL (must use FCL tools, no invented lots)', 'Що з комплектністю збірника…', res, [
+      'викликав get_fcl_overview / get_checklist / list_lots',
+      'каже, що партій ще немає, і не вигадує постачальників',
+      'пояснює, що партії створюються з інвойсів / контрактів / PL',
     ]);
   }
 

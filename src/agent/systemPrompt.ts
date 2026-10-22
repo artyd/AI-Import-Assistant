@@ -162,31 +162,11 @@ function contractModeBlock(ws: {
 }
 
 /**
- * System prompt for "Штурман" — the single import-logistics agent. Ukrainian
- * persona and domain (customs document reconciliation, package completeness,
- * УКТ ЗЕД codes). Encodes the Phase-4 GROUNDING CONTRACT (hard rules 1–4): gather
- * context before domain actions, prefer deterministic tools over free reasoning,
- * keep HS codes advisory, never fabricate on empty data. The rules prefix is kept
- * frozen (only number/supplier interpolated) so it stays cacheable; per-shipment
- * contract-mode state is appended as a trailing block (see contractModeBlock).
+ * The frozen shipment rules (grounding contract 1–7 + examples). Shared by the
+ * shipment chat and the FCL chat, so both hit the same prompt-cache entry.
  */
-export function buildSystemPrompt(workspace: {
-  number: string;
-  supplier: string;
-  contract_type?: 'bilateral' | 'trilateral' | null;
-  contract_type_source?: 'sidebar' | 'survey' | 'auto' | null;
-  contract_type_confidence?: number | null;
-  survey_status?: string | null;
-  /** The shipment's parties card (sender / intermediary / recipient). */
-  parties?: { role: string; company_name: string }[];
-  /** Compact per-document key-field digest (durable context; see documentsDigest.ts). */
-  documentsDigest?: string;
-}): ChatSystem {
-  // Two blocks: the frozen rules (identical for every shipment and turn → one
-  // prompt-cache entry shared across the whole app) and the per-shipment state
-  // (number, contract mode, documents digest), which changes and must come AFTER
-  // the cache breakpoint so it doesn't invalidate the rules.
-  const rules = [
+function shipmentRules(): string {
+  return [
     'Ти — «Штурман», ШІ-асистент для фахівців з імпорту та митного оформлення.',
     'Ти працюєш у межах одного постачання (workspace) і допомагаєш логісту:',
     'звіряти документи (контракт, інвойс, пакувальний лист, сертифікати),',
@@ -333,6 +313,34 @@ export function buildSystemPrompt(workspace: {
     ...logistToolsPromptBlock(),
     ...hubToolsPromptBlock('supply'),
   ].join('\n');
+}
+
+/**
+ * System prompt for "Штурман" — the single import-logistics agent. Ukrainian
+ * persona and domain (customs document reconciliation, package completeness,
+ * УКТ ЗЕД codes). Encodes the Phase-4 GROUNDING CONTRACT (hard rules 1–4): gather
+ * context before domain actions, prefer deterministic tools over free reasoning,
+ * keep HS codes advisory, never fabricate on empty data. The rules prefix is kept
+ * frozen (only number/supplier interpolated) so it stays cacheable; per-shipment
+ * contract-mode state is appended as a trailing block (see contractModeBlock).
+ */
+export function buildSystemPrompt(workspace: {
+  number: string;
+  supplier: string;
+  contract_type?: 'bilateral' | 'trilateral' | null;
+  contract_type_source?: 'sidebar' | 'survey' | 'auto' | null;
+  contract_type_confidence?: number | null;
+  survey_status?: string | null;
+  /** The shipment's parties card (sender / intermediary / recipient). */
+  parties?: { role: string; company_name: string }[];
+  /** Compact per-document key-field digest (durable context; see documentsDigest.ts). */
+  documentsDigest?: string;
+}): ChatSystem {
+  // Two blocks: the frozen rules (identical for every shipment and turn → one
+  // prompt-cache entry shared across the whole app) and the per-shipment state
+  // (number, contract mode, documents digest), which changes and must come AFTER
+  // the cache breakpoint so it doesn't invalidate the rules.
+  const rules = shipmentRules();
   const shipment = [
     `ПОТОЧНЕ ПОСТАЧАННЯ: №${workspace.number}` +
       (workspace.supplier ? `, постачальник: ${workspace.supplier}.` : '.'),
@@ -399,48 +407,52 @@ export function buildNormalSystemPrompt(): string {
 }
 
 /**
- * System prompt for a "consolidated" chat — a consultant scoped to a Збірник
- * (consolidated cargo / consolidation). For this slice the agent has NO document
- * tools yet: collection file retrieval and the consolidated-analysis engine land
- * in a later slice (Phase B). The agent acts as a consultant and explains that
- * the manifest analysis runs once a manifest file/table is provided.
+ * System prompt for a Збірник (FCL, spec 006) chat: the shipment rules (same cached
+ * block), the FCL rules (a second cached block), then the FCL's state. One agent —
+ * the chat kind only changes the prompt and the tools (ADR-0001).
  */
-export function buildConsolidatedSystemPrompt(collection: { number: string }): string {
-  return [
-    'Ти — «Штурман», ШІ-консультант для збірного (консолідованого) вантажу.',
-    `Поточний збірник: «${collection.number}».`,
-    'Ти допомагаєш фахівцю з імпорту розібратися зі збірним вантажем: багато позицій',
-    'та відправників в одній поставці, розрахунки та класифікація по кожній позиції.',
-    'Відповідай українською мовою, стисло та по суті.',
+export function buildConsolidatedSystemPrompt(fcl: {
+  number: string;
+  /** One line per lot: name, supplier, status. */
+  lots?: { name: string; supplier_name: string; status: string }[];
+  documentsDigest?: string;
+}): ChatSystem {
+  const fclRules = [
+    'РЕЖИМ ЗБІРНИКА (FCL). Зараз ти працюєш не з одним постачанням, а зі ЗБІРНИКОМ: це повний',
+    'контейнер (FCL), який ми веземо собі від кількох постачальників. Він складається з ПАРТІЙ:',
+    'одна партія = один постачальник (у партії може бути кілька товарів). Кожна партія перевіряється',
+    'як окреме постачання (комплектність, розбіжності, ризики, сторони, Incoterms, тип контракту),',
+    'а весь контейнер — зведено: MBL, HBL на кожну партію, T1/NCTS + CMR при транзиті через ЄС,',
+    'маніфест, МД на кожного отримувача; один контейнер у всіх документах; сума ваг і місць HBL = MBL;',
+    'маніфест ↔ інвойси партій. Статус збірника — за найгіршою партією.',
     '',
-    'Повний аналіз маніфесту збірника (розрахунок CIF, мита та ПДВ по позиціях,',
-    'країна походження, перевірки ЄС/UA) виконує інструмент run_consolidated_analysis:',
-    'він бере останній файл-маніфест (xlsx/csv) збірника й рахує все детерміновано.',
-    'Коли користувач просить проаналізувати збірник / порахувати платежі / перевірити',
-    'позиції — виклич run_consolidated_analysis, а не рахуй вручну. ДЖЕРЕЛО:',
-    '- якщо користувач ДАВ ПОСИЛАННЯ на Google Sheets — передай його у source_url;',
-    '- якщо ВСТАВИВ таблицю рядками — передай її у manifest_text;',
-    '- якщо нічого не задано — інструмент візьме останній завантажений файл-маніфест.',
-    'Розпізнавай посилання/таблицю в повідомленні автоматично і одразу запускай аналіз.',
-    'Інструмент повертає готову відповідь по позиціях — ПРЕЗЕНТУЙ її користувачу як є',
-    '(зберігай структуру блоками по кожному продукту, не скорочуй до однієї цифри). Якщо',
-    'інструмент каже, що джерела немає — попроси посилання/таблицю/файл і не вигадуй вміст.',
-    'Розрахунок сум — базовий (детермінований), а КОД, ПОХОДЖЕННЯ, реальні ставки та',
-    'обмеження/документи по кожній позиції звірено з qdpro (першоджерело) — саме на нього',
-    'спирайся у висновках про вимоги; статичний розрахунок бери як орієнтир по сумах.',
-    '',
-    'ПРАВИЛА:',
-    '',
-    'Код УКТ ЗЕД лише дорадчо.',
-    '- спершу постав уточнюючі запитання про товар (склад/матеріал, ступінь обробки,',
-    '  пакування, призначення);',
-    '- потім запропонуй КІЛЬКА можливих кодів-кандидатів із поясненням логіки;',
-    '- завжди зазнач, що остаточну класифікацію має підтвердити митний брокер/спеціаліст.',
-    'Ніколи не подавай один код як остаточний факт.',
-    '',
-    'Не вигадуй фактів. Якщо даних немає (маніфест не надано або питання потребує',
-    'документів, яких ти не бачиш) — прямо про це скажи, а не додумуй відповідь.',
-    ...userPortraitBlock(),
-    ...logistToolsPromptBlock(),
+    'ПРАВИЛА ЗБІРНИКА:',
+    '- Огляд усього контейнера → get_fcl_overview. Перелік партій → list_lots.',
+    '- get_checklist / get_discrepancies / get_risks без параметра lot відповідають по всьому збірнику',
+    '  (рівень FCL + кожна партія з позначкою); з lot — по одній партії. Не зводь партії «на око».',
+    '- Партія файлу визначається його папкою («Партія — <постачальник>»). Файли без партії не входять у',
+    '  перевірки партій — нагадуй розкласти їх. Переносити файл (assign_file_to_lot) — ЛИШЕ за',
+    '  проханням або підтвердженням користувача; спершу поясни, чому файл належить цій партії.',
+    '- Наші компанії (AGroup95, Prime Force) не є постачальниками: їхній інвойс — це наш перепродаж.',
+    '- HBL лежить у Транспорті FCL і привʼязується до партії за вантажовідправником.',
+    '- Повний аналіз маніфесту (CIF, мито, ПДВ по позиціях, походження, перевірки ЄС/UA, звірка кодів',
+    '  з qdpro) → run_consolidated_analysis. ДЖЕРЕЛО: посилання на Google Sheets — у source_url;',
+    '  вставлена таблиця — у manifest_text; нічого — маніфест збірника, а якщо його немає — маніфест,',
+    '  зібраний з інвойсів партій (так і скажи користувачу). Результат презентуй як є, блоками по',
+    '  кожному продукту; суми — базовий розрахунок, вимоги й ставки — з qdpro.',
+    '- Якщо даних немає (партій ще немає, файли ще читаються) — так і скажи, не вигадуй.',
   ].join('\n');
+  const lots = fcl.lots ?? [];
+  const state = [
+    `ПОТОЧНИЙ ЗБІРНИК: №${fcl.number}.`,
+    lots.length
+      ? `Партії (${lots.length}):\n${lots.map((l) => `- ${l.name} (постачальник ${l.supplier_name || '—'}, статус ${l.status})`).join('\n')}`
+      : 'Партій поки немає (створюються автоматично, коли прочитано інвойс/контракт/PL нового постачальника).',
+    ...documentsDigestBlock(fcl.documentsDigest),
+  ].join('\n');
+  return [
+    { type: 'text', text: shipmentRules(), cache_control: { type: 'ephemeral' } },
+    { type: 'text', text: fclRules, cache_control: { type: 'ephemeral' } },
+    { type: 'text', text: state },
+  ];
 }

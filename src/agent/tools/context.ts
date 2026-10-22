@@ -1,7 +1,9 @@
 import { z } from 'zod';
 import { query } from '../../db/pool.js';
 import { insertNotification } from '../../notifications/notifications.js';
-import { getWorkspaceById } from '../../shipments/workspaceAccess.js';
+import { getWorkspaceById, type WorkspaceRow } from '../../shipments/workspaceAccess.js';
+import { listLots } from '../../shipments/lots.js';
+import { lotWorkspaceView } from '../../shipments/fclState.js';
 import { realignPartiesForMode, proposePartyFieldsForMode } from '../../instruction/realign.js';
 import { shipmentChanged } from '../../shipments/state.js';
 import { getMissingContext, upsertParties, type PartyInput } from '../../reconciliation/parties.js';
@@ -12,6 +14,7 @@ import { type ToolContext, type ToolOutcome, requireWorkspace } from './shared.j
 export async function runMissingContext(ctx: ToolContext): Promise<ToolOutcome> {
   const ws = await getWorkspaceById(requireWorkspace(ctx));
   if (!ws) return { result: 'Постачання не знайдено.', summary: 'Контекст: помилка', citations: [] };
+  if (ws.kind === 'fcl') return fclMissingContext(ws);
   const missing = await getMissingContext(ws);
   if (missing.length === 0) {
     return { result: 'Усі параметри постачання задані.', summary: 'Контекст: повний', citations: [] };
@@ -21,6 +24,31 @@ export async function runMissingContext(ctx: ToolContext): Promise<ToolOutcome> 
     summary: `Бракує параметрів: ${missing.length}`,
     citations: [],
   };
+}
+
+/**
+ * An FCL's missing context (spec 006): the FCL's own (transport mode) and, per lot,
+ * the lot's (contract mode, product category, Incoterms, origin) — each lot is
+ * judged with its own context, so asking about the FCL's columns would mislead.
+ */
+async function fclMissingContext(ws: WorkspaceRow): Promise<ToolOutcome> {
+  const lines: string[] = [];
+  if (!ws.transport_mode) lines.push('- збірник: transport_mode (вид транспорту FCL)');
+  if (ws.eu_transit === null) lines.push('- збірник: eu_transit (чи є транзит через ЄС; якщо в документах видно порт ЄС — визначиться сам)');
+  const lots = await listLots(ws.id);
+  if (lots.length === 0) lines.push('- партій ще немає (створюються з інвойсів / контрактів / PL постачальників)');
+  for (const lot of lots) {
+    const view = lotWorkspaceView(ws, lot);
+    const miss = [
+      !view.contract_type && 'contract_type',
+      !view.product_category && 'product_category',
+      !view.incoterm_in && 'incoterm_in',
+      !view.origin_country && 'origin_country',
+    ].filter(Boolean);
+    if (miss.length) lines.push(`- партія «${lot.name}»: ${miss.join(', ')}`);
+  }
+  if (lines.length === 0) return { result: 'Усі параметри збірника та партій задані.', summary: 'Контекст: повний', citations: [] };
+  return { result: `Не задано:\n${lines.join('\n')}`, summary: `Бракує параметрів: ${lines.length}`, citations: [] };
 }
 
 const saveContextSchema = z.object({

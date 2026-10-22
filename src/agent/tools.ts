@@ -11,6 +11,7 @@ import { runMissingContext, runSaveContext, runGetContractMode, runSetContractMo
 import { runClassifyAndFile, runCompareVersions, runSortInbox, runNormalizeShipmentFiles } from './tools/files.js';
 import { runGenerateReport } from './tools/report.js';
 import { runConsolidatedAnalysis } from './tools/analysis.js';
+import { runListLots, runAssignFileToLot, runGetFclOverview } from './tools/fcl.js';
 import { runSearch, runReadFile, runListFiles, runFindFiles } from './tools/retrieval.js';
 export type { ToolContext, ToolOutcome } from './tools/shared.js';
 
@@ -79,16 +80,34 @@ export const toolDefinitions: ChatTool[] = [
     description:
       'Повертає розрахований чек-лист комплектності документів постачання та поточний ' +
       'статус (дані з бази, не з перечитування тексту). Використовуй для питань про ' +
-      'комплектність — «що є / чого бракує».',
-    input_schema: { type: 'object', properties: {} },
+      'комплектність — «що є / чого бракує». У збірнику — документи FCL і рядок по кожній партії ' +
+      '(або одна партія з параметром lot).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        lot: {
+          type: 'string',
+          description: 'ЛИШЕ у збірнику (FCL): назва або id партії. Без нього — по всьому збірнику.',
+        },
+      },
+    },
   },
   {
     name: 'get_discrepancies',
     description:
       'Повертає розрахований звіт розбіжностей між контрактом, інвойсом та пакувальним листом ' +
       '(детермінована звірка структурованих полів). Використовуй для питань про ' +
-      'невідповідності — не звіряй текст вручну.',
-    input_schema: { type: 'object', properties: {} },
+      'невідповідності — не звіряй текст вручну. У збірнику — розбіжності FCL (контейнер, ваги HBL/MBL, ' +
+      'маніфест ↔ інвойси) і всіх партій з позначкою партії (або одна партія з параметром lot).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        lot: {
+          type: 'string',
+          description: 'ЛИШЕ у збірнику (FCL): назва або id партії. Без нього — по всьому збірнику.',
+        },
+      },
+    },
   },
   {
     name: 'get_risks',
@@ -96,8 +115,17 @@ export const toolDefinitions: ChatTool[] = [
       'Повертає перелік поточних і майбутніх ризиків постачання (прострочені/близькі до ' +
       'завершення сертифікати, брак документів, розбіжності цифр, наближення терміну ' +
       'поставки). Викликай проактивно, коли користувач питає «які проблеми?», «що не так?», ' +
-      '«на що звернути увагу?» — не оцінюй ризики самостійно з тексту.',
-    input_schema: { type: 'object', properties: {} },
+      '«на що звернути увагу?» — не оцінюй ризики самостійно з тексту. У збірнику — ризики FCL і всіх ' +
+      'партій (або одна партія з параметром lot).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        lot: {
+          type: 'string',
+          description: 'ЛИШЕ у збірнику (FCL): назва або id партії. Без нього — по всьому збірнику.',
+        },
+      },
+    },
   },
   {
     name: 'check_drug_registration',
@@ -313,6 +341,46 @@ export const toolDefinitions: ChatTool[] = [
 ];
 
 /**
+ * Tools only an FCL (Збірник, spec 006) chat gets: its lots, moving a file between
+ * lots, and the container-wide verdicts. The shipment tools above also work in an
+ * FCL (scoped to it, with an optional `lot`).
+ */
+export const fclToolDefinitions: ChatTool[] = [
+  {
+    name: 'list_lots',
+    description:
+      'Перелік партій збірника (одна партія = один постачальник): статус, комплектність, розбіжності, ' +
+      'ризики, отримувач, кількість файлів, а також скільки файлів ще без партії.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'get_fcl_overview',
+    description:
+      'Зведена детермінована перевірка всього збірника (FCL): документи рівня FCL (MBL, HBL на кожну ' +
+      'партію, T1/NCTS + CMR при транзиті через ЄС, маніфест, МД на кожного отримувача), контейнер, ' +
+      'сума ваг/місць HBL проти MBL, звірка маніфесту з інвойсами, отримувачі, статус за найгіршою партією.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'assign_file_to_lot',
+    description:
+      'Переносить файл у партію (або в папку FCL / в Інбокс) — лише за проханням або підтвердженням ' +
+      'користувача. Після перенесення всі перевірки перераховуються.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', description: 'id файлу або (частина) його назви.' },
+        lot: {
+          type: 'string',
+          description: 'Назва або id партії; «FCL»/«транспорт», «митниця», «маніфест» — папки FCL; «inbox» — Інбокс.',
+        },
+      },
+      required: ['file', 'lot'],
+    },
+  },
+];
+
+/**
  * Customs/logistics reference tools backed by the internal `logist-mcp` service
  * (УКТ ЗЕД довідка/класифікатор, подвійне використання, курс НБУ, PubChem). They
  * are scope-less external lookups (no workspace/collection needed), advertised in
@@ -427,11 +495,17 @@ export async function executeTool(
     case 'find_files':
       return runFindFiles(input, ctx);
     case 'get_checklist':
-      return runChecklist(ctx);
+      return runChecklist(ctx, input);
     case 'get_discrepancies':
-      return runDiscrepancies(ctx);
+      return runDiscrepancies(ctx, input);
     case 'get_risks':
-      return runRisks(ctx);
+      return runRisks(ctx, input);
+    case 'list_lots':
+      return runListLots(ctx);
+    case 'assign_file_to_lot':
+      return runAssignFileToLot(input, ctx);
+    case 'get_fcl_overview':
+      return runGetFclOverview(ctx);
     case 'check_drug_registration':
       return runRegistryCheck(ctx);
     case 'generate_supplier_instruction':

@@ -5,10 +5,12 @@ import { shipmentVerdicts } from '../../reconciliation/verdicts.js';
 import { refreshWorkspaceState } from '../../shipments/status.js';
 import type { Citation } from '../../chat/conversations.js';
 import { type ToolContext, type ToolOutcome, requireWorkspace } from './shared.js';
+import { fclChecklist, fclDiscrepancies, fclRisks } from './fcl.js';
 
-export async function runChecklist(ctx: ToolContext): Promise<ToolOutcome> {
+export async function runChecklist(ctx: ToolContext, input: unknown = {}): Promise<ToolOutcome> {
   const ws = await getWorkspaceById(requireWorkspace(ctx));
   if (!ws) return { result: 'Постачання не знайдено.', summary: 'Чек-лист: помилка', citations: [] };
+  if (ws.kind === 'fcl') return fclChecklist(ws, input);
   const { checklist, status } = await refreshWorkspaceState(ws);
   if (checklist.length === 0) {
     return {
@@ -29,9 +31,10 @@ function statusUa(s: string): string {
   return s === 'verified' ? 'підтверджено' : s === 'received' ? 'отримано' : 'бракує';
 }
 
-export async function runDiscrepancies(ctx: ToolContext): Promise<ToolOutcome> {
+export async function runDiscrepancies(ctx: ToolContext, input: unknown = {}): Promise<ToolOutcome> {
   const ws = await getWorkspaceById(requireWorkspace(ctx));
   if (!ws) return { result: 'Постачання не знайдено.', summary: 'Розбіжності: помилка', citations: [] };
+  if (ws.kind === 'fcl') return fclDiscrepancies(ws, input);
   const { discrepancies: findings } = await shipmentVerdicts(ws);
   if (findings.length === 0) {
     return {
@@ -96,9 +99,10 @@ export async function runRegistryCheck(ctx: ToolContext): Promise<ToolOutcome> {
   };
 }
 
-export async function runRisks(ctx: ToolContext): Promise<ToolOutcome> {
+export async function runRisks(ctx: ToolContext, input: unknown = {}): Promise<ToolOutcome> {
   const ws = await getWorkspaceById(requireWorkspace(ctx));
   if (!ws) return { result: 'Постачання не знайдено.', summary: 'Ризики: помилка', citations: [] };
+  if (ws.kind === 'fcl') return fclRisks(ws, input);
   const { risks } = await shipmentVerdicts(ws);
   if (risks.length === 0) {
     return {

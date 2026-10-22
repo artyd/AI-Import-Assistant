@@ -12,16 +12,18 @@ import {
 import { SseStream } from '../lib/sse.js';
 import { buildConsolidatedSystemPrompt } from '../agent/systemPrompt.js';
 import { runAgentTurn } from '../agent/loop.js';
-import { toolDefinitions, logistTools } from '../agent/tools.js';
+import { toolDefinitions, fclToolDefinitions, logistTools } from '../agent/tools.js';
+import { hubToolDefinitions } from '../agent/tools/hub.js';
+import { sheetTools } from '../agent/tools/sheet.js';
+import { buildDocumentsDigest } from '../agent/documentsDigest.js';
+import { listLots } from '../shipments/lots.js';
 import { chatRateLimitConfig } from './chatRateLimit.js';
 
-// Consolidated (Збірник) chats run with the manifest analysis engine plus the
-// customs/logistics reference tools (УКТ ЗЕД / dual-use / НБУ / PubChem, when
-// enabled). Shipment tools (checklist/discrepancies/…) are workspace-scoped and
-// intentionally excluded here.
-const analysisTool = toolDefinitions.filter((t) => 'name' in t && t.name === 'run_consolidated_analysis');
+// A Збірник is an FCL workspace (spec 006): its chat gets every shipment tool
+// (scoped to the FCL, with an optional lot), the FCL tools and the manifest
+// analysis, plus the customs/logistics reference tools — one agent, more tools.
 function consolidatedTools() {
-  return [...analysisTool, ...logistTools()];
+  return [...toolDefinitions, ...fclToolDefinitions, ...logistTools(), ...hubToolDefinitions, ...sheetTools()];
 }
 
 const chatSchema = z.object({
@@ -30,11 +32,9 @@ const chatSchema = z.object({
 });
 
 /**
- * The "consolidated" chat — a consultant scoped to a Збірник (consolidated
- * cargo). Conversations are collection-scoped. The agent runs with a single tool,
- * `run_consolidated_analysis`, which analyses the collection's latest manifest
- * (CIF / мито / ПДВ per line, origin, EU/UA checks) and persists the result; the
- * loop is given a collection-scoped ToolContext (collectionId + ownerId).
+ * The "consolidated" chat — Штурман scoped to a Збірник (FCL). Conversations are
+ * collection-scoped; the loop's ToolContext carries the FCL as `workspaceId` (the
+ * shipment tools) and as `collectionId` (the manifest analysis).
  */
 export async function chatConsolidatedRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('preHandler', authenticate);
@@ -66,12 +66,21 @@ export async function chatConsolidatedRoutes(app: FastifyInstance): Promise<void
         const { history, stats: historyStats } = await getConversationHistoryWithStats(conversationId);
         await appendMessage(conversationId, 'user', message);
 
+        const [documentsDigest, lots] = await Promise.all([
+          buildDocumentsDigest(col.id).catch(() => ''),
+          listLots(col.id),
+        ]);
         const result = await runAgentTurn({
-          system: buildConsolidatedSystemPrompt({ number: col.number }),
+          system: buildConsolidatedSystemPrompt({
+            number: col.number,
+            lots: lots.map((l) => ({ name: l.name, supplier_name: l.supplier_name, status: l.status })),
+            documentsDigest,
+          }),
           history,
           userMessage: message,
           sse,
           signal: sse.signal,
+          workspaceId: col.id,
           collectionId: col.id,
           ownerId: req.user!.sub,
           tools: consolidatedTools(),
