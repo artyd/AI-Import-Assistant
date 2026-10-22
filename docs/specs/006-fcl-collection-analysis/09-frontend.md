@@ -1,6 +1,6 @@
 # 09 — Фронтенд збірника
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 06, 07, 08
 
 ## Що зробити (лише десктоп)

@@ -158,6 +158,83 @@ export interface Folder {
   id: string;
   name: string;
   position: number;
+  /** Збірник (FCL): set on a lot's folder («Партія — …»), null on FCL folders. */
+  lotId?: string | null;
+}
+
+// ── Збірник (FCL) — spec 006 ──────────────────────────────────────────────────
+export type LotStatus = "draft" | "docs_in_progress" | "docs_complete" | "customs_ready";
+
+export interface LotContext {
+  consignee: string | null;
+  incoterm_in: string | null;
+  incoterm_out: string | null;
+  product_category: string | null;
+  origin_country: string | null;
+  contract_type: "bilateral" | "trilateral" | null;
+  contract_type_source: string | null;
+  contract_type_reason: string | null;
+  auto_fields: string[];
+}
+
+export interface LotSummary {
+  id: string;
+  name: string;
+  supplier_name: string;
+  source: "auto" | "manual";
+  status: LotStatus;
+  derived_status: LotStatus;
+  file_count: number;
+  consignee: string | null;
+  intake_complete: boolean;
+  completeness: { done: number; total: number };
+  discrepancies: { confirmed: number; suspected: number };
+  risks: { error: number; warning: number };
+  context: LotContext;
+}
+
+export interface FclChecklistItem extends ChecklistItem {
+  label: string;
+  stage: "docs" | "customs";
+}
+
+export interface ManifestMatch {
+  manifest: { name: string; qtyKg: number; unitPrice: number; code: string | null } | null;
+  invoice: { lot_name: string; description: string; qty_kg: number | null; unit_price: number | null; file_name: string } | null;
+  status: "ok" | "qty" | "price" | "no_invoice" | "not_in_manifest";
+}
+
+export interface FclOverview {
+  fcl: {
+    id: string;
+    number: string;
+    status: WorkspaceStatus;
+    derived_status: LotStatus;
+    level_status: LotStatus;
+    intake_complete: boolean;
+    transport_mode: string | null;
+    product_category: string | null;
+    destination_country: string | null;
+    eu_transit: boolean | null;
+    eu_transit_derived: boolean | null;
+    containers: string[];
+    unassigned: number;
+  };
+  checklist: FclChecklistItem[];
+  discrepancies: Discrepancy[];
+  consignees: { name: string; lots: string[]; customs_declaration_file_id: string | null }[];
+  manifest: { file_name: string; built: boolean; matches: ManifestMatch[] } | null;
+  risks: Risk[];
+  all_discrepancies: (Discrepancy & { lot?: string })[];
+  lots: LotSummary[];
+}
+
+export interface LotDetail {
+  lot: LotSummary;
+  checklist: ChecklistItem[];
+  discrepancies: Discrepancy[];
+  risks: Risk[];
+  parties: Party[];
 }
 
 // ── News (Новини логістики) ───────────────────────────────────────────────────

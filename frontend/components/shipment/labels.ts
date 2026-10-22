@@ -88,4 +88,14 @@ export const FIELD_LABEL: Record<string, string> = {
   buyer: "Покупець",
   documents: "Документи",
   instruction: "Виконання інструкції постачальнику",
+  // Збірник (FCL), spec 006.
+  container_numbers: "Номер контейнера",
+  hbl_sum_gross_weight_kg: "Сума ваги брутто HBL проти MBL",
+  hbl_sum_packages_count: "Сума місць HBL проти MBL",
+  transit_gross_weight_kg: "Вага брутто T1 проти MBL",
+  lot_gross_weight_kg: "Вага брутто партії (PL проти HBL)",
+  manifest_qty: "Кількість у маніфесті",
+  manifest_price: "Ціна в маніфесті",
+  manifest_line: "Позиція маніфесту без інвойсу",
+  manifest_extra: "Товар поза маніфестом",
 };

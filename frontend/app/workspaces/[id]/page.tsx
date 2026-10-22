@@ -32,6 +32,9 @@ import { SidebarNav } from "@/components/layout/SidebarNav";
 import { TopBar, type CompletenessStep } from "@/components/layout/TopBar";
 import { RightPanel, type RightTab } from "@/components/shipment/RightPanel";
 import { FilesTab } from "@/components/files/FilesTab";
+import { LotsTab } from "@/components/fcl/LotsTab";
+import { FclCompleteness } from "@/components/fcl/FclCompleteness";
+import { useFclOverview } from "@/lib/fcl/useFcl";
 import { NewsView } from "@/components/news/NewsView";
 import { MapView } from "@/components/hub/MapView";
 import { CalendarView } from "@/components/calendar/CalendarView";
@@ -117,9 +120,8 @@ export default function WorkspacePage() {
     sortInbox,
     reindexFile,
   } = useShipmentFiles(id, { live: !!user && workspace != null, folders, notify });
-  // Collection (Збірник) files/folders for the right panel when consolidated is active.
+  // Collection (Збірник) folders for the right panel when consolidated is active.
   const [colFolders, setColFolders] = useState<Folder[]>([]);
-  const [colFiles, setColFiles] = useState<FileItem[]>([]);
 
   // Consolidated-cargo analysis result (latest) + archive modal.
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
@@ -147,6 +149,17 @@ export default function WorkspacePage() {
   const setActiveCollectionId = useAppStore((s) => s.setActiveCollectionId);
   const addCollection = useAppStore((s) => s.addCollection);
   const removeCollection = useAppStore((s) => s.removeCollection);
+
+  // A Збірник is an FCL workspace (spec 006): its files go through the same
+  // pipeline as a shipment's (read, extracted, filed into lots), live via SSE.
+  const fclId = chatKind === "consolidated" ? activeCollectionId : null;
+  const fclFiles = useShipmentFiles(activeCollectionId ?? id, {
+    live: !!user && !!fclId,
+    folders: colFolders,
+    notify,
+  });
+  const fcl = useFclOverview(fclId);
+  const [fclScope, setFclScope] = useState<string>("fcl");
 
   // Chat endpoints for the active (kind, entity). null = consolidated without a
   // selected collection (the UI then prompts to create/select one).
@@ -333,10 +346,12 @@ export default function WorkspacePage() {
 
   const onUploadVersion = useCallback(
     async (replacesFileId: string, fileList: FileList) => {
-      await upload(versionsFile?.folderId ?? null, fileList, replacesFileId);
-      await refreshFiles();
+      // A Збірник's file versions live in the FCL workspace.
+      const target = fclId ? fclFiles : { upload, refreshFiles };
+      await target.upload(versionsFile?.folderId ?? null, fileList, replacesFileId);
+      await target.refreshFiles();
     },
-    [upload, refreshFiles, versionsFile]
+    [upload, refreshFiles, versionsFile, fclId, fclFiles]
   );
 
   const createFolder = useCallback(async () => {
@@ -536,40 +551,67 @@ export default function WorkspacePage() {
     }
   }, [activeCollectionId]);
 
-  // ── Collection files (right panel Files tab for a Збірник) ──
-  const refreshColFiles = useCallback(async () => {
-    if (!activeCollectionId) return;
-    const r = await api<{ files: FileItem[] }>(`/api/collections/${activeCollectionId}/files`);
-    setColFiles(r.files);
-  }, [activeCollectionId]);
+  // ── Збірник (FCL) folders + files: the lot folders appear as files are read ──
+  const refreshColFolders = useCallback(async () => {
+    if (!fclId) return;
+    try {
+      const colRes = await api<{ collection: Collection; folders: Folder[] }>(`/api/collections/${fclId}`);
+      setColFolders(colRes.folders);
+    } catch {
+      /* keep the last list */
+    }
+  }, [fclId]);
 
   useEffect(() => {
-    if (chatKind !== "consolidated" || !activeCollectionId) {
+    if (!fclId) {
       setColFolders([]);
-      setColFiles([]);
       return;
     }
-    let cancelled = false;
-    (async () => {
-      try {
-        const [colRes, filesRes] = await Promise.all([
-          api<{ collection: Collection; folders: Folder[] }>(`/api/collections/${activeCollectionId}`),
-          api<{ files: FileItem[] }>(`/api/collections/${activeCollectionId}/files`),
-        ]);
-        if (cancelled) return;
-        setColFolders(colRes.folders);
-        setColFiles(filesRes.files);
-      } catch {
-        if (!cancelled) {
-          setColFolders([]);
-          setColFiles([]);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [chatKind, activeCollectionId]);
+    void refreshColFolders();
+    void fclFiles.refreshFiles().catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fclId, refreshColFolders]);
+
+  // When files finish reading or move between lots, the verdicts and lot folders
+  // change server-side: refresh both (debounced over a burst of file events).
+  const fclFilesKey = useMemo(
+    () => fclFiles.files.map((f) => `${f.id}:${f.status}:${f.folderId ?? ""}`).join("|"),
+    [fclFiles.files]
+  );
+  useEffect(() => {
+    if (!fclId) return;
+    const t = setTimeout(() => {
+      void refreshColFolders();
+      void fcl.reload();
+    }, 1500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fclId, fclFilesKey]);
+
+  const colCreateFolder = useCallback(async () => {
+    if (!fclId) return;
+    const name = window.prompt("Назва теки")?.trim();
+    if (!name) return;
+    try {
+      await api(`/api/workspaces/${fclId}/folders`, { body: { name } });
+      await refreshColFolders();
+    } catch {
+      notify("Не вдалося створити теку.");
+    }
+  }, [fclId, refreshColFolders, notify]);
+
+  const openLot = useCallback((lotId: string) => {
+    setFclScope(lotId);
+    setRightTab("complete");
+  }, []);
+
+  const onFclTurnComplete = useCallback(() => {
+    void reloadLatestAnalysis();
+    void refreshColFolders();
+    void fclFiles.refreshFiles().catch(() => {});
+    void fcl.reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reloadLatestAnalysis, refreshColFolders, fcl.reload]);
 
   // Load the collection's latest persisted analysis (so a сборник keeps its
   // analysis instead of losing it on reload / switch). Cleared when leaving
@@ -594,79 +636,6 @@ export default function WorkspacePage() {
       cancelled = true;
     };
   }, [activeCollectionId, chatKind]);
-
-  const colUpload = useCallback(
-    async (folderId: string | null, fileList: FileList) => {
-      if (!activeCollectionId) return;
-      const form = new FormData();
-      for (const f of Array.from(fileList)) form.append("files", f, f.name || "file");
-      const qs = folderId ? `?folderId=${folderId}` : "";
-      try {
-        await api(`/api/collections/${activeCollectionId}/files${qs}`, { form });
-        await refreshColFiles();
-      } catch {
-        notify("Не вдалося завантажити файл.");
-      }
-    },
-    [activeCollectionId, refreshColFiles, notify]
-  );
-  const colCreateFolder = useCallback(async () => {
-    if (!activeCollectionId) return;
-    const name = window.prompt("Назва теки")?.trim();
-    if (!name) return;
-    try {
-      await api(`/api/collections/${activeCollectionId}/folders`, { body: { name } });
-      const colRes = await api<{ collection: Collection; folders: Folder[] }>(
-        `/api/collections/${activeCollectionId}`
-      );
-      setColFolders(colRes.folders);
-    } catch {
-      notify("Не вдалося створити теку.");
-    }
-  }, [activeCollectionId, notify]);
-  const colRename = useCallback(
-    async (file: FileItem, name: string) => {
-      if (!activeCollectionId) return;
-      try {
-        await api(`/api/collections/${activeCollectionId}/files/${file.id}`, {
-          method: "PATCH",
-          body: { name },
-        });
-        await refreshColFiles();
-      } catch {
-        notify("Не вдалося перейменувати файл.");
-      }
-    },
-    [activeCollectionId, refreshColFiles, notify]
-  );
-  const colDelete = useCallback(
-    async (file: FileItem) => {
-      if (!activeCollectionId) return;
-      if (!window.confirm(`Видалити файл «${file.name}»?`)) return;
-      try {
-        await api(`/api/collections/${activeCollectionId}/files/${file.id}`, { method: "DELETE" });
-        await refreshColFiles();
-      } catch {
-        notify("Не вдалося видалити файл.");
-      }
-    },
-    [activeCollectionId, refreshColFiles, notify]
-  );
-  const colMove = useCallback(
-    async (file: FileItem, folderId: string) => {
-      if (!activeCollectionId) return;
-      try {
-        await api(`/api/collections/${activeCollectionId}/files/${file.id}`, {
-          method: "PATCH",
-          body: { folderId },
-        });
-        await refreshColFiles();
-      } catch {
-        notify("Не вдалося перемістити файл.");
-      }
-    },
-    [activeCollectionId, refreshColFiles, notify]
-  );
 
   const newShipment = useCallback(async () => {
     const number = window.prompt("Номер постачання (необов'язково)") ?? "";
@@ -1061,15 +1030,19 @@ export default function WorkspacePage() {
                     initialMessages={initialMessages}
                     onConversationStarted={onConversationStarted}
                     onLog={onLog}
-                    onTurnComplete={reloadLatestAnalysis}
+                    onTurnComplete={onFclTurnComplete}
                     onAnalyzeManifest={analyzeManifest}
-                    placeholder="Вставте посилання / таблицю, прикріпіть файл-маніфест 📎, або спитайте про збірник…"
-                    emptyTitle="Аналіз збірного вантажу"
+                    folders={colFolders}
+                    onUploadAndClassify={fclFiles.uploadAndClassify}
+                    onMoveFile={fclFiles.moveFile}
+                    docsStatus={fclFiles.docsStatus}
+                    placeholder="Прикріпіть документи збірника 📎, вставте посилання на маніфест, або спитайте про партії…"
+                    emptyTitle="Збірник (FCL)"
                     emptySubtitle={
                       <>
-                        Вставте посилання на Google&nbsp;Sheets, таблицю-маніфест або
-                        прикріпіть файл (xlsx/csv) — і я проаналізую збірник: коди,
-                        CIF&nbsp;/&nbsp;мито&nbsp;/&nbsp;ПДВ, походження та документи.
+                        Завантажте документи контейнера — я прочитаю їх, розкладу по партіях
+                        (одна партія = один постачальник) і перевірю кожну партію та весь FCL:
+                        комплектність, розбіжності, ризики, маніфест ↔ інвойси, CIF&nbsp;/&nbsp;мито&nbsp;/&nbsp;ПДВ.
                       </>
                     }
                     emptyStarters={CONSOLIDATED_STARTERS}
@@ -1149,7 +1122,7 @@ export default function WorkspacePage() {
 
       {rightOpen && view === "chat" && chatKind === "supply" && (
         <RightPanel
-          tab={rightTab === "archive" ? "files" : rightTab}
+          tab={rightTab === "archive" || rightTab === "lots" ? "files" : rightTab}
           onTab={setRightTab}
           onClose={() => setRightOpen(false)}
           badges={{ files: files.filter((f) => f.isLatest !== false).length, complete: missingCount }}
@@ -1184,30 +1157,64 @@ export default function WorkspacePage() {
 
       {rightOpen && view === "chat" && chatKind === "consolidated" && activeCollectionId && (
         <RightPanel
-          tab={rightTab === "archive" ? "archive" : "files"}
+          tab={rightTab}
           onTab={setRightTab}
           onClose={() => setRightOpen(false)}
-          badges={{ files: colFiles.length }}
+          badges={{
+            files: fclFiles.files.filter((f) => f.isLatest !== false).length,
+            lots: fcl.overview?.lots.length,
+            complete: fcl.overview?.checklist.filter((c) => c.status === "missing").length,
+          }}
           tabs={[
             { id: "files", label: "Файли" },
-            { id: "archive", label: "Архів" },
+            { id: "lots", label: "Партії" },
+            { id: "complete", label: "Комплектність" },
+            { id: "archive", label: "Аналіз" },
+            { id: "journal", label: "Журнал" },
           ]}
           files={
             <FilesTab
-              workspaceNumber={null}
+              workspaceNumber={collections.find((c) => c.id === activeCollectionId)?.number ?? null}
               folders={colFolders}
-              files={colFiles}
-              onUpload={colUpload}
+              files={fclFiles.files}
+              onUpload={fclFiles.uploadSmart}
               onCreateFolder={colCreateFolder}
-              onRenameFile={colRename}
-              onDeleteFile={colDelete}
-              onVersions={() => {}}
-              onMoveFile={colMove}
-              onReindex={() => {}}
-              onPreview={() => {}}
+              onRenameFile={fclFiles.renameFile}
+              onDeleteFile={fclFiles.deleteFile}
+              onVersions={setVersionsFile}
+              onMoveFile={(file, folderId) => {
+                void fclFiles.moveFile(file.id, folderId).catch(() => notify("Не вдалося перемістити файл."));
+              }}
+              onReindex={fclFiles.reindexFile}
+              onPreview={setPreviewFile}
+              uploadProgress={fclFiles.uploadProgress}
+            />
+          }
+          lots={
+            <LotsTab
+              fclId={activeCollectionId}
+              overview={fcl.overview}
+              loading={fcl.loading}
+              reload={fcl.reload}
+              onOpenLot={openLot}
+              onSortInbox={fclFiles.sortInbox}
+              notify={notify}
+            />
+          }
+          complete={
+            <FclCompleteness
+              fclId={activeCollectionId}
+              number={collections.find((c) => c.id === activeCollectionId)?.number ?? "zbirnyk"}
+              overview={fcl.overview}
+              version={fcl.version}
+              reload={fcl.reload}
+              scope={fclScope}
+              onScope={setFclScope}
+              notify={notify}
             />
           }
           archive={<ArchiveList />}
+          journal={<AgentLog entries={log} embedded />}
         />
       )}
 
@@ -1217,14 +1224,14 @@ export default function WorkspacePage() {
 
       {versionsFile && (
         <VersionsModal
-          workspaceId={id}
+          workspaceId={fclId ?? id}
           fileId={versionsFile.id}
           onClose={() => setVersionsFile(null)}
           onUploadVersion={onUploadVersion}
         />
       )}
       {previewFile && (
-        <FilePreviewModal workspaceId={id} file={previewFile} onClose={() => setPreviewFile(null)} />
+        <FilePreviewModal workspaceId={fclId ?? id} file={previewFile} onClose={() => setPreviewFile(null)} />
       )}
       {aiSettingsOpen && <AiSettingsModal onClose={() => setAiSettingsOpen(false)} />}
       {notice && <NoticeBanner text={notice.text} tone={notice.tone} onClose={closeNotice} />}

@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { LnChevronRight } from "../ui/LineIcons";
 
-export type RightTab = "files" | "journal" | "complete" | "archive";
+export type RightTab = "files" | "journal" | "complete" | "archive" | "lots";
 
 const DEFAULT_TABS: { id: RightTab; label: string }[] = [
   { id: "files", label: "Файли" },
@@ -20,11 +20,13 @@ interface Props {
   journal?: ReactNode;
   complete?: ReactNode;
   archive?: ReactNode;
+  /** Збірник (FCL): the «Партії» tab. */
+  lots?: ReactNode;
   // Override the default 3-tab set (e.g. Файли / Архів for a Збірник).
   tabs?: { id: RightTab; label: string }[];
 }
 
-export function RightPanel({ tab, onTab, onClose, badges, files, journal, complete, archive, tabs }: Props) {
+export function RightPanel({ tab, onTab, onClose, badges, files, journal, complete, archive, lots, tabs }: Props) {
   const TABS = tabs ?? DEFAULT_TABS;
   const content =
     tab === "files"
@@ -33,7 +35,9 @@ export function RightPanel({ tab, onTab, onClose, badges, files, journal, comple
         ? journal
         : tab === "archive"
           ? archive
-          : complete;
+          : tab === "lots"
+            ? lots
+            : complete;
   return (
     <aside
       style={{

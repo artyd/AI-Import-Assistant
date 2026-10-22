@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { api, ApiError, downloadBlob } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { runTurn, turnContent } from "@/lib/chat/turn";
@@ -53,6 +53,9 @@ export default function InstructionPage() {
   // Versions / shown version / draft / unsaved edits / resolved proposals (lib/instructionSession).
   const [session, dispatch] = useReducer(sessionReducer, emptySession);
   const { versions, current, draft, dirty } = session;
+  // Збірник (FCL, spec 006): the instruction of ONE lot (supplier).
+  const lotId = useSearchParams().get("lotId");
+  const lotQs = lotId ? `?lotId=${encodeURIComponent(lotId)}` : "";
   const [preview, setPreview] = useState<Preview | null>(null);
   const [lang, setLang] = useState<"en" | "uk">("en");
   const [dir, setDir] = useState<DirectoryEntry[]>([]);
@@ -70,16 +73,16 @@ export default function InstructionPage() {
   const load = useCallback(async () => {
     const [w, v, d] = await Promise.all([
       api<{ workspace: Workspace }>(`/api/workspaces/${id}`),
-      api<{ versions: InstructionVersion[] }>(`/api/workspaces/${id}/instructions`),
+      api<{ versions: InstructionVersion[] }>(`/api/workspaces/${id}/instructions${lotQs}`),
       api<{ entries: DirectoryEntry[] }>(`/api/directory`),
     ]);
     setWorkspace(w.workspace);
     setDir(d.entries);
     const prefill = v.versions[0]
       ? undefined
-      : (await api<{ draft: InstructionDraft }>(`/api/workspaces/${id}/instruction/prefill`)).draft;
+      : (await api<{ draft: InstructionDraft }>(`/api/workspaces/${id}/instruction/prefill${lotQs}`)).draft;
     dispatch({ type: "loaded", versions: v.versions, prefill });
-  }, [id]);
+  }, [id, lotQs]);
 
   useEffect(() => {
     if (user) load().catch((e) => setError(e instanceof ApiError ? e.message : String(e)));
@@ -111,7 +114,7 @@ export default function InstructionPage() {
     if (req.kind === "none") return req.version;
     const v =
       req.kind === "create"
-        ? (await api<{ version: InstructionVersion }>(`/api/workspaces/${id}/instructions`, { method: "POST", body: { draft: req.draft } })).version
+        ? (await api<{ version: InstructionVersion }>(`/api/workspaces/${id}/instructions`, { method: "POST", body: { draft: req.draft, ...(lotId ? { lotId } : {}) } })).version
         : (
             await api<{ version: InstructionVersion }>(`/api/workspaces/${id}/instructions/${req.version}`, {
               method: "PATCH",
@@ -120,7 +123,7 @@ export default function InstructionPage() {
           ).version;
     dispatch({ type: "saved", version: v });
     return v;
-  }, [session, id]);
+  }, [session, id, lotId]);
 
   const run = async (key: string, fn: () => Promise<void>) => {
     setBusy(key);
@@ -190,9 +193,9 @@ export default function InstructionPage() {
 
   /** After Штурман answered: pull its proposals in without touching local edits. */
   const syncProposals = useCallback(async () => {
-    const r = await api<{ versions: InstructionVersion[] }>(`/api/workspaces/${id}/instructions`);
+    const r = await api<{ versions: InstructionVersion[] }>(`/api/workspaces/${id}/instructions${lotQs}`);
     dispatch({ type: "synced", versions: r.versions });
-  }, [id]);
+  }, [id, lotQs]);
 
   if (!draft) {
     return (

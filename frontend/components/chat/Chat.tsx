@@ -579,10 +579,12 @@ export function Chat({
   // or the supply auto-file staging flow.
   const openManifestPicker = useCallback(() => manifestInputRef.current?.click(), []);
   const openFilePicker = useCallback(() => fileInputRef.current?.click(), []);
-  const attachAction = onAnalyzeManifest
-    ? openManifestPicker
-    : fileIntake
-      ? openFilePicker
+  // A Збірник (FCL) with file intake uploads documents (they are read and filed
+  // into lots); a pasted Sheets link still runs the analysis directly.
+  const attachAction = fileIntake
+    ? openFilePicker
+    : onAnalyzeManifest
+      ? openManifestPicker
       : undefined;
 
   return (
