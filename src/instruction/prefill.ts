@@ -113,7 +113,16 @@ function incotermPlace(term: string): string {
     .trim();
 }
 
-export async function prefillDraft(ws: WorkspaceRow, user?: { name: string } | null): Promise<InstructionDraft> {
+/**
+ * A fresh draft from the shipment. For an FCL lot (spec 006) pass the lot's view of
+ * the workspace (`lotWorkspaceView`) and `lotId`: documents and parties then come
+ * from that lot only, so the letter goes to that supplier.
+ */
+export async function prefillDraft(
+  ws: WorkspaceRow,
+  user?: { name: string } | null,
+  opts: { lotId?: string } = {},
+): Promise<InstructionDraft> {
   const d = emptyDraft();
   const src: Record<string, FieldSource> = {};
   const set = (path: string, value: string, source: FieldSource): void => {
@@ -129,11 +138,13 @@ export async function prefillDraft(ws: WorkspaceRow, user?: { name: string } | n
     query<DocRow>(
       `SELECT f.name AS file_name, de.extracted_fields->>'doc_type' AS doc_type, de.extracted_fields AS fields
        FROM document_extractions de JOIN files f ON f.id = de.file_id
+       LEFT JOIN folders fo ON fo.id = f.folder_id
        WHERE de.workspace_id = $1 AND f.is_latest = true
+         AND ($2::uuid IS NULL OR fo.lot_id = $2)
        ORDER BY f.created_at, f.name, f.id`,
-      [ws.id],
+      [ws.id, opts.lotId ?? null],
     ),
-    listParties(ws.id),
+    listParties(ws.id, opts.lotId ?? null),
     query<DirectoryRow>('SELECT id, kind, name, address, country, signer, email, phone FROM org_directory ORDER BY name'),
   ]);
   const party = (role: string) => parties.find((p) => p.role === role && p.company_name.trim())?.company_name ?? '';

@@ -437,7 +437,8 @@ newest first, owner-scoped.
 Rebuilds the `.xlsx` report from the stored analysis (sheets: Зведена / Детальний /
 Перевірки ЄС / Розмитнення UA) and streams it as an attachment
 (`analysis-<sheet>.xlsx`). Owner-scoped via the analysis's collection; `404
-not_found` on miss.
+not_found` on miss. For a Збірник (FCL) the workbook also carries the sheets
+«Партії», «Звірка маніфесту», «Розбіжності» and «Ризики по партіях».
 
 ---
 
@@ -584,6 +585,10 @@ from it by a deterministic template (EN for the supplier, UK check copy).
 - `PATCH /api/workspaces/:id/instructions/:ver` `{ draft?, status? }` → `{ version }`; `approved`/`sent` → `400 missing_fields` while required fields are empty.
 - `GET  /api/workspaces/:id/instructions/:ver/render?lang=en|uk&format=txt|docx|pdf` → `{ text, subject }` | DOCX | PDF.
 - `POST /api/workspaces/:id/instructions/:ver/refine` `{ request, draft? }` → `{ clauses:[{en,uk}] }` — AI proposes extra clauses; nothing is saved.
+- In a Збірник (FCL) an instruction belongs to ONE lot (one supplier): `prefill` and
+  `GET instructions` take `?lotId=<uuid>`, `POST instructions` takes `{ draft, lotId }`;
+  the lot's documents, parties and context fill it. Without `lotId` they address the
+  FCL itself. `404` when the lot is not this FCL's.
 - The latest **approved/sent** version is checked against the arriving documents:
   findings appear in `/discrepancies` (and risks / report) with `field: "instruction"`.
 

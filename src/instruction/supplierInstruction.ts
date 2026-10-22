@@ -21,9 +21,13 @@ export interface MissingContext {
   missing: string[];
 }
 
-export async function buildSupplierInstruction(ws: WorkspaceRow): Promise<InstructionResult | MissingContext> {
-  const [latest] = await listVersions(ws.id);
-  const draft = latest?.draft ?? (await prefillDraft(ws));
+/** `view` + `lotId` scope it to one lot of an FCL (spec 006); `ws` is the FCL itself. */
+export async function buildSupplierInstruction(
+  ws: WorkspaceRow,
+  scope: { view: WorkspaceRow; lotId: string | null } = { view: ws, lotId: null },
+): Promise<InstructionResult | MissingContext> {
+  const [latest] = await listVersions(ws.id, scope.lotId);
+  const draft = latest?.draft ?? (await prefillDraft(scope.view, null, { lotId: scope.lotId ?? undefined }));
   const missing = missingFields(draft);
   if (missing.length > 0) return { missing: missing.map((m) => m.label) };
   const instruction = renderText(draft, 'en');

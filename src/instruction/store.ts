@@ -41,8 +41,15 @@ const toVersion = (r: Row): InstructionVersion => ({
   updatedAt: r.updated_at,
 });
 
-export async function listVersions(workspaceId: string): Promise<InstructionVersion[]> {
-  const { rows } = await query<Row>(`${SELECT} WHERE si.workspace_id = $1 ORDER BY si.version DESC`, [workspaceId]);
+/**
+ * Versions of one instruction: a shipment's (lotId null), or one lot's in an FCL
+ * (spec 006). Version numbers stay unique per workspace across its lots.
+ */
+export async function listVersions(workspaceId: string, lotId: string | null = null): Promise<InstructionVersion[]> {
+  const { rows } = await query<Row>(
+    `${SELECT} WHERE si.workspace_id = $1 AND si.lot_id IS NOT DISTINCT FROM $2 ORDER BY si.version DESC`,
+    [workspaceId, lotId],
+  );
   return rows.map(toVersion);
 }
 
@@ -61,7 +68,12 @@ export async function latestApproved(workspaceId: string, lotId: string | null =
   return rows[0] ? toVersion(rows[0]) : null;
 }
 
-export async function createVersion(workspaceId: string, draft: InstructionDraft, userId: string | null): Promise<InstructionVersion> {
+export async function createVersion(
+  workspaceId: string,
+  draft: InstructionDraft,
+  userId: string | null,
+  lotId: string | null = null,
+): Promise<InstructionVersion> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -72,8 +84,8 @@ export async function createVersion(workspaceId: string, draft: InstructionDraft
       [workspaceId],
     );
     await client.query(
-      `INSERT INTO supplier_instructions (workspace_id, version, draft, created_by) VALUES ($1, $2, $3, $4)`,
-      [workspaceId, rows[0]!.v, JSON.stringify(draft), userId],
+      `INSERT INTO supplier_instructions (workspace_id, version, draft, created_by, lot_id) VALUES ($1, $2, $3, $4, $5)`,
+      [workspaceId, rows[0]!.v, JSON.stringify(draft), userId, lotId],
     );
     await client.query('COMMIT');
     return (await getVersion(workspaceId, rows[0]!.v))!;
@@ -93,14 +105,15 @@ export async function createVersion(workspaceId: string, draft: InstructionDraft
 export async function ensureDraftVersion(
   workspaceId: string,
   prefill: () => Promise<InstructionDraft>,
+  lotId: string | null = null,
 ): Promise<InstructionVersion> {
   const lock = await pool.connect();
   try {
     await lock.query('SELECT pg_advisory_lock(hashtext($1))', [`instr-draft:${workspaceId}`]);
-    const [latest] = await listVersions(workspaceId);
+    const [latest] = await listVersions(workspaceId, lotId);
     if (latest?.status === 'draft') return latest;
     const base = latest ? { ...latest.draft, proposals: [] } : await prefill();
-    return await createVersion(workspaceId, base, null);
+    return await createVersion(workspaceId, base, null, lotId);
   } finally {
     await lock.query('SELECT pg_advisory_unlock(hashtext($1))', [`instr-draft:${workspaceId}`]).catch(() => undefined);
     lock.release();

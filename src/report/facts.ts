@@ -59,7 +59,27 @@ export interface Money {
   currency: string;
 }
 
+/** The FCL part of a Збірник report (spec 006): one row per lot + the container. */
+export interface FclReportBlock {
+  containers: string[];
+  unassigned: number;
+  lots: {
+    name: string;
+    supplier: string;
+    consignee: string | null;
+    status: string;
+    done: number;
+    total: number;
+    confirmed: number;
+    errors: number;
+  }[];
+  /** Totals of the latest consolidated analysis, when one was run. */
+  payments: { cif: number; duty: number; vat: number; payable: number; count: number; currency: string | null } | null;
+}
+
 export interface ReportFacts {
+  /** Set for a Збірник (FCL) report. */
+  fcl?: FclReportBlock | null;
   generatedAt: string; // dd.mm.yyyy
   number: string;
   responsible: string | null;

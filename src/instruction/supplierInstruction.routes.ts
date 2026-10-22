@@ -12,6 +12,22 @@ import { proposeRefinement } from './refine.js';
 import { userRateLimit } from '../chat/chatRateLimit.js';
 import { query } from '../db/pool.js';
 import { shipmentChanged } from '../shipments/state.js';
+import { getLot } from '../shipments/lots.js';
+import { lotWorkspaceView } from '../shipments/fclState.js';
+import type { WorkspaceRow } from '../shipments/workspaceAccess.js';
+
+/**
+ * The instruction's scope: the shipment, or one lot of an FCL (spec 006) — the
+ * lot's view of the workspace and its id. `undefined` when the lot is not this FCL's.
+ */
+async function scopeOf(ws: WorkspaceRow, lotId: string | undefined | null): Promise<{ view: WorkspaceRow; lotId: string | null } | undefined> {
+  if (!lotId) return { view: ws, lotId: null };
+  if (ws.kind !== 'fcl') return undefined;
+  const lot = await getLot(ws.id, lotId);
+  return lot ? { view: lotWorkspaceView(ws, lot), lotId: lot.id } : undefined;
+}
+
+const lotQuery = z.object({ lotId: z.string().uuid().optional() });
 
 /** Allowed status moves (server-enforced; the screen mirrors them). */
 const NEXT: Record<string, string[]> = { draft: ['approved'], approved: ['sent'], sent: [] };
@@ -36,11 +52,14 @@ export async function supplierInstructionRoutes(app: FastifyInstance): Promise<v
   });
 
   // GET …/instruction/prefill — a fresh draft from the shipment (not saved).
-  app.get<{ Params: { id: string } }>('/api/workspaces/:id/instruction/prefill', async (req, reply) => {
+  app.get<{ Params: { id: string }; Querystring: { lotId?: string } }>('/api/workspaces/:id/instruction/prefill', async (req, reply) => {
     const ws = await getOwnedWorkspace(req.user!.sub, req.params.id);
     if (!ws) return reply.code(404).send({ error: 'not_found' });
+    const q = lotQuery.safeParse(req.query);
+    const scope = q.success ? await scopeOf(ws, q.data.lotId) : undefined;
+    if (!scope) return reply.code(404).send({ error: 'not_found' });
     const { rows } = await query<{ name: string }>('SELECT name FROM users WHERE id = $1', [req.user!.sub]);
-    const draft = await prefillDraft(ws, rows[0]?.name ? { name: rows[0].name } : null);
+    const draft = await prefillDraft(scope.view, rows[0]?.name ? { name: rows[0].name } : null, { lotId: scope.lotId ?? undefined });
     return reply.send({ draft, missing: missingFields(draft) });
   });
 
@@ -55,10 +74,13 @@ export async function supplierInstructionRoutes(app: FastifyInstance): Promise<v
   });
 
   // GET …/instructions — all versions (newest first).
-  app.get<{ Params: { id: string } }>('/api/workspaces/:id/instructions', async (req, reply) => {
+  app.get<{ Params: { id: string }; Querystring: { lotId?: string } }>('/api/workspaces/:id/instructions', async (req, reply) => {
     const ws = await getOwnedWorkspace(req.user!.sub, req.params.id);
     if (!ws) return reply.code(404).send({ error: 'not_found' });
-    const versions = await listVersions(ws.id);
+    const q = lotQuery.safeParse(req.query);
+    const scope = q.success ? await scopeOf(ws, q.data.lotId) : undefined;
+    if (!scope) return reply.code(404).send({ error: 'not_found' });
+    const versions = await listVersions(ws.id, scope.lotId);
     return reply.send({ versions: versions.map((v) => ({ ...v, missing: missingFields(v.draft) })) });
   });
 
@@ -66,9 +88,11 @@ export async function supplierInstructionRoutes(app: FastifyInstance): Promise<v
   app.post<{ Params: { id: string } }>('/api/workspaces/:id/instructions', async (req, reply) => {
     const ws = await getOwnedWorkspace(req.user!.sub, req.params.id);
     if (!ws) return reply.code(404).send({ error: 'not_found' });
-    const parsed = z.object({ draft: draftSchema }).safeParse(req.body);
+    const parsed = z.object({ draft: draftSchema, lotId: z.string().uuid().optional() }).safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: 'invalid_request', issues: parsed.error.issues });
-    const v = await createVersion(ws.id, parsed.data.draft, req.user!.sub);
+    const scope = await scopeOf(ws, parsed.data.lotId);
+    if (!scope) return reply.code(404).send({ error: 'not_found' });
+    const v = await createVersion(ws.id, parsed.data.draft, req.user!.sub, scope.lotId);
     return reply.code(201).send({ version: { ...v, missing: missingFields(v.draft) } });
   });
 

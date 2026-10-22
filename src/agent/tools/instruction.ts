@@ -5,11 +5,45 @@ import { listVersions, ensureDraftVersion, setProposals } from '../../instructio
 import { prefillDraft } from '../../instruction/prefill.js';
 import { missingFields, REQUIRED_FIELDS, getPath, isProposablePath } from '../../instruction/types.js';
 import { type ToolContext, type ToolOutcome, requireWorkspace } from './shared.js';
+import type { WorkspaceRow } from '../../shipments/workspaceAccess.js';
+import { loadFclVerdicts, lotWorkspaceView } from '../../shipments/fclState.js';
+import { findLot } from './fcl.js';
 
-export async function runSupplierInstruction(ctx: ToolContext): Promise<ToolOutcome> {
+interface InstructionScope {
+  ws: WorkspaceRow;
+  view: WorkspaceRow;
+  lotId: string | null;
+}
+
+/**
+ * A shipment's instruction, or in an FCL (spec 006) one lot's: the letter goes to
+ * ONE supplier, so an FCL needs `lot`. Returns an outcome to send back on a miss.
+ */
+async function instructionScope(ctx: ToolContext, input: unknown): Promise<InstructionScope | ToolOutcome> {
   const ws = await getWorkspaceById(requireWorkspace(ctx));
   if (!ws) return { result: 'Постачання не знайдено.', summary: 'Інструкція: помилка', citations: [] };
-  const res = await buildSupplierInstruction(ws);
+  if (ws.kind !== 'fcl') return { ws, view: ws, lotId: null };
+  const ref = String((input as { lot?: unknown })?.lot ?? '').trim();
+  const v = await loadFclVerdicts(ws);
+  const lot = ref ? findLot(v, ref) : null;
+  if (!lot) {
+    return {
+      result: `У збірнику інструкція складається для однієї партії (одного постачальника): вкажи lot. Партії: ${v.lots.map((l) => l.lot.name).join(', ') || 'немає'}.`,
+      summary: 'Інструкція: потрібна партія',
+      citations: [],
+    };
+  }
+  return { ws, view: lotWorkspaceView(ws, lot.lot), lotId: lot.lot.id };
+}
+
+function isOutcome(x: InstructionScope | ToolOutcome): x is ToolOutcome {
+  return 'result' in x;
+}
+
+export async function runSupplierInstruction(ctx: ToolContext, input: unknown = {}): Promise<ToolOutcome> {
+  const scope = await instructionScope(ctx, input);
+  if (isOutcome(scope)) return scope;
+  const res = await buildSupplierInstruction(scope.ws, scope);
   if ('missing' in res) {
     return {
       result: `Бракує даних для інструкції: ${res.missing.join(', ')}. Заповни їх у картці постачання.`,
@@ -20,11 +54,12 @@ export async function runSupplierInstruction(ctx: ToolContext): Promise<ToolOutc
   return { result: res.instruction, summary: 'Згенеровано інструкцію постачальнику', citations: [] };
 }
 
-export async function runGetInstructionDraft(ctx: ToolContext): Promise<ToolOutcome> {
+export async function runGetInstructionDraft(ctx: ToolContext, input: unknown = {}): Promise<ToolOutcome> {
   // Read-only: an unsaved shipment gets a prefill preview, nothing is written.
-  const wsId = requireWorkspace(ctx);
-  const [latest] = await listVersions(wsId);
-  const v = latest ?? { version: 0, status: 'не збережено', draft: await prefillDraft((await getWorkspaceById(wsId))!) };
+  const scope = await instructionScope(ctx, input);
+  if (isOutcome(scope)) return scope;
+  const [latest] = await listVersions(scope.ws.id, scope.lotId);
+  const v = latest ?? { version: 0, status: 'не збережено', draft: await prefillDraft(scope.view, null, { lotId: scope.lotId ?? undefined }) };
   const d = v.draft;
   const missing = missingFields(d);
   const fields = Object.keys(REQUIRED_FIELDS)
@@ -58,7 +93,9 @@ export async function runProposeInstructionFields(input: unknown, ctx: ToolConte
     })
     .safeParse(input);
   if (!parsed.success) return { result: 'Некоректні пропозиції.', summary: 'Інструкція: помилка', citations: [] };
-  const wsId = requireWorkspace(ctx);
+  const scope = await instructionScope(ctx, input);
+  if (isOutcome(scope)) return scope;
+  const wsId = scope.ws.id;
   const known = parsed.data.fields
     .filter((f) => isProposablePath(f.path))
     // Quantity and unit are separate fields — "1 kg" would print «1 kg kg».
@@ -66,7 +103,7 @@ export async function runProposeInstructionFields(input: unknown, ctx: ToolConte
       f.path === 'product.quantity' ? { ...f, value: f.value.replace(/^\s*([\d.,\s]*\d)\s*[a-zа-яіїєґ.]+\s*$/i, '$1') } : f,
     );
   if (!known.length) return { result: 'Жодного дозволеного шляху поля — перевір назви.', summary: 'Інструкція: 0 пропозицій', citations: [] };
-  const v = await ensureDraftVersion(wsId, async () => prefillDraft((await getWorkspaceById(wsId))!));
+  const v = await ensureDraftVersion(wsId, async () => prefillDraft(scope.view, null, { lotId: scope.lotId ?? undefined }), scope.lotId);
   const proposals = [...v.draft.proposals.filter((p) => !known.some((k) => k.path === p.path)), ...known].slice(-30);
   await setProposals(wsId, v.version, proposals);
   return {

@@ -99,11 +99,12 @@ export async function streamWorkspaceZip(ws: WorkspaceRow, reply: FastifyReply):
     is_latest: boolean;
     version: number;
     folder_name: string | null;
+    lot_id: string | null;
     suggested_folder_name: string | null;
     doc_type: string | null;
   }>(
     `SELECT f.name, f.disk_path, f.is_latest, f.version,
-            fo.name AS folder_name,
+            fo.name AS folder_name, fo.lot_id,
             sfo.name AS suggested_folder_name,
             de.extracted_fields->>'doc_type' AS doc_type
      FROM files f
@@ -131,7 +132,11 @@ export async function streamWorkspaceZip(ws: WorkspaceRow, reply: FastifyReply):
         ? '06_Photos'
         : DOC_TYPE_TO_FOLDER[f.doc_type] ?? null
       : null;
-    const targetFolder = f.folder_name ?? derived ?? f.suggested_folder_name;
+    let targetFolder = f.folder_name ?? derived ?? f.suggested_folder_name;
+    if (ws.kind === 'fcl' && f.folder_name) {
+      // A Збірник (spec 006): «Партія — X»/<document type>/…, FCL folders under FCL/.
+      targetFolder = f.lot_id ? `${f.folder_name}/${derived ?? 'Інше'}` : `FCL/${f.folder_name}`;
+    }
     const entry = !f.is_latest
       ? `_OldVersions/v${f.version}_${f.name}`
       : targetFolder

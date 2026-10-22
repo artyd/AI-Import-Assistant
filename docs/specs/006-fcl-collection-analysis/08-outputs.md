@@ -1,6 +1,6 @@
 # 08 — Дії: інструкція, звіт, ZIP, XLSX
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 06
 
 ## Що зробити

@@ -11,6 +11,10 @@ import {
   getLatestAnalysisForCollection,
 } from './analyses.js';
 import { buildConsolidatedReportXlsx } from './export/xlsx.js';
+import { appendFclSheets } from './export/fclSheets.js';
+import { loadFclVerdicts } from '../shipments/fclState.js';
+import { getOwnedWorkspace } from '../shipments/workspaceAccess.js';
+import { query } from '../db/pool.js';
 import { formatAnalysisMarkdown } from './format.js';
 import { ensureConversationScoped, appendMessage } from '../chat/conversations.js';
 import { SseStream } from '../lib/sse.js';
@@ -174,6 +178,14 @@ export async function analysisRoutes(app: FastifyInstance): Promise<void> {
       } catch (err) {
         req.log.warn({ err }, 'logist xlsx export failed — falling back to TS builder');
         buf = buildConsolidatedReportXlsx(analysis);
+      }
+      // A Збірник (FCL, spec 006): + the reconciliation sheets of the container.
+      try {
+        const { rows } = await query<{ collection_id: string | null }>('SELECT collection_id FROM analyses WHERE id = $1', [req.params.id]);
+        const ws = rows[0]?.collection_id ? await getOwnedWorkspace(req.user!.sub, rows[0].collection_id) : null;
+        if (ws?.kind === 'fcl') buf = appendFclSheets(buf, await loadFclVerdicts(ws));
+      } catch (err) {
+        req.log.warn({ err }, 'FCL reconciliation sheets skipped');
       }
       const filename = `analysis-${safeFilePart(analysis.sheet || 'report')}.xlsx`;
       reply.header(

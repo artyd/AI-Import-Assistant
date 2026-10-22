@@ -145,6 +145,24 @@ export function renderReportHtml(f: ReportFacts, summary: string | null): string
   if (p.manufactured || p.expiry) kv.push(['Придатність', `${esc(p.manufactured ?? '?')} → ${esc(p.expiry ?? '?')}`]);
   const kvHtml = kv.length ? kv.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('') : '<dt>—</dt><dd>даних немає</dd>';
 
+  // ── Збірник (FCL): payments from the analysis, a row per lot ────────────────
+  const fcl = f.fcl ?? null;
+  const STATUS_UK: Record<string, string> = { draft: 'чернетка', docs_in_progress: 'в роботі', docs_complete: 'повні', customs_ready: 'готово до митниці' };
+  const kPayFcl = fcl?.payments
+    ? `<div class="v">${money(fcl.payments.payable, fcl.payments.currency ?? 'USD')}</div><div class="s">мито <b>${money(fcl.payments.duty, fcl.payments.currency ?? 'USD')}</b> · ПДВ <b>${money(fcl.payments.vat, fcl.payments.currency ?? 'USD')}</b><br>МВ ${money(fcl.payments.cif, fcl.payments.currency ?? 'USD')} · ${fcl.payments.count} позицій (аналіз маніфесту)</div>`
+    : `<div class="v">—</div><div class="s">аналіз маніфесту ще не запускали</div>`;
+  const lotsHtml = fcl
+    ? fcl.lots
+        .map(
+          (l) =>
+            `<tr><td><b>${esc(l.name)}</b><br><span class="src">${esc(l.supplier)}</span></td><td>${esc(l.consignee ?? '—')}</td><td>${l.done}/${l.total}</td><td>${l.confirmed ? `<span class="neg">${l.confirmed}</span>` : '0'}</td><td>${l.errors ? `<span class="neg">${l.errors}</span>` : '0'}</td><td>${esc(STATUS_UK[l.status] ?? l.status)}</td></tr>`,
+        )
+        .join('')
+    : '';
+  const fclCard = fcl
+    ? `<div class="card"><h3>Партії <em>${fcl.lots.length} постачальників${fcl.containers.length ? ` · контейнер ${esc(fcl.containers.join(', '))}` : ''}${fcl.unassigned ? ` · без партії: ${fcl.unassigned} файлів` : ''}</em></h3><table class="lots"><thead><tr><th>Партія</th><th>Отримувач</th><th>Документи</th><th>🔴 розбіжн.</th><th>Критичні ризики</th><th>Статус</th></tr></thead><tbody>${lotsHtml || '<tr><td colspan="6">партій ще немає</td></tr>'}</tbody></table></div>`
+    : '';
+
   const docsHtml = f.docs.items
     .map((i) => (i.ok ? `<div><span class="ck">✓</span>${esc(i.label)}</div>` : `<div class="miss">— ${esc(i.label)}</div>`))
     .join('');
@@ -153,8 +171,8 @@ export function renderReportHtml(f: ReportFacts, summary: string | null): string
 <title>Звіт по постачанню — ${esc(f.number)}</title>
 <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>${CSS}</style></head><body><div class="page">
-<div class="hd"><div class="brand"><div class="mark">Ш</div><b>ШТУРМАН</b><span>Звіт по постачанню для керівництва</span></div>
-<div class="meta">Постачання <b>${esc(f.number)}</b> · сформовано <b>${esc(f.generatedAt)}</b>${f.responsible ? `<br>Відповідальний: ${esc(f.responsible)}` : ''}</div></div>
+<div class="hd"><div class="brand"><div class="mark">Ш</div><b>ШТУРМАН</b><span>${fcl ? 'Звіт по збірнику (FCL) для керівництва' : 'Звіт по постачанню для керівництва'}</span></div>
+<div class="meta">${fcl ? 'Збірник' : 'Постачання'} <b>${esc(f.number)}</b> · сформовано <b>${esc(f.generatedAt)}</b>${f.responsible ? `<br>Відповідальний: ${esc(f.responsible)}` : ''}</div></div>
 
 <div class="hero"><div><div class="title">${esc(title)}${sub ? `<small>${esc(sub)}</small>` : ''}</div>
 <div class="chain">${chain}${chainNote ? `<span class="cn">${esc(chainNote)}</span>` : ''}</div></div>
@@ -162,7 +180,7 @@ export function renderReportHtml(f: ReportFacts, summary: string | null): string
 
 <div class="kpis">
 <div class="kpi"><div class="l">Вартість товару</div>${kValue}</div>
-<div class="kpi"><div class="l">Митні платежі</div>${kPay}</div>
+<div class="kpi"><div class="l">Митні платежі</div>${fcl && pay === null ? kPayFcl : kPay}</div>
 <div class="kpi"><div class="l">Собівартість</div>${kCost}</div>
 <div class="kpi"><div class="l">Строк</div>${kTime}</div>
 </div>
@@ -177,6 +195,7 @@ ${f.timeline.length ? `<div class="card"><h3>Таймлайн <em>етапи з 
 <div class="card"><h3>Головні ризики <em>топ-${f.risksTop.length} з ${totalRisks}</em></h3><ul class="risks">${risks}</ul></div>
 </div>
 
+${fclCard}
 <div class="grid2">
 <div class="card"><h3>Товар і класифікація</h3><dl class="kv">${kvHtml}</dl></div>
 <div class="card"><h3>Документи <em>${f.docs.present} з ${f.docs.required} обовʼязкових</em></h3><div class="docs">${docsHtml}</div>
@@ -188,6 +207,7 @@ ${f.timeline.length ? `<div class="card"><h3>Таймлайн <em>етапи з 
 }
 
 const CSS = `
+.lots{width:100%;border-collapse:collapse;font-size:10.5px}.lots th{text-align:left;color:var(--muted);font-weight:600;padding:3px 6px;border-bottom:1px solid var(--border2)}.lots td{padding:4px 6px;border-bottom:1px solid var(--border);vertical-align:top}
 :root{--bg:#fff;--panel:#f7f7f8;--text:#0d0d0f;--muted:#8b8b94;--faint:#b4b4bc;--border:rgba(13,13,15,.09);--border2:rgba(13,13,15,.14);
 --accent:#2f6feb;--accentSoft:rgba(47,111,235,.12);--ok:#12936a;--okBg:rgba(18,147,106,.12);--warn:#d98213;--warnBg:rgba(217,130,19,.14);
 --err:#dc4a4f;--errBg:rgba(220,74,79,.12);--font:"Hanken Grotesk",system-ui,-apple-system,"Segoe UI",Arial,sans-serif}

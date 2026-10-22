@@ -8,9 +8,56 @@ import { shipmentVerdicts } from '../reconciliation/verdicts.js';
 import { listParties } from '../reconciliation/parties.js';
 import { logistEnabled, uktzedFlags } from '../customs/logist/index.js';
 import { buildFacts, type FactsDoc, type FactsQdpro, type ReportFacts } from './facts.js';
+import { flattenFcl, loadFclVerdicts } from '../shipments/fclState.js';
+import { getLatestAnalysisForCollection } from '../analysis/analyses.js';
+
+/**
+ * A Збірник (FCL, spec 006) report: route and timeline from the FCL papers
+ * (transport, customs), the FCL checklist, every lot's risks, a row per lot and the
+ * payments of the latest consolidated analysis. The product block stays empty —
+ * an FCL carries many goods, they are in the lot rows.
+ */
+async function collectFclFacts(ws: WorkspaceRow): Promise<ReportFacts> {
+  const [v, { rows: user }, analysis] = await Promise.all([
+    loadFclVerdicts(ws),
+    ws.responsible_user_id
+      ? query<{ name: string | null; email: string }>('SELECT name, email FROM users WHERE id = $1', [ws.responsible_user_id])
+      : Promise.resolve({ rows: [] as { name: string | null; email: string }[] }),
+    getLatestAnalysisForCollection(ws.owner_id, ws.id).catch(() => null),
+  ]);
+  const { risks } = flattenFcl(v);
+  const facts = buildFacts({
+    workspace: { number: ws.number, status: ws.status, contract_type: null, product_category: ws.product_category, transport_mode: ws.transport_mode },
+    responsible: user[0] ? user[0].name || user[0].email : null,
+    docs: v.files.filter((f) => f.lot_id === null && f.fields).map((f) => ({ file_name: f.file_name, doc_type: (f.fields!.doc_type as string) ?? null, fields: f.fields! })),
+    parties: [],
+    checklist: v.level.checklist.map((i) => ({ requirement_key: i.label, status: i.status })),
+    risks,
+    filesCount: v.files.length,
+    qdpro: null,
+    now: new Date(),
+  });
+  facts.fcl = {
+    containers: v.level.containers,
+    unassigned: v.level.unassigned,
+    lots: v.lots.map((l) => ({
+      name: l.lot.name,
+      supplier: l.lot.supplier_name,
+      consignee: l.consignee,
+      status: l.verdicts.derivedStatus,
+      done: l.verdicts.checklist.filter((i) => i.status !== 'missing').length,
+      total: l.verdicts.checklist.length,
+      confirmed: l.verdicts.discrepancies.filter((d) => d.kind === 'confirmed').length,
+      errors: l.verdicts.risks.filter((r) => r.severity === 'error').length,
+    })),
+    payments: analysis ? { ...analysis.totals, currency: analysis.fx?.currency ?? null } : null,
+  };
+  return facts;
+}
 
 /** Loads everything the report needs and assembles the facts (no LLM). */
 export async function collectFacts(ws: WorkspaceRow): Promise<ReportFacts> {
+  if (ws.kind === 'fcl') return collectFclFacts(ws);
   const [{ rows: docs }, parties, { checklist, risks }, { rows: cnt }, { rows: user }] = await Promise.all([
     query<FactsDoc>(
       `SELECT f.name AS file_name, de.extracted_fields->>'doc_type' AS doc_type, de.extracted_fields AS fields

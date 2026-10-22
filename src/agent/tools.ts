@@ -142,16 +142,17 @@ export const toolDefinitions: ChatTool[] = [
     description:
       'Повертає англійський лист-інструкцію постачальнику з конструктора (детермінований ' +
       'шаблон, остання збережена версія або автозаповнення). Якщо бракує обовʼязкових полів — ' +
-      'поверне їх перелік. Для редагування інструкції користувач має екран «Інструкція».',
-    input_schema: { type: 'object', properties: {} },
+      'поверне їх перелік. Для редагування інструкції користувач має екран «Інструкція». ' +
+      'У збірнику інструкція — для однієї партії: передай lot.',
+    input_schema: { type: 'object', properties: { lot: { type: 'string', description: 'ЛИШЕ у збірнику: назва або id партії.' } } },
   },
   {
     name: 'get_instruction_draft',
     description:
       'Читає поточну інструкцію постачальнику з конструктора: усі поля, їх джерела, незаповнені ' +
       'обовʼязкові поля та вже запропоновані значення. Викликай першим, коли користувач питає про ' +
-      'інструкцію або просить допомогти її заповнити.',
-    input_schema: { type: 'object', properties: {} },
+      'інструкцію або просить допомогти її заповнити. У збірнику — для однієї партії: передай lot.',
+    input_schema: { type: 'object', properties: { lot: { type: 'string', description: 'ЛИШЕ у збірнику: назва або id партії.' } } },
   },
   {
     name: 'propose_instruction_fields',
@@ -167,6 +168,7 @@ export const toolDefinitions: ChatTool[] = [
     input_schema: {
       type: 'object',
       properties: {
+        lot: { type: 'string', description: 'ЛИШЕ у збірнику: назва або id партії, чию інструкцію заповнюєш.' },
         fields: {
           type: 'array',
           items: {
@@ -509,9 +511,9 @@ export async function executeTool(
     case 'check_drug_registration':
       return runRegistryCheck(ctx);
     case 'generate_supplier_instruction':
-      return runSupplierInstruction(ctx);
+      return runSupplierInstruction(ctx, input);
     case 'get_instruction_draft':
-      return runGetInstructionDraft(ctx);
+      return runGetInstructionDraft(ctx, input);
     case 'propose_instruction_fields':
       return runProposeInstructionFields(input, ctx);
     case 'get_missing_context':
