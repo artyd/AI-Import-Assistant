@@ -139,7 +139,7 @@ export async function getLatestAnalysisForCollection(
 ): Promise<AnalysisResult | null> {
   const { rows } = await query<{ id: string }>(
     `SELECT a.id FROM analyses a
-     JOIN collections c ON c.id = a.collection_id
+     JOIN workspaces c ON c.id = a.collection_id
      WHERE a.collection_id = $1 AND c.owner_id = $2
      ORDER BY a.created_at DESC LIMIT 1`,
     [collectionId, ownerId],
@@ -176,7 +176,7 @@ export async function getAnalysisForOwner(
   }>(
     `SELECT a.id, a.source, a.sheet, a.meta, a.rows, a.totals, a.checks
      FROM analyses a
-     JOIN collections c ON c.id = a.collection_id
+     JOIN workspaces c ON c.id = a.collection_id
      WHERE a.id = $1 AND c.owner_id = $2`,
     [analysisId, ownerId],
   );

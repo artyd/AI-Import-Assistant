@@ -18,9 +18,15 @@ export const WORKSPACE_STATUSES: readonly WorkspaceStatus[] = [
   'customs_ready',
 ] as const;
 
+/** 'fcl' = a Збірник: a full-container shipment holding lots (spec 006). */
+export type WorkspaceKind = 'shipment' | 'fcl';
+
 export interface WorkspaceRow {
   id: string;
   owner_id: string;
+  kind: WorkspaceKind;
+  /** FCL only: the cargo transits the EU (T1/NCTS + CMR required). null = unknown. */
+  eu_transit: boolean | null;
   number: string;
   supplier: string;
   status: WorkspaceStatus;

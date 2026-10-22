@@ -18,20 +18,27 @@ export const FOLDER_SKELETON = [
 ] as const;
 
 /**
- * The folder skeleton for Collections (Збірник / consolidated cargo). Distinct
- * from the workspace skeleton above — collections group documents for a
- * multi-supplier consolidated shipment rather than a single reconciliation.
+ * The folder skeleton for an FCL (Збірник, spec 006). Only the FCL-level folders:
+ * each lot gets its own folder («Партія — <постачальник>») when the lot is created.
+ * Collections created before spec 006 keep their old 8-folder layout; folder roles
+ * are found by name (`fclFolderRole`), so both layouts work.
  */
-export const COLLECTION_FOLDER_SKELETON = [
-  '01_Маніфест',
-  '02_Інвойси',
-  '03_Сертифікати_походження',
-  '04_MSDS_SDS',
-  '05_Якість_CoA',
-  '06_Дозволи_ліцензії',
-  '07_Транспорт',
-  '08_Митниця',
-] as const;
+export const FCL_FOLDER_SKELETON = ['01_Маніфест', '02_Транспорт', '03_Митниця'] as const;
+
+export type FclFolderRole = 'manifest' | 'transport' | 'customs';
+
+/** The FCL role of a folder by its name, for both the new and the legacy layout. */
+export function fclFolderRole(name: string): FclFolderRole | null {
+  if (/маніфест/i.test(name)) return 'manifest';
+  if (/транспорт/i.test(name)) return 'transport';
+  if (/митниц/i.test(name)) return 'customs';
+  return null;
+}
+
+/** The folder name of a lot. */
+export function lotFolderName(lotName: string): string {
+  return `Партія — ${lotName}`;
+}
 
 export type FileType = 'pdf' | 'docx' | 'xlsx' | 'csv' | 'image' | 'md';
 

@@ -9,7 +9,6 @@ import { seedPlaces } from './hub/ports.js';
 import { authRoutes } from './auth/auth.routes.js';
 import { workspaceRoutes } from './shipments/workspaces.routes.js';
 import { collectionRoutes } from './shipments/collections.routes.js';
-import { collectionFileRoutes } from './documents/collectionFiles.routes.js';
 import { analysisRoutes } from './analysis/analysis.routes.js';
 import { fileRoutes } from './documents/files.routes.js';
 import { chatRoutes } from './chat/chat.routes.js';
@@ -108,7 +107,6 @@ async function buildServer() {
   await app.register(authRoutes);
   await app.register(workspaceRoutes);
   await app.register(collectionRoutes);
-  await app.register(collectionFileRoutes);
   await app.register(analysisRoutes);
   await app.register(fileRoutes);
   await app.register(chatRoutes);

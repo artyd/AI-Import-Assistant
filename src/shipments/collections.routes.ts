@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { pool, query } from '../db/pool.js';
 import { authenticate } from '../auth/hook.js';
 import { getOwnedCollection } from './collectionAccess.js';
-import { COLLECTION_FOLDER_SKELETON } from './folders.js';
+import { FCL_FOLDER_SKELETON } from './folders.js';
 import { deleteEntityStorage } from '../lib/storage.js';
 
 const createSchema = z.object({
@@ -36,15 +36,15 @@ export async function collectionRoutes(app: FastifyInstance): Promise<void> {
     try {
       await client.query('BEGIN');
       const { rows } = await client.query(
-        `INSERT INTO collections (owner_id, number, supplier, status)
-         VALUES ($1, $2, $3, $4) RETURNING id, number, supplier, status, created_at`,
+        `INSERT INTO workspaces (owner_id, number, supplier, status, kind)
+         VALUES ($1, $2, $3, $4, 'fcl') RETURNING id, number, supplier, status, created_at`,
         [req.user!.sub, number, supplier, status],
       );
       const col = rows[0];
-      for (let i = 0; i < COLLECTION_FOLDER_SKELETON.length; i++) {
+      for (let i = 0; i < FCL_FOLDER_SKELETON.length; i++) {
         await client.query(
-          'INSERT INTO folders (collection_id, name, position) VALUES ($1, $2, $3)',
-          [col.id, COLLECTION_FOLDER_SKELETON[i], i],
+          'INSERT INTO folders (workspace_id, name, position) VALUES ($1, $2, $3)',
+          [col.id, FCL_FOLDER_SKELETON[i], i],
         );
       }
       await client.query('COMMIT');
@@ -61,7 +61,7 @@ export async function collectionRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/collections', async (req, reply) => {
     const { rows } = await query(
       `SELECT id, number, supplier, status, created_at
-       FROM collections WHERE owner_id = $1 ORDER BY created_at DESC`,
+       FROM workspaces WHERE owner_id = $1 AND kind = 'fcl' ORDER BY created_at DESC`,
       [req.user!.sub],
     );
     return reply.send({ collections: rows });
@@ -72,7 +72,7 @@ export async function collectionRoutes(app: FastifyInstance): Promise<void> {
     const col = await getOwnedCollection(req.user!.sub, req.params.id);
     if (!col) return reply.code(404).send({ error: 'not_found' });
     const { rows: folders } = await query(
-      'SELECT id, name, position FROM folders WHERE collection_id = $1 ORDER BY position',
+      'SELECT id, name, position, lot_id AS "lotId" FROM folders WHERE workspace_id = $1 ORDER BY position',
       [col.id],
     );
     return reply.send({
@@ -87,14 +87,13 @@ export async function collectionRoutes(app: FastifyInstance): Promise<void> {
     });
   });
 
-  // DELETE /api/collections/:id — remove a collection and everything it owns.
-  // The DB cascade (folders, files, conversations) handles relational rows; the
-  // on-disk storage dir (STORAGE_DIR/<collectionId>) is purged here. Collection
-  // files are never embedded, so there is no Qdrant purge (unlike workspaces).
+  // DELETE /api/collections/:id — remove an FCL and everything it owns. The DB
+  // cascade (lots, folders, files, conversations, analyses) handles relational
+  // rows; the on-disk storage dir (STORAGE_DIR/<id>) is purged here.
   app.delete<{ Params: { id: string } }>('/api/collections/:id', async (req, reply) => {
     const col = await getOwnedCollection(req.user!.sub, req.params.id);
     if (!col) return reply.code(404).send({ error: 'not_found' });
-    await query('DELETE FROM collections WHERE id = $1', [col.id]);
+    await query("DELETE FROM workspaces WHERE id = $1 AND kind = 'fcl'", [col.id]);
     await deleteEntityStorage(col.id);
     return reply.send({ ok: true });
   });
@@ -122,11 +121,11 @@ export async function collectionRoutes(app: FastifyInstance): Promise<void> {
       vals.push(value);
     }
     if (sets.length > 0) {
-      await query(`UPDATE collections SET ${sets.join(', ')} WHERE id = $1`, vals);
+      await query(`UPDATE workspaces SET ${sets.join(', ')} WHERE id = $1`, vals);
     }
 
     const { rows } = await query(
-      'SELECT id, number, supplier, status, created_at FROM collections WHERE id = $1',
+      'SELECT id, number, supplier, status, created_at FROM workspaces WHERE id = $1',
       [col.id],
     );
     return reply.send({ collection: rows[0] });

@@ -23,9 +23,17 @@ One import deal handled as a unit: its documents, parties, context and chat.
 _Avoid_: Workspace (in prose), order, deal, cargo
 
 **Collection** (Збірник):
-A consolidated multi-supplier cargo with its own folder skeleton. A collection is
-analysed as a whole (consolidated analysis) and is deliberately never reconciled.
+A full container (FCL) we ship to ourselves from several suppliers. It is a kind
+of shipment (`kind = 'fcl'`), so it gets everything a shipment gets, and it holds
+lots. It is checked per lot and as a whole (transport, manifest, consignees), and
+its status is the worst lot's.
 _Avoid_: Сборник, batch, group
+
+**Lot** (Партія):
+One supplier's part of a collection: that supplier's documents, its own context
+(Incoterms, product category, contract mode, parties) and its own verdicts. A lot
+can hold several goods. A file belongs to a lot through its folder.
+_Avoid_: Batch (that is a production batch), sub-shipment, order
 
 **Folder skeleton**:
 The fixed set of folders that every new shipment or collection starts with.

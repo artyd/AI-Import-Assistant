@@ -75,7 +75,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/workspaces', async (req, reply) => {
     const { rows } = await query(
       `SELECT id, number, supplier, status, created_at
-       FROM workspaces WHERE owner_id = $1 ORDER BY created_at DESC`,
+       FROM workspaces WHERE owner_id = $1 AND kind = 'shipment' ORDER BY created_at DESC`,
       [req.user!.sub],
     );
     return reply.send({ workspaces: rows });

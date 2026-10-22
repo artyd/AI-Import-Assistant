@@ -5,8 +5,15 @@ import { formatAnalysisMarkdown } from '../../analysis/format.js';
 import { persistAnalysis } from '../../analysis/analyses.js';
 import { type ToolContext, type ToolOutcome } from './shared.js';
 
+async function isFcl(workspaceId: string): Promise<boolean> {
+  const { rows } = await query<{ kind: string }>('SELECT kind FROM workspaces WHERE id = $1', [workspaceId]);
+  return rows[0]?.kind === 'fcl';
+}
+
 export async function runConsolidatedAnalysis(input: unknown, ctx: ToolContext): Promise<ToolOutcome> {
-  if (!ctx.collectionId) {
+  // An FCL chat scopes by workspaceId (spec 006); the legacy collection scope is the same id.
+  const fclId = ctx.collectionId ?? (ctx.workspaceId && (await isFcl(ctx.workspaceId)) ? ctx.workspaceId : undefined);
+  if (!fclId) {
     return { result: 'Аналіз доступний лише в межах збірника.', summary: 'Аналіз: помилка', citations: [] };
   }
   const sourceUrl = String((input as { source_url?: unknown })?.source_url ?? '').trim();
@@ -22,9 +29,9 @@ export async function runConsolidatedAnalysis(input: unknown, ctx: ToolContext):
   } else {
     const { rows } = await query<{ id: string; name: string; type: string; disk_path: string }>(
       `SELECT id, name, type, disk_path FROM files
-       WHERE collection_id = $1 AND is_latest = true AND type IN ('xlsx', 'csv')
+       WHERE workspace_id = $1 AND is_latest = true AND type IN ('xlsx', 'csv')
        ORDER BY created_at DESC LIMIT 1`,
-      [ctx.collectionId],
+      [fclId],
     );
     const file = rows[0];
     if (!file) {
@@ -54,7 +61,7 @@ export async function runConsolidatedAnalysis(input: unknown, ctx: ToolContext):
   // Persist (best-effort — still return the computed result on failure).
   if (ctx.ownerId) {
     try {
-      await persistAnalysis(ctx.ownerId, ctx.collectionId, result);
+      await persistAnalysis(ctx.ownerId, fclId, result);
     } catch {
       /* persistence failed — the analysis text is still useful this turn */
     }

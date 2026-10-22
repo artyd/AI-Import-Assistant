@@ -933,3 +933,80 @@ CREATE TABLE IF NOT EXISTS sheet_notes (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_sheet_notes_row ON sheet_notes(row_id, created_at);
+
+-- ── Spec 006: Збірник = FCL, a kind of shipment, with lots inside ─────────────
+-- A collection (Збірник) is a full-container shipment "we ship to ourselves": one
+-- workspace with kind = 'fcl' that holds LOTS (one supplier each). Every shipment
+-- capability (ingest, extraction, verdicts, verification, report…) applies to it.
+-- The old `collections` rows migrate into `workspaces` with the SAME id, so URLs,
+-- conversations and analyses keep pointing at the right entity.
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'shipment'
+  CHECK (kind IN ('shipment', 'fcl'));
+-- FCL transits the EU (T1/NCTS + CMR required). NULL = not known yet.
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS eu_transit BOOLEAN;
+CREATE INDEX IF NOT EXISTS idx_workspaces_owner_kind ON workspaces(owner_id, kind);
+
+-- One supplier's part of an FCL. Lot-level context overrides the FCL context;
+-- `auto_fields` lists the fields last written by the document autopilot (a human
+-- edit removes a field from the list, and auto never overwrites a human value).
+CREATE TABLE IF NOT EXISTS lots (
+  id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id         UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  name                 TEXT NOT NULL,
+  supplier_name        TEXT NOT NULL DEFAULT '',
+  supplier_key         TEXT NOT NULL DEFAULT '',
+  consignee            TEXT,
+  incoterm_in          TEXT,
+  incoterm_out         TEXT,
+  product_category     TEXT,
+  contract_type        TEXT CHECK (contract_type IN ('bilateral', 'trilateral')),
+  contract_type_source TEXT,
+  status               TEXT NOT NULL DEFAULT 'draft'
+                       CHECK (status IN ('draft', 'docs_in_progress', 'docs_complete', 'customs_ready')),
+  source               TEXT NOT NULL DEFAULT 'auto' CHECK (source IN ('auto', 'manual')),
+  auto_fields          TEXT[] NOT NULL DEFAULT '{}',
+  position             INT NOT NULL DEFAULT 0,
+  created_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_lots_workspace ON lots(workspace_id);
+
+-- A file's lot is its folder's lot (one source of truth: moving a file between
+-- lot folders IS changing its lot). NULL = FCL-level folder or a plain shipment.
+ALTER TABLE folders ADD COLUMN IF NOT EXISTS lot_id UUID REFERENCES lots(id) ON DELETE CASCADE;
+CREATE INDEX IF NOT EXISTS idx_folders_lot ON folders(lot_id);
+ALTER TABLE parties ADD COLUMN IF NOT EXISTS lot_id UUID REFERENCES lots(id) ON DELETE CASCADE;
+ALTER TABLE workspace_checklist_items ADD COLUMN IF NOT EXISTS lot_id UUID REFERENCES lots(id) ON DELETE CASCADE;
+ALTER TABLE supplier_instructions ADD COLUMN IF NOT EXISTS lot_id UUID REFERENCES lots(id) ON DELETE CASCADE;
+
+-- Migrate collections → FCL workspaces (same id). Idempotent: rows already moved
+-- are skipped, and the collections table ends up empty.
+INSERT INTO workspaces (id, owner_id, number, supplier, status, created_at, kind)
+SELECT c.id, c.owner_id, c.number, c.supplier, c.status, c.created_at, 'fcl'
+FROM collections c
+WHERE NOT EXISTS (SELECT 1 FROM workspaces w WHERE w.id = c.id);
+
+UPDATE folders SET workspace_id = collection_id, collection_id = NULL
+WHERE collection_id IS NOT NULL;
+-- Collection files were never read. Queue them: the retry sweep picks up a
+-- 'queued' file with no live job (status_changed_at NULL → created_at is old).
+UPDATE files SET workspace_id = collection_id, collection_id = NULL,
+       status = 'queued', status_changed_at = NULL, error_reason = NULL,
+       extraction_status = NULL, index_attempts = 0
+WHERE collection_id IS NOT NULL;
+
+-- Consolidated chats and analyses keep their `collection_id` column, which now
+-- holds the FCL workspace id.
+ALTER TABLE conversations DROP CONSTRAINT IF EXISTS conversations_collection_id_fkey;
+ALTER TABLE conversations DROP CONSTRAINT IF EXISTS conversations_fcl_fkey;
+ALTER TABLE conversations ADD CONSTRAINT conversations_fcl_fkey
+  FOREIGN KEY (collection_id) REFERENCES workspaces(id) ON DELETE CASCADE;
+ALTER TABLE analyses DROP CONSTRAINT IF EXISTS analyses_collection_id_fkey;
+ALTER TABLE analyses DROP CONSTRAINT IF EXISTS analyses_fcl_fkey;
+ALTER TABLE analyses ADD CONSTRAINT analyses_fcl_fkey
+  FOREIGN KEY (collection_id) REFERENCES workspaces(id) ON DELETE CASCADE;
+ALTER TABLE archive_records DROP CONSTRAINT IF EXISTS archive_records_collection_id_fkey;
+ALTER TABLE archive_records DROP CONSTRAINT IF EXISTS archive_records_fcl_fkey;
+ALTER TABLE archive_records ADD CONSTRAINT archive_records_fcl_fkey
+  FOREIGN KEY (collection_id) REFERENCES workspaces(id) ON DELETE SET NULL;
+
+DELETE FROM collections;
