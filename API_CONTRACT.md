@@ -158,19 +158,23 @@ Response `200`: `{ "survey_status", "survey_answers" }`.
 
 ---
 
-## Collections (Збірник / consolidated cargo)
+## Collections (Збірник / FCL)
 
-A second top-level entity alongside workspaces, for grouping documents of a
-multi-supplier consolidated shipment. Collections have no intake / checklist /
-status-derivation — status is a plain tri-state (`active`/`draft`/`done`).
+Since spec 006 a collection is an **FCL**: a workspace with `kind = 'fcl'` that
+holds **lots** (one supplier each). It gets the whole shipment pipeline — file
+upload/reading/extraction, verification, verdicts, report, export — through the
+ordinary `/api/workspaces/:id/...` routes (the collection id IS the workspace id).
+`GET /api/workspaces` lists only `kind = 'shipment'`; collections are listed here.
+The `/api/collections` routes keep their wire shape; `status` is the shipment
+pipeline status (`draft`/`docs_in_progress`/`docs_complete`/`customs_ready`, or a
+manual `active`/`done`), derived as the worst lot.
 
 ### `POST /api/collections`  (auth)
 Request (all optional): `{ "number"?: string, "supplier"?: string, "status"?: "active"|"draft"|"done" }`
 When `number` is omitted it defaults to `Збірник <DD.MM>` (today's UTC date, e.g. `Збірник 14.09`);
 `supplier` defaults to `""` and `status` to `draft`.
-Creates the collection **and** the 8-folder skeleton
-(`01_Маніфест`, `02_Інвойси`, `03_Сертифікати_походження`, `04_MSDS_SDS`,
-`05_Якість_CoA`, `06_Дозволи_ліцензії`, `07_Транспорт`, `08_Митниця`).
+Creates the FCL **and** its FCL folders (`01_Маніфест`, `02_Транспорт`, `03_Митниця`);
+each lot gets its own folder `Партія — <name>` when the lot is created.
 Response `201`: `{ "collection": { "id","number","supplier","status","created_at" } }`
 
 ### `GET /api/collections`  (auth)
@@ -181,16 +185,15 @@ Response `200`:
 ```json
 {
   "collection": { "id","number","supplier","status","created_at" },
-  "folders": [ { "id","name","position" } ]
+  "folders": [ { "id","name","position","lotId" } ]
 }
 ```
-`404 not_found` if not owned/found.
+`lotId` is set on a lot's folder (`null` for FCL folders). `404 not_found` if not owned/found.
 
 ### `DELETE /api/collections/:id`  (auth)
-Deletes the collection and everything it owns — folders, files, conversations
-(DB cascade) — and purges its on-disk storage dir (`STORAGE_DIR/<collectionId>`).
-Irreversible. **No Qdrant purge:** collection files are never embedded (see
-"Collection files" below). Response `200`: `{ "ok": true }`. `404 not_found` if not
+Deletes the FCL and everything it owns — lots, folders, files, conversations,
+analyses (DB cascade) — and purges its on-disk storage dir (`STORAGE_DIR/<id>`).
+Irreversible. Response `200`: `{ "ok": true }`. `404 not_found` if not
 owned/found.
 
 ### `PATCH /api/collections/:id`  (auth)
@@ -293,46 +296,70 @@ Move confirmation reuses `PATCH /api/workspaces/:id/files/:fileId` with `{ "fold
 
 ---
 
-## Collection files (Збірник)
+## Lots and the FCL overview (Збірник, spec 006)
 
-> **Not indexed / not embedded (no RAG).** Unlike workspace files, collection
-> files never enter the embedding/Qdrant pipeline. They are panel documents /
-> certificates plus a manifest, parsed **directly** by the Phase-B analysis
-> engine. Uploads therefore skip `queued`/`indexing` and are stored as
-> `status: "ready"` immediately — there is no index job, no Qdrant, and no
-> `file_status` events channel for collections.
+Collection files use the workspace file routes (`/api/workspaces/:id/files…`,
+`/api/workspaces/:id/events` for `file_status`). After reading, a file is filed
+automatically: transport papers, customs declarations and the manifest into the
+FCL folders, commercial documents into the lot of their supplier (a new supplier
+on an invoice / contract / packing list opens a new lot), anything ambiguous stays
+in the inbox with `suggested_folder_id`. Moving a file into a lot's folder
+(`PATCH /api/workspaces/:id/files/:fileId { folderId }`) changes its lot.
 
-All routes are scoped by `getOwnedCollection` and `404 not_found` if the
-collection (or file/folder) isn't owned/found.
+All routes below `404 not_found` unless the workspace is an owned FCL.
 
-### `POST /api/collections/:id/files?folderId=<uuid>`  (auth, multipart)
-- `multipart/form-data` with one or more file parts. `folderId` (query) optional;
-  `400 invalid_folder` if it doesn't belong to this collection.
-- Same allow-list (`pdf, docx, xlsx, csv, png, jpg/jpeg`), per-file size limit
-  (`MAX_UPLOAD_BYTES`), and exact-content SHA-256 dedup (scoped to the collection's
-  `is_latest` files + within the batch) as the workspace upload. Duplicates are
-  reported in `rejected` with `reason: "duplicate_of:<existing name>"`.
-- On accept: stores to disk under the collection's id namespace and writes a
-  `ready` row (with `content_hash`). **No index job, no Qdrant, no events.**
-Response `201`: `{ "files": [ { "id","name","type","status":"ready","folderId","version","replacesFileId":null } ], "rejected": [ { "name","reason" } ] }`
-Response `415` when nothing valid was uploaded: `{ "error":"no_valid_files", "rejected":[…] }`
+### `GET /api/workspaces/:id/fcl`  (auth)
+```json
+{
+  "fcl": { "id","number","status","derived_status","level_status","intake_complete",
+           "transport_mode","product_category","destination_country",
+           "eu_transit","eu_transit_derived","containers":[string],"unassigned":number },
+  "checklist": [ { "requirement_key","label","stage":"docs"|"customs","status","source_file_id" } ],
+  "discrepancies": [Discrepancy],          // FCL level: container, Σ HBL vs MBL, T1, lot PL vs HBL, manifest
+  "consignees": [ { "name","lots":[string],"customs_declaration_file_id" } ],
+  "manifest": { "file_id","file_name","built","matches":[{ "manifest","invoice","status" }],"discrepancies":[…] } | null,
+  "hbl_lot": { "<fileId>": "<lotId>" },
+  "risks": [Risk],                          // FCL risks + every lot's, titled «<lot>: …»
+  "all_discrepancies": [Discrepancy & { "lot"?: string }],
+  "lots": [LotSummary]
+}
+```
+`requirement_key` is `master_transport`, `hbl:<lotId>`, `transit`, `cmr`, `manifest`
+or `customs_declaration:<consignee>`; `stage: "customs"` items are only required
+for `customs_ready`. Manifest match `status`: `ok|qty|price|no_invoice|not_in_manifest`.
 
-### `GET /api/collections/:id/files`  (auth)
-Response `200`: `{ "files": [ { "id","folderId","name","type","status","errorReason","sizeBytes","createdAt","version","isLatest","replacesFileId" } ] }`
-(collection files are always `status: "ready"` with `errorReason: null`).
+### `PATCH /api/workspaces/:id/fcl`  (auth)
+`{ "eu_transit": boolean|null }` → `200 { "ok": true, "status" }`. Other FCL context
+(transport mode, product category, destination) uses `PATCH /api/workspaces/:id`.
 
-### `DELETE /api/collections/:id/files/:fileId`  (auth)
-Deletes the on-disk file and the row. No Qdrant. Response `200`: `{ "ok": true }`.
+### `GET /api/workspaces/:id/lots`  (auth)
+`200 { "lots": [LotSummary], "unassigned": number }` where `LotSummary` =
+`{ "id","name","supplier_name","source":"auto"|"manual","status","derived_status","file_count",
+"consignee","intake_complete","completeness":{"done","total"},
+"discrepancies":{"confirmed","suspected"},"risks":{"error","warning"},
+"context":{ "consignee","incoterm_in","incoterm_out","product_category","origin_country",
+"contract_type","contract_type_source","contract_type_reason","auto_fields" } }`.
 
-### `PATCH /api/collections/:id/files/:fileId`  (auth)
-`{ "name"?: string, "folderId"?: string|null }` → `200 { "file": { "id","name","folderId","type","status" } }`.
-`400 invalid_folder` if the target folder isn't in this collection.
+### `GET /api/workspaces/:id/lots/:lotId`  (auth)
+`200 { "lot": LotSummary, "checklist": [ChecklistItem], "discrepancies": [Discrepancy],
+"risks": [Risk], "parties": [Party] }` — the lot judged like a shipment.
 
-### `GET /api/collections/:id/files/:fileId/content`  (auth)
-Streams the stored file bytes inline (same behaviour as the workspace content route).
+### `POST /api/workspaces/:id/lots`  (auth)
+`{ "name": string, "supplier_name"?: string }` → `201 { "lot", "folderId", "created": true }`
+(or `200` with the existing lot of the same supplier).
 
-### `POST /api/collections/:id/folders`  (auth)
-`{ "name": string }` → `201 { "folder": { "id","name","position" } }` (folder scoped to the collection).
+### `PATCH /api/workspaces/:id/lots/:lotId`  (auth)
+Any of `{ "name", "supplier_name", "consignee", "incoterm_in", "incoterm_out",
+"product_category", "origin_country", "contract_type" }` (nullable except names).
+A context field set here is never overwritten by the autopilot. Renaming renames
+the lot's folder. → `200 { "lot" }`.
+
+### `DELETE /api/workspaces/:id/lots/:lotId`  (auth)
+The lot's files go back to the inbox; the lot and its folder are deleted.
+→ `200 { "ok": true }`.
+
+### `POST /api/workspaces/:id/lots/:lotId/parties`  (auth)
+Same body and response as `POST /api/workspaces/:id/parties`, for the lot's parties.
 
 ---
 
@@ -463,7 +490,7 @@ per-user rate limiter. They differ only in scope and available tools:
 |------|----------|-------|-------|
 | `supply` | `POST /api/workspaces/:id/chat` | a shipment (workspace) | full set (unchanged) |
 | `normal` | `POST /api/chats` | global (the user) | none — general ЗЕД/customs consultant answering from knowledge |
-| `consolidated` | `POST /api/collections/:id/chat` | a collection (Збірник) | one tool — `run_consolidated_analysis` (analyses the collection's latest manifest: CIF/мито/ПДВ per line, origin, EU/UA checks; persists the result and returns an `analysisId` in the reply text for the FE to fetch via `GET /api/analyses/:id/xlsx` / the stored `AnalysisResult`) |
+| `consolidated` | `POST /api/collections/:id/chat` | a collection (Збірник / FCL) | every shipment tool (scoped to the FCL, with an optional `lot`), `list_lots`, `assign_file_to_lot`, `get_fcl_overview`, and `run_consolidated_analysis` (analyses the manifest — or one built from the invoices: CIF/мито/ПДВ per line, origin, EU/UA checks; persists the result) |
 
 The `supply` chat is **unchanged** — same workspace-scoped agent, same full tool
 set, same grounding prompt.

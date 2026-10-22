@@ -1,6 +1,6 @@
 # 06 — API партій і FCL
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 03, 04, 05
 
 ## Маршрути (`src/shipments/lots.routes.ts`; усі через `getOwnedWorkspace`, тіла через zod)
@@ -14,5 +14,9 @@ Blocked by: 03, 04, 05
   `shipmentChanged(id,'files')`.
 - `GET /api/workspaces/:id/fcl` — зведення FCL: контекст, комплектність FCL, транспорт,
   отримувачі, звірка маніфесту, ризики, статус.
-- `?lotId=` для `/checklist`, `/discrepancies`, `/risks`, `/parties`.
+- `GET /api/workspaces/:id/lots/:lotId` — вердикти партії (комплектність, розбіжності, ризики,
+  сторони) замість `?lotId=` на кожному маршруті; `POST …/lots/:lotId/parties` — сторони партії.
+- `PATCH /api/workspaces/:id/fcl` — `eu_transit`; решта контексту FCL — `PATCH /api/workspaces/:id`.
+- Маршрути поставки (`/checklist`, `/discrepancies`, `/risks`) для FCL повертають рівень FCL +
+  знахідки партій з позначкою партії.
 - `API_CONTRACT.md` оновлено (збірник як FCL, кінець «no indexing» для збірників).
