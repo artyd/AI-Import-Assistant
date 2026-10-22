@@ -29,6 +29,12 @@ export interface WorkspaceState {
  * undone by a mere recompute.
  */
 export async function refreshWorkspaceState(ws: WorkspaceRow): Promise<WorkspaceState> {
+  if (ws.kind === 'fcl') {
+    // Lazy: fclState imports this module's neighbours; an FCL is judged per lot.
+    const { refreshFclState } = await import('./fclState.js');
+    const s = await refreshFclState(ws);
+    return { checklist: s.checklist, discrepancies: s.discrepancies, risks: s.risks, status: s.status };
+  }
   const snapshot = await loadShipmentSnapshot(ws);
   const { checklist, discrepancies, risks, derivedStatus } = computeVerdicts(snapshot);
   // No matching templates → nothing to persist (the previous rows stay as they were).

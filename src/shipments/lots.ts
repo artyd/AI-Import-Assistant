@@ -20,8 +20,10 @@ export interface LotRow {
   incoterm_in: string | null;
   incoterm_out: string | null;
   product_category: string | null;
+  origin_country: string | null;
   contract_type: 'bilateral' | 'trilateral' | null;
   contract_type_source: string | null;
+  contract_type_reason: string | null;
   status: LotStatus;
   source: 'auto' | 'manual';
   auto_fields: string[];

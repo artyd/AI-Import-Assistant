@@ -29,6 +29,15 @@ vi.mock('../../notifications/notifications.js', () => ({
   insertNotification: vi.fn(async () => { calls.push('alert'); }),
 }));
 
+vi.mock('../fclState.js', () => ({
+  autoFillFclContext: vi.fn(async () => { calls.push('fcl-autopilot'); }),
+  refreshFclState: vi.fn(async () => {
+    calls.push('fcl-verdicts');
+    return { checklist: [], discrepancies: [], risks: [], status: 'docs_in_progress', intakeComplete: true };
+  }),
+}));
+vi.mock('../../documents/classify.js', () => ({ refileFclInbox: vi.fn(async () => { calls.push('refile'); return 0; }) }));
+
 const { shipmentChanged } = await import('../state.js');
 
 const complete = {
@@ -81,6 +90,19 @@ describe('shipmentChanged — order of steps per change', () => {
   });
 });
 
+describe('shipmentChanged — an FCL (Збірник)', () => {
+  it.each([
+    ['documents', ['refile', 'fcl-autopilot', 'fcl-verdicts']],
+    ['files', ['fcl-autopilot', 'fcl-verdicts']],
+    ['context', ['fcl-verdicts']],
+  ] as const)('%s → %j', async (change, steps) => {
+    row = { ...complete, kind: 'fcl' };
+    const res = await shipmentChanged('ws1', change);
+    expect(calls).toEqual(steps);
+    expect(res?.workspace.status).toBe('docs_in_progress');
+  });
+});
+
 /**
  * Pattern guard: every module that writes an input of the shipment verdicts
  * (files, folders, parties, extractions, context) must report it through
@@ -106,7 +128,7 @@ describe('every verdict-input writer reports shipmentChanged', () => {
     'reconciliation/parties.ts', // defines upsertParties
     'instruction/store.ts', // defines updateVersion
     'instruction/realign.ts', // parties realign — callers (mode change) report
-    'documents/collectionFiles.routes.ts', // collections have no verdicts
+    'shipments/fclState.ts', // FCL autopilot — runs inside shipmentChanged
     'shipments/collections.routes.ts',
     'ingest/extraction/extractFields.ts', // upsertExtraction — the worker reports
   ]);

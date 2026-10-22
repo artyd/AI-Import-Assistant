@@ -169,5 +169,13 @@ export function computeVerdicts(s: ShipmentSnapshot, now: number = Date.now()): 
 
 /** Read-only verdicts for a shipment (nothing persisted). */
 export async function shipmentVerdicts(ws: WorkspaceRow): Promise<ShipmentVerdicts> {
+  if (ws.kind === 'fcl') {
+    // An FCL (spec 006): the FCL checklist, with every lot's findings labelled by lot.
+    const { loadFclVerdicts, flattenFcl } = await import('../shipments/fclState.js');
+    const v = await loadFclVerdicts(ws);
+    const { discrepancies, risks } = flattenFcl(v);
+    const checklist = v.level.checklist.map((i) => ({ requirement_key: i.requirement_key, status: i.status, source_file_id: i.source_file_id }));
+    return { checklist, discrepancies, risks, derivedStatus: v.level.derivedStatus };
+  }
   return computeVerdicts(await loadShipmentSnapshot(ws));
 }

@@ -20,7 +20,7 @@ export interface IncotermSuggestion {
  */
 export async function loadDeriveDocs(
   workspaceId: string,
-  opts: { transportMarkdown?: boolean } = {},
+  opts: { transportMarkdown?: boolean; lotId?: string } = {},
 ): Promise<DeriveDoc[]> {
   const { rows } = await query<{
     file_name: string | null;
@@ -43,9 +43,11 @@ export async function loadDeriveDocs(
             } AS markdown
      FROM document_extractions de
      JOIN files f ON f.id = de.file_id
+     LEFT JOIN folders fo ON fo.id = f.folder_id
      WHERE de.workspace_id = $1 AND f.is_latest = true
+       AND ($2::uuid IS NULL OR fo.lot_id = $2)
      ORDER BY f.created_at, f.name, f.id`,
-    [workspaceId],
+    [workspaceId, opts.lotId ?? null],
   );
   return rows.map((r) => ({
     file_name: r.file_name,

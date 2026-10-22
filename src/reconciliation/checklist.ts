@@ -111,7 +111,11 @@ export function resolveItems(
 }
 
 /** Replaces the persisted checklist items for the shipment (what the sidebar reads). */
-export async function persistChecklist(workspaceId: string, items: ChecklistItem[]): Promise<void> {
+export async function persistChecklist(
+  workspaceId: string,
+  items: ChecklistItem[],
+  lotId: string | null = null,
+): Promise<void> {
   // Replace persisted items atomically.
   const client = await pool.connect();
   try {
@@ -119,13 +123,17 @@ export async function persistChecklist(workspaceId: string, items: ChecklistItem
     // Concurrent recomputes (3 index jobs in one workspace) each DELETE+INSERT;
     // under READ COMMITTED both inserts survived → duplicate checklist items.
     await client.query("SELECT pg_advisory_xact_lock(hashtext('checklist:' || $1))", [workspaceId]);
-    await client.query('DELETE FROM workspace_checklist_items WHERE workspace_id = $1', [workspaceId]);
+    // A shipment (and an FCL's own level) has lot_id NULL; each lot its own rows.
+    await client.query(
+      'DELETE FROM workspace_checklist_items WHERE workspace_id = $1 AND lot_id IS NOT DISTINCT FROM $2',
+      [workspaceId, lotId],
+    );
     for (const item of items) {
       await client.query(
         `INSERT INTO workspace_checklist_items
-           (workspace_id, requirement_key, status, source_file_id, updated_at)
-         VALUES ($1, $2, $3, $4, now())`,
-        [workspaceId, item.requirement_key, item.status, item.source_file_id],
+           (workspace_id, requirement_key, status, source_file_id, updated_at, lot_id)
+         VALUES ($1, $2, $3, $4, now(), $5)`,
+        [workspaceId, item.requirement_key, item.status, item.source_file_id, lotId],
       );
     }
     await client.query('COMMIT');

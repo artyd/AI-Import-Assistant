@@ -4,6 +4,8 @@ import { autoFillWorkspaceContext } from './autoContext.js';
 import { isIntakeComplete } from './contextDerive.js';
 import { refreshWorkspaceState, type WorkspaceState } from './status.js';
 import { insertNotification } from '../notifications/notifications.js';
+import { autoFillFclContext, refreshFclState } from './fclState.js';
+import { refileFclInbox } from '../documents/classify.js';
 
 /**
  * Shipment state: the ONE entry point after anything a shipment's verdicts read
@@ -49,6 +51,9 @@ export async function shipmentChanged(
   change: ShipmentChange,
   opts: ShipmentChangeOptions = {},
 ): Promise<ShipmentChangeResult | null> {
+  const kind = await getWorkspaceById(workspaceId);
+  if (kind?.kind === 'fcl') return fclChanged(kind, change, opts);
+
   // 1. Document-derived context (parties, contract mode, Incoterms, origin).
   if (READS_DOCUMENTS.has(change)) {
     try {
@@ -92,4 +97,45 @@ export async function shipmentChanged(
   }
 
   return { ...state, workspace };
+}
+
+/**
+ * The same order for an FCL (Збірник, spec 006): autopilot per lot + FCL, inbox
+ * files re-filed now that their lot may exist, then every lot's verdicts and the
+ * FCL level (`refreshFclState`, which also owns the FCL intake flag).
+ */
+async function fclChanged(
+  initial: WorkspaceRow,
+  change: ShipmentChange,
+  opts: ShipmentChangeOptions,
+): Promise<ShipmentChangeResult | null> {
+  if (READS_DOCUMENTS.has(change) || change === 'files') {
+    try {
+      if (READS_DOCUMENTS.has(change)) await refileFclInbox(initial.id);
+      await autoFillFclContext(initial);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(`FCL autopilot failed for workspace ${initial.id}:`, (err as Error).message);
+    }
+  }
+  const ws = await getWorkspaceById(initial.id);
+  if (!ws) return null;
+  const state = await refreshFclState(ws);
+  const workspace = { ...ws, status: state.status, intake_complete: state.intakeComplete };
+
+  if (opts.alertRisks && ws.responsible_user_id) {
+    const critical = state.risks.filter((r) => r.severity === 'error');
+    if (critical.length > 0) {
+      await insertNotification(
+        ws.responsible_user_id,
+        ws.id,
+        'risk_alert',
+        `Збірник №${ws.number}: критичні ризики (${critical.length}) — ${critical[0]!.title}.`,
+      ).catch((err: Error) => {
+        // eslint-disable-next-line no-console
+        console.error(`Risk alert failed for workspace ${ws.id}:`, err.message);
+      });
+    }
+  }
+  return { checklist: state.checklist, discrepancies: state.discrepancies, risks: state.risks, status: state.status, workspace };
 }

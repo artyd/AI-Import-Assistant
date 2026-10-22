@@ -1,6 +1,6 @@
 # 03 — Вердикти партій + статус FCL
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 01, 02
 
 ## Що зробити

@@ -959,8 +959,10 @@ CREATE TABLE IF NOT EXISTS lots (
   incoterm_in          TEXT,
   incoterm_out         TEXT,
   product_category     TEXT,
+  origin_country       TEXT,
   contract_type        TEXT CHECK (contract_type IN ('bilateral', 'trilateral')),
   contract_type_source TEXT,
+  contract_type_reason TEXT,
   status               TEXT NOT NULL DEFAULT 'draft'
                        CHECK (status IN ('draft', 'docs_in_progress', 'docs_complete', 'customs_ready')),
   source               TEXT NOT NULL DEFAULT 'auto' CHECK (source IN ('auto', 'manual')),

@@ -1,6 +1,6 @@
 # 04 — Зведені перевірки FCL
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 03
 
 ## Що зробити

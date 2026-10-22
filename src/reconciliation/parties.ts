@@ -66,8 +66,10 @@ export function canonicalRole(role: string | null | undefined): PartyRole | null
 export async function upsertParties(
   workspaceId: string,
   parties: PartyInput[],
-  opts: { onlyIfEmpty?: boolean } = {},
+  opts: { onlyIfEmpty?: boolean; lotId?: string | null } = {},
 ): Promise<PartyRow[]> {
+  // A shipment's parties (and an FCL's own) have lot_id NULL; a lot's carry its id.
+  const lotId = opts.lotId ?? null;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -77,21 +79,21 @@ export async function upsertParties(
     await client.query("SELECT pg_advisory_xact_lock(hashtext('parties:' || $1))", [workspaceId]);
     if (opts.onlyIfEmpty) {
       const { rows } = await client.query<{ n: number }>(
-        'SELECT count(*)::int AS n FROM parties WHERE workspace_id = $1',
-        [workspaceId],
+        'SELECT count(*)::int AS n FROM parties WHERE workspace_id = $1 AND lot_id IS NOT DISTINCT FROM $2',
+        [workspaceId, lotId],
       );
       if ((rows[0]?.n ?? 0) > 0) {
         await client.query('COMMIT');
         return [];
       }
     }
-    await client.query('DELETE FROM parties WHERE workspace_id = $1', [workspaceId]);
+    await client.query('DELETE FROM parties WHERE workspace_id = $1 AND lot_id IS NOT DISTINCT FROM $2', [workspaceId, lotId]);
     const out: PartyRow[] = [];
     for (const p of parties) {
       const role = canonicalRole(p.role) ?? p.role;
       const { rows } = await client.query<PartyRow>(
-        `INSERT INTO parties (workspace_id, role, company_name, is_internal, country, contact_info)
-         VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+        `INSERT INTO parties (workspace_id, role, company_name, is_internal, country, contact_info, lot_id)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
          RETURNING id, role, company_name, is_internal, country, contact_info`,
         [
           workspaceId,
@@ -100,6 +102,7 @@ export async function upsertParties(
           p.is_internal ?? false,
           p.country ?? null,
           JSON.stringify(p.contact_info ?? {}),
+          lotId,
         ],
       );
       out.push(rows[0]!);
@@ -143,11 +146,11 @@ export function validateParties(
   return warnings;
 }
 
-export async function listParties(workspaceId: string): Promise<PartyRow[]> {
+export async function listParties(workspaceId: string, lotId: string | null = null): Promise<PartyRow[]> {
   const { rows } = await query<PartyRow>(
     `SELECT id, role, company_name, is_internal, country, contact_info
-     FROM parties WHERE workspace_id = $1 ORDER BY role`,
-    [workspaceId],
+     FROM parties WHERE workspace_id = $1 AND lot_id IS NOT DISTINCT FROM $2 ORDER BY role`,
+    [workspaceId, lotId],
   );
   return rows;
 }

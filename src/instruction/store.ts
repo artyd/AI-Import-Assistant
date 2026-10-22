@@ -52,10 +52,11 @@ export async function getVersion(workspaceId: string, version: number): Promise<
 }
 
 /** The version that drives the compliance check: latest approved/sent. */
-export async function latestApproved(workspaceId: string): Promise<InstructionVersion | null> {
+export async function latestApproved(workspaceId: string, lotId: string | null = null): Promise<InstructionVersion | null> {
   const { rows } = await query<Row>(
-    `${SELECT} WHERE si.workspace_id = $1 AND si.status IN ('approved', 'sent') ORDER BY si.version DESC LIMIT 1`,
-    [workspaceId],
+    `${SELECT} WHERE si.workspace_id = $1 AND si.lot_id IS NOT DISTINCT FROM $2
+       AND si.status IN ('approved', 'sent') ORDER BY si.version DESC LIMIT 1`,
+    [workspaceId, lotId],
   );
   return rows[0] ? toVersion(rows[0]) : null;
 }

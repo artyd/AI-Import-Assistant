@@ -125,16 +125,22 @@ function pickTop(bucket: Map<string, Bucket>): Bucket | null {
  * Deterministic parties + contract-type analysis from stored extractions.
  * Read-only; does not write to `parties`.
  */
-export async function analyzeParties(workspaceId: string): Promise<PartiesAnalysis> {
+export async function analyzeParties(
+  workspaceId: string,
+  opts: { lotId?: string } = {},
+): Promise<PartiesAnalysis> {
+  // In an FCL a lot's parties come from that lot's documents only (spec 006).
   const { rows } = await query<ExtractionRow>(
     `SELECT f.name AS file_name, de.extracted_fields AS fields
      FROM document_extractions de JOIN files f ON f.id = de.file_id
+     LEFT JOIN folders fo ON fo.id = f.folder_id
      WHERE de.workspace_id = $1 AND f.is_latest = true
+       AND ($2::uuid IS NULL OR fo.lot_id = $2)
        -- 'other' is where unrelated files land (e.g. registration certificates of
        -- a different product) — their makers/holders are not parties of this deal.
        AND COALESCE(de.extracted_fields->>'doc_type', 'other') <> 'other'
      ORDER BY f.created_at, f.name, f.id`,
-    [workspaceId],
+    [workspaceId, opts.lotId ?? null],
   );
   const totalDocs = rows.length || 1;
 
