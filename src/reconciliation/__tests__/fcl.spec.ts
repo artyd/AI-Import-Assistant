@@ -86,6 +86,46 @@ describe('computeFclLevel', () => {
   });
 });
 
+// Regressions from the prod acceptance on «Сборник 18 Китай» (2026-10-22).
+describe('computeFclLevel — Сборник 18 regressions', () => {
+  const cmrZirka = file('cz', 'CMR Зирка.pdf', { doc_type: 'transport', transport_doc_kind: 'cmr', gross_weight_kg: 2240, container_numbers: ['ECMU4794246'] });
+  const hA1 = file('a1', 'HBL-A (10).pdf', { doc_type: 'transport', transport_doc_kind: 'hbl', transport_doc_number: 'BW26010230A', consignor_name: 'Shandong Betaine Co Ltd', consignee_name: '"NOVALAIT" LLC', gross_weight_kg: 4040, packages_count: 4 });
+  const hA2 = { ...hA1, file_id: 'a2', file_name: 'HBL-A TELEX.pdf' };
+  const hB = file('b1', 'HBL-B (9).pdf', { doc_type: 'transport', transport_doc_kind: 'hbl', transport_doc_number: 'BW26010230B', consignor_name: 'Hebei Pharm Co Ltd', consignee_name: 'PRIME FORCE UK BUSINESS LIMITED', gross_weight_kg: 14, packages_count: 1 });
+  const t1 = file('t', 'T1.pdf', { doc_type: 'transport', transport_doc_kind: 'transit', gross_weight_kg: 4054 });
+  const exportDecl = file('e', 'Export Declaration.pdf', { doc_type: 'customs_declaration', transport_doc_number: 'CHN3007938P2', buyer: 'PRIME FORCE UK BUSINESS LIMITED' });
+  const md = file('md', 'ВМД оформлена.pdf', { doc_type: 'customs_declaration', transport_doc_number: '26UA205140022085U4', consignee_name: 'ТОВ "НОВАЛАЙТ"', buyer: 'ТОВ "НОВАЛАЙТ"' });
+  const resale = file('r', 'Прайм_ЧЗ инвойс.pdf', { doc_type: 'invoice', seller: 'PRIME FORCE UK BUSINESS LIMITED', buyer: 'PJSC Chervona Zirka' }, { lot_id: 'L2' });
+  const base18 = { transport_mode: 'multimodal', eu_transit: null, consignee: null, lots: lots.map((l) => ({ ...l, consignee: null, recipient: 'PRIME FORCE UK BUSINESS LIMITED' })) };
+
+  it('a CMR is no master bill when the cargo has house bills', () => {
+    const v = computeFclLevel({ ...base18, files: [cmrZirka, hA1, hB] });
+    expect(v.checklist.find((i) => i.requirement_key === 'master_transport')?.status).toBe('missing');
+    expect(v.discrepancies.some((d) => d.field.startsWith('hbl_sum'))).toBe(false);
+  });
+
+  it('requires a house bill per lot whenever there are house bills (multimodal)', () => {
+    const v = computeFclLevel({ ...base18, files: [hA1] });
+    expect(v.checklist.filter((i) => i.requirement_key.startsWith('hbl:')).map((i) => i.status)).toEqual(['verified', 'missing']);
+  });
+
+  it('counts each house bill once, whatever the number of copies', () => {
+    const v = computeFclLevel({ ...base18, files: [hA1, hA2, hB, t1] });
+    // T1 4054 = HBL-A 4040 + HBL-B 14 — no transit discrepancy despite two HBL-A copies.
+    expect(v.discrepancies.filter((d) => d.field.startsWith('transit'))).toEqual([]);
+    const copy = { ...hA2, fields: { ...hA2.fields, gross_weight_kg: 3900 } };
+    const w = computeFclLevel({ ...base18, files: [hA1, copy, hB] });
+    expect(w.discrepancies.find((d) => d.field === 'hbl_versions_gross_weight_kg')?.kind).toBe('suspected');
+  });
+
+  it('takes consignees from house bills / resale invoices, never our own company', () => {
+    const v = computeFclLevel({ ...base18, files: [hA1, hB, resale, exportDecl, md] });
+    expect(v.lotConsignees).toEqual({ L1: '"NOVALAIT" LLC', L2: 'PJSC Chervona Zirka' });
+    const mdItems = v.checklist.filter((i) => i.stage === 'customs').map((i) => `${i.label}:${i.status}`);
+    expect(mdItems).toEqual(['МД — "NOVALAIT" LLC:verified', 'МД — PJSC Chervona Zirka:missing']);
+  });
+});
+
 describe('helpers', () => {
   it('worstStatus', () => {
     expect(worstStatus(['customs_ready', 'docs_complete', 'customs_ready'])).toBe('docs_complete');

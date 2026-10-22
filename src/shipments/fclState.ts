@@ -53,6 +53,8 @@ export interface LotVerdict {
   fileCount: number;
   /** The lot's consignee: set by hand, else the recipient read from its documents. */
   consignee: string | null;
+  /** The recipient party read from the lot's documents. */
+  recipient: string | null;
   intakeComplete: boolean;
 }
 
@@ -105,7 +107,7 @@ export async function loadFclVerdicts(ws: WorkspaceRow, now: number = Date.now()
   const hblLot = matchHblsToLots(files, shapes);
   const seaLike =
     ws.transport_mode === 'sea' ||
-    (ws.transport_mode === null && files.some((f) => docType(f) === 'transport' && transportDocKind(f.file_name, f.fields) === 'hbl'));
+    files.some((f) => docType(f) === 'transport' && transportDocKind(f.file_name, f.fields) === 'hbl');
 
   const lotVerdicts: LotVerdict[] = [];
   for (const lot of lots) {
@@ -138,6 +140,7 @@ export async function loadFclVerdicts(ws: WorkspaceRow, now: number = Date.now()
       verdicts,
       fileCount: files.filter((f) => f.lot_id === lot.id).length,
       consignee: lot.consignee ?? recipient,
+      recipient,
       intakeComplete: view.intake_complete,
     });
   }
@@ -156,10 +159,13 @@ export async function loadFclVerdicts(ws: WorkspaceRow, now: number = Date.now()
       id: v.lot.id,
       name: v.lot.name,
       supplier_name: v.lot.supplier_name,
-      consignee: v.consignee,
+      consignee: v.lot.consignee,
+      recipient: v.recipient,
       derivedStatus: v.verdicts.derivedStatus,
     })),
   });
+  // The FCL level decides each lot's consignee (house bill › resale invoice › recipient).
+  for (const v of lotVerdicts) v.consignee = level.lotConsignees[v.lot.id] ?? v.consignee;
   return { lots: lotVerdicts, level, files };
 }
 

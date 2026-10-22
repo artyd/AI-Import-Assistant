@@ -1,5 +1,6 @@
 import { sameCompany } from '../shipments/contextDerive.js';
-import { docGoods, isManifest, sameGoods, transportDocKind, type AssignFields } from '../shipments/lotAssign.js';
+import { docGoods, isInternalCompany, isManifest, sameGoods, transportDocKind, type AssignFields } from '../shipments/lotAssign.js';
+import { isLikelyDraft } from './reconcile.js';
 import type { WorkspaceStatus } from '../shipments/workspaceAccess.js';
 import type { ChecklistItem } from './checklist.js';
 import type { Discrepancy, DiscrepancyCitation, FlagKind } from './reconcile.js';
@@ -33,8 +34,10 @@ export interface FclLot {
   id: string;
   name: string;
   supplier_name: string;
-  /** Consignee set on the lot by hand, else read from its documents. */
+  /** Consignee set on the lot by hand. */
   consignee: string | null;
+  /** The lot's recipient party (read from its documents), when known. */
+  recipient?: string | null;
   derivedStatus: WorkspaceStatus;
 }
 
@@ -70,6 +73,8 @@ export interface FclLevelVerdicts {
   consignees: ConsigneeCoverage[];
   /** House bill → lot, matched by shipper / goods. */
   hblLot: Record<string, string>;
+  /** The consignee of each lot (by hand, HBL, resale invoice, recipient, FCL). */
+  lotConsignees: Record<string, string | null>;
   containers: string[];
   euTransit: boolean | null;
   /** Files in no lot and no FCL folder (the inbox and unknown folders). */
@@ -176,16 +181,105 @@ export function findManifestFile(files: FclFile[]): FclFile | null {
   );
 }
 
-function masterKinds(mode: string | null): string[] {
+/** Master bill kinds, in priority order. A consolidation with house bills always has a sea MBL. */
+function masterKinds(mode: string | null, hasHbl: boolean): string[] {
+  if (hasHbl || mode === 'sea') return ['mbl'];
   if (mode === 'air') return ['awb'];
   if (mode === 'road') return ['cmr'];
-  if (mode === 'sea') return ['mbl'];
   return ['mbl', 'awb', 'cmr'];
+}
+
+const MASTER_LABEL: Record<string, string> = {
+  mbl: 'Морський коносамент (MBL)',
+  awb: 'Авіанакладна (MAWB)',
+  cmr: 'CMR',
+};
+
+// Ukrainian/Russian → Latin, so «ТОВ "НОВАЛАЙТ"» in the МД matches «"NOVALAIT" LLC» in the HBL.
+const TRANSLIT: Record<string, string> = {
+  а: 'a', б: 'b', в: 'v', г: 'h', ґ: 'g', д: 'd', е: 'e', є: 'ye', ж: 'zh', з: 'z', и: 'y', і: 'i', ї: 'i', й: 'i',
+  к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'kh', ц: 'ts',
+  ч: 'ch', ш: 'sh', щ: 'shch', ь: '', ю: 'yu', я: 'ya', ы: 'y', э: 'e', ё: 'e', ъ: '',
+};
+const ORG_FORMS = /\b(tov|pat|prat|tdv|pp|fop|pjsc|ojsc|jsc|llc|ltd|limited|co|plc|ooo|zao|oao)\b/g;
+
+function latinKey(name: string): string {
+  const t = name.toLowerCase().replace(/[а-яіїєґёыэъ]/g, (c) => TRANSLIT[c] ?? c);
+  return t.replace(/[^a-z0-9 ]+/g, ' ').replace(ORG_FORMS, ' ').replace(/\s+/g, '').replace(/kh/g, 'h').replace(/y/g, 'i');
+}
+
+/** Same company across scripts and legal-form spellings. */
+export function sameParty(a: string | null, b: string | null): boolean {
+  if (!a || !b) return false;
+  if (sameCompany(a, b)) return true;
+  const ka = latinKey(a);
+  const kb = latinKey(b);
+  return !!ka && !!kb && (ka === kb || (Math.min(ka.length, kb.length) >= 5 && (ka.includes(kb) || kb.includes(ka))));
 }
 
 /** Consignee of a document: the consignee field, else the buyer. */
 function consigneeOf(fields: Record<string, unknown> | null): string | null {
   return str(fields?.consignee_name) ?? str(fields?.buyer);
+}
+
+const normDocNo = (s: string | null): string => (s ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+/** One house bill, however many copies of it were uploaded (original, TELEX, re-downloads). */
+export interface HblGroup {
+  key: string;
+  files: FclFile[];
+  /** The copy the checks use: TELEX / original / released first, then issued (PDF) over drafts. */
+  canonical: FclFile;
+}
+
+export function groupHbls(hbls: FclFile[]): HblGroup[] {
+  const groups = new Map<string, FclFile[]>();
+  for (const f of hbls) {
+    const letter = /\bHBL[\s_-]*([A-Z])\b/i.exec(f.file_name.replace(/[_.]/g, ' '))?.[1];
+    const key = normDocNo(str(f.fields?.transport_doc_number)) || (letter ? `HBL-${letter.toUpperCase()}` : f.file_id);
+    groups.set(key, [...(groups.get(key) ?? []), f]);
+  }
+  const rank = (f: FclFile): number =>
+    (/telex|original|released|оригінал|оригинал/i.test(f.file_name) ? 0 : 2) + (isLikelyDraft(f.file_name) ? 1 : 0);
+  return [...groups.entries()].map(([key, files]) => ({
+    key,
+    files,
+    canonical: [...files].sort((a, b) => rank(a) - rank(b))[0]!,
+  }));
+}
+
+/**
+ * A Ukrainian import declaration (МД), not the Chinese export declaration or a
+ * statistics spreadsheet that the extraction also files as a customs paper.
+ */
+export function isImportDeclaration(f: FclFile): boolean {
+  if (str(f.fields?.doc_type) !== 'customs_declaration') return false;
+  const no = str(f.fields?.transport_doc_number) ?? str(f.fields?.registration_number) ?? '';
+  const hay = `${f.file_name} ${no}`;
+  if (/export|експорт|экспорт|报关|出口|\bCHN\d/i.test(hay)) return false;
+  if (/\d{2}UA\d{6}/i.test(hay) || /(^|[^а-яіїєґ])(в?мд)([^а-яіїєґ]|$)|\bMD\b|IM\s?40|імпорт/i.test(hay)) return true;
+  return num(f.fields?.customs_value_uah) !== null || num(f.fields?.duty_uah) !== null || num(f.fields?.vat_uah) !== null;
+}
+
+/**
+ * Who receives a lot: set by hand, else the consignee of its house bill, else the
+ * buyer of our resale invoice in the lot, else the lot's recipient — never one of
+ * our own companies (they are the intermediary, not the consignee); else the FCL's.
+ */
+function lotConsignee(lot: FclLot, lotHbls: FclFile[], lotFiles: FclFile[], fallback: string | null): string | null {
+  if (lot.consignee) return lot.consignee;
+  const outside = (n: string | null): string | null => (n && !isInternalCompany(n) ? n : null);
+  for (const h of lotHbls) {
+    const c = outside(str(h.fields?.consignee_name));
+    if (c) return c;
+  }
+  for (const f of lotFiles) {
+    if (str(f.fields?.doc_type) === 'invoice' && isInternalCompany(str(f.fields?.seller))) {
+      const c = outside(consigneeOf(f.fields));
+      if (c) return c;
+    }
+  }
+  return outside(lot.recipient ?? null) ?? fallback;
 }
 
 export function computeFclLevel(input: FclLevelInput): FclLevelVerdicts {
@@ -196,25 +290,33 @@ export function computeFclLevel(input: FclLevelInput): FclLevelVerdicts {
   const discrepancies: Discrepancy[] = [];
   const checklist: FclChecklistItem[] = [];
 
+  const hbls = transport.filter((f) => kindOf(f) === 'hbl');
+  const hblGroups = groupHbls(hbls);
+  const groupLot = (g: HblGroup): string | null => g.files.map((f) => hblLot[f.file_id]).find(Boolean) ?? null;
+
   // ── 1. FCL completeness ────────────────────────────────────────────────────
-  const kinds = masterKinds(input.transport_mode);
-  const master = transport.find((f) => kinds.includes(kindOf(f) ?? ''));
+  const kinds = masterKinds(input.transport_mode, hbls.length > 0);
+  let master: FclFile | undefined;
+  for (const k of kinds) {
+    master = transport.find((f) => kindOf(f) === k);
+    if (master) break;
+  }
   checklist.push({
     requirement_key: 'master_transport',
-    label: input.transport_mode === 'air' ? 'Авіанакладна (MAWB)' : input.transport_mode === 'road' ? 'CMR' : 'Морський коносамент (MBL)',
+    label: kinds.length === 1 ? MASTER_LABEL[kinds[0]!]! : 'Основний транспортний документ (MBL / MAWB / CMR)',
     stage: 'docs',
     status: master ? 'verified' : 'missing',
     source_file_id: master?.file_id ?? null,
   });
-  if (input.transport_mode === 'sea' || (input.transport_mode === null && transport.some((f) => kindOf(f) === 'hbl'))) {
+  if (input.transport_mode === 'sea' || hbls.length > 0) {
     for (const lot of lots) {
-      const hbl = Object.entries(hblLot).find(([, l]) => l === lot.id)?.[0] ?? null;
+      const g = hblGroups.find((x) => groupLot(x) === lot.id);
       checklist.push({
         requirement_key: `hbl:${lot.id}`,
         label: `HBL — ${lot.name}`,
         stage: 'docs',
-        status: hbl ? 'verified' : 'missing',
-        source_file_id: hbl,
+        status: g ? 'verified' : 'missing',
+        source_file_id: g?.canonical.file_id ?? null,
       });
     }
   }
@@ -230,18 +332,21 @@ export function computeFclLevel(input: FclLevelInput): FclLevelVerdicts {
   checklist.push({ requirement_key: 'manifest', label: 'Маніфест збірника', stage: 'docs', status: manifest ? 'verified' : 'missing', source_file_id: manifest?.file_id ?? null });
 
   // ── 3. Consignees and their customs declarations ──────────────────────────
+  const consignees: Record<string, string | null> = {};
   const consigneeMap = new Map<string, ConsigneeCoverage>();
   for (const lot of lots) {
-    const name = lot.consignee ?? input.consignee;
+    const lotHbls = hblGroups.filter((g) => groupLot(g) === lot.id).flatMap((g) => [g.canonical, ...g.files]);
+    const name = lotConsignee(lot, lotHbls, files.filter((f) => f.lot_id === lot.id), input.consignee);
+    consignees[lot.id] = name;
     if (!name) continue;
-    const key = [...consigneeMap.keys()].find((k) => sameCompany(k, name)) ?? name;
+    const key = [...consigneeMap.keys()].find((k) => sameParty(k, name)) ?? name;
     const entry = consigneeMap.get(key) ?? { name: key, lots: [], customs_declaration_file_id: null };
     entry.lots.push(lot.name);
     consigneeMap.set(key, entry);
   }
-  const declarations = files.filter((f) => str(f.fields?.doc_type) === 'customs_declaration');
+  const declarations = files.filter(isImportDeclaration);
   for (const c of consigneeMap.values()) {
-    const md = declarations.find((d) => sameCompany(consigneeOf(d.fields), c.name) || sameCompany(str(d.fields?.buyer), c.name));
+    const md = declarations.find((d) => sameParty(consigneeOf(d.fields), c.name) || sameParty(str(d.fields?.buyer), c.name));
     c.customs_declaration_file_id = md?.file_id ?? null;
     checklist.push({
       requirement_key: `customs_declaration:${c.name}`,
@@ -254,31 +359,55 @@ export function computeFclLevel(input: FclLevelInput): FclLevelVerdicts {
 
   // ── 2. Transport as a whole ────────────────────────────────────────────────
   const containerSet = new Set<string>();
-  const masterContainers = (master?.fields?.container_numbers as string[] | undefined) ?? [];
   for (const f of transport) for (const c of (f.fields?.container_numbers as string[] | undefined) ?? []) containerSet.add(c);
-  if (master && masterContainers.length > 0) {
+  // The reference container: the master bill's, else the one most transport papers name.
+  const counts = new Map<string, number>();
+  for (const f of transport) for (const c of (f.fields?.container_numbers as string[] | undefined) ?? []) counts.set(c, (counts.get(c) ?? 0) + 1);
+  const refContainers = ((master?.fields?.container_numbers as string[] | undefined) ?? []).length
+    ? ((master!.fields!.container_numbers as string[]))
+    : [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 1).map(([c]) => c);
+  const refDoc = master ?? transport.find((f) => ((f.fields?.container_numbers as string[] | undefined) ?? []).some((c) => refContainers.includes(c)));
+  if (refDoc && refContainers.length > 0) {
     for (const f of transport) {
-      if (f === master) continue;
+      if (f === refDoc) continue;
       const theirs = (f.fields?.container_numbers as string[] | undefined) ?? [];
-      if (theirs.length > 0 && !theirs.some((c) => masterContainers.includes(c))) {
+      if (theirs.length > 0 && !theirs.some((c) => refContainers.includes(c))) {
         discrepancies.push({
           field: 'container_numbers',
-          expected: masterContainers.join(', '),
+          expected: refContainers.join(', '),
           actual: theirs.join(', '),
           severity: 'error',
           kind: 'confirmed',
-          citations: [cite(master, 'transport', masterContainers.join(', ')), cite(f, 'transport', theirs.join(', '))],
+          citations: [cite(refDoc, 'transport', refContainers.join(', ')), cite(f, 'transport', theirs.join(', '))],
         });
       }
     }
   }
 
-  const hbls = transport.filter((f) => kindOf(f) === 'hbl');
-  if (master && hbls.length > 0) {
+  // Copies of one house bill that disagree (a re-issued or edited copy).
+  for (const g of hblGroups) {
+    for (const field of ['gross_weight_kg', 'packages_count', 'consignee_name'] as const) {
+      const values = g.files.map((f) => f.fields?.[field]).filter((v) => v !== null && v !== undefined && v !== '');
+      const distinct = [...new Set(values.map((v) => String(v).trim().toUpperCase()))];
+      if (distinct.length > 1 && !(field === 'consignee_name' && values.every((v, _, all) => sameCompany(String(v), String(all[0]))))) {
+        discrepancies.push({
+          field: `hbl_versions_${field}`,
+          expected: `${g.key}: ${String(g.canonical.fields?.[field] ?? '—')}`,
+          actual: distinct.join(' / '),
+          severity: 'warning',
+          kind: 'suspected',
+          citations: g.files.map((f) => cite(f, 'transport', f.fields?.[field])),
+        });
+      }
+    }
+  }
+
+  const canon = hblGroups.map((g) => g.canonical);
+  if (master && canon.length > 0) {
     for (const field of ['gross_weight_kg', 'packages_count'] as const) {
       const masterValue = num(master.fields?.[field]);
       if (masterValue === null) continue;
-      const values = hbls.map((h) => num(h.fields?.[field]));
+      const values = canon.map((h) => num(h.fields?.[field]));
       if (values.some((v) => v === null)) {
         discrepancies.push({
           field: `hbl_sum_${field}`,
@@ -293,36 +422,44 @@ export function computeFclLevel(input: FclLevelInput): FclLevelVerdicts {
       const sum = values.reduce<number>((a, v) => a + (v ?? 0), 0);
       const off = field === 'packages_count' ? sum !== masterValue : Math.abs(sum - masterValue) > masterValue * WEIGHT_TOLERANCE;
       if (off) {
-        const low = lowConfidence(master, field) || hbls.some((h) => lowConfidence(h, field));
+        const low = lowConfidence(master, field) || canon.some((h) => lowConfidence(h, field));
         discrepancies.push({
           field: `hbl_sum_${field}`,
           expected: String(masterValue),
           actual: String(Math.round(sum * 1000) / 1000),
           severity: low ? 'warning' : 'error',
           kind: low ? 'suspected' : 'confirmed',
-          citations: [cite(master, 'transport', masterValue), ...hbls.map((h) => cite(h, 'transport', h.fields?.[field]))],
+          citations: [cite(master, 'transport', masterValue), ...canon.map((h) => cite(h, 'transport', h.fields?.[field]))],
         });
       }
     }
   }
 
+  // Transit (T1) against the master bill, else against Σ house bills.
   const transit = transport.find((f) => kindOf(f) === 'transit');
-  const mGross = num(master?.fields?.gross_weight_kg);
   const tGross = num(transit?.fields?.gross_weight_kg);
-  if (master && transit && mGross !== null && tGross !== null && Math.abs(mGross - tGross) > mGross * WEIGHT_TOLERANCE) {
-    const kind: FlagKind = lowConfidence(master, 'gross_weight_kg') || lowConfidence(transit, 'gross_weight_kg') ? 'suspected' : 'confirmed';
+  const canonGross = canon.map((h) => num(h.fields?.gross_weight_kg));
+  const refGross = master
+    ? num(master.fields?.gross_weight_kg)
+    : canon.length > 0 && canonGross.every((v) => v !== null)
+      ? Math.round(canonGross.reduce<number>((a, v) => a + (v ?? 0), 0) * 1000) / 1000
+      : null;
+  if (transit && tGross !== null && refGross !== null && Math.abs(refGross - tGross) > refGross * WEIGHT_TOLERANCE) {
+    const refDocs = master ? [master] : canon;
+    const kind: FlagKind =
+      lowConfidence(transit, 'gross_weight_kg') || refDocs.some((d) => lowConfidence(d, 'gross_weight_kg')) ? 'suspected' : 'confirmed';
     discrepancies.push({
-      field: 'transit_gross_weight_kg',
-      expected: String(mGross),
+      field: master ? 'transit_gross_weight_kg' : 'transit_vs_hbl_gross_weight_kg',
+      expected: String(refGross),
       actual: String(tGross),
       severity: kind === 'confirmed' ? 'error' : 'warning',
       kind,
-      citations: [cite(master, 'transport', mGross), cite(transit, 'transport', tGross)],
+      citations: [...refDocs.map((d) => cite(d, 'transport', d.fields?.gross_weight_kg)), cite(transit, 'transport', tGross)],
     });
   }
 
   for (const lot of lots) {
-    const lotHbls = hbls.filter((h) => hblLot[h.file_id] === lot.id);
+    const lotHbls = hblGroups.filter((g) => groupLot(g) === lot.id).map((g) => g.canonical);
     const pl = files.find((f) => f.lot_id === lot.id && str(f.fields?.doc_type) === 'packing_list');
     const plGross = num(pl?.fields?.gross_weight_kg);
     const hGross = lotHbls.map((h) => num(h.fields?.gross_weight_kg));
@@ -405,6 +542,7 @@ export function computeFclLevel(input: FclLevelInput): FclLevelVerdicts {
     risks,
     consignees: [...consigneeMap.values()],
     hblLot,
+    lotConsignees: consignees,
     containers: [...containerSet],
     euTransit,
     unassigned,

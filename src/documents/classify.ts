@@ -404,7 +404,11 @@ export async function refileFclInbox(workspaceId: string): Promise<number> {
     `SELECT f.id FROM files f
      JOIN document_extractions de ON de.file_id = f.id
      WHERE f.workspace_id = $1 AND f.folder_id IS NULL AND f.is_latest = true
-       AND COALESCE(de.extracted_fields->>'doc_type', 'other') <> 'other'
+       -- 'other' papers (labels, vet certificates…) count when they name the goods.
+       AND (COALESCE(de.extracted_fields->>'doc_type', 'other') <> 'other'
+            OR de.extracted_fields->>'product_name' IS NOT NULL
+            OR de.extracted_fields->>'cas_number' IS NOT NULL
+            OR de.extracted_fields->>'batch_number' IS NOT NULL)
      ORDER BY f.created_at`,
     [workspaceId],
   );
