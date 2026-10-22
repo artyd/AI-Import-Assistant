@@ -77,6 +77,16 @@ export const DISCREPANCY_FIELD_LABELS: Record<string, string> = {
   buyer: 'покупець',
   documents: 'документи',
   instruction: 'виконання інструкції постачальнику',
+  // FCL (Збірник) checks, spec 006.
+  container_numbers: 'номер контейнера',
+  hbl_sum_gross_weight_kg: 'сума ваги брутто HBL проти MBL',
+  hbl_sum_packages_count: 'сума місць HBL проти MBL',
+  transit_gross_weight_kg: 'вага брутто T1 проти MBL',
+  lot_gross_weight_kg: 'вага брутто партії (PL проти HBL)',
+  manifest_qty: 'кількість у маніфесті',
+  manifest_price: 'ціна в маніфесті',
+  manifest_line: 'позиція маніфесту без інвойсу',
+  manifest_extra: 'товар поза маніфестом',
 };
 
 export function fieldLabel(field: string): string {

@@ -8,7 +8,11 @@ import { upsertParties } from '../reconciliation/parties.js';
 import { requiredDocumentTypes, persistChecklist, type ChecklistItem } from '../reconciliation/checklist.js';
 import { computeVerdicts, type ShipmentFile, type ShipmentVerdicts } from '../reconciliation/verdicts.js';
 import { registryChecksForDocs, type RegistryFinding } from '../customs/drugRegistry.js';
-import { computeFclLevel, matchHblsToLots, type FclLevelVerdicts, type FclLot } from '../reconciliation/fcl.js';
+import { computeFclLevel, findManifestFile, matchHblsToLots, type FclLevelVerdicts, type FclLot } from '../reconciliation/fcl.js';
+import type { ManifestLine } from '../reconciliation/manifest.js';
+import { readStoredFile } from '../lib/storage.js';
+import { parseWorkbook, extractRows } from '../analysis/sheets/parse.js';
+import { selectActualSheet } from '../analysis/sheets/selectActualSheet.js';
 import { latestApproved } from '../instruction/store.js';
 import { transportDocKind } from './lotAssign.js';
 import type { Discrepancy } from '../reconciliation/discrepancies.js';
@@ -63,6 +67,29 @@ function docType(f: FclFileRow): string | null {
   return typeof t === 'string' ? t : null;
 }
 
+/**
+ * Lines of the FCL manifest spreadsheet, through the consolidated analysis parser
+ * (same actual-sheet choice and columns). null when there is no readable manifest.
+ */
+export async function loadManifestLines(fileId: string): Promise<ManifestLine[] | null> {
+  const { rows } = await query<{ name: string; type: string; disk_path: string }>(
+    'SELECT name, type, disk_path FROM files WHERE id = $1',
+    [fileId],
+  );
+  const f = rows[0];
+  if (!f || (f.type !== 'xlsx' && f.type !== 'csv')) return null;
+  try {
+    const sheets = parseWorkbook(await readStoredFile(f.disk_path), f.name);
+    const { selected } = selectActualSheet(sheets, new Date());
+    if (!selected) return null;
+    return extractRows(selected).rows.map((r) => ({ name: r.name, qtyKg: r.qtyKg, unitPrice: r.unitPrice, code: r.uctzedCode ?? null }));
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(`Manifest ${fileId} could not be parsed:`, (err as Error).message);
+    return null;
+  }
+}
+
 /** Read-only verdicts of an FCL: every lot + the FCL level. */
 export async function loadFclVerdicts(ws: WorkspaceRow, now: number = Date.now()): Promise<FclVerdicts> {
   const [lots, files, { rows: parties }] = await Promise.all([
@@ -115,12 +142,16 @@ export async function loadFclVerdicts(ws: WorkspaceRow, now: number = Date.now()
     });
   }
 
+  const manifestFile = findManifestFile(files);
+  const manifestLines = manifestFile ? await loadManifestLines(manifestFile.file_id) : null;
+
   const fclRecipient = parties.find((p) => p.lot_id === null && p.role === 'recipient')?.company_name ?? null;
   const level = computeFclLevel({
     transport_mode: ws.transport_mode,
     eu_transit: ws.eu_transit,
     consignee: fclRecipient,
     files: files.map((f) => ({ ...f })),
+    manifest: manifestFile && manifestLines ? { file_id: manifestFile.file_id, file_name: manifestFile.file_name, lines: manifestLines } : null,
     lots: lotVerdicts.map((v) => ({
       id: v.lot.id,
       name: v.lot.name,

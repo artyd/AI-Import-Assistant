@@ -3,7 +3,8 @@ import { docGoods, isManifest, sameGoods, transportDocKind, type AssignFields } 
 import type { WorkspaceStatus } from '../shipments/workspaceAccess.js';
 import type { ChecklistItem } from './checklist.js';
 import type { Discrepancy, DiscrepancyCitation, FlagKind } from './reconcile.js';
-import type { Risk } from './risks.js';
+import { fieldLabel, type Risk } from './risks.js';
+import { invoiceLines, reconcileManifest, type ManifestLine, type ManifestReconciliation } from './manifest.js';
 
 /**
  * FCL-level verdicts (Збірник, spec 006 #04) — pure, no I/O. The lots are judged
@@ -52,6 +53,8 @@ export interface FclLevelInput {
   consignee: string | null;
   files: FclFile[];
   lots: FclLot[];
+  /** Lines of the manifest file (parsed by the analysis sheet parser), when there is one. */
+  manifest?: { file_id: string; file_name: string; lines: ManifestLine[] } | null;
 }
 
 export interface ConsigneeCoverage {
@@ -71,6 +74,8 @@ export interface FclLevelVerdicts {
   euTransit: boolean | null;
   /** Files in no lot and no FCL folder (the inbox and unknown folders). */
   unassigned: number;
+  /** Manifest ↔ invoices; null when there is no manifest and no invoice line. */
+  manifest: ManifestReconciliation | null;
   /** Status of the FCL level alone. */
   levelStatus: WorkspaceStatus;
   /** The FCL status: the worst of the lots and the FCL level. */
@@ -161,6 +166,16 @@ export function deriveEuTransit(explicit: boolean | null, files: FclFile[]): boo
   return EU_RX.test(discharge) ? true : null;
 }
 
+/** The manifest: a file the extraction / name marks as one, or a spreadsheet in the manifest folder. */
+export function findManifestFile(files: FclFile[]): FclFile | null {
+  const sheet = (f: FclFile) => f.file_type === 'xlsx' || f.file_type === 'csv';
+  return (
+    files.find((f) => isManifest({ file_name: f.file_name, file_type: f.file_type, fields: f.fields as AssignFields | null })) ??
+    files.find((f) => sheet(f) && /маніфест|manifest/i.test(f.folder_name ?? '')) ??
+    null
+  );
+}
+
 function masterKinds(mode: string | null): string[] {
   if (mode === 'air') return ['awb'];
   if (mode === 'road') return ['cmr'];
@@ -211,7 +226,7 @@ export function computeFclLevel(input: FclLevelInput): FclLevelVerdicts {
       checklist.push({ requirement_key: 'cmr', label: 'CMR (автоплече до України)', stage: 'docs', status: cmr ? 'verified' : 'missing', source_file_id: cmr?.file_id ?? null });
     }
   }
-  const manifest = files.find((f) => isManifest({ file_name: f.file_name, file_type: f.file_type, fields: f.fields as AssignFields | null }) || /маніфест/i.test(f.folder_name ?? '') && (f.file_type === 'xlsx' || f.file_type === 'csv'));
+  const manifest = findManifestFile(files);
   checklist.push({ requirement_key: 'manifest', label: 'Маніфест збірника', stage: 'docs', status: manifest ? 'verified' : 'missing', source_file_id: manifest?.file_id ?? null });
 
   // ── 3. Consignees and their customs declarations ──────────────────────────
@@ -326,6 +341,16 @@ export function computeFclLevel(input: FclLevelInput): FclLevelVerdicts {
     }
   }
 
+  // ── Manifest ↔ the lots' invoices (#05) ────────────────────────────────────
+  const lines = invoiceLines(files, Object.fromEntries(lots.map((l) => [l.id, l.name])));
+  let manifestRecon: ManifestReconciliation | null = null;
+  if (input.manifest) {
+    manifestRecon = reconcileManifest({ ...input.manifest, built: false }, lines);
+    discrepancies.push(...manifestRecon.discrepancies);
+  } else if (lines.length > 0) {
+    manifestRecon = reconcileManifest({ file_id: null, file_name: 'зібрано з інвойсів', built: true, lines: [] }, lines);
+  }
+
   // ── Risks of the FCL level ─────────────────────────────────────────────────
   const risks: Risk[] = [];
   const unassigned = files.filter((f) => f.lot_id === null && !/маніфест|транспорт|митниц/i.test(f.folder_name ?? '')).length;
@@ -355,7 +380,7 @@ export function computeFclLevel(input: FclLevelInput): FclLevelVerdicts {
       code: `fcl_discrepancy_${d.field}`,
       category: 'discrepancy',
       severity: 'error',
-      title: `Розбіжність FCL: ${d.field}`,
+      title: `Розбіжність FCL: ${fieldLabel(d.field)}`,
       detail: `очікувалось ${d.expected}, фактично ${d.actual}`,
       source_file_id: d.citations[1]?.file_id ?? null,
     });
@@ -383,6 +408,7 @@ export function computeFclLevel(input: FclLevelInput): FclLevelVerdicts {
     containers: [...containerSet],
     euTransit,
     unassigned,
+    manifest: manifestRecon,
     levelStatus,
     derivedStatus,
   };

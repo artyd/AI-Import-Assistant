@@ -1,6 +1,6 @@
 # 05 — Маніфест ↔ документи
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 04
 
 ## Що зробити
