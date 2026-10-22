@@ -118,6 +118,19 @@ describe('computeFclLevel — Сборник 18 regressions', () => {
     expect(w.discrepancies.find((d) => d.field === 'hbl_versions_gross_weight_kg')?.kind).toBe('suspected');
   });
 
+  it('one edited copy does not decide the sums: majority figures, findings only suspected', () => {
+    const hC = (id: string, name: string, g: number) =>
+      file(id, name, { doc_type: 'transport', transport_doc_kind: 'hbl', transport_doc_number: 'BW26010230C', consignor_name: 'Shandong Betaine Co Ltd', gross_weight_kg: g, packages_count: 4 });
+    const t1c = file('t', 'T1.pdf', { doc_type: 'transport', transport_doc_kind: 'transit', gross_weight_kg: 10720 });
+    const v = computeFclLevel({
+      ...base18,
+      files: [hC('c0', 'HBL-C TELEX edited.pdf', 10150), hC('c1', 'HBL-C (10).pdf', 10720), hC('c2', 'HBL-C TELEX.pdf', 10720), t1c],
+    });
+    expect(v.discrepancies.some((d) => d.field.startsWith('transit'))).toBe(false);
+    const w = computeFclLevel({ ...base18, files: [hC('c0', 'HBL-C TELEX edited.pdf', 10150), hC('c1', 'HBL-C (10).pdf', 10720), hC('c2', 'HBL-C TELEX.pdf', 10720), { ...t1c, fields: { ...t1c.fields, gross_weight_kg: 9000 } }] });
+    expect(w.discrepancies.find((d) => d.field.startsWith('transit'))?.kind).toBe('suspected');
+  });
+
   it('takes consignees from house bills / resale invoices, never our own company', () => {
     const v = computeFclLevel({ ...base18, files: [hA1, hB, resale, exportDecl, md] });
     expect(v.lotConsignees).toEqual({ L1: '"NOVALAIT" LLC', L2: 'PJSC Chervona Zirka' });

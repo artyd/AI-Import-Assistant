@@ -228,8 +228,10 @@ const normDocNo = (s: string | null): string => (s ?? '').toUpperCase().replace(
 export interface HblGroup {
   key: string;
   files: FclFile[];
-  /** The copy the checks use: TELEX / original / released first, then issued (PDF) over drafts. */
+  /** The copy the checks use: the figures most copies carry, then TELEX / original, then issued over drafts. */
   canonical: FclFile;
+  /** Copies disagree on weight / packages — sums built on this bill are only suspected. */
+  conflicting: boolean;
 }
 
 export function groupHbls(hbls: FclFile[]): HblGroup[] {
@@ -241,11 +243,17 @@ export function groupHbls(hbls: FclFile[]): HblGroup[] {
   }
   const rank = (f: FclFile): number =>
     (/telex|original|released|оригінал|оригинал/i.test(f.file_name) ? 0 : 2) + (isLikelyDraft(f.file_name) ? 1 : 0);
-  return [...groups.entries()].map(([key, files]) => ({
-    key,
-    files,
-    canonical: [...files].sort((a, b) => rank(a) - rank(b))[0]!,
-  }));
+  // Copies that disagree: the figures most copies carry win (a single edited copy
+  // must not decide the sums), then TELEX / original, then issued over drafts.
+  const signature = (f: FclFile): string => `${num(f.fields?.gross_weight_kg) ?? ''}|${num(f.fields?.packages_count) ?? ''}`;
+  return [...groups.entries()].map(([key, files]) => {
+    const votes = new Map<string, number>();
+    for (const f of files) votes.set(signature(f), (votes.get(signature(f)) ?? 0) + 1);
+    const canonical = [...files].sort(
+      (a, b) => (votes.get(signature(b)) ?? 0) - (votes.get(signature(a)) ?? 0) || rank(a) - rank(b),
+    )[0]!;
+    return { key, files, canonical, conflicting: votes.size > 1 };
+  });
 }
 
 /**
@@ -403,6 +411,7 @@ export function computeFclLevel(input: FclLevelInput): FclLevelVerdicts {
   }
 
   const canon = hblGroups.map((g) => g.canonical);
+  const shaky = hblGroups.some((g) => g.conflicting);
   if (master && canon.length > 0) {
     for (const field of ['gross_weight_kg', 'packages_count'] as const) {
       const masterValue = num(master.fields?.[field]);
@@ -422,7 +431,7 @@ export function computeFclLevel(input: FclLevelInput): FclLevelVerdicts {
       const sum = values.reduce<number>((a, v) => a + (v ?? 0), 0);
       const off = field === 'packages_count' ? sum !== masterValue : Math.abs(sum - masterValue) > masterValue * WEIGHT_TOLERANCE;
       if (off) {
-        const low = lowConfidence(master, field) || canon.some((h) => lowConfidence(h, field));
+        const low = shaky || lowConfidence(master, field) || canon.some((h) => lowConfidence(h, field));
         discrepancies.push({
           field: `hbl_sum_${field}`,
           expected: String(masterValue),
@@ -447,7 +456,7 @@ export function computeFclLevel(input: FclLevelInput): FclLevelVerdicts {
   if (transit && tGross !== null && refGross !== null && Math.abs(refGross - tGross) > refGross * WEIGHT_TOLERANCE) {
     const refDocs = master ? [master] : canon;
     const kind: FlagKind =
-      lowConfidence(transit, 'gross_weight_kg') || refDocs.some((d) => lowConfidence(d, 'gross_weight_kg')) ? 'suspected' : 'confirmed';
+      (!master && shaky) || lowConfidence(transit, 'gross_weight_kg') || refDocs.some((d) => lowConfidence(d, 'gross_weight_kg')) ? 'suspected' : 'confirmed';
     discrepancies.push({
       field: master ? 'transit_gross_weight_kg' : 'transit_vs_hbl_gross_weight_kg',
       expected: String(refGross),
@@ -459,14 +468,16 @@ export function computeFclLevel(input: FclLevelInput): FclLevelVerdicts {
   }
 
   for (const lot of lots) {
-    const lotHbls = hblGroups.filter((g) => groupLot(g) === lot.id).map((g) => g.canonical);
+    const lotGroups = hblGroups.filter((g) => groupLot(g) === lot.id);
+    const lotHbls = lotGroups.map((g) => g.canonical);
     const pl = files.find((f) => f.lot_id === lot.id && str(f.fields?.doc_type) === 'packing_list');
     const plGross = num(pl?.fields?.gross_weight_kg);
     const hGross = lotHbls.map((h) => num(h.fields?.gross_weight_kg));
     if (!pl || plGross === null || lotHbls.length === 0 || hGross.some((v) => v === null)) continue;
     const sum = hGross.reduce<number>((a, v) => a + (v ?? 0), 0);
     if (Math.abs(sum - plGross) > plGross * WEIGHT_TOLERANCE) {
-      const kind: FlagKind = lowConfidence(pl, 'gross_weight_kg') || lotHbls.some((h) => lowConfidence(h, 'gross_weight_kg')) ? 'suspected' : 'confirmed';
+      const kind: FlagKind =
+        lotGroups.some((g) => g.conflicting) || lowConfidence(pl, 'gross_weight_kg') || lotHbls.some((h) => lowConfidence(h, 'gross_weight_kg')) ? 'suspected' : 'confirmed';
       discrepancies.push({
         field: 'lot_gross_weight_kg',
         expected: `${lot.name}: ${plGross}`,
