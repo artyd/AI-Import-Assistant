@@ -1,6 +1,6 @@
 # 02 — Читання файлів FCL + авторозкладання по партіях
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 01
 
 ## Що зробити
@@ -12,7 +12,8 @@ Blocked by: 01
 - Чистий модуль `src/shipments/lotAssign.ts`:
   `assignLot(doc, lots, ctx) → { target: lot | 'new' | 'fcl' | 'inbox', reason, confidence }`
   за правилами спеки (продавець → посередник/ланцюг → збіг товарів → виробник/експортер/
-  batch → HBL shipper). Нова партія лише з якірних документів (invoice/contract/PL/HBL).
+  batch). Нова партія лише з якірних документів (invoice/contract/PL). HBL лишається в Транспорті FCL
+  і прив'язується до партії за shipper у вердиктах.
 - `classifyAndFile` для `kind='fcl'`: замість `DOC_TYPE_TO_FOLDER` — `assignLot`; створює партію
   та її папку «Партія — <постачальник>» під advisory-lock на workspace; FCL-документи →
   `02_Транспорт` / `03_Митниця` / `01_Маніфест`; невпевнене → Інбокс із підказкою.

@@ -44,6 +44,8 @@ const HEADER_FIELDS = [
   'manufacture_date',
   'transport_mode',
   'transport_doc_number',
+  'transport_doc_kind',
+  'vessel',
   'place_of_loading',
   'place_of_discharge',
   'final_destination',
@@ -74,6 +76,7 @@ export function mergeExtractions(parts: ExtractedFields[]): ExtractedFields | nu
     (t) => t !== merged.doc_type && t !== 'other',
   );
   merged.line_items = parts.flatMap((p) => p.line_items);
+  merged.container_numbers = [...new Set(parts.flatMap((p) => p.container_numbers ?? []))];
 
   // Dedupe by name + role: the same company as seller (legal address) and as
   // consignor (warehouse address) are two facts — deduping by name alone dropped

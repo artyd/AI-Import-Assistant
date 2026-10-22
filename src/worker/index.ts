@@ -28,7 +28,7 @@ import {
   extractDocumentFieldsFromDocumentWithMeta,
   type ExtractedFields,
 } from '../ingest/extraction/extractFields.js';
-import { classifyAndFile } from '../documents/classify.js';
+import { classifyAndFile, needsAutoFiling } from '../documents/classify.js';
 import { shipmentChanged } from '../shipments/state.js';
 import { maybeReconcileBatch } from '../reconciliation/reconcileBatch.js';
 import { scanAndNotify } from '../notifications/reminders.js';
@@ -181,11 +181,7 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
         // moves the file; low confidence stays in the inbox with a suggestion for
         // the user to confirm. Guarded on folder_id IS NULL so we never touch a
         // file the user already placed by hand.
-        const { rows: cur } = await query<{ folder_id: string | null }>(
-          'SELECT folder_id FROM files WHERE id = $1',
-          [file.id],
-        );
-        if (cur[0] && cur[0].folder_id === null) {
+        if (await needsAutoFiling(file.id)) {
           const res = await classifyAndFile(file.workspace_id, file.id, { move: true });
           if (res?.to) {
             // eslint-disable-next-line no-console

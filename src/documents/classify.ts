@@ -3,7 +3,9 @@ import { readStoredFile } from '../lib/storage.js';
 import { extractText } from '../ingest/extract/index.js';
 import { loadFileMarkdown } from '../ingest/markdown/store.js';
 import { classifyDocTypeCheap } from '../ingest/extraction/extractFields.js';
-import type { FileType } from '../shipments/folders.js';
+import { fclFolderRole, type FileType } from '../shipments/folders.js';
+import { assignLot } from '../shipments/lotAssign.js';
+import { ensureLot, fclFolderId, loadLotProfiles, lotFolderId } from '../shipments/lots.js';
 
 /**
  * Inbox auto-sort. Determines a document's category and MOVES it into the
@@ -209,6 +211,8 @@ export async function classifyAndFile(
   const file = rows[0];
   if (!file) return null;
 
+  if (await isFclWorkspace(workspaceId)) return classifyIntoFcl(workspaceId, file, move);
+
   const empty: ClassifyResult = {
     fileId: file.id,
     name: file.name,
@@ -297,6 +301,121 @@ export async function classifyAndFile(
   };
 }
 
+async function isFclWorkspace(workspaceId: string): Promise<boolean> {
+  const { rows } = await query<{ kind: string }>('SELECT kind FROM workspaces WHERE id = $1', [workspaceId]);
+  return rows[0]?.kind === 'fcl';
+}
+
+/**
+ * FCL (Збірник) filing: the document goes to its lot's folder, or to an FCL folder
+ * (manifest / transport / customs), by `assignLot` — a new supplier on an invoice,
+ * contract or packing list opens a new lot. Anything ambiguous stays in the inbox
+ * with the likely lot as a suggestion.
+ */
+async function classifyIntoFcl(workspaceId: string, file: FileRow, move: boolean): Promise<ClassifyResult> {
+  const base = { fileId: file.id, name: file.name, from: file.folder_name };
+  const { rows } = await query<{ fields: Record<string, unknown> }>(
+    'SELECT extracted_fields AS fields FROM document_extractions WHERE file_id = $1 ORDER BY extracted_at DESC LIMIT 1',
+    [file.id],
+  );
+  let fields: Record<string, unknown> | null = rows[0]?.fields ?? null;
+  let confidence: Confidence = 'high';
+  if (!fields || !fields.doc_type || fields.doc_type === 'other') {
+    // No usable extraction: the filename/LLM type alone can still place FCL papers.
+    const { docType, confidence: c } = await resolveDocType(file);
+    if (docType && docType !== 'photos') {
+      fields = { ...(fields ?? {}), doc_type: docType };
+      confidence = c ?? 'low';
+    }
+  }
+
+  const assignment = assignLot({ file_name: file.name, file_type: file.type, fields }, await loadLotProfiles(workspaceId));
+
+  let targetId: string | null = null;
+  let targetName: string | null = null;
+  if (assignment.kind === 'fcl') {
+    targetId = await fclFolderId(workspaceId, assignment.folder);
+  } else if (assignment.kind === 'lot') {
+    targetId = await lotFolderId(assignment.lotId);
+    if (assignment.confidence === 'medium' && confidence === 'high') confidence = 'medium';
+  } else if (assignment.kind === 'new') {
+    if (move && confidence !== 'low') targetId = (await ensureLot(workspaceId, assignment.supplierName, 'auto')).folderId;
+  } else if (assignment.suggestLotId) {
+    targetId = await lotFolderId(assignment.suggestLotId);
+    confidence = 'low';
+  } else {
+    await query(
+      `UPDATE files SET suggested_folder_id = NULL, folder_reason = $1, folder_confidence = NULL
+       WHERE id = $2 AND workspace_id = $3`,
+      [assignment.reason, file.id, workspaceId],
+    );
+    return { ...base, to: null, reason: assignment.reason, confidence: null, suggested: null };
+  }
+  if (targetId) {
+    const { rows: fo } = await query<{ name: string }>('SELECT name FROM folders WHERE id = $1', [targetId]);
+    targetName = fo[0]?.name ?? null;
+  }
+  if (!targetId || !targetName) return { ...base, to: null, reason: assignment.reason, confidence: null, suggested: null };
+
+  if (!move || confidence === 'low' || assignment.kind === 'inbox') {
+    await query(
+      `UPDATE files SET suggested_folder_id = $1, folder_reason = $2, folder_confidence = $3
+       WHERE id = $4 AND workspace_id = $5`,
+      [targetId, assignment.reason, confidence, file.id, workspaceId],
+    );
+    return { ...base, to: null, reason: assignment.reason, confidence, suggested: targetName };
+  }
+
+  const moved = await query(
+    `UPDATE files SET folder_id = $1, suggested_folder_id = NULL, folder_reason = $2, folder_confidence = $3
+     WHERE id = $4 AND workspace_id = $5 AND folder_id IS NOT DISTINCT FROM $6`,
+    [targetId, assignment.reason, confidence, file.id, workspaceId, file.folder_id],
+  );
+  if ((moved.rowCount ?? 0) === 0) return { ...base, to: null, reason: null, confidence: null, suggested: null };
+  return { ...base, to: targetName, reason: assignment.reason, confidence, suggested: null };
+}
+
+/**
+ * Whether the worker should auto-file a freshly read file: an inbox file, or — in
+ * an FCL — a file in a folder that is neither a lot nor an FCL folder (the type
+ * folders of collections made before spec 006), so it still reaches its lot.
+ */
+export async function needsAutoFiling(fileId: string): Promise<boolean> {
+  const { rows } = await query<{ folder_id: string | null; folder_name: string | null; lot_id: string | null; kind: string }>(
+    `SELECT f.folder_id, fo.name AS folder_name, fo.lot_id, w.kind
+     FROM files f JOIN workspaces w ON w.id = f.workspace_id
+     LEFT JOIN folders fo ON fo.id = f.folder_id
+     WHERE f.id = $1`,
+    [fileId],
+  );
+  const r = rows[0];
+  if (!r) return false;
+  if (r.folder_id === null) return true;
+  return r.kind === 'fcl' && r.lot_id === null && fclFolderRole(r.folder_name ?? '') === null;
+}
+
+/**
+ * FCL: files read earlier than the lot they belong to (a CoA processed before its
+ * supplier's invoice opened the lot) stay in the inbox. Re-run the assignment for
+ * inbox files that already have an extraction — no LLM call, only lookups.
+ */
+export async function refileFclInbox(workspaceId: string): Promise<number> {
+  const { rows } = await query<{ id: string }>(
+    `SELECT f.id FROM files f
+     JOIN document_extractions de ON de.file_id = f.id
+     WHERE f.workspace_id = $1 AND f.folder_id IS NULL AND f.is_latest = true
+       AND COALESCE(de.extracted_fields->>'doc_type', 'other') <> 'other'
+     ORDER BY f.created_at`,
+    [workspaceId],
+  );
+  let moved = 0;
+  for (const { id } of rows) {
+    const res = await classifyAndFile(workspaceId, id, { move: true });
+    if (res?.to) moved++;
+  }
+  return moved;
+}
+
 export interface SortInboxResult {
   moved: { fileId: string; name: string; to: string; reason: string | null }[];
   // Left in inbox: either a low-confidence suggestion (suggested set) or truly
@@ -306,10 +425,15 @@ export interface SortInboxResult {
 
 /** Classifies and files every inbox (folder_id IS NULL) file. */
 export async function sortInbox(workspaceId: string): Promise<SortInboxResult> {
-  const { rows } = await query<{ id: string }>(
-    'SELECT id FROM files WHERE workspace_id = $1 AND folder_id IS NULL ORDER BY created_at',
+  // An FCL also re-sorts files left in pre-spec-006 type folders (needsAutoFiling).
+  const fcl = await isFclWorkspace(workspaceId);
+  const { rows: all } = await query<{ id: string; folder_id: string | null }>(
+    `SELECT id, folder_id FROM files WHERE workspace_id = $1 ${fcl ? 'AND is_latest = true' : 'AND folder_id IS NULL'}
+     ORDER BY created_at`,
     [workspaceId],
   );
+  const rows = [];
+  for (const r of all) if (r.folder_id === null || (await needsAutoFiling(r.id))) rows.push(r);
 
   const moved: SortInboxResult['moved'] = [];
   const unclassified: SortInboxResult['unclassified'] = [];

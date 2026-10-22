@@ -1,4 +1,5 @@
 import { pool, query } from '../db/pool.js';
+import { INTERNAL_COMPANIES } from './internalCompanies.js';
 import type { WorkspaceRow } from '../shipments/workspaceAccess.js';
 
 /**
@@ -32,7 +33,6 @@ export interface PartyRow {
   contact_info: Record<string, unknown>;
 }
 
-const INTERNAL_COMPANIES = ['AGroup95', 'PrimeForce'];
 
 // Free-text/legacy role labels (UA/RU/EN) → the three fixed slots. Used to bucket
 // extracted or historical roles when reading; upserts write canonical values.

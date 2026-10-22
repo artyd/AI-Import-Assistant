@@ -1,6 +1,6 @@
 # 01 — Модель FCL + міграція збірників
 
-Status: ready-for-agent
+Status: resolved
 
 ## Що зробити
 

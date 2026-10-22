@@ -55,6 +55,17 @@ export const DOC_TYPES: readonly DocType[] = [
   'other',
 ];
 
+export type TransportDocKind = 'mbl' | 'hbl' | 'awb' | 'cmr' | 'transit' | 'manifest' | 'other';
+export const TRANSPORT_DOC_KINDS: readonly TransportDocKind[] = [
+  'mbl',
+  'hbl',
+  'awb',
+  'cmr',
+  'transit',
+  'manifest',
+  'other',
+];
+
 export type Confidence = 'high' | 'medium' | 'low';
 const CONFIDENCE_LEVELS: readonly Confidence[] = ['high', 'medium', 'low'];
 
@@ -149,6 +160,12 @@ export interface ExtractedFields {
   /** Mode of THIS transport document (AWB → air, CMR → road, B/L → sea). */
   transport_mode: 'air' | 'road' | 'sea' | 'rail' | 'courier' | null;
   transport_doc_number: string | null;
+  /** What kind of transport paper this is — the FCL checks need the master bill
+   *  apart from the house bills, the transit (T1/NCTS) and the CMR (spec 006). */
+  transport_doc_kind?: TransportDocKind | null;
+  /** Container numbers stated in the document (ISO 6346, e.g. ECMU4794246). */
+  container_numbers?: string[];
+  vessel?: string | null;
   place_of_loading: string | null;
   place_of_discharge: string | null;
   final_destination: string | null;
@@ -263,6 +280,21 @@ const EXTRACTION_TOOL: ChatTool = {
           '(AWB/HAWB — air, CMR — road, B/L — sea, СМГС — rail, експрес-накладна — courier).',
       },
       transport_doc_number: { type: 'string', description: 'Номер транспортного документа (AWB, CMR, B/L, MRN транзиту).' },
+      transport_doc_kind: {
+        type: 'string',
+        enum: TRANSPORT_DOC_KINDS as unknown as string[],
+        description:
+          'ЛИШЕ для транспортного документа — його вид: mbl — морський коносамент перевізника на ' +
+          'контейнер (Master B/L); hbl — коносамент експедитора на частину вантажу (House B/L, HBL); ' +
+          'awb — авіанакладна (AWB/HAWB/MAWB); cmr — автомобільна накладна CMR; transit — транзитна ' +
+          'декларація (T1, NCTS, MRN); manifest — маніфест / перелік вантажів збірного контейнера; other — інше.',
+      },
+      container_numbers: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Номери контейнерів, вказані в документі (напр. ECMU4794246). Інакше — порожній масив.',
+      },
+      vessel: { type: 'string', description: 'Судно (і рейс), якщо вказано в транспортному документі.' },
       place_of_loading: { type: 'string', description: 'Місце/аеропорт/порт відвантаження (звідки).' },
       place_of_discharge: { type: 'string', description: 'Місце/аеропорт/порт призначення цього перевезення (куди).' },
       final_destination: { type: 'string', description: 'Кінцевий пункт призначення вантажу, якщо вказано окремо.' },
@@ -496,6 +528,9 @@ function normalize(input: Record<string, unknown>): ExtractedFields {
     manufacture_date: toStr(input.manufacture_date),
     transport_mode: oneOf(input.transport_mode, ['air', 'road', 'sea', 'rail', 'courier'] as const),
     transport_doc_number: toStr(input.transport_doc_number),
+    transport_doc_kind: oneOf(input.transport_doc_kind, TRANSPORT_DOC_KINDS),
+    container_numbers: normalizeContainers(input.container_numbers),
+    vessel: toStr(input.vessel),
     place_of_loading: toStr(input.place_of_loading),
     place_of_discharge: toStr(input.place_of_discharge),
     final_destination: toStr(input.final_destination),
@@ -511,6 +546,17 @@ function normalize(input: Record<string, unknown>): ExtractedFields {
     field_confidence: normalizeFieldConfidence(input.field_confidence),
     extraction_note: toStr(input.extraction_note),
   };
+}
+
+/** Container numbers as ISO 6346 codes (4 letters + 7 digits), uppercased, unique. */
+export function normalizeContainers(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  const out: string[] = [];
+  for (const item of v) {
+    const s = toStr(item)?.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (s && /^[A-Z]{4}\d{7}$/.test(s) && !out.includes(s)) out.push(s);
+  }
+  return out;
 }
 
 function oneOf<T extends string>(v: unknown, allowed: readonly T[]): T | null {
