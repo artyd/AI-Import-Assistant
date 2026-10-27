@@ -57,3 +57,20 @@ jobs:
       - run: npm test
       # `next build` also runs ESLint + type validation.
       - run: npm run build
+
+  logist-mcp:
+    name: logist-mcp · image builds and starts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: docker build -t logist-mcp ./logist-mcp
+      # A broken dependency set crash-loops on import, which only shows at start —
+      # so run the image and require /health to answer.
+      - run: |
+          docker run -d --name lm -p 8015:8015 logist-mcp
+          for i in $(seq 1 30); do
+            if curl -fs http://127.0.0.1:8015/health; then exit 0; fi
+            sleep 2
+          done
+          docker logs lm
+          exit 1

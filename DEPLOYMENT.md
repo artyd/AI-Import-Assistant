@@ -162,7 +162,7 @@ tunes how long to wait for indexing. Exit code is non-zero if any check fails.
 
 - **Logs:** `docker compose logs -f backend worker frontend`
 - **Scale indexing throughput:** `docker compose up -d --scale worker=3`
-- **Redeploy after code changes:** `docker compose up -d --build backend worker frontend`
+- **Redeploy after code changes:** `docker compose up -d --build`
 - **Auto-deploy (CI):** on every push to `main` the **CI** workflow
   (`.github/workflows/ci.yml`, typecheck + build + test) runs; only when it passes
   does **`.github/workflows/deploy.yml`** fire (via `workflow_run`) — it SSHes into
