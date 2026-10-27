@@ -64,7 +64,7 @@ DEPLOYMENT.md            server setup, host Caddy block, env
 
 ## Deploy
 
-CI (`.github/workflows/ci.yml`) runs on every push to `main`. When it is green, `deploy.yml` deploys over SSH, but only if the repo variable `DEPLOY_ENABLED=true`. Otherwise deploy by hand: on `alliance-server` run `cd /opt/AI-Import-Assistant && git pull && docker compose up -d --build backend worker frontend`. Migrations run on boot. Host Caddy and `.env` are covered in `DEPLOYMENT.md`.
+CI (`.github/workflows/ci.yml`) runs on every push to `main`. When it is green, `deploy.yml` deploys over SSH, but only if the repo variable `DEPLOY_ENABLED=true`. Otherwise deploy by hand: on `alliance-server` run `cd /opt/AI-Import-Assistant && git pull && docker compose up -d --build`. Migrations run on boot. Host Caddy and `.env` are covered in `DEPLOYMENT.md`.
 
 ## Agent skills
 

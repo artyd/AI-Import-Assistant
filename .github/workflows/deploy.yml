@@ -45,8 +45,15 @@ jobs:
             # Docker volumes are untracked, so they are NOT touched.
             git fetch --prune origin main
             git reset --hard origin/main
-            # Rebuild + restart the app services. DB migrations run on boot
-            # (idempotent), so no separate migrate step is needed.
-            docker compose up -d --build backend worker frontend
+            # Rebuild + restart every built service (backend, worker, frontend,
+            # logist-mcp); unchanged ones and postgres/redis are left running.
+            # DB migrations run on boot (idempotent), so no separate migrate step.
+            docker compose up -d --build
+            # Fail the deploy if a service is crash-looping instead of going green.
+            sleep 45
+            if docker compose ps --format '{{.Service}} {{.Status}}' | grep -E 'Restarting|unhealthy|Exited'; then
+              docker compose logs --tail=50 logist-mcp backend
+              exit 1
+            fi
             # Reclaim space from the previous image layers.
             docker image prune -f
