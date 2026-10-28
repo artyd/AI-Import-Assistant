@@ -116,7 +116,7 @@ export function FileTree({
           byFolder={byFolder}
           searching={!!q}
           collapsed={collapsed}
-          onToggle={(id) => setCollapsed((c) => ({ ...c, [id]: !c[id] }))}
+          onToggle={(id) => setCollapsed((c) => ({ ...c, [id]: !(c[id] ?? id !== INBOX_ID) }))}
           onPick={pickFor}
           row={(p, d) => (
             <FileRow
@@ -167,7 +167,9 @@ function FolderBranch({
   const items = byFolder.get(folder.id) ?? [];
   const inSubtree = subtreeIds(node).reduce((n, id) => n + (byFolder.get(id)?.length ?? 0), 0);
   if (searching && inSubtree === 0) return null;
-  const isCollapsed = collapsed[folder.id];
+  // Folders start collapsed so the structure is visible at a glance (a збірник
+  // holds hundreds of files); the inbox starts open — it needs attention.
+  const isCollapsed = collapsed[folder.id] ?? folder.id !== INBOX_ID;
   return (
     <div>
       <div className="tree-row" style={{ ...rowStyle, paddingLeft: 6 + depth * 16 }}>
@@ -220,7 +222,8 @@ function FolderBranch({
               row={row}
             />
           ))}
-          {items.map((p) => row(p, depth))}
+          {/* The folder's own files first, then the links to shared papers. */}
+          {[...items].sort((a, b) => Number(a.linked) - Number(b.linked)).map((p) => row(p, depth))}
         </>
       )}
     </div>
