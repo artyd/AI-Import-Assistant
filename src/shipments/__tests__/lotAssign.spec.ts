@@ -107,6 +107,14 @@ describe('assignLot', () => {
     expect(assignLot(doc('coa2.pdf', { doc_type: 'quality_certificate', product_name: 'Caffeine Anhydrous' }), lots)).toMatchObject({ kind: 'lot', lotId: 'L2' });
   });
 
+  it('the goods win over a batch number that points to another lot', () => {
+    const r = assignLot(
+      doc('Label Paracetamol.pdf', { doc_type: 'other', product_name: 'Paracetamol USP', batch_number: 'SB2601' }),
+      lots,
+    );
+    expect(r).toMatchObject({ kind: 'lot', lotId: 'L2', confidence: 'medium' });
+  });
+
   it('does not create a lot from a certificate', () => {
     const r = assignLot(doc('coo.pdf', { doc_type: 'certificate_of_origin', seller: 'Unknown Trading Co' }), lots);
     expect(r.kind).toBe('inbox');

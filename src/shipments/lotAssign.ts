@@ -237,13 +237,20 @@ export function assignLot(doc: AssignDoc, lots: LotProfile[]): Assignment {
   const bySeller = lotBySupplier(suppliers, lots);
   if (bySeller) return { kind: 'lot', lotId: bySeller.id, confidence: 'high', reason: `експортер «${bySeller.supplier_name}» → ${bySeller.name}` };
 
+  const byGoods = lotsByGoods(goods, lots);
   const batch = str(f?.batch_number);
   if (batch) {
     const byBatch = unique(lots.filter((l) => l.batches.some((b) => b.toLowerCase() === batch.toLowerCase())));
+    // A batch number can repeat across suppliers' papers (or be misread); when the
+    // goods name exactly one OTHER lot, the goods win (a Ceftiofur label is not
+    // Xi'an's because a batch number happened to match).
+    const goodsLot = unique(byGoods);
+    if (byBatch && goodsLot && goodsLot.id !== byBatch.id) {
+      return { kind: 'lot', lotId: goodsLot.id, confidence: 'medium', reason: `товар збігається з ${goodsLot.name} (номер партії вказує на іншу — не довіряю йому)` };
+    }
     if (byBatch) return { kind: 'lot', lotId: byBatch.id, confidence: 'high', reason: `номер партії товару ${batch} → ${byBatch.name}` };
   }
 
-  const byGoods = lotsByGoods(goods, lots);
   const manufacturer = str(f?.manufacturer);
   const narrowed = manufacturer && byGoods.length > 1
     ? byGoods.filter((l) => l.manufacturers.some((m) => sameCompany(m, manufacturer)) || sameCompany(l.supplier_name, manufacturer))

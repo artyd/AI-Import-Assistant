@@ -285,6 +285,19 @@ export function useShipmentFiles(
     }
   }, [id, refreshFiles, notify]);
 
+  // File the whole збірник again from what is already read (no re-reading);
+  // the user's own moves stay.
+  const refileAll = useCallback(async () => {
+    try {
+      const r = await api<{ filed: number; inbox: number }>(`/api/workspaces/${id}/refile`, { method: "POST" });
+      await refreshFiles();
+      notify(`Розкладено заново: ${r.filed}.` + (r.inbox ? `
+В Інбоксі: ${r.inbox}.` : ""), "info");
+    } catch {
+      notify("Не вдалося розкласти заново.");
+    }
+  }, [id, refreshFiles, notify]);
+
   const reindexFile = useCallback(
     async (file: FileItem) => {
       setFiles((p) => withPatch(p, file.id, { status: "queued", errorReason: null }));
@@ -314,6 +327,7 @@ export function useShipmentFiles(
     uploadAndClassify,
     sortInbox,
     rereadAll,
+    refileAll,
     reindexFile,
     /** The reading journal (spec 007), oldest first. */
     journal,

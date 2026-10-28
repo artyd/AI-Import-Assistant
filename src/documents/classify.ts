@@ -445,7 +445,8 @@ async function classifyIntoFcl(workspaceId: string, file: FileRow, move: boolean
           : null;
     if (lot) ({ targetId, links } = await placeWithinLot(workspaceId, lot, docType, fields, sure, file.name));
   } else if (assignment.suggestLotId) {
-    targetId = await lotFolderId(assignment.suggestLotId);
+    // Only a hint for the user — point at the lot's «Інше», never its root.
+    targetId = await lotOtherFolderId(workspaceId, assignment.suggestLotId);
     confidence = 'low';
   } else {
     await query(
@@ -589,11 +590,11 @@ const ANCHOR_FIRST = ['invoice', 'contract', 'packing_list'];
  * Files a fully read FCL batch: the anchor documents first (they create the lots
  * and the product folders), then everything else. Returns how many were filed.
  */
-export async function fileFclBatch(workspaceId: string, batchId: string): Promise<{ filed: number; inbox: number }> {
+export async function fileFclBatch(workspaceId: string, batchId: string | null): Promise<{ filed: number; inbox: number }> {
   const { rows } = await query<{ id: string; doc_type: string | null }>(
     `SELECT f.id, de.extracted_fields->>'doc_type' AS doc_type
      FROM files f LEFT JOIN document_extractions de ON de.file_id = f.id
-     WHERE f.workspace_id = $1 AND f.batch_id = $2 AND f.is_latest = true
+     WHERE f.workspace_id = $1 AND ($2::uuid IS NULL OR f.batch_id = $2) AND f.is_latest = true
      ORDER BY f.created_at, f.name`,
     [workspaceId, batchId],
   );
@@ -647,6 +648,57 @@ export async function refileFclInbox(workspaceId: string): Promise<number> {
     if (res?.to) moved++;
   }
   return moved;
+}
+
+/** Marks a placement the user made by hand: re-filing never undoes it. */
+export const MANUAL_REASON = 'вручну';
+
+/**
+ * Takes back every placement Штурман made in an FCL (files the user moved by
+ * hand stay) — the files return to the inbox, their links are dropped. Old
+ * mistakes then can't steer the next filing (a lot's profile is built from the
+ * files lying in it).
+ */
+export async function resetAutoPlacements(workspaceId: string): Promise<number> {
+  const { rows } = await query<{ id: string }>(
+    `UPDATE files SET folder_id = NULL, suggested_folder_id = NULL
+     WHERE workspace_id = $1 AND is_latest = true AND folder_id IS NOT NULL
+       -- only Штурман's own placements carry a reason; a file uploaded straight
+       -- into a folder (no reason) or moved by hand stays where it is
+       AND folder_reason IS NOT NULL AND folder_reason <> $2
+     RETURNING id`,
+    [workspaceId, MANUAL_REASON],
+  );
+  if (rows.length > 0) {
+    await query(
+      'DELETE FROM file_links WHERE file_id = ANY($1::uuid[])',
+      [rows.map((r) => r.id)],
+    );
+  }
+  return rows.length;
+}
+
+/**
+ * Files an FCL again from scratch with what is already read (no re-reading):
+ * every automatic placement is taken back, then the whole збірник is filed —
+ * anchors first — and folders outside the layout are tidied away.
+ */
+export async function refileAll(workspaceId: string): Promise<{ filed: number; inbox: number }> {
+  if (!(await isFclWorkspace(workspaceId))) {
+    const r = await sortInbox(workspaceId);
+    return { filed: r.moved.length, inbox: r.unclassified.length };
+  }
+  const reset = await resetAutoPlacements(workspaceId);
+  await logIngest(workspaceId, {
+    kind: 'summary',
+    text: `Розкладаю збірник заново (${reset} файл(ів); перенесені вручну лишаються на місці)…`,
+  });
+  const res = await fileFclBatch(workspaceId, null);
+  await logIngest(workspaceId, {
+    kind: 'summary',
+    text: `Готово: розкладено ${res.filed}${res.inbox ? `, в Інбоксі ${res.inbox}` : ''}.`,
+  });
+  return res;
 }
 
 export interface SortInboxResult {

@@ -16,7 +16,7 @@ import {
 import { inferFileType } from '../shipments/folders.js';
 import { enqueueIndexJob } from '../lib/queue/index.js';
 import { publishFileStatus } from '../lib/events/fileStatus.js';
-import { classifyAndFile, sortInbox } from './classify.js';
+import { classifyAndFile, MANUAL_REASON, refileAll, resetAutoPlacements, sortInbox } from './classify.js';
 import { shipmentChanged } from '../shipments/state.js';
 import { isZipUpload, unpackZip, ZipGuardError } from '../lib/zip.js';
 import { contentType } from '../lib/mime.js';
@@ -365,10 +365,14 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       const { rows } = await query(
         `UPDATE files SET
            name = COALESCE($3, name),
-           folder_id = CASE WHEN $4::boolean THEN $5 ELSE folder_id END
+           folder_id = CASE WHEN $4::boolean THEN $5 ELSE folder_id END,
+           -- a hand move is remembered: automatic re-filing never undoes it
+           folder_reason = CASE WHEN $4::boolean THEN $6 ELSE folder_reason END,
+           folder_confidence = CASE WHEN $4::boolean THEN NULL ELSE folder_confidence END,
+           suggested_folder_id = CASE WHEN $4::boolean THEN NULL ELSE suggested_folder_id END
          WHERE id = $1 AND workspace_id = $2
          RETURNING id, name, folder_id AS "folderId", type, status`,
-        [req.params.fileId, ws.id, name ?? null, folderId !== undefined, folderId ?? null],
+        [req.params.fileId, ws.id, name ?? null, folderId !== undefined, folderId ?? null, MANUAL_REASON],
       );
       if (!rows[0]) return reply.code(404).send({ error: 'not_found' });
       // The folder is a completeness signal ("received").
@@ -589,6 +593,8 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       [ws.id, files.length],
     );
     const batchId = b[0]!.id;
+    // An FCL is filed from scratch once re-read (hand moves stay).
+    if (ws.kind === 'fcl') await resetAutoPlacements(ws.id);
     await query(
       `UPDATE files SET batch_id = $2, status = 'queued', status_changed_at = now(), error_reason = NULL,
               index_attempts = 0, extraction_status = NULL
@@ -605,6 +611,17 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       await publishFileStatus(ws.id, { fileId: f.id, status: 'queued', name: f.name });
     }
     return reply.send({ batchId, total: files.length });
+  });
+
+  // POST /api/workspaces/:id/refile — file everything again from what is already
+  // read (no re-reading): automatic placements are taken back and redone, hand
+  // moves stay. A shipment: same as sort-inbox.
+  app.post<{ Params: { id: string } }>('/api/workspaces/:id/refile', async (req, reply) => {
+    const ws = await getOwnedWorkspace(req.user!.sub, req.params.id);
+    if (!ws) return reply.code(404).send({ error: 'not_found' });
+    const result = await refileAll(ws.id);
+    await shipmentChanged(ws.id, 'files');
+    return reply.send(result);
   });
 
   // GET /api/workspaces/:id/ingest-log[?after=<id>&limit=<n>] — the reading

@@ -285,6 +285,12 @@ Requeue indexing for a file (e.g. one whose previous run errored): resets status
 to `queued`, clears `error_reason`, enqueues a fresh index job, emits `file_status`.
 Response `200`: `{ "ok": true }`. `404 not_found` if the workspace/file isn't found.
 
+### `POST /api/workspaces/:id/refile`  (auth, no body)
+Files everything again from what is already read — no re-reading. An FCL: every placement Штурман
+made (a `folderReason` other than `вручну`) is taken back and redone, anchors first; files moved by
+hand (`PATCH … { folderId }` now records `folderReason: "вручну"`) or uploaded straight into a folder stay.
+A shipment: same as `sort-inbox`. Response `200`: `{ "filed": number, "inbox": number }`.
+
 ### `POST /api/workspaces/:id/reread`  (auth, no body)
 Reads every latest file of the shipment / збірник again with the current models, as one
 batch (`ingest_batches.source = 'reread'`): fresh Markdown (a vision transcription is reused

@@ -1212,6 +1212,7 @@ export default function WorkspacePage() {
               onOpenLot={openLot}
               onSortInbox={fclFiles.sortInbox}
               onRereadAll={fclFiles.rereadAll}
+              onRefileAll={fclFiles.refileAll}
               notify={notify}
             />
           }

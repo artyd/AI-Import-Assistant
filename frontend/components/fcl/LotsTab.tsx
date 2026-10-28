@@ -19,6 +19,7 @@ export function LotsTab({
   onOpenLot,
   onSortInbox,
   onRereadAll,
+  onRefileAll,
   notify,
 }: {
   fclId: string;
@@ -29,6 +30,8 @@ export function LotsTab({
   onSortInbox: () => Promise<void>;
   /** Read every file of the збірник again and re-file it (spec 007). */
   onRereadAll?: () => Promise<void>;
+  /** File everything again from what is already read (hand moves stay). */
+  onRefileAll?: () => Promise<void>;
   notify: (text: string) => void;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
@@ -148,6 +151,16 @@ export function LotsTab({
         <button className="btn" onClick={createLot} disabled={busy === "create"}>
           + Партія вручну
         </button>
+        {onRefileAll && (
+          <button
+            className="btn"
+            disabled={busy === "refile"}
+            onClick={() => void run("refile", onRefileAll, "Не вдалося розкласти заново.")}
+            title="Штурман розкладе всі файли заново за тим, що вже прочитано; перенесені вручну лишаються на місці"
+          >
+            Розкласти все заново
+          </button>
+        )}
         {onRereadAll && (
           <button
             className="btn"
