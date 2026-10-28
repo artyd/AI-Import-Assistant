@@ -1,6 +1,13 @@
 import { pool, query } from '../db/pool.js';
 import { sameCompany } from './contextDerive.js';
-import { FCL_FOLDER_SKELETON, fclFolderRole, lotFolderName, type FclFolderRole } from './folders.js';
+import {
+  FCL_COMMON_FOLDER,
+  FCL_FOLDER_SKELETON,
+  LOT_OTHER_FOLDER,
+  fclFolderRole,
+  lotFolderName,
+  type FclFolderRole,
+} from './folders.js';
 import { buildLotProfiles, lotNameFor, type AssignFields, type LotProfile } from './lotAssign.js';
 import { findProductFolder, productKey, type ProductFolder, type ProductRef } from './fclLayout.js';
 
@@ -123,8 +130,72 @@ async function insertLotFolder(
   return rows[0]!.id;
 }
 
-/** The FCL-level folder of a role (manifest / transport / customs), created when missing. */
-export async function fclFolderId(workspaceId: string, role: FclFolderRole): Promise<string> {
+/**
+ * Where a container-level paper goes (spec 007): transport papers → «Транспорт»;
+ * customs declarations, our resale papers and the manifest → «Митниця / Весь
+ * контейнер» (there is no manifest folder any more).
+ */
+export async function fclTargetFolderId(workspaceId: string, role: FclFolderRole): Promise<string> {
+  if (role === 'transport') return fclFolderId(workspaceId, 'transport');
+  return fclSubFolderId(workspaceId, await fclFolderId(workspaceId, 'customs'), 'fcl_common', FCL_COMMON_FOLDER, null);
+}
+
+/** A lot's «Інше» sub-folder: its papers whose product is unknown. */
+export async function lotOtherFolderId(workspaceId: string, lotId: string): Promise<string | null> {
+  const root = await lotFolderId(lotId);
+  if (!root) return null;
+  return fclSubFolderId(workspaceId, root, 'lot_other', LOT_OTHER_FOLDER, lotId);
+}
+
+/** A named sub-folder of a role under a parent, created once (serialised per workspace). */
+async function fclSubFolderId(
+  workspaceId: string,
+  parentId: string,
+  role: string,
+  name: string,
+  lotId: string | null,
+): Promise<string> {
+  const find = 'SELECT id FROM folders WHERE parent_id = $1 AND role = $2 LIMIT 1';
+  const { rows } = await query<{ id: string }>(find, [parentId, role]);
+  if (rows[0]) return rows[0].id;
+  return withFolderLock(workspaceId, async (client) => {
+    const again = await client.query<{ id: string }>(find, [parentId, role]);
+    if (again.rows[0]) return again.rows[0].id;
+    const { rows: created } = await client.query<{ id: string }>(
+      `INSERT INTO folders (workspace_id, name, position, lot_id, parent_id, role)
+       VALUES ($1, $2, COALESCE((SELECT MAX(position) + 1 FROM folders WHERE workspace_id = $1), 0), $3, $4, $5)
+       RETURNING id`,
+      [workspaceId, name, lotId, parentId, role],
+    );
+    return created[0]!.id;
+  });
+}
+
+/**
+ * Removes the folders that are not part of the FCL layout once they are empty:
+ * the old «Маніфест» folder and folders a zip's own structure created.
+ */
+export async function tidyFclFolders(workspaceId: string): Promise<number> {
+  const { rows } = await query<{ id: string; name: string }>(
+    `SELECT fo.id, fo.name FROM folders fo
+     WHERE fo.workspace_id = $1 AND fo.parent_id IS NULL AND fo.lot_id IS NULL
+       AND NOT EXISTS (SELECT 1 FROM files f WHERE f.folder_id = fo.id)
+       AND NOT EXISTS (SELECT 1 FROM folders c WHERE c.parent_id = fo.id)
+       AND NOT EXISTS (SELECT 1 FROM file_links l WHERE l.folder_id = fo.id)`,
+    [workspaceId],
+  );
+  const drop = rows.filter((r) => {
+    const role = fclFolderRole(r.name);
+    return role === null || role === 'manifest';
+  });
+  for (const r of drop) await query('DELETE FROM folders WHERE id = $1', [r.id]);
+  return drop.length;
+}
+
+/** The FCL-level root folder of a role (transport / customs), created when missing. */
+export async function fclFolderId(workspaceId: string, asked: FclFolderRole): Promise<string> {
+  // There is no manifest folder any more (spec 007): the manifest is a customs paper.
+  const role: FclFolderRole = asked === 'manifest' ? 'customs' : asked;
   const { rows } = await query<{ id: string; name: string }>(
     'SELECT id, name FROM folders WHERE workspace_id = $1 AND lot_id IS NULL AND parent_id IS NULL ORDER BY position',
     [workspaceId],

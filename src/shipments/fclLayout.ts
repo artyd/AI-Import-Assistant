@@ -95,3 +95,15 @@ export function findProductFolder(folders: ProductFolder[], p: ProductRef): Prod
   }
   return folders.find((f) => sameGoods(f.product_key, productKey(p))) ?? null;
 }
+
+/**
+ * The product folder a file NAME points to ("photo of D-Glucosamine Hcl 2.jpg"),
+ * for papers whose content names no product (photos, labels). Only an
+ * unambiguous match counts — a name that fits two products returns null.
+ */
+export function productFolderByFileName<T extends ProductFolder>(folders: T[], fileName: string): T | null {
+  const stem = fileName.replace(/\.[a-z0-9]{2,5}$/i, '').replace(/[_]+/g, ' ');
+  const hits = folders.filter((f) => sameGoods(stem, f.product_key));
+  const keys = new Set(hits.map((h) => h.product_key.toLowerCase()));
+  return hits.length > 0 && keys.size === 1 ? hits[0]! : null;
+}

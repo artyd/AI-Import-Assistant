@@ -20,6 +20,9 @@ import {
 import { UPLOAD_ACCEPT } from "@/lib/files/policy";
 import { buildFolderTree, flattenTree, folderPathLabel, subtreeIds, type FolderNode } from "@/lib/files/folderTree";
 
+/** The key of files without a folder (shown in the virtual «Інбокс» folder). */
+const INBOX_ID = "__none__";
+
 /** A file row in a folder: its own place, or a link (a document about several products). */
 interface Placed {
   file: FileItem;
@@ -78,11 +81,18 @@ export function FileTree({
   const tree = useMemo(() => buildFolderTree(folders), [folders]);
 
   function pickFor(folderId: string | null) {
-    uploadTarget.current = folderId;
+    uploadTarget.current = folderId === INBOX_ID ? null : folderId;
     inputRef.current?.click();
   }
 
-  const rootFiles = byFolder.get("__none__") ?? [];
+  const rootFiles = byFolder.get(INBOX_ID) ?? [];
+  // Files without a folder are shown INSIDE a folder too (spec 007: nothing
+  // lies loose) — the inbox, at the top so it is noticed.
+  const inboxNode: FolderNode = {
+    folder: { id: INBOX_ID, name: `Інбокс — не розкладені`, position: -1 },
+    depth: 0,
+    children: [],
+  };
 
   return (
     <div style={{ overflowY: "auto", flex: 1, marginTop: 4 }}>
@@ -99,7 +109,7 @@ export function FileTree({
         }}
       />
 
-      {tree.map((node) => (
+      {[...(rootFiles.length > 0 ? [inboxNode] : []), ...tree].map((node) => (
         <FolderBranch
           key={node.folder.id}
           node={node}
@@ -123,20 +133,6 @@ export function FileTree({
               onPreview={onPreview}
             />
           )}
-        />
-      ))}
-
-      {rootFiles.map(({ file }) => (
-        <FileRow
-          key={file.id}
-          file={file}
-          folders={folders}
-          onRename={onRenameFile}
-          onDelete={onDeleteFile}
-          onVersions={onVersions}
-          onMove={onMoveFile}
-          onReindex={onReindex}
-          onPreview={onPreview}
         />
       ))}
 

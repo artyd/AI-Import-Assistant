@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { docProducts, findProductFolder, placeInLot, createsProducts, shortProductName } from '../fclLayout.js';
+import { docProducts, findProductFolder, placeInLot, createsProducts, shortProductName, productFolderByFileName } from '../fclLayout.js';
 
 describe('fclLayout', () => {
   it('customs papers go to the lot customs folder, the rest to the product', () => {
@@ -43,5 +43,17 @@ describe('fclLayout', () => {
     expect(findProductFolder(folders, { name: 'Acetaminophen', cas: '103-90-2' })?.id).toBe('p1');
     expect(findProductFolder(folders, { name: 'Ascorbic Acid', cas: null })?.id).toBe('p2');
     expect(findProductFolder(folders, { name: 'Glycine', cas: '56-40-6' })).toBeNull();
+  });
+
+  it('a photo goes by its file name only when one product fits', () => {
+    const folders = [
+      { id: 'g', product_key: 'D-Glucosamine Hydrochloride' },
+      { id: 'a', product_key: 'DL-ASPARTIC ACID' },
+      { id: 'c', product_key: 'Ascorbic acid' },
+    ];
+    expect(productFolderByFileName(folders, '026_photo of D-Glucosamine Hcl 2.jpg')?.id).toBe('g');
+    expect(productFolderByFileName(folders, '048_photo of DL-Aspartic Acid with pallet.png')?.id).toBe('a');
+    expect(productFolderByFileName(folders, '20251202.jpg')).toBeNull();
+    expect(productFolderByFileName(folders, 'acid.jpg')).toBeNull(); // two acids → ambiguous
   });
 });

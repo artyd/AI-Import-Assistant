@@ -89,7 +89,9 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       // one folder per name, created on demand). Root-level entries fall back to
       // the request's target folder.
       const resolveEntryFolder = async (entryFolderName: string | null): Promise<string | null> => {
-        if (!entryFolderName) return folderId ?? null;
+        // A збірник has its own layout (spec 007): Штурман files every entry after
+        // reading it, so the archive's folders are not recreated.
+        if (!entryFolderName || ws.kind === 'fcl') return folderId ?? null;
         const cached = folderCache.get(entryFolderName);
         if (cached) return cached;
         const { rows } = await query<{ id: string }>(

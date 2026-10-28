@@ -7,16 +7,19 @@ import { fclFolderRole, type FileType } from '../shipments/folders.js';
 import { assignLot } from '../shipments/lotAssign.js';
 import {
   ensureLot,
-  fclFolderId,
+  fclTargetFolderId,
   getLot,
   listLots,
+  listProductFolders,
   loadLotProfiles,
   lotCustomsFolderId,
   lotFolderId,
+  lotOtherFolderId,
   productFolderId,
   setFileLinks,
+  tidyFclFolders,
 } from '../shipments/lots.js';
-import { createsProducts, docProducts, placeInLot } from '../shipments/fclLayout.js';
+import { createsProducts, docProducts, placeInLot, productFolderByFileName } from '../shipments/fclLayout.js';
 import { folderPath } from '../shipments/folderPath.js';
 import { publishFileStatus, type FileStatusEvent } from '../lib/events/fileStatus.js';
 import { logIngest, q } from '../ingest/journal.js';
@@ -260,7 +263,30 @@ export async function classifyAndFile(
   const file = rows[0];
   if (!file) return null;
 
-  if (await isFclWorkspace(workspaceId)) return classifyIntoFcl(workspaceId, file, move);
+  if (await isFclWorkspace(workspaceId)) {
+    const res = await classifyIntoFcl(workspaceId, file, move);
+    // A paper that stays unfiled leaves a folder outside the layout (an old zip
+    // folder, «Маніфест») for the inbox — nothing lies outside the structure.
+    if (move && !res.to && file.folder_id && (await needsAutoFiling(file.id))) {
+      // Loose in a lot's root → that lot's «Інше» (it stays in the lot's checks);
+      // anywhere else outside the layout → the inbox.
+      const { rows: fo } = await query<{ lot_id: string | null; role: string | null }>(
+        'SELECT lot_id, role FROM folders WHERE id = $1',
+        [file.folder_id],
+      );
+      const dest = fo[0]?.role === 'lot' && fo[0].lot_id ? await lotOtherFolderId(workspaceId, fo[0].lot_id) : null;
+      const out = await query('UPDATE files SET folder_id = $3 WHERE id = $1 AND folder_id = $2', [file.id, file.folder_id, dest]);
+      if ((out.rowCount ?? 0) > 0) {
+        if (dest) await announceMove(workspaceId, file, dest);
+        else {
+          await publishFileStatus(workspaceId, { fileId: file.id, status: file.status, name: file.name, folderId: null }).catch(
+            () => undefined,
+          );
+        }
+      }
+    }
+    return res;
+  }
 
   const empty: ClassifyResult = {
     fileId: file.id,
@@ -386,10 +412,28 @@ async function classifyIntoFcl(workspaceId: string, file: FileRow, move: boolean
   let targetId: string | null = null;
   let links: string[] = [];
   if (assignment.kind === 'fcl') {
-    targetId = await fclFolderId(workspaceId, assignment.folder);
+    targetId = await fclTargetFolderId(workspaceId, assignment.folder);
     // A container-level paper that names goods (our resale invoice) is linked
     // into those goods' folders in every lot.
-    if (assignment.folder === 'customs') links = await productLinksAcrossLots(workspaceId, fields);
+    if (assignment.folder !== 'transport') links = await productLinksAcrossLots(workspaceId, fields);
+  } else if (assignment.kind === 'inbox' && docProducts(fields).length === 0 && (await productByFileName(workspaceId, file.name))) {
+    // No lot signal in the content (a photo, a label) but the file name names a
+    // product of exactly one lot: «photo of D-Glucosamine Hcl 2.jpg».
+    targetId = await productByFileName(workspaceId, file.name);
+    if (confidence === 'high') confidence = 'medium';
+    if (move) {
+      const moved = await query(
+        `UPDATE files SET folder_id = $1, suggested_folder_id = NULL, folder_reason = $2, folder_confidence = $3
+         WHERE id = $4 AND workspace_id = $5 AND folder_id IS NOT DISTINCT FROM $6`,
+        [targetId, 'назва файлу вказує на товар', confidence, file.id, workspaceId, file.folder_id],
+      );
+      if ((moved.rowCount ?? 0) > 0) {
+        await setFileLinks(file.id, []);
+        await announceMove(workspaceId, file, targetId!);
+        const name = (await folderPath(targetId!)).join(' / ');
+        return { ...base, to: name, reason: 'назва файлу вказує на товар', confidence, suggested: null };
+      }
+    }
   } else if (assignment.kind === 'lot' || assignment.kind === 'new') {
     if (assignment.kind === 'lot' && assignment.confidence === 'medium' && confidence === 'high') confidence = 'medium';
     const sure = move && confidence !== 'low';
@@ -399,7 +443,7 @@ async function classifyIntoFcl(workspaceId: string, file: FileRow, move: boolean
         : sure
           ? (await ensureLot(workspaceId, assignment.supplierName, 'auto')).lot
           : null;
-    if (lot) ({ targetId, links } = await placeWithinLot(workspaceId, lot, docType, fields, sure));
+    if (lot) ({ targetId, links } = await placeWithinLot(workspaceId, lot, docType, fields, sure, file.name));
   } else if (assignment.suggestLotId) {
     targetId = await lotFolderId(assignment.suggestLotId);
     confidence = 'low';
@@ -444,6 +488,13 @@ async function classifyIntoFcl(workspaceId: string, file: FileRow, move: boolean
   return { ...base, to: targetName, reason: assignment.reason, confidence, suggested: null };
 }
 
+/** The one product folder (any lot) a file name points to, or null. */
+async function productByFileName(workspaceId: string, fileName: string): Promise<string | null> {
+  const all = [];
+  for (const lot of await listLots(workspaceId)) all.push(...(await listProductFolders(lot.id)));
+  return productFolderByFileName(all, fileName)?.id ?? null;
+}
+
 /** The existing product folders, in any lot, of the goods a document names. */
 async function productLinksAcrossLots(workspaceId: string, fields: Record<string, unknown> | null): Promise<string[]> {
   const products = docProducts(fields);
@@ -470,6 +521,7 @@ async function placeWithinLot(
   docType: string | null,
   fields: Record<string, unknown> | null,
   sure: boolean,
+  fileName: string,
 ): Promise<{ targetId: string | null; links: string[] }> {
   const create = sure && createsProducts(docType);
   const productIds: string[] = [];
@@ -480,7 +532,11 @@ async function placeWithinLot(
   if (placeInLot(docType) === 'lot_customs') {
     return { targetId: await lotCustomsFolderId(workspaceId, lot), links: productIds };
   }
-  return { targetId: productIds[0] ?? (await lotFolderId(lot.id)), links: productIds.slice(1) };
+  if (productIds[0]) return { targetId: productIds[0], links: productIds.slice(1) };
+  // No product in the content: the file name may still name one of this lot's
+  // goods; otherwise the lot's «Інше» — never loose in the lot's root.
+  const byName = productFolderByFileName(await listProductFolders(lot.id), fileName);
+  return { targetId: byName?.id ?? (await lotOtherFolderId(workspaceId, lot.id)), links: [] };
 }
 
 /**
@@ -508,8 +564,12 @@ export async function needsAutoFiling(fileId: string): Promise<boolean> {
   if (!r) return false;
   if (r.folder_id === null) return true;
   if (r.kind !== 'fcl') return false;
+  // Loose in a lot's root (before spec 007 lots were flat).
   if (r.lot_id !== null) return r.role === 'lot';
-  return r.parent_id === null && fclFolderRole(r.folder_name ?? '') === null;
+  // Root FCL folders: only «Транспорт» holds files directly; «Митниця» keeps its
+  // papers in sub-folders, and anything else (old «Маніфест», zip folders) is
+  // outside the layout.
+  return r.parent_id === null && fclFolderRole(r.folder_name ?? '') !== 'transport';
 }
 
 /**
@@ -556,6 +616,7 @@ export async function fileFclBatch(workspaceId: string, batchId: string): Promis
     filed += again;
     inbox -= Math.min(inbox, again);
   }
+  await tidyFclFolders(workspaceId);
   return { filed, inbox };
 }
 
@@ -622,5 +683,6 @@ export async function sortInbox(workspaceId: string): Promise<SortInboxResult> {
     if (res.to) moved.push({ fileId: res.fileId, name: res.name, to: res.to, reason: res.reason });
     else unclassified.push({ fileId: res.fileId, name: res.name, suggested: res.suggested, reason: res.reason });
   }
+  if (fcl) await tidyFclFolders(workspaceId);
   return { moved, unclassified };
 }

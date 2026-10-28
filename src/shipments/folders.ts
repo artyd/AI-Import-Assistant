@@ -23,7 +23,11 @@ export const FOLDER_SKELETON = [
  * Collections created before spec 006 keep their old 8-folder layout; folder roles
  * are found by name (`fclFolderRole`), so both layouts work.
  */
-export const FCL_FOLDER_SKELETON = ['01_Маніфест', '02_Транспорт', '03_Митниця'] as const;
+export const FCL_FOLDER_SKELETON = ['01_Митниця', '02_Транспорт'] as const;
+
+/** Sub-folder names of the FCL layout (spec 007). */
+export const FCL_COMMON_FOLDER = 'Весь контейнер';
+export const LOT_OTHER_FOLDER = 'Інше';
 
 export type FclFolderRole = 'manifest' | 'transport' | 'customs';
 
