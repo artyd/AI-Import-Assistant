@@ -4,13 +4,14 @@ import { extractText } from '../ingest/extract/index.js';
 import { loadFileMarkdown } from '../ingest/markdown/store.js';
 import { classifyDocTypeCheap } from '../ingest/extraction/extractFields.js';
 import { fclFolderRole, type FileType } from '../shipments/folders.js';
-import { assignLot } from '../shipments/lotAssign.js';
+import { assignLot, phantomLots, type AssignFields } from '../shipments/lotAssign.js';
 import {
   ensureLot,
   fclTargetFolderId,
   getLot,
   listLots,
   listProductFolders,
+  loadFclFiles,
   loadLotProfiles,
   lotCustomsFolderId,
   lotFolderId,
@@ -693,7 +694,28 @@ export async function refileAll(workspaceId: string): Promise<{ filed: number; i
     kind: 'summary',
     text: `Розкладаю збірник заново (${reset} файл(ів); перенесені вручну лишаються на місці)…`,
   });
-  const res = await fileFclBatch(workspaceId, null);
+  let res = await fileFclBatch(workspaceId, null);
+  // Lots Штурман opened from a misread (no paper shows that supplier selling to
+  // us) are dropped — their papers go back to the inbox and are filed again.
+  const lots = await listLots(workspaceId);
+  const files = await loadFclFiles(workspaceId);
+  const phantoms = phantomLots(
+    lots.filter((l) => l.source === 'auto'),
+    files.map((f) => ({ lot_id: f.lot_id, fields: f.fields as AssignFields | null })),
+  );
+  if (phantoms.length > 0) {
+    const names = lots.filter((l) => phantoms.includes(l.id)).map((l) => l.name);
+    await query(
+      `UPDATE files SET folder_id = NULL WHERE folder_id IN (SELECT id FROM folders WHERE lot_id = ANY($1::uuid[]))`,
+      [phantoms],
+    );
+    await query('DELETE FROM lots WHERE id = ANY($1::uuid[])', [phantoms]);
+    await logIngest(workspaceId, {
+      kind: 'warn',
+      text: `Прибрав партії без жодного документа продажу нам (помилково прочитаний постачальник): ${names.join(', ')} — їхні файли розкладаю заново.`,
+    });
+    res = await fileFclBatch(workspaceId, null);
+  }
   // Lots Штурман opened that ended up with no papers (a misread supplier) go away.
   const { rows: empty } = await query<{ id: string; name: string }>(
     `DELETE FROM lots l WHERE l.workspace_id = $1 AND l.source = 'auto'

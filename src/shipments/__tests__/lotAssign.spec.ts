@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  phantomLots,
   assignLot,
   buildLotProfiles,
   isInternalCompany,
@@ -43,6 +44,30 @@ const lots = buildLotProfiles(
     },
   ],
 );
+
+describe('phantomLots', () => {
+  it('a lot without a sale to us is a phantom (a maker read as a seller)', () => {
+    const ids = phantomLots(
+      [
+        { id: 'X', supplier_name: "Xi'an TaiCheng Chem Co., Ltd." },
+        { id: 'C', supplier_name: 'Changzhou Shenlong Bio-Engineering Co Ltd.' },
+      ],
+      [
+        { lot_id: 'X', fields: { doc_type: 'invoice', seller: "Xi'an TaiCheng Chem Co., Ltd", buyer: 'PRIME FORCE UK BUSINESS LIMITED' } },
+        { lot_id: 'C', fields: { doc_type: 'quality_certificate', seller: 'Changzhou Shenlong Bio-Engineering Co., Ltd.' } },
+        { lot_id: 'C', fields: { doc_type: 'invoice', buyer: 'PJSC "Chervona zirka"', manufacturer: 'Changzhou Shenlong' } },
+        { lot_id: 'C', fields: { doc_type: 'contract', seller: 'PRIME FORCE UK BUSINESS LIMITED', buyer: 'PJSC "Chervona zirka"' } },
+      ],
+    );
+    expect(ids).toEqual(['C']);
+    // A trilateral supplier invoicing the consignee directly is real.
+    expect(
+      phantomLots([{ id: 'R', supplier_name: 'ZHEJIANG RIVITA BIOTECH CO., LTD' }], [
+        { lot_id: 'R', fields: { doc_type: 'invoice', seller: 'Zhejiang Rivita Biotech Co., Ltd', buyer: 'NOVALAIT LLC' } },
+      ]),
+    ).toEqual([]);
+  });
+});
 
 describe('sameGoods — spellings of one product', () => {
   it('HCl = hydrochloride, PEG-1500 = polyethylene glycol PEG 1500', () => {

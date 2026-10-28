@@ -311,3 +311,26 @@ export function buildLotProfiles(
     return { ...l, goods: [...goods], manufacturers: [...manufacturers], batches: [...batches] };
   });
 }
+
+/**
+ * Lots whose supplier is never the SELLER on any invoice, packing list or
+ * contract in the lot. Such a lot came from a misread (a maker or an exporter on
+ * a certificate read as the seller) and is a phantom (spec 007). The buyer is not
+ * required to be us: a trilateral supplier may invoice the consignee directly.
+ */
+export function phantomLots(
+  lots: { id: string; supplier_name: string }[],
+  files: { lot_id: string | null; fields: AssignFields | null }[],
+): string[] {
+  return lots
+    .filter((l) => {
+      const anchors = files.filter((f) => {
+        if (f.lot_id !== l.id || !f.fields) return false;
+        if (!ANCHOR_TYPES.has(str(f.fields.doc_type) ?? '')) return false;
+        const seller = str(f.fields.seller);
+        return !!seller && sameCompany(seller, l.supplier_name);
+      });
+      return anchors.length === 0;
+    })
+    .map((l) => l.id);
+}
