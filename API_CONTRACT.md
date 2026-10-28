@@ -285,6 +285,13 @@ Requeue indexing for a file (e.g. one whose previous run errored): resets status
 to `queued`, clears `error_reason`, enqueues a fresh index job, emits `file_status`.
 Response `200`: `{ "ok": true }`. `404 not_found` if the workspace/file isn't found.
 
+### `POST /api/workspaces/:id/reread`  (auth, no body)
+Reads every latest file of the shipment / збірник again with the current models, as one
+batch (`ingest_batches.source = 'reread'`): fresh Markdown (a vision transcription is reused
+only from the current `OCR_MODEL`), fresh extraction, then filing — an FCL files the whole batch
+when it is read. Progress over `file_status` + `ingest_log`.
+Response `200`: `{ "batchId": string, "total": number }`; `400 no_files`.
+
 ### `GET /api/workspaces/:id/ingest-log`  (auth)
 The reading journal (spec 007), oldest first. Query: `after` (an event id — only newer lines),
 `limit` (1–1000, default 300 newest).

@@ -272,6 +272,19 @@ export function useShipmentFiles(
     }
   }, [id, refreshFiles, notify]);
 
+  // Read every file again with the current models (spec 007), as one batch: the
+  // reading journal shows the progress, the server files the batch when done.
+  const rereadAll = useCallback(async () => {
+    if (!window.confirm("Перечитати всі файли заново? Штурман прочитає кожен файл повністю і розкладе їх після читання.")) return;
+    try {
+      const r = await api<{ total: number }>(`/api/workspaces/${id}/reread`, { method: "POST" });
+      notify(`Перечитую ${r.total} файл(ів) — хід видно в чаті та в Журналі.`, "info");
+      await refreshFiles();
+    } catch {
+      notify("Не вдалося запустити перечитування.");
+    }
+  }, [id, refreshFiles, notify]);
+
   const reindexFile = useCallback(
     async (file: FileItem) => {
       setFiles((p) => withPatch(p, file.id, { status: "queued", errorReason: null }));
@@ -300,6 +313,7 @@ export function useShipmentFiles(
     uploadSmart,
     uploadAndClassify,
     sortInbox,
+    rereadAll,
     reindexFile,
     /** The reading journal (spec 007), oldest first. */
     journal,

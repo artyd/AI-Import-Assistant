@@ -18,6 +18,7 @@ export function LotsTab({
   reload,
   onOpenLot,
   onSortInbox,
+  onRereadAll,
   notify,
 }: {
   fclId: string;
@@ -26,6 +27,8 @@ export function LotsTab({
   reload: () => Promise<void>;
   onOpenLot: (lotId: string) => void;
   onSortInbox: () => Promise<void>;
+  /** Read every file of the збірник again and re-file it (spec 007). */
+  onRereadAll?: () => Promise<void>;
   notify: (text: string) => void;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
@@ -141,9 +144,21 @@ export function LotsTab({
         </div>
       ) : null}
 
-      <button className="btn" onClick={createLot} disabled={busy === "create"} style={{ alignSelf: "flex-start" }}>
-        + Партія вручну
-      </button>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button className="btn" onClick={createLot} disabled={busy === "create"}>
+          + Партія вручну
+        </button>
+        {onRereadAll && (
+          <button
+            className="btn"
+            disabled={busy === "reread"}
+            onClick={() => void run("reread", onRereadAll, "Не вдалося запустити перечитування.")}
+            title="Штурман прочитає кожен файл повністю і розкладе: Постачальник / Товар, Митниця / Постачальник"
+          >
+            Перечитати і розкласти все
+          </button>
+        )}
+      </div>
     </div>
   );
 }

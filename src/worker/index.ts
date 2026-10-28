@@ -280,8 +280,10 @@ async function reuseMarkdownByHash(file: FileJobRow): Promise<ConversionResult |
      FROM files f JOIN file_markdown m ON m.file_id = f.id
      WHERE f.content_hash = $1 AND f.id <> $2 AND m.partial = false
        AND m.converter <> 'none' AND m.char_count > 0
+       -- a vision transcription is reused only from the current OCR model
+       AND (m.converter NOT LIKE 'vision%' OR m.model = $3)
      ORDER BY m.created_at DESC LIMIT 1`,
-    [file.content_hash, file.id],
+    [file.content_hash, file.id, config.OCR_MODEL],
   );
   const r = rows[0];
   if (!r) return null;

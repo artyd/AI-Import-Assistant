@@ -1046,3 +1046,10 @@ CREATE TABLE IF NOT EXISTS ingest_events (
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_ingest_events_ws ON ingest_events(workspace_id, id DESC);
+
+-- Spec 007: which vision model transcribed the Markdown. Identical bytes reuse a
+-- conversion only when it came from the current OCR model, so switching models
+-- (Sonnet → Haiku 5.5) really re-reads the documents.
+ALTER TABLE file_markdown ADD COLUMN IF NOT EXISTS model TEXT;
+ALTER TABLE ingest_batches DROP CONSTRAINT IF EXISTS ingest_batches_source_check;
+ALTER TABLE ingest_batches ADD CONSTRAINT ingest_batches_source_check CHECK (source IN ('upload', 'zip', 'reread'));

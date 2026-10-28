@@ -20,7 +20,7 @@ import { classifyAndFile, sortInbox } from './classify.js';
 import { shipmentChanged } from '../shipments/state.js';
 import { isZipUpload, unpackZip, ZipGuardError } from '../lib/zip.js';
 import { contentType } from '../lib/mime.js';
-import { listIngestEvents } from '../ingest/journal.js';
+import { listIngestEvents, logIngest } from '../ingest/journal.js';
 
 
 async function folderBelongs(workspaceId: string, folderId: string): Promise<boolean> {
@@ -569,6 +569,41 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       });
     },
   );
+
+  // POST /api/workspaces/:id/reread — read every file again with the current
+  // models, as ONE batch (spec 007): fresh Markdown, fresh extraction, then the
+  // filing (an FCL: the whole batch at once, anchors first; files still in a
+  // flat lot folder move into Митниця / the product folders).
+  app.post<{ Params: { id: string } }>('/api/workspaces/:id/reread', async (req, reply) => {
+    const ws = await getOwnedWorkspace(req.user!.sub, req.params.id);
+    if (!ws) return reply.code(404).send({ error: 'not_found' });
+    const { rows: files } = await query<{ id: string; name: string }>(
+      'SELECT id, name FROM files WHERE workspace_id = $1 AND is_latest = true ORDER BY created_at',
+      [ws.id],
+    );
+    if (files.length === 0) return reply.code(400).send({ error: 'no_files' });
+    const { rows: b } = await query<{ id: string }>(
+      `INSERT INTO ingest_batches (workspace_id, source, total) VALUES ($1, 'reread', $2) RETURNING id`,
+      [ws.id, files.length],
+    );
+    const batchId = b[0]!.id;
+    await query(
+      `UPDATE files SET batch_id = $2, status = 'queued', status_changed_at = now(), error_reason = NULL,
+              index_attempts = 0, extraction_status = NULL
+       WHERE workspace_id = $1 AND is_latest = true`,
+      [ws.id, batchId],
+    );
+    await logIngest(ws.id, {
+      batchId,
+      kind: 'summary',
+      text: `Перечитую всі файли (${files.length}) заново — кожен повністю; розкладу, коли дочитаю.`,
+    });
+    for (const f of files) {
+      await enqueueIndexJob(f.id);
+      await publishFileStatus(ws.id, { fileId: f.id, status: 'queued', name: f.name });
+    }
+    return reply.send({ batchId, total: files.length });
+  });
 
   // GET /api/workspaces/:id/ingest-log[?after=<id>&limit=<n>] — the reading
   // journal: "Читаю …", "Прочитано …", "Кладу → …" (spec 007). Oldest first.

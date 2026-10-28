@@ -120,6 +120,7 @@ export default function WorkspacePage() {
     uploadSmart,
     uploadAndClassify,
     sortInbox,
+    rereadAll,
     reindexFile,
     journal,
   } = useShipmentFiles(id, { live: !!user && workspace != null, folders, notify });
@@ -764,6 +765,7 @@ export default function WorkspacePage() {
     ];
     if (hasInbox)
       a.push({ id: "sort", label: "Розкласти інбокс", icon: <LnFolder size={17} />, run: sortInbox });
+    a.push({ id: "reread", label: "Перечитати всі файли заново", icon: <LnFolder size={17} />, run: fclId ? fclFiles.rereadAll : rereadAll });
     a.push({
       id: "ai-settings",
       label: "Налаштування AI",
@@ -775,7 +777,7 @@ export default function WorkspacePage() {
     a.push({ id: "theme", label: "Перемкнути тему", icon: <LnMoon size={17} />, run: toggleTheme });
     a.push({ id: "lock", label: "Заблокувати (вийти)", icon: <LnLock size={17} />, run: lock });
     return a;
-  }, [newChat, newShipment, openRightTab, missingCount, hasInbox, sortInbox, toggleTheme, lock]);
+  }, [newChat, newShipment, openRightTab, missingCount, hasInbox, sortInbox, rereadAll, fclId, fclFiles.rereadAll, toggleTheme, lock]);
 
   if (authLoading || (loading && !workspace)) {
     return (
@@ -1209,6 +1211,7 @@ export default function WorkspacePage() {
               reload={fcl.reload}
               onOpenLot={openLot}
               onSortInbox={fclFiles.sortInbox}
+              onRereadAll={fclFiles.rereadAll}
               notify={notify}
             />
           }

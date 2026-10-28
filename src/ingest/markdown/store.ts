@@ -1,6 +1,7 @@
 import { pool, query } from "../../db/pool.js";
 import { chunkPages } from "../extract/chunk.js";
 import type { ConversionResult } from "./convert.js";
+import { config } from "../../lib/config.js";
 import type { MarkdownPage } from "./format.js";
 import {
   buildTsQuery,
@@ -50,11 +51,12 @@ export async function saveFileMarkdown(
       fileId,
     ]);
     await client.query(
-      `INSERT INTO file_markdown (file_id, workspace_id, pages, char_count, page_count, converter, partial, note)
-     VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, $8)
+      `INSERT INTO file_markdown (file_id, workspace_id, pages, char_count, page_count, converter, partial, note, model)
+     VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, $8, $9)
      ON CONFLICT (file_id) DO UPDATE SET
        pages = EXCLUDED.pages, char_count = EXCLUDED.char_count, page_count = EXCLUDED.page_count,
-       converter = EXCLUDED.converter, partial = EXCLUDED.partial, note = EXCLUDED.note, created_at = now()`,
+       converter = EXCLUDED.converter, partial = EXCLUDED.partial, note = EXCLUDED.note,
+       model = EXCLUDED.model, created_at = now()`,
       [
         fileId,
         workspaceId,
@@ -64,6 +66,8 @@ export async function saveFileMarkdown(
         conv.converter,
         conv.partial,
         conv.note,
+        // The vision model that read it (spec 007): the reuse cache is keyed by it.
+        conv.converter.startsWith("vision") ? config.OCR_MODEL : null,
       ],
     );
 
