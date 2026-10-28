@@ -336,3 +336,12 @@ export async function getConversationHistoryWithStats(
   // messages) and guarantee the window opens with a user message.
   return { history: repairBlocks(kept.flat()), stats };
 }
+
+/**
+ * The text an assistant turn is stored with. An errored turn keeps its partial
+ * text plus the error line — stored empty it reloaded as a blank «Штурман» bubble.
+ */
+export function storedAnswer(result: { text: string; error?: string }): string {
+  if (!result.error) return result.text;
+  return `${result.text ? `${result.text}\n\n` : ''}⚠️ Відповідь перервалася. Спробуйте ще раз.`;
+}

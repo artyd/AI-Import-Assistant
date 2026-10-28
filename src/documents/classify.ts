@@ -592,6 +592,41 @@ async function placeWithinLot(
 }
 
 /**
+ * Puts a file into the lot the user chose (via Штурман) — into that lot's product
+ * folder / «Митниця» / «Інше» like automatic filing would, never loose in the
+ * lot's root — and marks it as placed by hand, so «Розкласти все заново» keeps
+ * it there. Returns the folder path, or null when the lot or file is missing.
+ */
+export async function fileIntoLot(workspaceId: string, fileId: string, lotId: string): Promise<string | null> {
+  const { rows } = await query<FileRow>(
+    `SELECT f.id, f.name, f.type, f.folder_id, f.disk_path, f.status, f.batch_id, fo.name AS folder_name
+     FROM files f LEFT JOIN folders fo ON fo.id = f.folder_id
+     WHERE f.id = $1 AND f.workspace_id = $2`,
+    [fileId, workspaceId],
+  );
+  const file = rows[0];
+  const lot = file ? await getLot(workspaceId, lotId) : null;
+  if (!file || !lot) return null;
+  const { rows: ex } = await query<{ fields: Record<string, unknown> }>(
+    'SELECT extracted_fields AS fields FROM document_extractions WHERE file_id = $1 ORDER BY extracted_at DESC LIMIT 1',
+    [file.id],
+  );
+  const fields = ex[0]?.fields ?? null;
+  const docType = typeof fields?.doc_type === 'string' ? fields.doc_type : null;
+  const { targetId, links } = await placeWithinLot(workspaceId, lot, docType, fields, true, file);
+  if (!targetId) return null;
+  await query(
+    `UPDATE files SET folder_id = $1, suggested_folder_id = NULL, folder_reason = $2, folder_confidence = NULL
+     WHERE id = $3 AND workspace_id = $4`,
+    [targetId, MANUAL_REASON, file.id, workspaceId],
+  );
+  const extra = links.filter((l) => l !== targetId);
+  await setFileLinks(file.id, extra);
+  await announceMove(workspaceId, file, targetId, extra);
+  return (await folderPath(targetId)).join(' / ');
+}
+
+/**
  * Whether a file should be (re-)filed automatically: an inbox file, or — in an
  * FCL — a file in a folder that is neither a lot nor an FCL folder (the type
  * folders of collections made before spec 006), or one lying in a lot's root

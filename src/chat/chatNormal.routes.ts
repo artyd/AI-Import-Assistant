@@ -4,6 +4,7 @@ import { authenticate } from '../auth/hook.js';
 import {
   ensureConversationScoped,
   appendMessage,
+  storedAnswer,
   getConversationHistoryWithStats,
   listConversationsByOwner,
   getConversationMessagesByOwner,
@@ -73,7 +74,7 @@ export async function chatNormalRoutes(app: FastifyInstance): Promise<void> {
       const messageId = await appendMessage(
         conversationId,
         'assistant',
-        result.text,
+        storedAnswer(result),
         result.citations,
         result.toolCalls,
         result.turnBlocks,

@@ -24,6 +24,7 @@ import { convertToMarkdown, type ConversionResult } from '../ingest/markdown/con
 import { saveFileMarkdown } from '../ingest/markdown/store.js';
 import {
   extractFieldsFromMarkdown,
+  correctLabelDocType,
   extractDocumentFieldsFromDocumentWithMeta,
   type ExtractedFields,
 } from '../ingest/extraction/extractFields.js';
@@ -155,7 +156,7 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
           meta = await extractDocumentFieldsFromDocumentWithMeta(buf, file.type, file.name);
         }
         if (conv.partial) meta.truncated = true;
-        const fields = meta.fields;
+        const fields = meta.fields ? correctLabelDocType(meta.fields, file.name) : null;
 
         if (fields && extractionIsSubstantive(fields)) {
           await upsertExtraction(file.id, file.workspace_id, fields);

@@ -106,6 +106,20 @@ describe('assignLot', () => {
     expect(r).toMatchObject({ kind: 'lot', lotId: 'L2', confidence: 'medium' });
   });
 
+  it('a supplier invoicing the consignee directly (trilateral) is still that supplier', () => {
+    const withPrachi = [...lots, { id: 'P', name: 'Партія — Prachi', supplier_name: 'Prachi Pharmaceuticals', goods: [], manufacturers: [], batches: [] }];
+    const fields = {
+      doc_type: 'invoice',
+      also_contains: ['packing_list', 'quality_certificate'],
+      seller: 'PRACHI PHARMACEUTICALS PVT. LTD.',
+      buyer: 'PC ALLIANCE GROUP LLC',
+      line_items: [{ description: 'Paracetamol USP powder' }],
+    };
+    expect(assignLot(doc('Инв пак СОА.pdf', fields), withPrachi)).toMatchObject({ kind: 'lot', lotId: 'P', confidence: 'high' });
+    // No Prachi lot yet → it opens one, never lands in another lot by the goods.
+    expect(assignLot(doc('Инв пак СОА.pdf', fields), lots)).toMatchObject({ kind: 'new', supplierName: 'PRACHI PHARMACEUTICALS PVT. LTD.' });
+  });
+
   it('opens a new lot for a new supplier on an anchor document', () => {
     const r = assignLot(doc('ci.pdf', { doc_type: 'contract', seller: 'Jiangsu Zhongbang Chemical Co., Ltd' }), lots);
     expect(r).toEqual(expect.objectContaining({ kind: 'new', supplierName: 'Jiangsu Zhongbang Chemical Co., Ltd' }));

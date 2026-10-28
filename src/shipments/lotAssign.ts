@@ -179,6 +179,20 @@ function supplierNames(fields: AssignFields | null): string[] {
   return [...new Set(names.filter((n): n is string => !!n && !isInternalCompany(n)))];
 }
 
+/** Our companies as people write them in file names («Прайм_ЧЗ инвойс…»). */
+const INTERNAL_IN_NAME = /прайм|prime\s*force|primeforce|agroup|(?<![\p{L}])pf(?![\p{L}])/iu;
+
+/** Whether one of our own companies is named on the document or in its file name. */
+function mentionsInternal(fields: AssignFields | null, fileName: string): boolean {
+  if (INTERNAL_IN_NAME.test(fileName)) return true;
+  if (!fields) return false;
+  const names = [str(fields.seller), str(fields.buyer), str(fields.consignor_name)];
+  if (Array.isArray(fields.parties)) {
+    for (const p of fields.parties as { name?: unknown }[]) names.push(str(p?.name));
+  }
+  return names.some((n) => isInternalCompany(n));
+}
+
 function lotBySupplier(names: string[], lots: LotProfile[]): LotProfile | null {
   for (const n of names) {
     const hit = lots.find((l) => sameCompany(l.supplier_name, n));
@@ -214,8 +228,11 @@ export function assignLot(doc: AssignDoc, lots: LotProfile[]): Assignment {
     // Suppliers sell TO US. A paper whose buyer is a consignee (Червона Зірка,
     // Новалайт…) is our resale leg — its "seller" is often the maker read off the
     // goods, never a new supplier (spec 007; a resale invoice opened a phantom lot).
+    // A supplier may also invoice the consignee directly (trilateral: Prachi →
+    // PC Alliance) — that is still a supplier's paper. Only a paper where one of
+    // OUR companies appears and the buyer is someone else is our resale leg.
     const buyer = str(f?.buyer);
-    const sellsToUs = !buyer || isInternalCompany(buyer);
+    const sellsToUs = !buyer || isInternalCompany(buyer) || !mentionsInternal(f, doc.file_name);
     if (suppliers.length > 0 && seller && !isInternalCompany(seller) && sellsToUs) {
       return { kind: 'new', supplierName: seller, reason: `новий постачальник «${seller}» → нова партія` };
     }

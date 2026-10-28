@@ -277,10 +277,10 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
     ...(tools.length === 0 ? stripToolBlocks(history) : history),
     { role: 'user' as const, content: userMessage },
   ];
-  const seedLen = messages.length; // everything appended past this = THIS turn
+  let seedLen = messages.length; // everything appended past this = THIS turn
   const systemParam = cachedSystem(system);
   const toolsParam = cachedTools(tools);
-  const historyEnd = seedLen - 2; // last message of prior history (−1 = none)
+  let historyEnd = seedLen - 2; // last message of prior history (−1 = none)
   const usage = { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 };
   const ctxStats = { last: 0, peak: 0, clearedTokens: 0, clearedToolUses: 0 };
   const noteContext = (m: {
@@ -340,11 +340,30 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
     for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
       if (params.signal?.aborted) throw new Error('client_disconnected');
       blockBreak = true;
-      const msg = await callModel(
-        { system: systemParam, messages: request(), tools: toolsParam, signal: params.signal },
-        {},
-        wireStream,
-      );
+      let msg: ModelMessage;
+      try {
+        msg = await callModel(
+          { system: systemParam, messages: request(), tools: toolsParam, signal: params.signal },
+          {},
+          wireStream,
+        );
+      } catch (err) {
+        // The replayed history itself was rejected (400 before any answer): every
+        // later turn of this chat would fail the same way and the user saw only
+        // empty bubbles. Retry once with the history as plain prose.
+        if (iteration !== 0 || text || !(err instanceof Anthropic.BadRequestError) || history.length === 0) throw err;
+        // eslint-disable-next-line no-console
+        console.error(`Agent: history rejected (${err.message}); retrying with prose-only history.`);
+        const prose = repairBlocks(stripToolBlocks(history));
+        messages.splice(0, messages.length, ...prose, { role: 'user' as const, content: userMessage });
+        seedLen = messages.length;
+        historyEnd = seedLen - 2;
+        msg = await callModel(
+          { system: systemParam, messages: request(), tools: toolsParam, signal: params.signal },
+          {},
+          wireStream,
+        );
+      }
       track(msg.usage);
       noteContext(msg);
       // Preserve the full assistant content (incl. thinking + tool_use blocks).

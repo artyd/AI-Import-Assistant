@@ -214,6 +214,9 @@ const EXTRACTION_TOOL: ChatTool = {
           'invoice — ЛИШЕ комерційний інвойс/рахунок-фактура за ТОВАР; рахунки й акти за ПОСЛУГИ ' +
           '(митний брокер, фрахт, експедирування, зберігання) — "other". ' +
           'packing_list — пакувальний лист / специфікація місць ЦІЄЇ поставки (не листівка-вкладка до препарату). ' +
+          'Етикетка / маркування одного місця (label, drum/bag label, shipping mark: назва товару, партія, вага ' +
+          'нетто/брутто ОДНІЄЇ бочки чи мішка) — НЕ пакувальний лист і НЕ інвойс, а "other" (заповни product_name, ' +
+          'batch_number; ваги одного місця НЕ пиши в net_weight_kg/gross_weight_kg). ' +
           'certificate_of_origin — ЛИШЕ сертифікат походження товару (COO, Form A, EUR.1, CT-1); ' +
           'реєстраційні посвідчення, дозволи, ліцензії — "other". ' +
           'quality_certificate — сертифікат аналізу/якості (COA), паспорт безпеки (MSDS/SDS). ' +
@@ -608,6 +611,35 @@ const INSTRUCTION =
   'Для кожного заповненого ключового поля познач field_confidence; якщо документ ' +
   'погано читається — додай extraction_note.';
 
+
+// A label / marking of one package (drum, bag) carries a weight, so a model
+// sometimes calls it a packing list — and the reconciliation then compares 25 kg
+// of one drum with 450 kg of the invoice. The file name settles it.
+const LABEL_NAME = /label|етикетк|этикетк|маркуван|маркировк|наклейк|shipping[\s_-]*mark|drum[\s_-]*mark/i;
+const NOT_A_LABEL = /packing|pack[\s_-]*list|(?<![a-z])pl(?![a-z])|invoice|інвойс|инвойс/i;
+
+/**
+ * Corrects a label / package marking typed as a packing list or invoice to
+ * "other" (its single-package weights cleared, so they never meet the totals).
+ */
+export function correctLabelDocType(fields: ExtractedFields, fileName: string): ExtractedFields {
+  const name = fileName.replace(/\.[a-z0-9]{2,5}$/i, '');
+  if (!LABEL_NAME.test(name) || NOT_A_LABEL.test(name)) return fields;
+  const wrong = new Set<DocType>(['packing_list', 'invoice']);
+  if (!wrong.has(fields.doc_type) && !fields.also_contains.some((t) => wrong.has(t))) return fields;
+  const anchor = wrong.has(fields.doc_type);
+  return {
+    ...fields,
+    doc_type: anchor ? 'other' : fields.doc_type,
+    also_contains: fields.also_contains.filter((t) => !wrong.has(t)),
+    ...(anchor
+      ? { net_weight_kg: null, gross_weight_kg: null, total_weight_kg: null, packages_count: null, total_value: null }
+      : {}),
+    extraction_note: [fields.extraction_note, 'Етикетка / маркування місця — не пакувальний лист і не інвойс.']
+      .filter(Boolean)
+      .join(' '),
+  };
+}
 
 /**
  * Extraction result plus whether the model's tool-call JSON was truncated by the

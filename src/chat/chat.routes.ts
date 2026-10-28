@@ -6,6 +6,7 @@ import { getOwnedWorkspace } from '../shipments/workspaceAccess.js';
 import {
   ensureConversation,
   appendMessage,
+  storedAnswer,
   getConversationHistoryWithStats,
 } from './conversations.js';
 import { SseStream } from '../lib/sse.js';
@@ -82,7 +83,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         const messageId = await appendMessage(
           conversationId,
           'assistant',
-          result.text,
+          storedAnswer(result),
           result.citations,
           result.toolCalls,
           result.turnBlocks,

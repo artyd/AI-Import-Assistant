@@ -5,6 +5,7 @@ import { getOwnedCollection } from '../shipments/collectionAccess.js';
 import {
   ensureConversationScoped,
   appendMessage,
+  storedAnswer,
   getConversationHistoryWithStats,
   listConversationsByCollection,
   getConversationMessagesByCollection,
@@ -91,7 +92,7 @@ export async function chatConsolidatedRoutes(app: FastifyInstance): Promise<void
         const messageId = await appendMessage(
           conversationId,
           'assistant',
-          result.text,
+          storedAnswer(result),
           result.citations,
           result.toolCalls,
           result.turnBlocks,

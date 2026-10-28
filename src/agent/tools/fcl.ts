@@ -1,7 +1,8 @@
 import { query } from '../../db/pool.js';
 import { getWorkspaceById, type WorkspaceRow } from '../../shipments/workspaceAccess.js';
 import { flattenFcl, loadFclVerdicts, type FclVerdicts, type LotVerdict } from '../../shipments/fclState.js';
-import { fclFolderId, lotFolderId } from '../../shipments/lots.js';
+import { fclFolderId } from '../../shipments/lots.js';
+import { fileIntoLot, MANUAL_REASON } from '../../documents/classify.js';
 import { shipmentChanged } from '../../shipments/state.js';
 import { fieldLabel } from '../../reconciliation/risks.js';
 import type { Discrepancy } from '../../reconciliation/discrepancies.js';
@@ -241,13 +242,18 @@ export async function runAssignFileToLot(input: unknown, ctx: ToolContext): Prom
   } else {
     const lot = findLot(await loadFclVerdicts(ws), ref);
     if (!lot) return noLot(await loadFclVerdicts(ws), ref);
-    folderId = await lotFolderId(lot.lot.id);
-    target = lot.lot.name;
+    // Into the lot's product folder / «Митниця» / «Інше», marked as moved by hand
+    // (a re-file keeps it there).
+    const path = await fileIntoLot(ws.id, file.id, lot.lot.id);
+    if (!path) return { result: `Не вдалося перенести «${file.name}» у ${lot.lot.name}.`, summary: 'Перенесення: помилка', citations: [] };
+    await shipmentChanged(ws.id, 'files');
+    return { result: `Файл «${file.name}» перенесено: ${path}.`, summary: `Перенесено: ${file.name} → ${path}`, citations: [] };
   }
+  // The user asked for this place: a re-file must not undo it.
   await query(
-    `UPDATE files SET folder_id = $1, suggested_folder_id = NULL, folder_reason = 'перенесено Штурманом за проханням користувача'
+    `UPDATE files SET folder_id = $1, suggested_folder_id = NULL, folder_reason = $4
      WHERE id = $2 AND workspace_id = $3`,
-    [folderId, file.id, ws.id],
+    [folderId, file.id, ws.id, MANUAL_REASON],
   );
   await shipmentChanged(ws.id, 'files');
   return { result: `Файл «${file.name}» перенесено: ${target}.`, summary: `Перенесено: ${file.name} → ${target}`, citations: [] };
