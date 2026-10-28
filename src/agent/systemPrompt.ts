@@ -454,7 +454,9 @@ export function buildConsolidatedSystemPrompt(fcl: {
     ...documentsDigestBlock(fcl.documentsDigest),
   ].join('\n');
   return [
-    { type: 'text', text: shipmentRules(), cache_control: { type: 'ephemeral' } },
+    // One breakpoint after both static blocks caches them together; the API
+    // allows only 4 per request (tools + system + 2 in the messages).
+    { type: 'text', text: shipmentRules() },
     { type: 'text', text: fclRules, cache_control: { type: 'ephemeral' } },
     { type: 'text', text: state },
   ];

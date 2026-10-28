@@ -87,6 +87,14 @@ function cachedTools(tools: ChatTool[]): ChatTool[] {
   return [...tools.slice(0, -1), { ...last, cache_control: EPHEMERAL } as ChatTool];
 }
 
+const MAX_CACHE_BREAKPOINTS = 4;
+
+/** cache_control marks already set on system blocks or tools. */
+export function countBreakpoints(items: readonly unknown[] | string): number {
+  if (typeof items === 'string') return 0;
+  return items.filter((x) => !!x && typeof x === 'object' && 'cache_control' in x && (x as { cache_control?: unknown }).cache_control).length;
+}
+
 /** Copy of `messages` with a cache breakpoint on the last block of each listed index. */
 function withBreakpoints(messages: ChatMessageParam[], indexes: number[]): ChatMessageParam[] {
   const out = [...messages];
@@ -296,8 +304,17 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
       ctxStats.clearedToolUses += e.cleared_tool_uses ?? 0;
     }
   };
+  // The API allows at most 4 cache_control blocks per request; whatever the
+  // system and tools already use leaves the rest for the messages (newest first).
+  const messageBreakpoints = Math.max(
+    0,
+    MAX_CACHE_BREAKPOINTS - countBreakpoints(systemParam) - countBreakpoints(toolsParam),
+  );
   const request = (): ChatMessageParam[] =>
-    withBreakpoints(messages, historyEnd >= 0 ? [historyEnd, messages.length - 1] : [messages.length - 1]);
+    withBreakpoints(
+      messages,
+      (historyEnd >= 0 ? [messages.length - 1, historyEnd] : [messages.length - 1]).slice(0, messageBreakpoints),
+    );
   const track = (u: {
     input_tokens: number;
     output_tokens: number;
