@@ -211,7 +211,12 @@ export function assignLot(doc: AssignDoc, lots: LotProfile[]): Assignment {
     const bySeller = lotBySupplier(suppliers, lots);
     if (bySeller) return { kind: 'lot', lotId: bySeller.id, confidence: 'high', reason: `продавець «${bySeller.supplier_name}» → ${bySeller.name}` };
     const seller = str(f?.seller);
-    if (suppliers.length > 0 && seller && !isInternalCompany(seller)) {
+    // Suppliers sell TO US. A paper whose buyer is a consignee (Червона Зірка,
+    // Новалайт…) is our resale leg — its "seller" is often the maker read off the
+    // goods, never a new supplier (spec 007; a resale invoice opened a phantom lot).
+    const buyer = str(f?.buyer);
+    const sellsToUs = !buyer || isInternalCompany(buyer);
+    if (suppliers.length > 0 && seller && !isInternalCompany(seller) && sellsToUs) {
       return { kind: 'new', supplierName: seller, reason: `новий постачальник «${seller}» → нова партія` };
     }
     const byGoods = lotsByGoods(goods, lots);
@@ -219,14 +224,14 @@ export function assignLot(doc: AssignDoc, lots: LotProfile[]): Assignment {
     if (one) return { kind: 'lot', lotId: one.id, confidence: 'medium', reason: `товар збігається з ${one.name}` };
     // Our own resale paper (Prime Force → consignee) over goods of several lots is
     // a customs document of the whole container, not of one lot (spec 007).
-    if (byGoods.length > 1 && (!seller || isInternalCompany(seller))) {
+    if (byGoods.length > 1 && (!seller || isInternalCompany(seller) || !sellsToUs)) {
       return {
         kind: 'fcl',
         folder: 'customs',
         reason: `наш перепродаж товарів кількох партій (${byGoods.map((l) => l.name).join(', ')}) → Митниця збірника`,
       };
     }
-    if (suppliers[0] && !seller) {
+    if (suppliers[0] && !seller && sellsToUs) {
       // A packing list that names only the shipper.
       return { kind: 'new', supplierName: suppliers[0], reason: `новий постачальник «${suppliers[0]}» → нова партія` };
     }

@@ -68,6 +68,19 @@ describe('assignLot', () => {
     expect(r).toMatchObject({ kind: 'lot', lotId: 'L1', confidence: 'high' });
   });
 
+  it('a resale paper (buyer is a consignee) never opens a lot, even with a maker as seller', () => {
+    const r = assignLot(
+      doc('Прайм_ЧЗ инвойс_упак аспарагин.pdf', {
+        doc_type: 'invoice',
+        seller: 'Changzhou Shenlong Bio-Engineering Co Ltd.',
+        buyer: 'ПАТ «Червона зірка»',
+        line_items: [{ description: 'Paracetamol USP powder' }],
+      }),
+      lots,
+    );
+    expect(r).toMatchObject({ kind: 'lot', lotId: 'L2', confidence: 'medium' });
+  });
+
   it('opens a new lot for a new supplier on an anchor document', () => {
     const r = assignLot(doc('ci.pdf', { doc_type: 'contract', seller: 'Jiangsu Zhongbang Chemical Co., Ltd' }), lots);
     expect(r).toEqual(expect.objectContaining({ kind: 'new', supplierName: 'Jiangsu Zhongbang Chemical Co., Ltd' }));

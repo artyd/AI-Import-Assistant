@@ -694,6 +694,20 @@ export async function refileAll(workspaceId: string): Promise<{ filed: number; i
     text: `Розкладаю збірник заново (${reset} файл(ів); перенесені вручну лишаються на місці)…`,
   });
   const res = await fileFclBatch(workspaceId, null);
+  // Lots Штурман opened that ended up with no papers (a misread supplier) go away.
+  const { rows: empty } = await query<{ id: string; name: string }>(
+    `DELETE FROM lots l WHERE l.workspace_id = $1 AND l.source = 'auto'
+       AND NOT EXISTS (SELECT 1 FROM files f JOIN folders fo ON fo.id = f.folder_id
+                       WHERE fo.lot_id = l.id AND f.is_latest = true)
+     RETURNING l.id, l.name`,
+    [workspaceId],
+  );
+  if (empty.length > 0) {
+    await logIngest(workspaceId, {
+      kind: 'warn',
+      text: `Прибрав порожні партії без документів: ${empty.map((l) => l.name).join(', ')}.`,
+    });
+  }
   await logIngest(workspaceId, {
     kind: 'summary',
     text: `Готово: розкладено ${res.filed}${res.inbox ? `, в Інбоксі ${res.inbox}` : ''}.`,
