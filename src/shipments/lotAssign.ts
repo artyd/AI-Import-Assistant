@@ -99,12 +99,30 @@ export function isManifest(doc: AssignDoc): boolean {
 
 const STOP = new Set(['the', 'and', 'for', 'with', 'grade', 'powder', 'usp', 'bp', 'ep', 'kg', 'pcs', 'drum', 'drums', 'bag', 'bags']);
 
+/** Salt / form names written several ways ("HCl" = "hydrochloride" = "гідрохлорид"). */
+const SYNONYM: Record<string, string> = {
+  hydrochloride: 'hcl',
+  hydrochlorid: 'hcl',
+  'гідрохлорид': 'hcl',
+  'гидрохлорид': 'hcl',
+  'гх': 'hcl',
+  anhydrate: 'anhydrous',
+};
+
 /** Significant tokens of a product name (lowercased, ≥3 chars, no packing words). */
 export function goodsTokens(name: string): Set<string> {
   const out = new Set<string>();
+  const add = (tok: string): void => {
+    const t = SYNONYM[tok] ?? tok;
+    if (t.length >= 3 && !STOP.has(t) && !/^\d+$/.test(t)) out.add(t);
+  };
   for (const t of name.toLowerCase().split(/[^\p{L}\p{N}-]+/u)) {
     const tok = t.replace(/^-+|-+$/g, '');
-    if (tok.length >= 3 && !STOP.has(tok) && !/^\d+$/.test(tok)) out.add(tok);
+    const parts = tok.split('-');
+    // "D-glucosamine", "DL-aspartic" keep their stereo prefix (D- ≠ DL-); a
+    // compound like "PEG-1500" also counts as its parts ("peg").
+    if (parts.length > 1 && parts[0]!.length > 2) parts.forEach(add);
+    else add(tok);
   }
   return out;
 }
@@ -199,6 +217,15 @@ export function assignLot(doc: AssignDoc, lots: LotProfile[]): Assignment {
     const byGoods = lotsByGoods(goods, lots);
     const one = unique(byGoods);
     if (one) return { kind: 'lot', lotId: one.id, confidence: 'medium', reason: `товар збігається з ${one.name}` };
+    // Our own resale paper (Prime Force → consignee) over goods of several lots is
+    // a customs document of the whole container, not of one lot (spec 007).
+    if (byGoods.length > 1 && (!seller || isInternalCompany(seller))) {
+      return {
+        kind: 'fcl',
+        folder: 'customs',
+        reason: `наш перепродаж товарів кількох партій (${byGoods.map((l) => l.name).join(', ')}) → Митниця збірника`,
+      };
+    }
     if (suppliers[0] && !seller) {
       // A packing list that names only the shipper.
       return { kind: 'new', supplierName: suppliers[0], reason: `новий постачальник «${suppliers[0]}» → нова партія` };

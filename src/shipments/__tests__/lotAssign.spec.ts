@@ -44,6 +44,18 @@ const lots = buildLotProfiles(
   ],
 );
 
+describe('sameGoods — spellings of one product', () => {
+  it('HCl = hydrochloride, PEG-1500 = polyethylene glycol PEG 1500', () => {
+    expect(sameGoods('D-Glucosamine HCl', 'D-Glucosamine Hydrochloride')).toBe(true);
+    expect(sameGoods('Глюкозаміну гідрохлорид', 'Glucosamine HCl')).toBe(false); // different scripts stay apart
+    expect(sameGoods('PEG-1500', 'POLYETHYLENE GLYCOL PEG 1500')).toBe(true);
+  });
+
+  it('keeps D- and DL- forms apart', () => {
+    expect(sameGoods('DL-Aspartic acid', 'D-Aspartic acid')).toBe(false);
+  });
+});
+
 describe('assignLot', () => {
   it('files transport, customs and the manifest at the FCL level', () => {
     expect(assignLot(doc('HBL BW26010230A.pdf', { doc_type: 'transport' }), lots)).toMatchObject({ kind: 'fcl', folder: 'transport' });
@@ -71,6 +83,18 @@ describe('assignLot', () => {
       lots,
     );
     expect(r).toMatchObject({ kind: 'lot', lotId: 'L2', confidence: 'medium' });
+  });
+
+  it('our resale paper over goods of several lots goes to the FCL customs folder', () => {
+    const r = assignLot(
+      doc('Прайм_Новалайт инвойс_упак.pdf', {
+        doc_type: 'invoice',
+        seller: 'PRIME FORCE UK BUSINESS LTD',
+        line_items: [{ description: 'Betaine anhydrous 98%' }, { description: 'Paracetamol USP powder' }],
+      }),
+      lots,
+    );
+    expect(r).toMatchObject({ kind: 'fcl', folder: 'customs' });
   });
 
   it('never makes our own company a supplier lot', () => {

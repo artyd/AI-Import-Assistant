@@ -9,6 +9,7 @@ import {
   ensureLot,
   fclFolderId,
   getLot,
+  listLots,
   loadLotProfiles,
   lotCustomsFolderId,
   lotFolderId,
@@ -386,6 +387,9 @@ async function classifyIntoFcl(workspaceId: string, file: FileRow, move: boolean
   let links: string[] = [];
   if (assignment.kind === 'fcl') {
     targetId = await fclFolderId(workspaceId, assignment.folder);
+    // A container-level paper that names goods (our resale invoice) is linked
+    // into those goods' folders in every lot.
+    if (assignment.folder === 'customs') links = await productLinksAcrossLots(workspaceId, fields);
   } else if (assignment.kind === 'lot' || assignment.kind === 'new') {
     if (assignment.kind === 'lot' && assignment.confidence === 'medium' && confidence === 'high') confidence = 'medium';
     const sure = move && confidence !== 'low';
@@ -438,6 +442,20 @@ async function classifyIntoFcl(workspaceId: string, file: FileRow, move: boolean
   await setFileLinks(file.id, extra);
   await announceMove(workspaceId, file, targetId, extra);
   return { ...base, to: targetName, reason: assignment.reason, confidence, suggested: null };
+}
+
+/** The existing product folders, in any lot, of the goods a document names. */
+async function productLinksAcrossLots(workspaceId: string, fields: Record<string, unknown> | null): Promise<string[]> {
+  const products = docProducts(fields);
+  if (products.length === 0) return [];
+  const out: string[] = [];
+  for (const lot of await listLots(workspaceId)) {
+    for (const p of products) {
+      const id = await productFolderId(workspaceId, lot.id, p, false);
+      if (id && !out.includes(id)) out.push(id);
+    }
+  }
+  return out;
 }
 
 /**
