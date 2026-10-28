@@ -35,14 +35,32 @@ One supplier's part of a collection: that supplier's documents, its own context
 can hold several goods. A file belongs to a lot through its folder.
 _Avoid_: Batch (that is a production batch), sub-shipment, order
 
+**Product folder** (Папка товару):
+One good of a lot, as a sub-folder of the lot's folder: every document about that
+good (CoA, MSDS, specification, photos). Created from the lot's invoice, packing list
+or contract lines. A document about several goods sits in one folder and is *linked*
+into the others.
+_Avoid_: SKU folder, item folder
+
+**Customs folder of a lot** (Митниця / постачальник):
+The lot's sub-folder under the collection's «Митниця»: its invoices, packing lists,
+contract, certificates of origin and marking.
+_Avoid_: Docs folder
+
+**Reading journal** (Журнал читання):
+What Штурман did with each file — «Читаю…», «Прочитано…», «Кладу → …» — shown live in
+the chat and kept in the Журнал tab. A collection's batch is filed only after all of
+it is read.
+_Avoid_: Ingest log (in UI text)
+
 **Folder skeleton**:
 The fixed set of folders that every new shipment or collection starts with.
 _Avoid_: Template, directory tree
 
 **Inbox** (Інбокс):
 Files that have no folder yet. After a file is read, it is filed automatically
-when its document type is recognised confidently; unrecognised files stay in the
-inbox. The user can always move a file by hand.
+when its document type is recognised confidently (a collection: once the whole
+upload batch is read); unrecognised files stay in the inbox. The user can always move a file by hand.
 _Avoid_: Unsorted, root
 
 **Document type**:

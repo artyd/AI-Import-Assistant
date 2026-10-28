@@ -9,7 +9,7 @@ import { config } from '../../lib/config.js';
 import type { FileType } from '../../shipments/folders.js';
 import { extractText } from '../extract/index.js';
 import { htmlToMarkdown, rowsToMarkdownTable, type MarkdownPage } from './format.js';
-import { imageToMarkdown, pdfToMarkdown } from './vision.js';
+import { imageToMarkdown, pdfToMarkdown, type PageProgress } from './vision.js';
 
 const run = promisify(execFile);
 
@@ -93,7 +93,7 @@ function sheetToMarkdown(buf: Buffer): ConversionResult {
 
 const textLen = (ps: { text: string }[]): number => ps.reduce((n, p) => n + p.text.length, 0);
 
-async function pdfToMd(buf: Buffer): Promise<ConversionResult> {
+async function pdfToMd(buf: Buffer, onPages?: PageProgress): Promise<ConversionResult> {
   const textPages = await extractText(buf, 'pdf').catch(() => []);
   const asMd = (ps: typeof textPages): MarkdownPage[] => ps.map((p) => ({ page: p.page, markdown: p.text }));
 
@@ -104,7 +104,7 @@ async function pdfToMd(buf: Buffer): Promise<ConversionResult> {
   }
 
   try {
-    const v = await pdfToMarkdown(buf);
+    const v = await pdfToMarkdown(buf, onPages);
     const pages = [...v.pages];
     let converter: ConversionResult['converter'] = 'vision';
     // Pages vision could not transcribe → fill from the text layer (never lose a page).
@@ -143,8 +143,13 @@ async function pdfToMd(buf: Buffer): Promise<ConversionResult> {
  * Converts a stored document to Markdown pages. Claude vision reads PDFs and
  * images; Office/CSV files are converted locally (they already carry structure).
  */
-export async function convertToMarkdown(buf: Buffer, type: FileType, name: string): Promise<ConversionResult> {
-  const conv = await convertRaw(buf, type, name);
+export async function convertToMarkdown(
+  buf: Buffer,
+  type: FileType,
+  name: string,
+  onPages?: PageProgress,
+): Promise<ConversionResult> {
+  const conv = await convertRaw(buf, type, name, onPages);
   return { ...conv, pages: conv.pages.map((p) => ({ ...p, markdown: stripControlChars(p.markdown) })) };
 }
 
@@ -158,10 +163,10 @@ export function stripControlChars(s: string): string {
   return s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
 }
 
-async function convertRaw(buf: Buffer, type: FileType, name: string): Promise<ConversionResult> {
+async function convertRaw(buf: Buffer, type: FileType, name: string, onPages?: PageProgress): Promise<ConversionResult> {
   switch (type) {
     case 'pdf':
-      return pdfToMd(buf);
+      return pdfToMd(buf, onPages);
     case 'image': {
       if (!config.OCR_ENABLED) return { pages: [], converter: 'none', partial: false, pageCount: 1, note: null };
       const v = await imageToMarkdown(buf, name);

@@ -3,6 +3,9 @@ import { query } from '../db/pool.js';
 import { getWorkspaceById } from '../shipments/workspaceAccess.js';
 import { shipmentVerdicts } from './verdicts.js';
 import { insertNotification } from '../notifications/notifications.js';
+import { fileFclBatch } from '../documents/classify.js';
+import { shipmentChanged } from '../shipments/state.js';
+import { logIngest } from '../ingest/journal.js';
 
 /**
  * Auto-reconcile when an upload batch is fully read (user's "auto-reconcile when
@@ -54,6 +57,29 @@ export async function maybeReconcileBatch(batchId: string | null | undefined): P
   const ws = await getWorkspaceById(batch.workspace_id);
   if (!ws) return false;
 
+  // Spec 007: the batch is read — say so, and an FCL files it now, as a whole.
+  const { rows: totalRows } = await query<{ n: string }>(
+    'SELECT COUNT(*) AS n FROM files WHERE batch_id = $1 AND is_latest = true',
+    [batchId],
+  );
+  const total = Number(totalRows[0]?.n ?? 0);
+  const journal = (kind: 'summary' | 'warn', text: string): Promise<void> => logIngest(ws.id, { batchId, kind, text });
+  await journal(
+    'summary',
+    `Усю пачку прочитано (${total} файл(ів)).` +
+      (ws.kind === 'fcl' ? ' Розкладаю по папках: спершу інвойси, контракти й пакувальні листи, потім решту…' : ''),
+  );
+  if (ws.kind === 'fcl') {
+    try {
+      await fileFclBatch(ws.id, batchId);
+      await shipmentChanged(ws.id, 'files');
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(`FCL batch filing failed for batch ${batchId}:`, (err as Error).message);
+      await journal('warn', 'Розкласти пачку не вдалося — натисніть «Розкласти інбокс» або спробуйте пізніше.');
+    }
+  }
+
   const { discrepancies, risks } = await shipmentVerdicts(ws).catch(() => ({ discrepancies: [], risks: [] }));
   const confirmed = discrepancies.filter((d) => d.kind === 'confirmed').length;
   const critical = risks.filter((r) => r.severity === 'error').length;
@@ -65,6 +91,24 @@ export async function maybeReconcileBatch(batchId: string | null | undefined): P
     [batchId],
   );
   const needsManual = Number(flagged[0]!.n);
+
+  const { rows: inboxRows } = await query<{ n: string }>(
+    'SELECT COUNT(*) AS n FROM files WHERE batch_id = $1 AND is_latest = true AND folder_id IS NULL',
+    [batchId],
+  );
+  const inInbox = Number(inboxRows[0]?.n ?? 0);
+  await journal(
+    'summary',
+    [
+      `Готово: розкладено ${total - inInbox} з ${total}`,
+      inInbox > 0 ? `в Інбоксі ${inInbox} (див. підказки біля файлів)` : null,
+      `розбіжностей ${discrepancies.length}${confirmed ? ` (${confirmed} підтверджених)` : ''}`,
+      critical > 0 ? `критичних ризиків ${critical}` : null,
+      needsManual > 0 ? `потребують ручного вводу ${needsManual}` : null,
+    ]
+      .filter(Boolean)
+      .join('; ') + '.',
+  );
 
   if (ws.responsible_user_id) {
     const parts = [

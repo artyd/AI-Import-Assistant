@@ -36,6 +36,7 @@ vi.mock('../fclState.js', () => ({
     return { checklist: [], discrepancies: [], risks: [], status: 'docs_in_progress', intakeComplete: true };
   }),
 }));
+vi.mock('../../lib/diskTree.js', () => ({ scheduleDiskTree: vi.fn() }));
 vi.mock('../../documents/classify.js', () => ({ refileFclInbox: vi.fn(async () => { calls.push('refile'); return 0; }) }));
 
 const { shipmentChanged } = await import('../state.js');

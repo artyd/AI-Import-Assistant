@@ -15,6 +15,7 @@ import type { WorkspaceRow } from '../shipments/workspaceAccess.js';
 import { readStoredFile } from '../lib/storage.js';
 import { shipmentVerdicts } from '../reconciliation/verdicts.js';
 import { DOC_TYPE_TO_FOLDER } from './classify.js';
+import { folderPaths } from '../shipments/folderPath.js';
 import { buildAndSaveReport } from '../report/report.js';
 import { saveArtifact, getLatestArtifacts, type ArtifactType } from './artifacts.js';
 
@@ -98,12 +99,16 @@ export async function streamWorkspaceZip(ws: WorkspaceRow, reply: FastifyReply):
     disk_path: string;
     is_latest: boolean;
     version: number;
+    folder_id: string | null;
+    folder_role: string | null;
+    links: string[];
     folder_name: string | null;
     lot_id: string | null;
     suggested_folder_name: string | null;
     doc_type: string | null;
   }>(
-    `SELECT f.name, f.disk_path, f.is_latest, f.version,
+    `SELECT f.name, f.disk_path, f.is_latest, f.version, f.folder_id, fo.role AS folder_role,
+            COALESCE((SELECT array_agg(l.folder_id) FROM file_links l WHERE l.file_id = f.id), '{}') AS links,
             fo.name AS folder_name, fo.lot_id,
             sfo.name AS suggested_folder_name,
             de.extracted_fields->>'doc_type' AS doc_type
@@ -115,6 +120,10 @@ export async function streamWorkspaceZip(ws: WorkspaceRow, reply: FastifyReply):
      ORDER BY fo.position NULLS LAST, f.created_at`,
     [ws.id],
   );
+
+  // Full folder paths (nested FCL layout, spec 007).
+  const paths = await folderPaths(ws.id);
+  const pathOf = (id: string | null): string | null => (id ? (paths.get(id)?.join('/') ?? null) : null);
 
   for (const f of files) {
     let buf: Buffer;
@@ -134,8 +143,11 @@ export async function streamWorkspaceZip(ws: WorkspaceRow, reply: FastifyReply):
       : null;
     let targetFolder = f.folder_name ?? derived ?? f.suggested_folder_name;
     if (ws.kind === 'fcl' && f.folder_name) {
-      // A Збірник (spec 006): «Партія — X»/<document type>/…, FCL folders under FCL/.
-      targetFolder = f.lot_id ? `${f.folder_name}/${derived ?? 'Інше'}` : `FCL/${f.folder_name}`;
+      // A Збірник: the app's own tree (Постачальник/Товар, Митниця/Постачальник,
+      // Транспорт…). A file still in a pre-spec-007 flat lot folder gets its
+      // document type as a sub-folder, as before.
+      const own = pathOf(f.folder_id) ?? f.folder_name;
+      targetFolder = f.lot_id && f.folder_role === 'lot' ? `${own}/${derived ?? 'Інше'}` : own;
     }
     const entry = !f.is_latest
       ? `_OldVersions/v${f.version}_${f.name}`
@@ -143,6 +155,13 @@ export async function streamWorkspaceZip(ws: WorkspaceRow, reply: FastifyReply):
         ? `${targetFolder}/${f.name}`
         : `_Inbox/${f.name}`;
     archive.append(buf, { name: uniqueName(entry) });
+    // A document about several products also sits in each product's folder.
+    if (f.is_latest && ws.kind === 'fcl') {
+      for (const l of f.links) {
+        const p = pathOf(l);
+        if (p) archive.append(buf, { name: uniqueName(`${p}/${f.name}`) });
+      }
+    }
   }
 
   for (const g of GENERATED) {

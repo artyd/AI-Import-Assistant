@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, uploadWithProgress } from "@/lib/api";
 import { openEventsChannel } from "@/lib/sse";
-import type { FileItem, FileStatusEvent, Folder } from "@/lib/types";
+import type { FileItem, FileStatusEvent, Folder, IngestEvent } from "@/lib/types";
 import type { NoticeTone } from "@/components/ui/Notice";
 import {
   applyFileStatus,
@@ -26,7 +26,12 @@ export interface ClassifiedUpload {
   fileId: string;
   name: string;
   folderName: string | null;
+  /** Not filed yet: Штурман files it after reading (spec 007). */
+  deferred?: boolean;
 }
+
+/** How many journal lines the page keeps. */
+const JOURNAL_MAX = 500;
 
 /**
  * A shipment's files: the list, live file_status updates, uploads (batched,
@@ -40,12 +45,32 @@ export function useShipmentFiles(
   const { live, folders, notify } = opts;
   const [files, setFiles] = useState<FileItem[]>([]);
   const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
+  // The reading journal (spec 007): history on load, then live lines.
+  const [journal, setJournal] = useState<IngestEvent[]>([]);
+  const addJournal = useCallback((events: IngestEvent[] | undefined) => {
+    // A missing/odd payload (older backend, a proxy error page) is ignored.
+    if (!Array.isArray(events)) return;
+    setJournal((prev) => {
+      const seen = new Set(prev.map((e) => e.id));
+      const add = events.filter((e) => e && typeof e.id === "string" && !seen.has(e.id));
+      if (add.length === 0) return prev;
+      return [...prev, ...add].sort((a, b) => Number(a.id) - Number(b.id)).slice(-JOURNAL_MAX);
+    });
+  }, []);
+  const refreshJournal = useCallback(async () => {
+    const r = await api<{ events?: IngestEvent[] }>(`/api/workspaces/${id}/ingest-log?limit=300`);
+    addJournal(r?.events);
+  }, [id, addJournal]);
+  useEffect(() => {
+    setJournal([]);
+  }, [id]);
   const docsStatus = useMemo(() => docsStatusOf(files), [files]);
 
   // file_status events that arrive while a refresh is in flight are re-applied
   // on top of its (possibly older) snapshot, so a resync can never roll a file
   // back to a stale status.
   const refreshInFlight = useRef(0);
+  const resyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bufferedEvents = useRef<FileStatusEvent[]>([]);
 
   const refreshFiles = useCallback(async () => {
@@ -69,12 +94,26 @@ export function useShipmentFiles(
         if (refreshInFlight.current > 0) bufferedEvents.current.push(ev);
         setFiles((prev) => applyFileStatus(prev, ev));
       },
+      onIngestLog: (raw) => {
+        const ev = raw as IngestEvent;
+        addJournal([ev]);
+        // A filing / batch summary changed folders and links (links don't ride
+        // on file_status) — resync the list once the burst settles.
+        if (ev.kind === "file" || ev.kind === "summary") {
+          if (resyncTimer.current) clearTimeout(resyncTimer.current);
+          resyncTimer.current = setTimeout(() => void refreshFiles().catch(() => {}), 1500);
+        }
+      },
       onOpen: () => {
         void refreshFiles().catch(() => {});
+        void refreshJournal().catch(() => {});
       },
     });
-    return () => channel.close();
-  }, [id, live, refreshFiles]);
+    return () => {
+      channel.close();
+      if (resyncTimer.current) clearTimeout(resyncTimer.current);
+    };
+  }, [id, live, refreshFiles, refreshJournal, addJournal]);
 
   const upload = useCallback(
     async (folderId: string | null, fileList: FileList | File[], replacesFileId?: string): Promise<FileItem[]> => {
@@ -182,8 +221,8 @@ export function useShipmentFiles(
   );
 
   const classifyFile = useCallback(
-    async (fileId: string): Promise<string | null> => {
-      const { folderName } = await api<{ fileId: string; folderName: string | null }>(
+    async (fileId: string): Promise<{ folderName: string | null; deferred: boolean }> => {
+      const { folderName, deferred } = await api<{ fileId: string; folderName: string | null; deferred?: boolean }>(
         `/api/workspaces/${id}/files/${fileId}/classify`,
         { method: "POST" },
       );
@@ -191,23 +230,17 @@ export function useShipmentFiles(
         const target = folders.find((f) => f.name === folderName);
         if (target) setFiles((p) => withPatch(p, fileId, { folderId: target.id }));
       }
-      return folderName;
+      return { folderName, deferred: !!deferred };
     },
     [id, folders],
   );
 
-  // Upload + auto-distribute: when 2+ files land in the root (inbox), classify
-  // each into its skeleton folder (single files stay in the root for the user
-  // to place). Folder-targeted uploads are never reclassified.
+  // Upload from the file tree. Filing is the server's job now (spec 007): the
+  // worker reads each file and only then files it (an FCL: the whole batch at
+  // once), reporting every move in the reading journal and over file_status.
   const uploadSmart = useCallback(
-    async (folderId: string | null, fileList: FileList | File[]): Promise<FileItem[]> => {
-      const created = await upload(folderId, fileList);
-      if (folderId == null && created.length >= 2) {
-        await mapLimit(created, 4, (f) => classifyFile(f.id).catch(() => null));
-      }
-      return created;
-    },
-    [upload, classifyFile],
+    (folderId: string | null, fileList: FileList | File[]): Promise<FileItem[]> => upload(folderId, fileList),
+    [upload],
   );
 
   /** The chat paperclip: upload to the inbox, classify each file, report where it went. */
@@ -216,7 +249,7 @@ export function useShipmentFiles(
       const created = await upload(null, fileList);
       return mapLimit(created, 4, async (f) => {
         try {
-          return { fileId: f.id, name: f.name, folderName: await classifyFile(f.id) };
+          return { fileId: f.id, name: f.name, ...(await classifyFile(f.id)) };
         } catch {
           return { fileId: f.id, name: f.name, folderName: null };
         }
@@ -268,5 +301,7 @@ export function useShipmentFiles(
     uploadAndClassify,
     sortInbox,
     reindexFile,
+    /** The reading journal (spec 007), oldest first. */
+    journal,
   };
 }

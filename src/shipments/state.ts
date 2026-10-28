@@ -6,6 +6,7 @@ import { refreshWorkspaceState, type WorkspaceState } from './status.js';
 import { insertNotification } from '../notifications/notifications.js';
 import { autoFillFclContext, refreshFclState } from './fclState.js';
 import { refileFclInbox } from '../documents/classify.js';
+import { scheduleDiskTree } from '../lib/diskTree.js';
 
 /**
  * Shipment state: the ONE entry point after anything a shipment's verdicts read
@@ -51,6 +52,8 @@ export async function shipmentChanged(
   change: ShipmentChange,
   opts: ShipmentChangeOptions = {},
 ): Promise<ShipmentChangeResult | null> {
+  // The shipment's folder on the server's disk follows the tree (debounced).
+  scheduleDiskTree(workspaceId);
   const kind = await getWorkspaceById(workspaceId);
   if (kind?.kind === 'fcl') return fclChanged(kind, change, opts);
 

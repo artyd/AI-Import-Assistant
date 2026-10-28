@@ -1,6 +1,5 @@
 import {
   anthropic,
-  MODEL,
   type ChatTool,
   type ChatContentBlockParam,
 } from '../../lib/anthropic/client.js';
@@ -111,6 +110,9 @@ export interface ExtractedLineItem {
   amount: number | null;
   hs_code: string | null;
   batch_no: string | null;
+  /** Short product name for the product folder (spec 007); absent on old extractions. */
+  product_name?: string | null;
+  cas_number?: string | null;
 }
 
 export interface ExtractedFields {
@@ -338,6 +340,13 @@ const EXTRACTION_TOOL: ChatTool = {
           type: 'object',
           properties: {
             description: { type: 'string', description: 'Найменування товару/позиції.' },
+            product_name: {
+              type: 'string',
+              description:
+                'Коротка назва самого товару без фасування, ґатунку тари й кількості — так, як назвали б ' +
+                'папку товару (напр. «Paracetamol», «Ascorbic acid», «Betaine HCl»).',
+            },
+            cas_number: { type: 'string', description: 'CAS-номер речовини цієї позиції, якщо вказаний.' },
             quantity: { type: 'number', description: 'Кількість.' },
             unit: { type: 'string', description: 'Одиниця виміру (kg, pcs, шт тощо).' },
             unit_price: { type: 'number', description: 'Ціна за одиницю.' },
@@ -487,6 +496,8 @@ function normalizeLineItems(v: unknown): ExtractedLineItem[] {
       amount,
       hs_code: toStr(rec.hs_code),
       batch_no: toStr(rec.batch_no),
+      ...(toStr(rec.product_name) ? { product_name: toStr(rec.product_name) } : {}),
+      ...(toStr(rec.cas_number) ? { cas_number: toStr(rec.cas_number) } : {}),
     });
   }
   return out;
@@ -618,15 +629,15 @@ async function runExtraction(content: ChatContentBlockParam[]): Promise<Extracti
   for (let attempt = 0; attempt < 2; attempt++) {
     const msg = await runWithAnthropicLimit(() =>
       anthropic.messages.create({
-        model: MODEL,
+        model: config.EXTRACTION_MODEL,
         // Large packing lists/manifests carry hundreds of line_items; 16k truncated
         // the tool JSON mid-array. 32k fits far larger tables; truncation is still
         // detected below via stop_reason and surfaced (never silently marked ok).
         // Thinking counts against it too (adaptive by default on current models).
         max_tokens: 32000,
-        // Verbatim field reading needs little reasoning — low effort keeps the
-        // (default-on) thinking short. No `temperature`: current models reject it.
-        output_config: { effort: 'low' },
+        // Thinking is adaptive (on by default); effort bounds it. No `temperature`:
+        // current models reject it.
+        output_config: { effort: config.EXTRACTION_EFFORT },
         tools: [EXTRACTION_TOOL],
         tool_choice: { type: 'auto' },
         messages: [{ role: 'user', content }],
@@ -686,7 +697,10 @@ export async function classifyDocTypeCheap(text: string): Promise<DocType | null
   const msg = await runWithAnthropicLimit(() =>
     anthropic.messages.create({
       model: config.CLASSIFY_MODEL,
-      max_tokens: 20,
+      // Adaptive thinking is on by default and counts against max_tokens — a tiny
+      // cap would end on a thinking block with no answer.
+      max_tokens: 2000,
+      output_config: { effort: 'low' },
       messages: [
         {
           role: 'user',

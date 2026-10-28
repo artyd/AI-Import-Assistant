@@ -278,7 +278,7 @@ const STABLE_MS = 30_000;
  */
 export function openEventsChannel(
   workspaceId: string,
-  handlers: { onFileStatus: (data: unknown) => void; onOpen?: () => void }
+  handlers: { onFileStatus: (data: unknown) => void; onIngestLog?: (data: unknown) => void; onOpen?: () => void }
 ): EventsChannel {
   let closed = false;
   let es: EventSource | null = null;
@@ -321,6 +321,14 @@ export function openEventsChannel(
     source.addEventListener("file_status", (ev) => {
       try {
         handlers.onFileStatus(JSON.parse((ev as MessageEvent).data));
+      } catch {
+        /* ignore malformed */
+      }
+    });
+    // The reading journal (spec 007): "Читаю …", "Кладу → …".
+    source.addEventListener("ingest_log", (ev) => {
+      try {
+        handlers.onIngestLog?.(JSON.parse((ev as MessageEvent).data));
       } catch {
         /* ignore malformed */
       }

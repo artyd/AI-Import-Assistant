@@ -72,6 +72,10 @@ services:
       ACCESS_CODE_EMAIL: ${ACCESS_CODE_EMAIL:-}
       CORS_ORIGIN: ${CORS_ORIGIN}
       STORAGE_DIR: /data/storage
+      # File analysis (spec 007): vision transcription, extraction, classification.
+      OCR_MODEL: ${OCR_MODEL:-claude-haiku-5-5}
+      EXTRACTION_MODEL: ${EXTRACTION_MODEL:-claude-haiku-5-5}
+      CLASSIFY_MODEL: ${CLASSIFY_MODEL:-claude-haiku-5-5}
       MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-104857600}
       # Internal logist-mcp URL (Phase 1). Empty disables the Phase-2 tools.
       LOGIST_MCP_URL: ${LOGIST_MCP_URL:-http://logist-mcp:8015}
@@ -117,6 +121,10 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       CORS_ORIGIN: ${CORS_ORIGIN}
       STORAGE_DIR: /data/storage
+      # File analysis (spec 007): vision transcription, extraction, classification.
+      OCR_MODEL: ${OCR_MODEL:-claude-haiku-5-5}
+      EXTRACTION_MODEL: ${EXTRACTION_MODEL:-claude-haiku-5-5}
+      CLASSIFY_MODEL: ${CLASSIFY_MODEL:-claude-haiku-5-5}
       # Ingest-time Markdown conversion (Claude vision, 5-page windows).
       MARKDOWN_VISION_ENABLED: ${MARKDOWN_VISION_ENABLED:-true}
       MARKDOWN_PDF_BATCH_PAGES: ${MARKDOWN_PDF_BATCH_PAGES:-5}

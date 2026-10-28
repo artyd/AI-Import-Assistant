@@ -38,7 +38,7 @@ export async function publishFileStatus(
 // exclusive to subscriptions), fanned out to listeners by channel — it used to
 // be one Redis connection per open browser tab.
 let subscriber: Redis | null = null;
-const listeners = new Map<string, Set<(event: FileStatusEvent) => void>>();
+const listeners = new Map<string, Set<(event: unknown) => void>>();
 
 function getSubscriber(): Redis {
   if (subscriber) return subscriber;
@@ -46,9 +46,9 @@ function getSubscriber(): Redis {
   subscriber.on('message', (ch: string, payload: string) => {
     const set = listeners.get(ch);
     if (!set || set.size === 0) return;
-    let event: FileStatusEvent;
+    let event: unknown;
     try {
-      event = JSON.parse(payload) as FileStatusEvent;
+      event = JSON.parse(payload);
     } catch {
       return; // Ignore malformed payloads.
     }
@@ -62,7 +62,16 @@ export function subscribeFileStatus(
   workspaceId: string,
   onEvent: (event: FileStatusEvent) => void,
 ): () => Promise<void> {
-  const ch = channel(workspaceId);
+  return subscribeChannel(channel(workspaceId), onEvent as (event: unknown) => void);
+}
+
+/** Publishes any JSON payload on a named channel (e.g. the reading journal). */
+export async function publishOn(ch: string, payload: unknown): Promise<void> {
+  await getPublisher().publish(ch, JSON.stringify(payload));
+}
+
+/** Subscribes to a named channel on the shared subscriber connection. */
+export function subscribeChannel(ch: string, onEvent: (event: unknown) => void): () => Promise<void> {
   const sub = getSubscriber();
   let set = listeners.get(ch);
   if (!set) {

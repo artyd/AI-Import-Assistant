@@ -2,10 +2,13 @@ import { pool, query } from '../db/pool.js';
 import { sameCompany } from './contextDerive.js';
 import { FCL_FOLDER_SKELETON, fclFolderRole, lotFolderName, type FclFolderRole } from './folders.js';
 import { buildLotProfiles, lotNameFor, type AssignFields, type LotProfile } from './lotAssign.js';
+import { findProductFolder, productKey, type ProductFolder, type ProductRef } from './fclLayout.js';
 
 /**
- * Lots of an FCL (Збірник, spec 006): the Postgres side. A lot always has exactly
- * one folder («Партія — <name>»), and a file's lot is its folder's lot.
+ * Lots of an FCL (Збірник, spec 006/007): the Postgres side. A lot has its root
+ * folder («Партія — <name>», role 'lot') with a sub-folder per product, plus its
+ * own folder under «Митниця» (role 'lot_customs'). Every one of them carries the
+ * lot's id — a file's lot is its folder's lot.
  */
 
 export type LotStatus = 'draft' | 'docs_in_progress' | 'docs_complete' | 'customs_ready';
@@ -51,7 +54,10 @@ export function supplierKey(name: string): string {
 
 /** The id of the lot's folder. */
 export async function lotFolderId(lotId: string): Promise<string | null> {
-  const { rows } = await query<{ id: string }>('SELECT id FROM folders WHERE lot_id = $1 LIMIT 1', [lotId]);
+  const { rows } = await query<{ id: string }>(
+    'SELECT id FROM folders WHERE lot_id = $1 AND parent_id IS NULL LIMIT 1',
+    [lotId],
+  );
   return rows[0]?.id ?? null;
 }
 
@@ -76,7 +82,10 @@ export async function ensureLot(
     );
     const same = supplierName ? existing.find((l) => l.supplier_name && sameCompany(l.supplier_name, supplierName)) : undefined;
     if (same) {
-      const { rows: fo } = await client.query<{ id: string }>('SELECT id FROM folders WHERE lot_id = $1 LIMIT 1', [same.id]);
+      const { rows: fo } = await client.query<{ id: string }>(
+        'SELECT id FROM folders WHERE lot_id = $1 AND parent_id IS NULL LIMIT 1',
+        [same.id],
+      );
       let folderId = fo[0]?.id;
       if (!folderId) folderId = await insertLotFolder(client, workspaceId, same);
       await client.query('COMMIT');
@@ -106,8 +115,8 @@ async function insertLotFolder(
   lot: Pick<LotRow, 'id' | 'name'>,
 ): Promise<string> {
   const { rows } = await client.query<{ id: string }>(
-    `INSERT INTO folders (workspace_id, name, position, lot_id)
-     VALUES ($1, $2, COALESCE((SELECT MAX(position) + 1 FROM folders WHERE workspace_id = $1), 0), $3)
+    `INSERT INTO folders (workspace_id, name, position, lot_id, role)
+     VALUES ($1, $2, COALESCE((SELECT MAX(position) + 1 FROM folders WHERE workspace_id = $1), 0), $3, 'lot')
      RETURNING id`,
     [workspaceId, lotFolderName(lot.name), lot.id],
   );
@@ -117,7 +126,7 @@ async function insertLotFolder(
 /** The FCL-level folder of a role (manifest / transport / customs), created when missing. */
 export async function fclFolderId(workspaceId: string, role: FclFolderRole): Promise<string> {
   const { rows } = await query<{ id: string; name: string }>(
-    'SELECT id, name FROM folders WHERE workspace_id = $1 AND lot_id IS NULL ORDER BY position',
+    'SELECT id, name FROM folders WHERE workspace_id = $1 AND lot_id IS NULL AND parent_id IS NULL ORDER BY position',
     [workspaceId],
   );
   const hit = rows.find((f) => fclFolderRole(f.name) === role);
@@ -130,6 +139,98 @@ export async function fclFolderId(workspaceId: string, role: FclFolderRole): Pro
     [workspaceId, name],
   );
   return created[0]!.id;
+}
+
+/** The lot's folder under «Митниця» (invoices, packing lists, contract…), created when missing. */
+export async function lotCustomsFolderId(workspaceId: string, lot: { id: string; name: string }): Promise<string> {
+  const { rows } = await query<{ id: string }>(
+    "SELECT id FROM folders WHERE lot_id = $1 AND role = 'lot_customs' LIMIT 1",
+    [lot.id],
+  );
+  if (rows[0]) return rows[0].id;
+  const customs = await fclFolderId(workspaceId, 'customs');
+  return withFolderLock(workspaceId, async (client) => {
+    const again = await client.query<{ id: string }>(
+      "SELECT id FROM folders WHERE lot_id = $1 AND role = 'lot_customs' LIMIT 1",
+      [lot.id],
+    );
+    if (again.rows[0]) return again.rows[0].id;
+    const { rows: created } = await client.query<{ id: string }>(
+      `INSERT INTO folders (workspace_id, name, position, lot_id, parent_id, role)
+       VALUES ($1, $2, COALESCE((SELECT MAX(position) + 1 FROM folders WHERE workspace_id = $1), 0), $3, $4, 'lot_customs')
+       RETURNING id`,
+      [workspaceId, lot.name, lot.id, customs],
+    );
+    return created[0]!.id;
+  });
+}
+
+/** The product folders of a lot. */
+export async function listProductFolders(lotId: string): Promise<(ProductFolder & { name: string })[]> {
+  const { rows } = await query<ProductFolder & { name: string }>(
+    "SELECT id, name, COALESCE(product_key, name) AS product_key FROM folders WHERE lot_id = $1 AND role = 'product' ORDER BY position",
+    [lotId],
+  );
+  return rows;
+}
+
+/**
+ * The folder of one product of a lot. With `create`, a product that has no
+ * folder yet gets one (only the anchor documents create products).
+ */
+export async function productFolderId(
+  workspaceId: string,
+  lotId: string,
+  product: ProductRef,
+  create: boolean,
+): Promise<string | null> {
+  const hit = findProductFolder(await listProductFolders(lotId), product);
+  if (hit || !create) return hit?.id ?? null;
+  const parent = await lotFolderId(lotId);
+  if (!parent) return null;
+  return withFolderLock(workspaceId, async (client) => {
+    const { rows } = await client.query<ProductFolder>(
+      "SELECT id, COALESCE(product_key, name) AS product_key FROM folders WHERE lot_id = $1 AND role = 'product'",
+      [lotId],
+    );
+    const again = findProductFolder(rows, product);
+    if (again) return again.id;
+    const { rows: created } = await client.query<{ id: string }>(
+      `INSERT INTO folders (workspace_id, name, position, lot_id, parent_id, role, product_key)
+       VALUES ($1, $2, COALESCE((SELECT MAX(position) + 1 FROM folders WHERE workspace_id = $1), 0), $3, $4, 'product', $5)
+       RETURNING id`,
+      [workspaceId, product.name, lotId, parent, productKey(product)],
+    );
+    return created[0]!.id;
+  });
+}
+
+/** Folder creation serialised per workspace: concurrent filings must not make twins. */
+async function withFolderLock<T>(
+  workspaceId: string,
+  fn: (client: { query: typeof pool.query }) => Promise<T>,
+): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query("SELECT pg_advisory_xact_lock(hashtext('folders:' || $1))", [workspaceId]);
+    const out = await fn(client);
+    await client.query('COMMIT');
+    return out;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/** Replaces the extra places (product folders) a file is linked into. */
+export async function setFileLinks(fileId: string, folderIds: string[]): Promise<void> {
+  await query('DELETE FROM file_links WHERE file_id = $1', [fileId]);
+  for (const folderId of new Set(folderIds)) {
+    await query('INSERT INTO file_links (file_id, folder_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [fileId, folderId]);
+  }
 }
 
 /** One latest file of an FCL with its lot (through the folder) and extraction. */

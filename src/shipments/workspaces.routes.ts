@@ -86,7 +86,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
     const ws = await getOwnedWorkspace(req.user!.sub, req.params.id);
     if (!ws) return reply.code(404).send({ error: 'not_found' });
     const { rows: folders } = await query(
-      'SELECT id, name, position FROM folders WHERE workspace_id = $1 ORDER BY position',
+      'SELECT id, name, position, lot_id AS "lotId", parent_id AS "parentId", role FROM folders WHERE workspace_id = $1 ORDER BY position',
       [ws.id],
     );
     return reply.send({

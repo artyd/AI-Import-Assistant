@@ -2,7 +2,6 @@ import { Worker, type Job } from 'bullmq';
 import { config } from '../lib/config.js';
 import { pool, query } from '../db/pool.js';
 import { runMigrations } from '../db/migrate.js';
-import { MODEL } from '../lib/anthropic/client.js';
 import { createRedis } from '../lib/queue/connection.js';
 import { INDEX_QUEUE, type IndexJobData } from '../lib/queue/index.js';
 import { REMINDERS_QUEUE, scheduleReminders, type ReminderJobData } from '../lib/queue/reminders.js';
@@ -28,7 +27,9 @@ import {
   extractDocumentFieldsFromDocumentWithMeta,
   type ExtractedFields,
 } from '../ingest/extraction/extractFields.js';
-import { classifyAndFile, needsAutoFiling } from '../documents/classify.js';
+import { batchStillReading, classifyAndFile, needsAutoFiling } from '../documents/classify.js';
+import { logIngest, q } from '../ingest/journal.js';
+import { describeDocument } from '../ingest/describe.js';
 import { shipmentChanged } from '../shipments/state.js';
 import { maybeReconcileBatch } from '../reconciliation/reconcileBatch.js';
 import { scanAndNotify } from '../notifications/reminders.js';
@@ -45,6 +46,7 @@ interface FileJobRow {
   folder_name: string | null;
   batch_id: string | null;
   content_hash: string | null;
+  kind: string;
 }
 
 /**
@@ -86,8 +88,9 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
   const { fileId } = job.data;
   const { rows } = await query<FileJobRow>(
     `SELECT f.id, f.workspace_id, f.name, f.type, f.disk_path, f.batch_id, f.content_hash,
-            fo.name AS folder_name
+            fo.name AS folder_name, w.kind
      FROM files f LEFT JOIN folders fo ON fo.id = f.folder_id
+     JOIN workspaces w ON w.id = f.workspace_id
      WHERE f.id = $1`,
     [fileId],
   );
@@ -95,6 +98,9 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
   if (!file) return; // File deleted before indexing ran.
 
   await setStatus(file.id, file.workspace_id, 'indexing');
+  const journal = (kind: Parameters<typeof logIngest>[1]['kind'], text: string): Promise<void> =>
+    logIngest(file.workspace_id, { fileId: file.id, batchId: file.batch_id, kind, text });
+  await journal('read', `Читаю ${q(file.name)}${job.attemptsMade > 0 ? ` (спроба ${job.attemptsMade + 1})` : ''}…`);
   // Fresh run: no extraction verdict yet (a stale 'ok' from a previous run must
   // not survive if this run's extraction fails). Batch reconcile waits on NULL.
   await query('UPDATE files SET extraction_status = NULL WHERE id = $1', [file.id]);
@@ -110,7 +116,14 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
     // Identical bytes were already converted (re-upload, another shipment, a new
     // version of the same file, a retry) → reuse that Markdown instead of paying
     // for Claude vision again. Only clean conversions are reused.
-    const conv = (await reuseMarkdownByHash(file)) ?? (await convertToMarkdown(buf, file.type, file.name));
+    // Long documents report each finished page window to the journal.
+    const onPages = (from: number, to: number, total: number): void => {
+      if (total > config.MARKDOWN_PDF_BATCH_PAGES) {
+        void journal('progress', `${q(file.name)}: прочитано стор. ${from}–${to} з ${total}.`);
+      }
+    };
+    const conv =
+      (await reuseMarkdownByHash(file)) ?? (await convertToMarkdown(buf, file.type, file.name, onPages));
     await saveFileMarkdown(file.id, file.workspace_id, conv);
     const pages = conv.pages;
     // eslint-disable-next-line no-console
@@ -121,14 +134,17 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
     );
 
     await setStatus(file.id, file.workspace_id, 'ready');
+    if (pages.length === 0) {
+      await journal('warn', `${q(file.name)}: тексту не розпізнано${conv.note ? ` — ${conv.note}` : ''}.`);
+    } else if (conv.partial) {
+      await journal('warn', `${q(file.name)}: розпізнано не повністю${conv.note ? ` — ${conv.note}` : ''}.`);
+    }
 
     // Structured extraction (best-effort): populate document_extractions so the
     // checklist/discrepancy checks are deterministic. A failure here must NOT
-    // fail indexing — the file stays "ready".
+    // fail indexing — the file stays "ready". Set once the verdict is stored.
+    let extractionStored = false;
     if (config.EXTRACTION_ENABLED) {
-      // Set once the extraction verdict is stored — a later failure (risk scan,
-      // classification…) must not be reported as an extraction failure.
-      let extractionStored = false;
       try {
         // Primary: multi-pass extraction over the stored Markdown (already a
         // faithful Claude transcription, so no second vision pass is needed).
@@ -143,6 +159,8 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
 
         if (fields && extractionIsSubstantive(fields)) {
           await upsertExtraction(file.id, file.workspace_id, fields);
+          const pagesNote = conv.pageCount ? `${conv.pageCount} стор., ` : '';
+          await journal('done', `Прочитано ${q(file.name)} (${pagesNote}${describeDocument(fields as never)}).`);
           // 'partial' when the extraction JSON was truncated by the output cap:
           // fields are present but line_items are under-counted — don't trust as
           // a clean 'ok' (reconciliation/totals may be incomplete).
@@ -173,41 +191,56 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
           // Nothing extractable this run — drop any stale row from a previous run.
           await query('DELETE FROM document_extractions WHERE file_id = $1', [file.id]);
           await query('UPDATE files SET extraction_status = $2 WHERE id = $1', [file.id, 'no_fields']);
+          await journal('done', `Прочитано ${q(file.name)}: це не документ поставки з ключовими полями.`);
         }
         extractionStored = true;
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error(`Extraction failed for file ${file.id}:`, (err as Error).message);
+        await journal('warn', `${q(file.name)}: поля не витягнуто (${(err as Error).message.slice(0, 120)}) — повторю пізніше.`);
+        // Surface + let the sweep retry it, instead of a silently missing document.
+        await query(`UPDATE files SET extraction_status = 'failed' WHERE id = $1`, [file.id]).catch(
+          () => undefined,
+        );
+      }
+    }
 
-        // Auto-file the document into its skeleton folder using the CLAUDE
-        // classifier (structured extraction → filename heuristic → LLM-on-Markdown). High/medium confidence
-        // moves the file; low confidence stays in the inbox with a suggestion for
-        // the user to confirm. Guarded on folder_id IS NULL so we never touch a
-        // file the user already placed by hand.
-        if (await needsAutoFiling(file.id)) {
-          const res = await classifyAndFile(file.workspace_id, file.id, { move: true });
-          if (res?.to) {
-            // eslint-disable-next-line no-console
-            console.log(`Auto-filed ${file.id} (${file.name}) → ${res.to}.`);
-          } else if (res?.suggested) {
-            // eslint-disable-next-line no-console
-            console.log(`Suggested folder for ${file.id} (${file.name}) → ${res.suggested} (needs confirm).`);
-          }
+    // Auto-file the document into its skeleton folder (structured extraction →
+    // filename heuristic → LLM-on-Markdown). High/medium confidence moves the
+    // file and announces the move to open file trees; low confidence stays in the
+    // inbox with a suggestion. Runs even when the extraction failed or is off —
+    // the filename and the Markdown still classify most papers — and only for an
+    // inbox file, never one the user already placed by hand.
+    let filed = false;
+    try {
+      // An FCL files the whole batch once it is read (anchors first) — see
+      // fileFclBatch in maybeReconcileBatch.
+      const deferred = file.kind === 'fcl' && (await batchStillReading(file.batch_id));
+      if (!deferred && (await needsAutoFiling(file.id))) {
+        const res = await classifyAndFile(file.workspace_id, file.id, { move: true });
+        filed = !!res?.to;
+        if (res?.to) {
+          // eslint-disable-next-line no-console
+          console.log(`Auto-filed ${file.id} (${file.name}) → ${res.to}.`);
+        } else if (res?.suggested) {
+          // eslint-disable-next-line no-console
+          console.log(`Suggested folder for ${file.id} (${file.name}) → ${res.suggested} (needs confirm).`);
         }
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(`Auto-filing failed for file ${file.id}:`, (err as Error).message);
+    }
 
-        // The shipment's documents changed: autopilot context → intake → verdicts.
-        // Single uploads also get a critical-risk alert; a batch gets ONE scan in
-        // its auto-reconcile (maybeReconcileBatch) instead of one per file.
+    // The shipment's documents changed: autopilot context → intake → verdicts.
+    // Single uploads also get a critical-risk alert; a batch gets ONE scan in
+    // its auto-reconcile (maybeReconcileBatch) instead of one per file.
+    if (extractionStored || filed) {
+      try {
         await shipmentChanged(file.workspace_id, 'documents', { alertRisks: !file.batch_id });
       } catch (err) {
         // eslint-disable-next-line no-console
-        console.error(
-          `${extractionStored ? 'Post-extraction step' : 'Extraction'} failed for file ${file.id}:`,
-          (err as Error).message,
-        );
-        // Surface + let the sweep retry it, instead of a silently missing document.
-        if (!extractionStored) {
-          await query(`UPDATE files SET extraction_status = 'failed' WHERE id = $1`, [file.id]).catch(
-            () => undefined,
-          );
-        }
+        console.error(`Post-extraction step failed for file ${file.id}:`, (err as Error).message);
       }
     }
 
@@ -224,7 +257,10 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
     // Only the LAST attempt is a real 'error' (the retry sweep re-queues errors —
     // doing it while BullMQ still retries ran two jobs for one file).
     const finalAttempt = job.attemptsMade + 1 >= (job.opts.attempts ?? 1);
-    if (finalAttempt) await setStatus(file.id, file.workspace_id, 'error', reason);
+    if (finalAttempt) {
+      await setStatus(file.id, file.workspace_id, 'error', reason);
+      await journal('error', `Не вдалося прочитати ${q(file.name)}: ${reason.slice(0, 160)}.`);
+    }
     else {
       await query(`UPDATE files SET status = 'queued', status_changed_at = now() WHERE id = $1`, [file.id]);
       await publishFileStatus(file.workspace_id, { fileId: file.id, status: 'queued' });
@@ -262,7 +298,7 @@ async function upsertExtraction(fileId: string, workspaceId: string, fields: unk
      ON CONFLICT (file_id) DO UPDATE SET
        extracted_fields = EXCLUDED.extracted_fields, model_version = EXCLUDED.model_version,
        extracted_at = now()`,
-    [fileId, workspaceId, JSON.stringify(fields), MODEL],
+    [fileId, workspaceId, JSON.stringify(fields), config.EXTRACTION_MODEL],
   );
 }
 

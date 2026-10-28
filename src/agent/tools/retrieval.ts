@@ -7,6 +7,7 @@ import { joinPages } from '../../ingest/markdown/format.js';
 import { searchWorkspace, workspaceCoverage, loadFileMarkdown, saveFileMarkdown } from '../../ingest/markdown/store.js';
 import type { Citation } from '../../chat/conversations.js';
 import type { FileType } from '../../shipments/folders.js';
+import { folderPaths } from '../../shipments/folderPath.js';
 import { type ToolContext, type ToolOutcome, requireWorkspace } from './shared.js';
 
 interface FileRow {
@@ -16,6 +17,7 @@ interface FileRow {
   disk_path: string;
   status: string;
   folder_name: string | null;
+  folder_id?: string | null;
   doc_type?: string | null;
   /** First page of the stored Markdown (for version hints). */
   md_head?: string | null;
@@ -103,9 +105,16 @@ export async function runReadFile(input: unknown, ctx: ToolContext): Promise<Too
   // the Markdown pipeline existed are converted on first read and stored.
   let stored = await loadFileMarkdown(file.id);
   if (!stored && (file.status === 'queued' || file.status === 'indexing')) {
-    // The worker is converting it right now — don't duplicate the (vision) cost inline.
+    // The worker is converting it right now (typically a file just attached in
+    // the chat). Wait for that conversion like a chat app waits for its upload,
+    // instead of answering "try later" — and don't duplicate the vision cost inline.
+    stored = await waitForMarkdown(file.id, config.READ_FILE_WAIT_MS);
+  }
+  if (!stored && (file.status === 'queued' || file.status === 'indexing')) {
     return {
-      result: `Файл "${file.name}" ще обробляється (розпізнавання в Markdown). Спробуй прочитати його трохи пізніше.`,
+      result:
+        `Файл "${file.name}" ще обробляється (розпізнавання в Markdown) довше, ніж ${Math.round(config.READ_FILE_WAIT_MS / 1000)} с. ` +
+        'Скажи користувачу, що файл ще читається, і запропонуй повторити питання за хвилину.',
       summary: `Читання: ${file.name} (ще обробляється)`,
       citations: [{ file: file.name, page: null }],
     };
@@ -187,6 +196,22 @@ export async function runReadFile(input: unknown, ctx: ToolContext): Promise<Too
 }
 
 const PROVENANCE_MAX_BYTES = 40 * 1024 * 1024;
+
+/**
+ * Polls for the worker's Markdown of a file that is still being converted. Gives
+ * up early when the file errors or is deleted; null on timeout.
+ */
+async function waitForMarkdown(fileId: string, timeoutMs: number): Promise<Awaited<ReturnType<typeof loadFileMarkdown>>> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 2000));
+    const md = await loadFileMarkdown(fileId);
+    if (md) return md;
+    const { rows } = await query<{ status: string }>('SELECT status FROM files WHERE id = $1', [fileId]);
+    if (!rows[0] || rows[0].status === 'error' || rows[0].status === 'ready') return null;
+  }
+  return null;
+}
 
 export async function runListFiles(ctx: ToolContext): Promise<ToolOutcome> {
   const files = await listFiles(requireWorkspace(ctx));
@@ -340,7 +365,7 @@ async function findFile(
 
 async function listFiles(workspaceId: string): Promise<FileRow[]> {
   const { rows } = await query<FileRow>(
-    `SELECT f.id, f.name, f.type, f.disk_path, f.status, fo.name AS folder_name,
+    `SELECT f.id, f.name, f.type, f.disk_path, f.status, fo.name AS folder_name, f.folder_id,
             de.extracted_fields->>'doc_type' AS doc_type,
             (SELECT left(ds.text, 3000) FROM document_sections ds
              WHERE ds.file_id = f.id ORDER BY ds.seq LIMIT 1) AS md_head
@@ -354,7 +379,13 @@ async function listFiles(workspaceId: string): Promise<FileRow[]> {
      ORDER BY fo.position NULLS LAST, f.created_at`,
     [workspaceId],
   );
-  return rows;
+  // Nested folders (spec 007): name each by its full path — two lots can both
+  // have a «Paracetamol» folder.
+  const paths = await folderPaths(workspaceId);
+  return rows.map((r) => {
+    const p = r.folder_id ? paths.get(r.folder_id) : undefined;
+    return p && p.length > 1 ? { ...r, folder_name: p.join(' / ') } : r;
+  });
 }
 
 function dedupeCitations(citations: Citation[]): Citation[] {

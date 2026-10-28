@@ -14,6 +14,8 @@ type ClassifyCardState =
   | "classifying"
   | "filed"
   | "needs_pick"
+  /** Uploaded; Штурман files it after reading it (spec 007). */
+  | "deferred"
   | "moving"
   | "error";
 
@@ -133,6 +135,8 @@ export function ClassifyBubble({
       ? "Не вдалося завантажити."
       : card.state === "filed"
       ? `Віднесено до «${folderLabel(card.folderName ?? "")}».`
+      : card.state === "deferred"
+      ? "Прийнято. Штурман прочитає файл повністю й сам покладе його в потрібну папку — хід видно нижче і в Журналі."
       : "Не вдалося визначити папку — оберіть вручну:";
 
   return (

@@ -25,27 +25,33 @@ const WINDOW_MAX_BYTES = 22 * 1024 * 1024;
 class WindowTooLarge extends Error {}
 
 const RULES =
-  'Правила: переписуй ДОСЛІВНО, нічого не перекладай, не скорочуй і не вигадуй. ' +
-  'Таблиці — у форматі Markdown-таблиць (| … |), по одному рядку документа на рядок таблиці, ' +
-  'з заголовками колонок; цифри, суми, ваги, коди, дати, номери — точно як у документі. ' +
-  'Заголовки розділів — через #. Печатки, підписи, рукописні позначки — коротко в [квадратних дужках] ' +
-  '(напр. [печатка: ТОВ «…»], [підпис]). Нечитабельне — [нерозбірливо]. ' +
+  'Правила: переписуй ДОСЛІВНО і ПОВНІСТЮ, від першого до останнього символу сторінки — нічого не ' +
+  'пропускай, не перекладай, не скорочуй і не вигадуй. Дрібний шрифт, примітки, колонтитули, ' +
+  'реквізити, номери партій/серій (Batch/Lot), дати виготовлення і придатності, CAS, коди ТН ЗЕД/HS, ' +
+  'ваги брутто/нетто, кількість місць, маркування на упаковці, штрихкоди/QR (їхній підпис) — усе ' +
+  'переписуй точно. Таблиці — у форматі Markdown-таблиць (| … |), по одному рядку документа на рядок ' +
+  'таблиці, з заголовками колонок, без пропуску рядків; цифри, суми, ваги, коди, дати, номери — точно ' +
+  'як у документі. Заголовки розділів — через #. Печатки, штампи, підписи, рукописні позначки — у ' +
+  '[квадратних дужках] із текстом, який на них видно (напр. [печатка: ТОВ «…», код 12345678], [підпис], ' +
+  '[рукописно: «…»]). Нечитабельне — [нерозбірливо], але все, що можна розібрати, — перепиши. ' +
   'Не додавай власних коментарів чи вступу — лише вміст документа.';
 
 function batchPrompt(from: number, to: number): string {
   return (
-    `Це сторінки ${from}–${to} документа постачання (українською, російською, англійською або іншою мовою). ` +
+    `Це сторінки ${from}–${to} документа постачання (українською, російською, англійською, китайською або іншою мовою). ` +
     'Перепиши їх у Markdown. ПЕРЕД вмістом кожної сторінки постав окремим рядком маркер ' +
-    `<!-- стор. N -->, де N — справжній номер сторінки (від ${from} до ${to}). ` +
+    `<!-- стор. N -->, де N — справжній номер сторінки (від ${from} до ${to}); жодної сторінки не пропускай. ` +
     RULES
   );
 }
 
 const IMAGE_PROMPT =
-  'Це фото або скан документа постачання. Перепиши його вміст у Markdown. ' +
+  'Це фото або скан документа постачання (або фото вантажу, упаковки, етикетки). Перепиши ВЕСЬ видимий ' +
+  'текст у Markdown. ' +
   RULES +
-  ' Якщо на зображенні немає тексту — поверни порожню відповідь.';
-
+  ' Якщо це фото вантажу/упаковки — спершу одним рядком опиши, що на ньому (напр. [фото: мішки 25 кг на ' +
+  'палеті, етикетка постачальника]), далі — весь текст етикеток і маркування. Якщо тексту немає зовсім — ' +
+  'лише цей рядок опису.';
 
 /**
  * `media` is built LAZILY inside the concurrency slot: slicing a PDF window and
@@ -60,9 +66,9 @@ async function transcribe(
     anthropic.messages.create({
       model: config.OCR_MODEL,
       max_tokens: config.OCR_MAX_TOKENS,
-      // Verbatim transcription needs little reasoning — keep thinking cheap.
-      // (No `temperature`: current models reject non-default sampling with a 400.)
-      output_config: { effort: 'low' },
+      // Careful reading of small print / stamps / handwriting (spec 007). No
+      // `temperature`: current models reject non-default sampling with a 400.
+      output_config: { effort: config.OCR_EFFORT },
       messages: [
         {
           role: 'user',
@@ -110,7 +116,10 @@ export async function imageToMarkdown(buf: Buffer, name: string): Promise<Vision
  * caller fills those from the text layer). Throws only if the PDF can't be
  * parsed at all (encrypted/corrupt) AND is too large for a single whole-file call.
  */
-export async function pdfToMarkdown(buf: Buffer): Promise<VisionResult> {
+/** Called as page windows finish: pages `from`–`to` of `total` are read. */
+export type PageProgress = (from: number, to: number, total: number) => void;
+
+export async function pdfToMarkdown(buf: Buffer, onPages?: PageProgress): Promise<VisionResult> {
   let src: PDFDocument;
   try {
     src = await PDFDocument.load(buf, { ignoreEncryption: true, updateMetadata: false });
@@ -167,7 +176,13 @@ export async function pdfToMarkdown(buf: Buffer): Promise<VisionResult> {
   };
 
   // Windows run concurrently; the Anthropic semaphore bounds real parallelism.
-  const results = await Promise.all(windows.map(([f, t]) => runWindow(f, t)));
+  const results = await Promise.all(
+    windows.map(async ([f, t]) => {
+      const r = await runWindow(f, t);
+      onPages?.(f, t, pageCount);
+      return r;
+    }),
+  );
   return {
     pages: results.flatMap((r) => r.pages).sort((a, b) => (a.page ?? 0) - (b.page ?? 0)),
     partial: results.some((r) => r.partial),

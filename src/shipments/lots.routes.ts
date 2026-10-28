@@ -203,7 +203,9 @@ export async function lotRoutes(app: FastifyInstance): Promise<void> {
       await client.query('BEGIN');
       await client.query(`UPDATE lots SET ${sets.join(', ')} WHERE id = $1`, vals);
       if (parsed.data.name) {
-        await client.query('UPDATE folders SET name = $2 WHERE lot_id = $1', [lot.id, lotFolderName(parsed.data.name)]);
+        // Only the lot's own folders follow the rename — product folders keep theirs.
+        await client.query('UPDATE folders SET name = $2 WHERE lot_id = $1 AND parent_id IS NULL', [lot.id, lotFolderName(parsed.data.name)]);
+        await client.query("UPDATE folders SET name = $2 WHERE lot_id = $1 AND role = 'lot_customs'", [lot.id, parsed.data.name]);
       }
       await client.query('COMMIT');
     } catch (err) {

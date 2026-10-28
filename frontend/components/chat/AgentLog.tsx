@@ -7,6 +7,8 @@ export interface LogEntry {
   time: string; // HH:MM
   text: string;
   kind: "call" | "result" | "info" | "warn";
+  /** Epoch ms — orders the chat log against the reading journal. */
+  at?: number;
 }
 
 const DOT: Record<LogEntry["kind"], string> = {

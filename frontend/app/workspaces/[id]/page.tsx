@@ -7,6 +7,8 @@ import { NoticeBanner, type NoticeTone } from "@/components/ui/Notice";
 import { useAuth } from "@/lib/auth";
 import { useTheme } from "@/lib/theme";
 import { useShipmentFiles } from "@/lib/files/useShipmentFiles";
+import { journalRows, mergeJournal } from "@/lib/files/journal";
+import { ReadingFeed } from "@/components/chat/ReadingFeed";
 import type {
   AnalysisResult,
   Collection,
@@ -119,6 +121,7 @@ export default function WorkspacePage() {
     uploadAndClassify,
     sortInbox,
     reindexFile,
+    journal,
   } = useShipmentFiles(id, { live: !!user && workspace != null, folders, notify });
   // Collection (Збірник) folders for the right panel when consolidated is active.
   const [colFolders, setColFolders] = useState<Folder[]>([]);
@@ -288,7 +291,13 @@ export default function WorkspacePage() {
     if (user && workspace) void refreshChecklist();
   }, [user, workspace, refreshChecklist]);
 
-  const onLog = useCallback((entry: LogEntry) => setLog((l) => [...l, entry]), []);
+  const onLog = useCallback((entry: LogEntry) => setLog((l) => [...l, { ...entry, at: entry.at ?? Date.now() }]), []);
+  // Журнал = the chat's tool calls + the reading journal of the open shipment /
+  // збірник (spec 007), by time.
+  const journalLog = useMemo(
+    () => mergeJournal(journalRows(fclId ? fclFiles.journal : journal), log),
+    [fclId, fclFiles.journal, journal, log]
+  );
   const onPatch = useCallback(
     (partial: Partial<Workspace>) => setWorkspace((w) => (w ? { ...w, ...partial } : w)),
     []
@@ -1036,6 +1045,7 @@ export default function WorkspacePage() {
                     onUploadAndClassify={fclFiles.uploadAndClassify}
                     onMoveFile={fclFiles.moveFile}
                     docsStatus={fclFiles.docsStatus}
+                    readingFeed={<ReadingFeed events={fclFiles.journal} files={fclFiles.files} />}
                     placeholder="Прикріпіть документи збірника 📎, вставте посилання на маніфест, або спитайте про партії…"
                     emptyTitle="Збірник (FCL)"
                     emptySubtitle={
@@ -1107,6 +1117,7 @@ export default function WorkspacePage() {
               onUploadAndClassify={uploadAndClassify}
               onMoveFile={moveFile}
               docsStatus={chatKind === "supply" ? docsStatus : null}
+              readingFeed={chatKind !== "normal" ? <ReadingFeed events={journal} files={files} /> : undefined}
               onTurnComplete={chatKind === "supply" ? onSupplyTurnComplete : undefined}
               onSurveyPersist={chatKind === "supply" ? persistSurvey : undefined}
               onSurveyIntake={chatKind === "supply" ? onSurveyIntake : undefined}
@@ -1144,7 +1155,7 @@ export default function WorkspacePage() {
               uploadProgress={uploadProgress}
             />
           }
-          journal={<AgentLog entries={log} embedded />}
+          journal={<AgentLog entries={journalLog} embedded />}
           complete={
             <ShipmentPanel
               workspaceId={id}
@@ -1214,7 +1225,7 @@ export default function WorkspacePage() {
             />
           }
           archive={<ArchiveList />}
-          journal={<AgentLog entries={log} embedded />}
+          journal={<AgentLog entries={journalLog} embedded />}
         />
       )}
 

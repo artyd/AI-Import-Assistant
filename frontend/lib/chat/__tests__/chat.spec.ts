@@ -83,3 +83,17 @@ describe("survey", () => {
     expect(surveyMessage([a])).toContain(`• ${q.question}\n  → ${opt.label}`);
   });
 });
+
+describe("chat attachments", () => {
+  it("no files: the text is sent as is", async () => {
+    const { withAttachments } = await import("../attachments");
+    expect(withAttachments("Привіт", [])).toBe("Привіт");
+  });
+
+  it("files are listed by name and id after the text", async () => {
+    const { withAttachments } = await import("../attachments");
+    expect(withAttachments("Проаналізуй", [{ fileId: "f1", name: "inv.pdf" }, { fileId: "f2", name: "pl.xlsx" }])).toBe(
+      "Проаналізуй\n\n📎 Прикріплені файли:\n- «inv.pdf» (file_id: f1)\n- «pl.xlsx» (file_id: f2)",
+    );
+  });
+});

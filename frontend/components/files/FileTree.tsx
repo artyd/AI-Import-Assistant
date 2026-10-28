@@ -18,6 +18,13 @@ import {
 } from "../ui/icons";
 
 import { UPLOAD_ACCEPT } from "@/lib/files/policy";
+import { buildFolderTree, flattenTree, folderPathLabel, subtreeIds, type FolderNode } from "@/lib/files/folderTree";
+
+/** A file row in a folder: its own place, or a link (a document about several products). */
+interface Placed {
+  file: FileItem;
+  linked: boolean;
+}
 interface Props {
   folders: Folder[];
   files: FileItem[];
@@ -48,20 +55,27 @@ export function FileTree({
   const inputRef = useRef<HTMLInputElement>(null);
 
   const q = search.trim().toLowerCase();
+  const known = useMemo(() => new Set(folders.map((f) => f.id)), [folders]);
   const byFolder = useMemo(() => {
-    const map = new Map<string, FileItem[]>();
+    const map = new Map<string, Placed[]>();
+    const put = (key: string, p: Placed) => {
+      const arr = map.get(key) ?? [];
+      arr.push(p);
+      map.set(key, arr);
+    };
     for (const f of files) {
       // Show only the latest version of each document; older versions are
       // reachable from the per-file version history.
       if (f.isLatest === false) continue;
       if (q && !f.name.toLowerCase().includes(q)) continue;
-      const key = f.folderId ?? "__none__";
-      const arr = map.get(key) ?? [];
-      arr.push(f);
-      map.set(key, arr);
+      // A folder the list doesn't know yet (just created server-side): show the
+      // file at the root until the folder list catches up, never hide it.
+      put(f.folderId && known.has(f.folderId) ? f.folderId : "__none__", { file: f, linked: false });
+      for (const l of f.linkedFolderIds ?? []) if (l !== f.folderId) put(l, { file: f, linked: true });
     }
     return map;
-  }, [files, q]);
+  }, [files, q, known]);
+  const tree = useMemo(() => buildFolderTree(folders), [folders]);
 
   function pickFor(folderId: string | null) {
     uploadTarget.current = folderId;
@@ -85,73 +99,34 @@ export function FileTree({
         }}
       />
 
-      {folders.map((folder) => {
-        const items = byFolder.get(folder.id) ?? [];
-        if (q && items.length === 0) return null;
-        const isCollapsed = collapsed[folder.id];
-        return (
-          <div key={folder.id}>
-            <div className="tree-row" style={rowStyle}>
-              <button
-                className="btn-icon"
-                style={{ width: 22, height: 22 }}
-                onClick={() =>
-                  setCollapsed((c) => ({ ...c, [folder.id]: !c[folder.id] }))
-                }
-                aria-label="Розгорнути"
-              >
-                {isCollapsed ? (
-                  <IconChevronRight size={15} />
-                ) : (
-                  <IconChevronDown size={15} />
-                )}
-              </button>
-              <IconFolder size={16} />
-              <span style={{ fontWeight: 600, flex: 1, minWidth: 0 }} className="ellipsis">
-                {folderLabel(folder.name)}
-              </span>
-              {items.length > 0 && (
-                <span
-                  style={{
-                    fontSize: 11,
-                    color: "var(--muted)",
-                    background: "var(--card)",
-                    borderRadius: 999,
-                    padding: "1px 7px",
-                  }}
-                >
-                  {items.length}
-                </span>
-              )}
-              <button
-                className="btn-icon row-action"
-                onClick={() => pickFor(folder.id)}
-                title="Завантажити у папку"
-                aria-label="Завантажити у папку"
-              >
-                <IconPlus size={15} />
-              </button>
-            </div>
+      {tree.map((node) => (
+        <FolderBranch
+          key={node.folder.id}
+          node={node}
+          byFolder={byFolder}
+          searching={!!q}
+          collapsed={collapsed}
+          onToggle={(id) => setCollapsed((c) => ({ ...c, [id]: !c[id] }))}
+          onPick={pickFor}
+          row={(p, d) => (
+            <FileRow
+              key={`${p.file.id}${p.linked ? "-link" : ""}`}
+              file={p.file}
+              linked={p.linked}
+              folders={folders}
+              depth={d}
+              onRename={onRenameFile}
+              onDelete={onDeleteFile}
+              onVersions={onVersions}
+              onMove={onMoveFile}
+              onReindex={onReindex}
+              onPreview={onPreview}
+            />
+          )}
+        />
+      ))}
 
-            {!isCollapsed &&
-              items.map((file) => (
-                <FileRow
-                  key={file.id}
-                  file={file}
-                  folders={folders}
-                  onRename={onRenameFile}
-                  onDelete={onDeleteFile}
-                  onVersions={onVersions}
-                  onMove={onMoveFile}
-                  onReindex={onReindex}
-                  onPreview={onPreview}
-                />
-              ))}
-          </div>
-        );
-      })}
-
-      {rootFiles.map((file) => (
+      {rootFiles.map(({ file }) => (
         <FileRow
           key={file.id}
           file={file}
@@ -174,6 +149,88 @@ export function FileTree({
   );
 }
 
+/** One folder with its files and sub-folders (spec 007 nesting). */
+function FolderBranch({
+  node,
+  byFolder,
+  searching,
+  collapsed,
+  onToggle,
+  onPick,
+  row,
+}: {
+  node: FolderNode;
+  byFolder: Map<string, Placed[]>;
+  searching: boolean;
+  collapsed: Record<string, boolean>;
+  onToggle: (id: string) => void;
+  onPick: (folderId: string) => void;
+  row: (p: Placed, depth: number) => React.ReactNode;
+}) {
+  const { folder, depth, children } = node;
+  const items = byFolder.get(folder.id) ?? [];
+  const inSubtree = subtreeIds(node).reduce((n, id) => n + (byFolder.get(id)?.length ?? 0), 0);
+  if (searching && inSubtree === 0) return null;
+  const isCollapsed = collapsed[folder.id];
+  return (
+    <div>
+      <div className="tree-row" style={{ ...rowStyle, paddingLeft: 6 + depth * 16 }}>
+        <button
+          className="btn-icon"
+          style={{ width: 22, height: 22 }}
+          onClick={() => onToggle(folder.id)}
+          aria-label="Розгорнути"
+        >
+          {isCollapsed ? <IconChevronRight size={15} /> : <IconChevronDown size={15} />}
+        </button>
+        <IconFolder size={16} />
+        <span style={{ fontWeight: depth === 0 ? 600 : 500, flex: 1, minWidth: 0 }} className="ellipsis">
+          {folderLabel(folder.name)}
+        </span>
+        {inSubtree > 0 && (
+          <span
+            style={{
+              fontSize: 11,
+              color: "var(--muted)",
+              background: "var(--card)",
+              borderRadius: 999,
+              padding: "1px 7px",
+            }}
+            title={items.length !== inSubtree ? `${items.length} тут, ${inSubtree} разом із вкладеними` : undefined}
+          >
+            {inSubtree}
+          </span>
+        )}
+        <button
+          className="btn-icon row-action"
+          onClick={() => onPick(folder.id)}
+          title="Завантажити у папку"
+          aria-label="Завантажити у папку"
+        >
+          <IconPlus size={15} />
+        </button>
+      </div>
+      {!isCollapsed && (
+        <>
+          {children.map((c) => (
+            <FolderBranch
+              key={c.folder.id}
+              node={c}
+              byFolder={byFolder}
+              searching={searching}
+              collapsed={collapsed}
+              onToggle={onToggle}
+              onPick={onPick}
+              row={row}
+            />
+          ))}
+          {items.map((p) => row(p, depth))}
+        </>
+      )}
+    </div>
+  );
+}
+
 const rowStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
@@ -185,6 +242,8 @@ const rowStyle: React.CSSProperties = {
 
 function FileRow({
   file,
+  linked = false,
+  depth = -1,
   folders,
   onRename,
   onDelete,
@@ -194,6 +253,10 @@ function FileRow({
   onPreview,
 }: {
   file: FileItem;
+  /** Shown here as a link; the file itself lives in another folder. */
+  linked?: boolean;
+  /** Depth of the folder the row sits in (-1 = the inbox root). */
+  depth?: number;
   folders: Folder[];
   onRename: (f: FileItem, name: string) => void;
   onDelete: (f: FileItem) => void;
@@ -208,14 +271,17 @@ function FileRow({
     file.folderId == null && file.suggestedFolderId
       ? folders.find((f) => f.id === file.suggestedFolderId) ?? null
       : null;
+  const home = linked && file.folderId ? folderPathLabel(folders, file.folderId, folderLabel) : null;
   const title =
-    file.status === "error" && file.errorReason
+    home
+      ? `Посилання: документ стосується кількох товарів, сам файл лежить у «${home}»`
+      : file.status === "error" && file.errorReason
       ? `Помилка: ${file.errorReason}`
       : file.folderReason
         ? `Чому тут: ${file.folderReason}${file.folderConfidence ? ` (впевненість: ${CONFIDENCE_LABEL[file.folderConfidence]})` : ""}`
         : `${file.name} — натисніть для перегляду`;
   return (
-    <div className="tree-row" style={{ ...rowStyle, paddingLeft: 30 }} title={title}>
+    <div className="tree-row" style={{ ...rowStyle, paddingLeft: 30 + Math.max(0, depth) * 16 }} title={title}>
       <button
         onClick={() => onPreview(file)}
         title={file.name}
@@ -235,9 +301,14 @@ function FileRow({
         }}
       >
         <IconFile size={15} style={{ flex: "none" }} />
-        <span className="ellipsis" style={{ flex: 1, minWidth: 0 }}>
+        <span className="ellipsis" style={{ flex: 1, minWidth: 0, fontStyle: linked ? "italic" : undefined }}>
           {file.name}
         </span>
+        {linked && (
+          <span style={{ fontSize: 10, color: "var(--muted)", whiteSpace: "nowrap" }} aria-label="посилання">
+            ↗ посилання
+          </span>
+        )}
       </button>
       {suggestedFolder && (
         <button
@@ -255,7 +326,7 @@ function FileRow({
             cursor: "pointer",
           }}
         >
-          ? {folderLabel(suggestedFolder.name)}
+          ? {folderPathLabel(folders, suggestedFolder.id, folderLabel)}
         </button>
       )}
       {file.version && file.version > 1 && (
@@ -308,7 +379,7 @@ function FileRow({
                 padding: 4,
               }}
             >
-              {folders.map((folder) => {
+              {flattenTree(buildFolderTree(folders)).map(({ folder, depth: d }) => {
                 const current = file.folderId === folder.id;
                 return (
                   <button
@@ -331,6 +402,7 @@ function FileRow({
                       font: "inherit",
                       fontSize: 13,
                       padding: "7px 8px",
+                      paddingLeft: 8 + d * 14,
                       borderRadius: 6,
                       cursor: current ? "default" : "pointer",
                     }}

@@ -158,8 +158,22 @@ export interface Folder {
   id: string;
   name: string;
   position: number;
-  /** Збірник (FCL): set on a lot's folder («Партія — …»), null on FCL folders. */
+  /** Збірник (FCL): set on a lot's folders (its root, products, Митниця sub-folder). */
   lotId?: string | null;
+  /** Nested folders (spec 007): the parent folder, null at the root. */
+  parentId?: string | null;
+  /** 'lot' | 'product' | 'lot_customs' | null (root folders). */
+  role?: string | null;
+}
+
+/** One line of the reading journal (spec 007): what Штурман does with the files. */
+export interface IngestEvent {
+  id: string;
+  fileId: string | null;
+  batchId: string | null;
+  kind: "read" | "progress" | "done" | "file" | "warn" | "error" | "summary";
+  text: string;
+  createdAt: string;
 }
 
 // ── Збірник (FCL) — spec 006 ──────────────────────────────────────────────────
@@ -276,6 +290,8 @@ export interface FileItem {
   folderReason?: string | null;
   folderConfidence?: "high" | "medium" | "low" | null;
   suggestedFolderId?: string | null;
+  /** Extra folders that show this file (a document about several products). */
+  linkedFolderIds?: string[];
   // Extraction outcome (plan Q29): 'unreadable' means the human must enter key
   // fields on the verification screen; 'failed' = the extraction call errored
   // and will be retried automatically; 'partial' = truncated (incomplete rows).

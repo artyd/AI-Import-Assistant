@@ -3,6 +3,7 @@ import { authenticateSse } from '../auth/hook.js';
 import { getOwnedWorkspace } from '../shipments/workspaceAccess.js';
 import { SseStream } from '../lib/sse.js';
 import { subscribeFileStatus } from '../lib/events/fileStatus.js';
+import { subscribeIngestEvents } from '../ingest/journal.js';
 
 /**
  * Lightweight per-workspace event channel (SSE). Currently forwards live file
@@ -29,11 +30,16 @@ export async function eventRoutes(app: FastifyInstance): Promise<void> {
       const unsubscribe = subscribeFileStatus(ws.id, (event) => {
         sse.send('file_status', event);
       });
+      // The reading journal (spec 007): "Читаю …", "Кладу → …".
+      const unsubscribeJournal = subscribeIngestEvents(ws.id, (event) => {
+        sse.send('ingest_log', event);
+      });
       const heartbeat = setInterval(() => sse.ping(), 15_000);
 
       const cleanup = (): void => {
         clearInterval(heartbeat);
         void unsubscribe();
+        void unsubscribeJournal();
         sse.close();
       };
       if (closed || req.raw.destroyed) cleanup();

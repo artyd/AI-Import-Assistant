@@ -100,7 +100,7 @@ Response `200`:
                  "responsible_user_id",
                  "contract_type_source","contract_type_confidence","contract_type_reason",
                  "survey_status","survey_answers","auto_context_fields" },
-  "folders": [ { "id","name","position" } ]
+  "folders": [ { "id","name","position","lotId","parentId","role" } ]
 }
 ```
 
@@ -185,7 +185,7 @@ Response `200`:
 ```json
 {
   "collection": { "id","number","supplier","status","created_at" },
-  "folders": [ { "id","name","position","lotId" } ]
+  "folders": [ { "id","name","position","lotId","parentId","role" } ]
 }
 ```
 `lotId` is set on a lot's folder (`null` for FCL folders). `404 not_found` if not owned/found.
@@ -256,7 +256,7 @@ Full version chain for a document (walks `replaces_file_id` both ways).
 Response `200`: `{ "versions": [ { "id","name","version","replacesFileId","isLatest","createdAt" } ] }` (ordered by `version`).
 
 ### `GET /api/workspaces/:id/files`  (auth)
-Response `200`: `{ "files": [ { "id","folderId","name","type","status","errorReason","sizeBytes","createdAt","version","isLatest","replacesFileId","folderReason","folderConfidence","suggestedFolderId" } ] }`
+Response `200`: `{ "files": [ { "id","folderId","name","type","status","errorReason","sizeBytes","createdAt","version","isLatest","replacesFileId","folderReason","folderConfidence","suggestedFolderId","linkedFolderIds" } ] }` — `linkedFolderIds`: extra folders that show the file (a document about several products, spec 007)
 (the UI shows only `isLatest` files; superseded versions are reachable via the history endpoint).
 `folderReason` (human-readable "why this folder") + `folderConfidence` (`high`|`medium`|`low`)
 explain the auto-classification; `suggestedFolderId` is set for a low-confidence guess left
@@ -285,12 +285,19 @@ Requeue indexing for a file (e.g. one whose previous run errored): resets status
 to `queued`, clears `error_reason`, enqueues a fresh index job, emits `file_status`.
 Response `200`: `{ "ok": true }`. `404 not_found` if the workspace/file isn't found.
 
+### `GET /api/workspaces/:id/ingest-log`  (auth)
+The reading journal (spec 007), oldest first. Query: `after` (an event id — only newer lines),
+`limit` (1–1000, default 300 newest).
+Response `200`: `{ "events": [ { "id","fileId","batchId","kind","text","createdAt" } ] }` (same shape as the `ingest_log` SSE event).
+
 ### `POST /api/workspaces/:id/files/:fileId/classify`  (auth, no body)
 Auto-sorts a single file into its skeleton folder (move-only; same classifier as the
 agent's `classify_and_file` tool). Used by the chat right after a paperclip upload.
-Response `200`: `{ "fileId": string, "folderName": string | null }` — `folderName` is
+Response `200`: `{ "fileId": string, "folderName": string | null, "deferred"?: true }` — `folderName` is
 the destination folder name when filed, or `null` when the file was left in the inbox
 (`folder_id IS NULL`; unknown/`other` type) so the client can ask the user to pick.
+`deferred: true` (spec 007): the file is not read yet — the worker files it after reading
+(an FCL: the whole upload batch at once) and reports the move over `file_status` and `ingest_log`.
 Move confirmation reuses `PATCH /api/workspaces/:id/files/:fileId` with `{ "folderId" }`.
 `404 not_found` if the workspace or file isn't owned/found.
 
@@ -553,8 +560,9 @@ transitions so the file-tree dots update without polling.
 | event | data |
 |-------|------|
 | `file_status` | `{ "fileId": string, "status": "queued"|"indexing"|"ready"|"error"|"deleted", "name"?: string, "errorReason"?: string|null, "folderId"?: string|null }` |
+| `ingest_log` | `{ "id": string, "fileId": string|null, "batchId": string|null, "kind": "read"|"progress"|"done"|"file"|"warn"|"error"|"summary", "text": string, "createdAt": string }` — the reading journal (spec 007): «Читаю …», «Прочитано …», «Кладу → …», batch summary |
 
-`folderId` is present when the worker auto-filed an inbox file (e.g. a scan classified via OCR); the tree moves the file into that folder live.
+`folderId` is present whenever a file was auto-filed (the worker after reading it, sort-inbox, the classify route, the agent's filing tools); the tree moves the file into that folder live. `status` is the file's current status.
 
 Consumable with the native `EventSource` (GET). Emits `: ping` keep-alives.
 

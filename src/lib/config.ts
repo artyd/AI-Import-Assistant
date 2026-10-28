@@ -93,6 +93,9 @@ const envSchema = z.object({
   AGENT_MAX_TOKENS: z.coerce.number().int().positive().default(64_000),
   AGENT_HISTORY_CHAR_BUDGET: z.coerce.number().int().positive().default(1_200_000),
   READ_FILE_MAX_CHARS: z.coerce.number().int().positive().default(200_000),
+  // How long read_file waits for a file that is still being converted to
+  // Markdown (e.g. attached to the chat a moment ago) before giving up.
+  READ_FILE_WAIT_MS: z.coerce.number().int().nonnegative().default(180_000),
   // Anthropic SDK resilience (shared client). The SDK auto-retries 408/409/429/
   // 5xx + connection errors with exponential backoff and honours Retry-After;
   // the default of 2 is too low for a burst of indexing jobs that each make
@@ -147,13 +150,17 @@ const envSchema = z.object({
     .enum(['true', 'false'])
     .default('true')
     .transform((v) => v === 'true'),
-  // Model for vision transcription (PDF/scan/photo → Markdown). Verbatim
-  // transcription doesn't need Opus-level reasoning; Sonnet 5.5 reads as well at
-  // lower cost. (Structured extraction runs on ANTHROPIC_MODEL with tool_choice
-  // "auto" — forced tool_choice is a 400 on Sonnet 5.5.)
-  OCR_MODEL: z.string().default('claude-sonnet-5-5'),
+  // File analysis (spec 007) runs on Claude Haiku 5.5: vision transcription
+  // (PDF/scan/photo → Markdown, high-res image tier), structured extraction and
+  // the doc-type classifier. The chat agent stays on ANTHROPIC_MODEL.
+  OCR_MODEL: z.string().default('claude-haiku-5-5'),
+  EXTRACTION_MODEL: z.string().default('claude-haiku-5-5'),
   // Tiny doc-type classifier used only for files without a structured extraction.
-  CLASSIFY_MODEL: z.string().default('claude-haiku-4-5'),
+  CLASSIFY_MODEL: z.string().default('claude-haiku-5-5'),
+  // Reasoning depth for reading documents: `medium` reads small print, stamps
+  // and handwritten marks more carefully than `low`.
+  OCR_EFFORT: z.enum(['low', 'medium', 'high']).default('medium'),
+  EXTRACTION_EFFORT: z.enum(['low', 'medium', 'high']).default('medium'),
   // Summarizer for qdpro УКТ ЗЕД pages (logist uktzed_lookup_code digest).
   LOGIST_DIGEST_MODEL: z.string().default('claude-sonnet-5-5'),
   // 3–5 sentence management summary on the one-page report (facts JSON in, no

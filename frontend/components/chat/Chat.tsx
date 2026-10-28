@@ -18,6 +18,7 @@ import { UPLOAD_ACCEPT, fileKey, acceptFiles } from "@/lib/files/policy";
 import { type ClassifyCard, type QuestionCard, DateSeparator, UserBubble, ClassifyBubble, QuestionBubble, AssistantBubble } from "./bubbles";
 import { type EntitySelector, Composer } from "./Composer";
 import { activeQuestions, answersRecord, intakePatch, surveyMessage, withAnswer, type SurveyAnswer } from "@/lib/chat/survey";
+import { withAttachments } from "@/lib/chat/attachments";
 export type { EntitySelector } from "./Composer";
 export { CHAT_TYPES } from "./Composer";
 
@@ -25,6 +26,8 @@ export interface UploadClassifyOutcome {
   fileId: string;
   name: string;
   folderName: string | null;
+  /** Filed by the server after reading (spec 007). */
+  deferred?: boolean;
 }
 
 interface Props {
@@ -56,6 +59,8 @@ interface Props {
   folders?: Folder[];
   onUploadAndClassify?: (files: File[]) => Promise<UploadClassifyOutcome[]>;
   onMoveFile?: (fileId: string, folderId: string) => Promise<void>;
+  /** Live «Штурман читає документи» feed above the input (spec 007). */
+  readingFeed?: React.ReactNode;
   /** Shipment documents' processing state, for the «Документи» meter (supply chat). */
   docsStatus?: DocsStatus | null;
   // Shipment survey (supply only). When provided, the "Опитування" button shows
@@ -119,6 +124,7 @@ export function Chat({
   onUploadAndClassify,
   onMoveFile,
   docsStatus,
+  readingFeed,
   onSurveyPersist,
   onSurveyIntake,
   surveyPrefilled,
@@ -228,9 +234,10 @@ export function Chat({
     []
   );
 
+  // Uploads + classifies the files; returns the ones that were stored.
   const handleFiles = useCallback(
-    async (files: File[]) => {
-      if (!files.length) return;
+    async (files: File[]): Promise<UploadClassifyOutcome[]> => {
+      if (!files.length) return [];
       // One card per selected file, in order, starting at "uploading".
       const cards: ClassifyCard[] = files.map((f) => ({
         kind: "classify",
@@ -241,7 +248,7 @@ export function Chat({
       }));
       setItems((list) => [...list, ...cards]);
 
-      if (!onUploadAndClassify) return;
+      if (!onUploadAndClassify) return [];
       const outcomes = await onUploadAndClassify(files);
 
       // Match outcomes back to cards by name (a file skipped client-side — too
@@ -263,9 +270,10 @@ export function Chat({
           fileId: outcome.fileId,
           name: outcome.name,
           folderName: outcome.folderName ?? undefined,
-          state: outcome.folderName ? "filed" : "needs_pick",
+          state: outcome.folderName ? "filed" : outcome.deferred ? "deferred" : "needs_pick",
         });
       });
+      return outcomes;
     },
     [onUploadAndClassify, patchCard]
   );
@@ -555,9 +563,10 @@ export function Chat({
       }
     }
     void (async () => {
+      let attached: UploadClassifyOutcome[] = [];
       if (files.length) {
         setPending([]);
-        await handleFiles(files);
+        attached = await handleFiles(files);
       }
       if (text || q) {
         // When a fragment is quoted, prepend it as context so the agent answers
@@ -566,7 +575,9 @@ export function Chat({
           ? `Стосовно цього фрагмента попередньої відповіді:\n«${q}»\n\n${text || "Поясни детальніше."}`
           : raw;
         if (q) setQuote(null);
-        await runMessage(composed);
+        // Files sent with the text are what the question is about: name them so
+        // the agent reads exactly these (read_file waits while they convert).
+        await runMessage(withAttachments(composed, attached));
       }
     })();
     return true;
@@ -760,6 +771,7 @@ export function Chat({
                 </>
               )}
             </p>
+            {readingFeed}
             {notice && <Notice text={notice} onClear={clearNotice} />}
             <Composer
               inputRef={inputRef}
@@ -850,6 +862,7 @@ export function Chat({
 
           <div style={{ flex: "none", padding: "8px 28px 20px" }}>
             <div style={{ maxWidth: 760, margin: "0 auto" }}>
+              {readingFeed}
               {notice && <Notice text={notice} onClear={clearNotice} />}
               <Composer
                 inputRef={inputRef}

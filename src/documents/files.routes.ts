@@ -20,6 +20,7 @@ import { classifyAndFile, sortInbox } from './classify.js';
 import { shipmentChanged } from '../shipments/state.js';
 import { isZipUpload, unpackZip, ZipGuardError } from '../lib/zip.js';
 import { contentType } from '../lib/mime.js';
+import { listIngestEvents } from '../ingest/journal.js';
 
 
 async function folderBelongs(workspaceId: string, folderId: string): Promise<boolean> {
@@ -283,7 +284,8 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
               error_reason AS "errorReason", size_bytes AS "sizeBytes", created_at AS "createdAt",
               version, is_latest AS "isLatest", replaces_file_id AS "replacesFileId",
               folder_reason AS "folderReason", folder_confidence AS "folderConfidence",
-              suggested_folder_id AS "suggestedFolderId"
+              suggested_folder_id AS "suggestedFolderId",
+              COALESCE((SELECT array_agg(l.folder_id) FROM file_links l WHERE l.file_id = files.id), '{}') AS "linkedFolderIds"
        FROM files WHERE workspace_id = $1 ORDER BY created_at`,
       [ws.id],
     );
@@ -444,6 +446,18 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       const ws = await getOwnedWorkspace(req.user!.sub, req.params.id);
       if (!ws) return reply.code(404).send({ error: 'not_found' });
 
+      // Spec 007: a file is filed only after Штурман has read it. Right after an
+      // upload the worker hasn't — it files the file itself (an FCL: the whole
+      // batch) and reports where in the reading journal.
+      const { rows: st } = await query<{ status: string }>(
+        'SELECT status FROM files WHERE id = $1 AND workspace_id = $2',
+        [req.params.fileId, ws.id],
+      );
+      if (!st[0]) return reply.code(404).send({ error: 'not_found' });
+      if (st[0].status !== 'ready') {
+        return reply.send({ fileId: req.params.fileId, folderName: null, deferred: true });
+      }
+
       const res = await classifyAndFile(ws.id, req.params.fileId);
       if (!res) return reply.code(404).send({ error: 'not_found' });
       if (res.to) await shipmentChanged(ws.id, 'files');
@@ -553,6 +567,19 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
         done: pending === 0,
         problems,
       });
+    },
+  );
+
+  // GET /api/workspaces/:id/ingest-log[?after=<id>&limit=<n>] — the reading
+  // journal: "Читаю …", "Прочитано …", "Кладу → …" (spec 007). Oldest first.
+  app.get<{ Params: { id: string }; Querystring: { after?: string; limit?: string } }>(
+    '/api/workspaces/:id/ingest-log',
+    async (req, reply) => {
+      const ws = await getOwnedWorkspace(req.user!.sub, req.params.id);
+      if (!ws) return reply.code(404).send({ error: 'not_found' });
+      const after = req.query.after && /^\d+$/.test(req.query.after) ? req.query.after : undefined;
+      const limit = Math.min(1000, Math.max(1, Number(req.query.limit) || 300));
+      return reply.send({ events: await listIngestEvents(ws.id, limit, after) });
     },
   );
 

@@ -1012,3 +1012,37 @@ ALTER TABLE archive_records ADD CONSTRAINT archive_records_fcl_fkey
   FOREIGN KEY (collection_id) REFERENCES workspaces(id) ON DELETE SET NULL;
 
 DELETE FROM collections;
+
+-- ── Spec 007: nested folders, file links, the reading journal ───────────────
+-- FCL layout: Постачальник (role 'lot') / Товар (role 'product'), and
+-- Митниця / Постачальник (role 'lot_customs'). Every one of them carries the
+-- lot's id, so a file's lot is still its folder's lot.
+ALTER TABLE folders ADD COLUMN IF NOT EXISTS parent_id UUID REFERENCES folders(id) ON DELETE CASCADE;
+ALTER TABLE folders ADD COLUMN IF NOT EXISTS role TEXT;
+-- A product folder's identity: its short name + CAS, matched with sameGoods.
+ALTER TABLE folders ADD COLUMN IF NOT EXISTS product_key TEXT;
+CREATE INDEX IF NOT EXISTS idx_folders_parent ON folders(parent_id);
+UPDATE folders SET role = 'lot' WHERE lot_id IS NOT NULL AND parent_id IS NULL AND role IS NULL;
+
+-- Extra places a file is shown in (a document about several products sits in each
+-- product's folder). Verdicts count the file once, by its own folder.
+CREATE TABLE IF NOT EXISTS file_links (
+  file_id    UUID NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+  folder_id  UUID NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (file_id, folder_id)
+);
+CREATE INDEX IF NOT EXISTS idx_file_links_folder ON file_links(folder_id);
+
+-- What Штурман did with the shipment's files: "reading X", "read: invoice from A",
+-- "filed → Митниця / A". Shown live in the chat and kept for the Журнал tab.
+CREATE TABLE IF NOT EXISTS ingest_events (
+  id           BIGSERIAL PRIMARY KEY,
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  file_id      UUID,
+  batch_id     UUID,
+  kind         TEXT NOT NULL,
+  text         TEXT NOT NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_ingest_events_ws ON ingest_events(workspace_id, id DESC);
