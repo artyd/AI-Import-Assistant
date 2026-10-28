@@ -1053,3 +1053,13 @@ CREATE INDEX IF NOT EXISTS idx_ingest_events_ws ON ingest_events(workspace_id, i
 ALTER TABLE file_markdown ADD COLUMN IF NOT EXISTS model TEXT;
 ALTER TABLE ingest_batches DROP CONSTRAINT IF EXISTS ingest_batches_source_check;
 ALTER TABLE ingest_batches ADD CONSTRAINT ingest_batches_source_check CHECK (source IN ('upload', 'zip', 'reread'));
+
+-- Spec 007: folders carry no numbering. A збірник's root folders are renamed
+-- (their role is found by the word); a shipment's skeleton keeps its code names
+-- in the database and is shown without numbers (folderDisplayName).
+UPDATE folders fo SET name = regexp_replace(fo.name, '^[0-9]{1,2}_', '')
+FROM workspaces w
+WHERE w.id = fo.workspace_id AND w.kind = 'fcl' AND fo.parent_id IS NULL AND fo.lot_id IS NULL
+  AND fo.name ~ '^[0-9]{1,2}_(Митниця|Транспорт|Маніфест)';
+-- The category a non-customs paper was put under («Інше / Фінанси» …), decided once.
+ALTER TABLE files ADD COLUMN IF NOT EXISTS other_category TEXT;

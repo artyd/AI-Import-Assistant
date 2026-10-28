@@ -11,16 +11,28 @@ import {
   getLot,
   listLots,
   listProductFolders,
+  loadBatchIndex,
   loadFclFiles,
   loadLotProfiles,
   lotCustomsFolderId,
   lotFolderId,
   lotOtherFolderId,
+  otherFolderId,
   productFolderId,
   setFileLinks,
   tidyFclFolders,
 } from '../shipments/lots.js';
-import { createsProducts, docProducts, placeInLot, productFolderByFileName } from '../shipments/fclLayout.js';
+import {
+  createsProducts,
+  docProducts,
+  findSignal,
+  placeInLot,
+  productFolderByFileName,
+  type ProductOfLot,
+  type Signal,
+} from '../shipments/fclLayout.js';
+import { otherCategoryOf } from './otherCategory.js';
+import { OTHER_CATEGORIES } from '../shipments/folders.js';
 import { folderPath } from '../shipments/folderPath.js';
 import { publishFileStatus, type FileStatusEvent } from '../lib/events/fileStatus.js';
 import { logIngest, q } from '../ingest/journal.js';
@@ -87,7 +99,13 @@ interface FileRow {
  * in the database only and the file sat in the inbox on screen until a reload —
  * which read as "files are not sorted". Best-effort: the move itself stands.
  */
-async function announceMove(workspaceId: string, file: FileRow, folderId: string, links: string[] = []): Promise<void> {
+async function announceMove(
+  workspaceId: string,
+  file: FileRow,
+  folderId: string,
+  links: string[] = [],
+  uncertain = false,
+): Promise<void> {
   await publishFileStatus(workspaceId, { fileId: file.id, status: file.status, name: file.name, folderId }).catch(
     () => undefined,
   );
@@ -99,7 +117,9 @@ async function announceMove(workspaceId: string, file: FileRow, folderId: string
     fileId: file.id,
     batchId: file.batch_id,
     kind: 'file',
-    text: `Кладу ${q(file.name)} → ${path}${named.length ? ` (і посилання в папках товарів: ${named.join(', ')})` : ''}.`,
+    text:
+      `Кладу ${q(file.name)} → ${path}${named.length ? ` (і посилання в папках товарів: ${named.join(', ')})` : ''}` +
+      (uncertain ? ' — не впевнений, перевірте.' : '.'),
   });
 }
 
@@ -252,6 +272,45 @@ function reasonText(method: DocTypeResolution['method'], docType: string, folder
 export async function classifyAndFile(
   workspaceId: string,
   fileId: string,
+  opts: { move?: boolean; fallback?: boolean } = {},
+): Promise<ClassifyResult | null> {
+  const res = await classifyAndFileInner(workspaceId, fileId, opts);
+  // Spec 007: nothing stays loose. A read file that points nowhere goes under
+  // «Інше / <категорія>» (payments, letters, permits, tables, photos, unread).
+  if (res && !res.to && opts.move !== false && opts.fallback !== false) {
+    const filed = await fileUnderOther(workspaceId, fileId);
+    if (filed) return { ...res, to: filed, reason: res.reason, suggested: null };
+  }
+  return res;
+}
+
+/** Files a read, still-loose file under «Інше / <категорія>». Returns the path. */
+export async function fileUnderOther(workspaceId: string, fileId: string): Promise<string | null> {
+  const { rows } = await query<FileRow>(
+    `SELECT f.id, f.name, f.type, f.folder_id, f.disk_path, f.status, f.batch_id, fo.name AS folder_name
+     FROM files f LEFT JOIN folders fo ON fo.id = f.folder_id
+     WHERE f.id = $1 AND f.workspace_id = $2`,
+    [fileId, workspaceId],
+  );
+  const file = rows[0];
+  // Only a loose file that has been read (or has failed for good).
+  if (!file || file.folder_id !== null || file.status === 'queued' || file.status === 'indexing') return null;
+  const cat = await otherCategoryOf(file);
+  const target = await otherFolderId(workspaceId, cat);
+  const reason = `не належить до митного пакета партій → Інше / ${OTHER_CATEGORIES[cat]}`;
+  const moved = await query(
+    `UPDATE files SET folder_id = $1, suggested_folder_id = NULL, folder_reason = $2, folder_confidence = NULL
+     WHERE id = $3 AND workspace_id = $4 AND folder_id IS NULL`,
+    [target, reason, file.id, workspaceId],
+  );
+  if ((moved.rowCount ?? 0) === 0) return null;
+  await announceMove(workspaceId, file, target);
+  return (await folderPath(target)).join(' / ');
+}
+
+async function classifyAndFileInner(
+  workspaceId: string,
+  fileId: string,
   opts: { move?: boolean } = {},
 ): Promise<ClassifyResult | null> {
   const move = opts.move !== false;
@@ -336,37 +395,19 @@ export async function classifyAndFile(
     };
   }
 
-  // Low confidence → do NOT auto-move. Keep in the inbox with a suggested folder
-  // and the reason, so the user confirms it manually.
-  if (confidence === 'low') {
-    await query(
-      `UPDATE files SET suggested_folder_id = $1, folder_reason = $2, folder_confidence = 'low'
-       WHERE id = $3 AND workspace_id = $4`,
-      [target.id, reason, file.id, workspaceId],
-    );
-    await announceInbox(workspaceId, file, reason, targetName);
-    return {
-      fileId: file.id,
-      name: file.name,
-      from: file.folder_name,
-      to: null,
-      reason,
-      confidence: 'low',
-      suggested: targetName,
-    };
-  }
-
-  // High/medium → move. Never deletes or overwrites. Record why + how confident.
-  // Only if the file is still where we found it: the classification can take an
-  // LLM call, and a manual move made meanwhile must win.
+  // Move — spec 007: an uncertain (low) guess is filed too, flagged «перевірте»,
+  // never left loose. Never deletes or overwrites. Only if the file is still
+  // where we found it: the classification can take an LLM call, and a manual
+  // move made meanwhile must win.
+  const flaggedReason = confidence === 'low' ? `перевірте: ${reason}` : reason;
   const moved = await query(
     `UPDATE files SET folder_id = $1, suggested_folder_id = NULL,
             folder_reason = $2, folder_confidence = $3
      WHERE id = $4 AND workspace_id = $5 AND folder_id IS NOT DISTINCT FROM $6`,
-    [target.id, reason, confidence, file.id, workspaceId, file.folder_id],
+    [target.id, flaggedReason, confidence, file.id, workspaceId, file.folder_id],
   );
   if ((moved.rowCount ?? 0) === 0) return empty;
-  await announceMove(workspaceId, file, target.id);
+  await announceMove(workspaceId, file, target.id, [], confidence === 'low');
 
   return {
     fileId: file.id,
@@ -409,6 +450,7 @@ async function classifyIntoFcl(workspaceId: string, file: FileRow, move: boolean
 
   const assignment = assignLot({ file_name: file.name, file_type: file.type, fields }, await loadLotProfiles(workspaceId));
   const docType = typeof fields?.doc_type === 'string' ? fields.doc_type : null;
+  let reason: string = assignment.reason;
 
   let targetId: string | null = null;
   let links: string[] = [];
@@ -417,24 +459,6 @@ async function classifyIntoFcl(workspaceId: string, file: FileRow, move: boolean
     // A container-level paper that names goods (our resale invoice) is linked
     // into those goods' folders in every lot.
     if (assignment.folder !== 'transport') links = await productLinksAcrossLots(workspaceId, fields);
-  } else if (assignment.kind === 'inbox' && docProducts(fields).length === 0 && (await productByFileName(workspaceId, file.name))) {
-    // No lot signal in the content (a photo, a label) but the file name names a
-    // product of exactly one lot: «photo of D-Glucosamine Hcl 2.jpg».
-    targetId = await productByFileName(workspaceId, file.name);
-    if (confidence === 'high') confidence = 'medium';
-    if (move) {
-      const moved = await query(
-        `UPDATE files SET folder_id = $1, suggested_folder_id = NULL, folder_reason = $2, folder_confidence = $3
-         WHERE id = $4 AND workspace_id = $5 AND folder_id IS NOT DISTINCT FROM $6`,
-        [targetId, 'назва файлу вказує на товар', confidence, file.id, workspaceId, file.folder_id],
-      );
-      if ((moved.rowCount ?? 0) > 0) {
-        await setFileLinks(file.id, []);
-        await announceMove(workspaceId, file, targetId!);
-        const name = (await folderPath(targetId!)).join(' / ');
-        return { ...base, to: name, reason: 'назва файлу вказує на товар', confidence, suggested: null };
-      }
-    }
   } else if (assignment.kind === 'lot' || assignment.kind === 'new') {
     if (assignment.kind === 'lot' && assignment.confidence === 'medium' && confidence === 'high') confidence = 'medium';
     const sure = move && confidence !== 'low';
@@ -444,50 +468,73 @@ async function classifyIntoFcl(workspaceId: string, file: FileRow, move: boolean
         : sure
           ? (await ensureLot(workspaceId, assignment.supplierName, 'auto')).lot
           : null;
-    if (lot) ({ targetId, links } = await placeWithinLot(workspaceId, lot, docType, fields, sure, file.name));
-  } else if (assignment.suggestLotId) {
-    // Only a hint for the user — point at the lot's «Інше», never its root.
-    targetId = await lotOtherFolderId(workspaceId, assignment.suggestLotId);
-    confidence = 'low';
+    if (lot) ({ targetId, links } = await placeWithinLot(workspaceId, lot, docType, fields, sure, file));
   } else {
-    await query(
-      `UPDATE files SET suggested_folder_id = NULL, folder_reason = $1, folder_confidence = NULL
-       WHERE id = $2 AND workspace_id = $3`,
-      [assignment.reason, file.id, workspaceId],
-    );
-    if (move) await announceInbox(workspaceId, file, assignment.reason, null);
-    return { ...base, to: null, reason: assignment.reason, confidence: null, suggested: null };
+    // No lot signal in the extraction (a photo, a scan, a label): what its NAME
+    // or recognised TEXT mentions — a batch number, a product, a supplier.
+    const signal = await signalFor(workspaceId, file, null);
+    if (signal) {
+      targetId = signal.productFolderId ?? (await lotOtherFolderId(workspaceId, signal.lotId));
+      reason = signal.reason;
+      if (confidence === 'high') confidence = 'medium';
+    } else if (assignment.suggestLotId) {
+      targetId = await lotOtherFolderId(workspaceId, assignment.suggestLotId);
+      confidence = 'low';
+    } else {
+      // Nothing points anywhere — the caller files it under «Інше / <категорія>».
+      await query(
+        `UPDATE files SET suggested_folder_id = NULL, folder_reason = $1, folder_confidence = NULL
+         WHERE id = $2 AND workspace_id = $3`,
+        [reason, file.id, workspaceId],
+      );
+      return { ...base, to: null, reason, confidence: null, suggested: null };
+    }
   }
   const targetName = targetId ? (await folderPath(targetId)).join(' / ') || null : null;
-  if (!targetId || !targetName) {
-    if (move) await announceInbox(workspaceId, file, assignment.reason, null);
-    return { ...base, to: null, reason: assignment.reason, confidence: null, suggested: null };
-  }
+  if (!targetId || !targetName) return { ...base, to: null, reason, confidence: null, suggested: null };
 
   if (targetId === file.folder_id) {
     await setFileLinks(file.id, links.filter((l) => l !== targetId));
-    return { ...base, to: targetName, reason: assignment.reason, confidence, suggested: null };
+    return { ...base, to: targetName, reason, confidence, suggested: null };
   }
-  if (!move || confidence === 'low' || assignment.kind === 'inbox') {
+  if (!move) {
     await query(
       `UPDATE files SET suggested_folder_id = $1, folder_reason = $2, folder_confidence = $3
        WHERE id = $4 AND workspace_id = $5`,
-      [targetId, assignment.reason, confidence, file.id, workspaceId],
+      [targetId, reason, confidence, file.id, workspaceId],
     );
-    if (move) await announceInbox(workspaceId, file, assignment.reason, targetName);
-    return { ...base, to: null, reason: assignment.reason, confidence, suggested: targetName };
+    return { ...base, to: null, reason, confidence, suggested: targetName };
   }
 
+  // Spec 007: everything is filed. An uncertain guess is filed too, flagged
+  // «перевірте» (low confidence) so the user can confirm or move it.
+  const flagged = confidence === 'low' ? `перевірте: ${reason}` : reason;
   const moved = await query(
     `UPDATE files SET folder_id = $1, suggested_folder_id = NULL, folder_reason = $2, folder_confidence = $3
      WHERE id = $4 AND workspace_id = $5 AND folder_id IS NOT DISTINCT FROM $6`,
-    [targetId, assignment.reason, confidence, file.id, workspaceId, file.folder_id],
+    [targetId, flagged, confidence, file.id, workspaceId, file.folder_id],
   );
   if ((moved.rowCount ?? 0) === 0) return { ...base, to: null, reason: null, confidence: null, suggested: null };
   const extra = links.filter((l) => l !== targetId);
   await setFileLinks(file.id, extra);
-  await announceMove(workspaceId, file, targetId, extra);
-  return { ...base, to: targetName, reason: assignment.reason, confidence, suggested: null };
+  await announceMove(workspaceId, file, targetId, extra, confidence === 'low');
+  return { ...base, to: targetName, reason: flagged, confidence, suggested: null };
+}
+
+/**
+ * The lot / product a paper's name or recognised text points to (spec 007),
+ * optionally only inside one lot.
+ */
+async function signalFor(workspaceId: string, file: FileRow, onlyLotId: string | null): Promise<Signal | null> {
+  const md = await loadFileMarkdown(file.id).catch(() => null);
+  const text = md ? md.pages.map((p) => p.markdown).join('\n').slice(0, 40_000) : '';
+  const lots = (await listLots(workspaceId)).filter((l) => !onlyLotId || l.id === onlyLotId);
+  if (lots.length === 0) return null;
+  const products: ProductOfLot[] = [];
+  for (const l of lots) for (const p of await listProductFolders(l.id)) products.push({ ...p, lot_id: l.id });
+  const batches = (await loadBatchIndex(workspaceId)).filter((b) => !onlyLotId || b.lotId === onlyLotId);
+  const hay = `${file.name.replace(/\.[a-z0-9]{2,5}$/i, '').replace(/_/g, ' ')}\n${text}`;
+  return findSignal(hay, lots, products, batches);
 }
 
 /** The one product folder (any lot) a file name points to, or null. */
@@ -523,7 +570,7 @@ async function placeWithinLot(
   docType: string | null,
   fields: Record<string, unknown> | null,
   sure: boolean,
-  fileName: string,
+  file: FileRow,
 ): Promise<{ targetId: string | null; links: string[] }> {
   const create = sure && createsProducts(docType);
   const productIds: string[] = [];
@@ -537,8 +584,11 @@ async function placeWithinLot(
   if (productIds[0]) return { targetId: productIds[0], links: productIds.slice(1) };
   // No product in the content: the file name may still name one of this lot's
   // goods; otherwise the lot's «Інше» — never loose in the lot's root.
-  const byName = productFolderByFileName(await listProductFolders(lot.id), fileName);
-  return { targetId: byName?.id ?? (await lotOtherFolderId(workspaceId, lot.id)), links: [] };
+  const byName = productFolderByFileName(await listProductFolders(lot.id), file.name);
+  if (byName) return { targetId: byName.id, links: [] };
+  // A batch number / product named in the recognised text, inside this lot.
+  const signal = await signalFor(workspaceId, file, lot.id);
+  return { targetId: signal?.productFolderId ?? (await lotOtherFolderId(workspaceId, lot.id)), links: [] };
 }
 
 /**
@@ -608,7 +658,7 @@ export async function fileFclBatch(workspaceId: string, batchId: string | null):
   let inbox = 0;
   for (const { id } of ordered) {
     if (!(await needsAutoFiling(id))) continue;
-    const res = await classifyAndFile(workspaceId, id, { move: true });
+    const res = await classifyAndFile(workspaceId, id, { move: true, fallback: false });
     if (res?.to) filed++;
     else inbox++;
   }
@@ -617,6 +667,18 @@ export async function fileFclBatch(workspaceId: string, batchId: string | null):
     const again = await refileFclInbox(workspaceId);
     filed += again;
     inbox -= Math.min(inbox, again);
+  }
+  // Whatever still points nowhere → «Інше / <категорія>» (spec 007).
+  const { rows: loose } = await query<{ id: string }>(
+    `SELECT id FROM files WHERE workspace_id = $1 AND folder_id IS NULL AND is_latest = true
+       AND ($2::uuid IS NULL OR batch_id = $2)`,
+    [workspaceId, batchId],
+  );
+  for (const { id } of loose) {
+    if (await fileUnderOther(workspaceId, id)) {
+      filed++;
+      inbox = Math.max(0, inbox - 1);
+    }
   }
   await tidyFclFolders(workspaceId);
   return { filed, inbox };
@@ -645,7 +707,7 @@ export async function refileFclInbox(workspaceId: string): Promise<number> {
   );
   let moved = 0;
   for (const { id } of rows) {
-    const res = await classifyAndFile(workspaceId, id, { move: true });
+    const res = await classifyAndFile(workspaceId, id, { move: true, fallback: false });
     if (res?.to) moved++;
   }
   return moved;

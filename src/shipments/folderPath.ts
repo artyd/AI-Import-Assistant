@@ -1,4 +1,5 @@
 import { query } from '../db/pool.js';
+import { folderDisplayName } from './folders.js';
 
 /** Folder names from the root down, for one folder ("Митниця / Shandong X"). */
 export async function folderPath(folderId: string): Promise<string[]> {
@@ -12,7 +13,7 @@ export async function folderPath(folderId: string): Promise<string[]> {
      SELECT name FROM up ORDER BY depth DESC`,
     [folderId],
   );
-  return rows.map((r) => r.name);
+  return rows.map((r) => folderDisplayName(r.name));
 }
 
 /** Every folder of a workspace with its full path (for the disk mirror and ZIP export). */
@@ -27,7 +28,7 @@ export async function folderPaths(workspaceId: string): Promise<Map<string, stri
     const path: string[] = [];
     let cur: typeof r | undefined = r;
     for (let i = 0; cur && i < 10; i++) {
-      path.unshift(cur.name);
+      path.unshift(folderDisplayName(cur.name));
       cur = cur.parent_id ? byId.get(cur.parent_id) : undefined;
     }
     out.set(r.id, path);

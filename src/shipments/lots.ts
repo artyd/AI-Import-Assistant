@@ -4,12 +4,23 @@ import {
   FCL_COMMON_FOLDER,
   FCL_FOLDER_SKELETON,
   LOT_OTHER_FOLDER,
+  OTHER_CATEGORIES,
+  OTHER_ROOT_FOLDER,
+  type OtherCategory,
   fclFolderRole,
   lotFolderName,
   type FclFolderRole,
 } from './folders.js';
 import { buildLotProfiles, lotNameFor, type AssignFields, type LotProfile } from './lotAssign.js';
-import { findProductFolder, productKey, type ProductFolder, type ProductRef } from './fclLayout.js';
+import {
+  docProducts,
+  findProductFolder,
+  productKey,
+  shortProductName,
+  type BatchEntry,
+  type ProductFolder,
+  type ProductRef,
+} from './fclLayout.js';
 
 /**
  * Lots of an FCL (Збірник, spec 006/007): the Postgres side. A lot has its root
@@ -138,6 +149,74 @@ async function insertLotFolder(
 export async function fclTargetFolderId(workspaceId: string, role: FclFolderRole): Promise<string> {
   if (role === 'transport') return fclFolderId(workspaceId, 'transport');
   return fclSubFolderId(workspaceId, await fclFolderId(workspaceId, 'customs'), 'fcl_common', FCL_COMMON_FOLDER, null);
+}
+
+/**
+ * «Інше / <категорія>» — papers that are not part of the customs package and
+ * point to no lot (spec 007: nothing is left unfiled). Works for a shipment too.
+ */
+export async function otherFolderId(workspaceId: string, category: OtherCategory): Promise<string> {
+  const find = "SELECT id FROM folders WHERE workspace_id = $1 AND parent_id IS NULL AND role = 'other' LIMIT 1";
+  let root = (await query<{ id: string }>(find, [workspaceId])).rows[0]?.id;
+  if (!root) {
+    root = await withFolderLock(workspaceId, async (client) => {
+      const again = await client.query<{ id: string }>(find, [workspaceId]);
+      if (again.rows[0]) return again.rows[0].id;
+      const { rows } = await client.query<{ id: string }>(
+        `INSERT INTO folders (workspace_id, name, position, role)
+         VALUES ($1, $2, COALESCE((SELECT MAX(position) + 1 FROM folders WHERE workspace_id = $1), 0), 'other')
+         RETURNING id`,
+        [workspaceId, OTHER_ROOT_FOLDER],
+      );
+      return rows[0]!.id;
+    });
+  }
+  return fclSubFolderId(workspaceId, root, `other_${category}`, OTHER_CATEGORIES[category], null);
+}
+
+/**
+ * Every batch number the lots' papers state, with the product folder it belongs
+ * to when that is known (a CoA in a product folder; an invoice line naming the
+ * product). Lets a photo «20251202.jpg» or a label scan find its product.
+ */
+export async function loadBatchIndex(workspaceId: string): Promise<BatchEntry[]> {
+  const files = await loadFclFiles(workspaceId);
+  const { rows: folders } = await query<{ id: string; lot_id: string; role: string | null; product_key: string | null; name: string }>(
+    'SELECT id, lot_id, role, product_key, name FROM folders WHERE workspace_id = $1 AND lot_id IS NOT NULL',
+    [workspaceId],
+  );
+  const byId = new Map(folders.map((f) => [f.id, f]));
+  const productsOf = (lotId: string): ProductFolder[] =>
+    folders.filter((f) => f.lot_id === lotId && f.role === 'product').map((f) => ({ id: f.id, product_key: f.product_key ?? f.name }));
+  const out: BatchEntry[] = [];
+  const seen = new Set<string>();
+  const add = (batch: unknown, lotId: string, productFolderId: string | null): void => {
+    if (typeof batch !== 'string' || batch.trim().length < 5) return;
+    const b = batch.trim();
+    const key = `${b.toLowerCase()}|${lotId}|${productFolderId ?? ''}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.push({ batch: b, lotId, productFolderId });
+    }
+  };
+  for (const f of files) {
+    if (!f.lot_id || !f.fields) continue;
+    const fields = f.fields as Record<string, unknown>;
+    const folder = f.folder_id ? byId.get(f.folder_id) : undefined;
+    const own = folder?.role === 'product' ? folder.id : null;
+    const products = docProducts(fields);
+    const single = products.length === 1 ? findProductFolder(productsOf(f.lot_id), products[0]!)?.id ?? null : null;
+    add(fields.batch_number, f.lot_id, own ?? single);
+    if (Array.isArray(fields.line_items)) {
+      for (const li of fields.line_items as Record<string, unknown>[]) {
+        const name = typeof li?.product_name === 'string' ? li.product_name : typeof li?.description === 'string' ? li.description : null;
+        const cas = typeof li?.cas_number === 'string' ? li.cas_number : null;
+        const pf = name ? findProductFolder(productsOf(f.lot_id), { name: shortProductName(name), cas })?.id ?? null : null;
+        add(li?.batch_no, f.lot_id, pf);
+      }
+    }
+  }
+  return out;
 }
 
 /** A lot's «Інше» sub-folder: its papers whose product is unknown. */

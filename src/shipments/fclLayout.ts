@@ -1,4 +1,4 @@
-import { sameGoods, type AssignFields } from './lotAssign.js';
+import { goodsTokens, sameGoods, type AssignFields } from './lotAssign.js';
 
 /**
  * Where a document goes INSIDE its lot (spec 007). Pure — the Postgres side is
@@ -106,4 +106,74 @@ export function productFolderByFileName<T extends ProductFolder>(folders: T[], f
   const hits = folders.filter((f) => sameGoods(stem, f.product_key));
   const keys = new Set(hits.map((h) => h.product_key.toLowerCase()));
   return hits.length > 0 && keys.size === 1 ? hits[0]! : null;
+}
+
+/** A batch number seen in a lot's papers, with the product folder it belongs to. */
+export interface BatchEntry {
+  batch: string;
+  lotId: string;
+  productFolderId: string | null;
+}
+
+export interface ProductOfLot extends ProductFolder {
+  lot_id: string;
+}
+
+export interface Signal {
+  lotId: string;
+  productFolderId: string | null;
+  reason: string;
+}
+
+const tokensOf = (s: string): Set<string> =>
+  new Set(s.toLowerCase().split(/[^\p{L}\p{N}-]+/u).flatMap((t) => [t, ...t.split('-')]).filter(Boolean));
+
+/**
+ * Where a paper belongs by what its NAME or its TEXT mentions (spec 007) — for
+ * photos, scans and labels whose extraction found no lot signal:
+ *   1. a batch number known in exactly one lot ("20251202.jpg", a label photo
+ *      whose text carries the batch) → that lot, and its product when known;
+ *   2. a product name whose every significant word appears → that product;
+ *   3. a supplier's distinctive name → that lot.
+ * Only an unambiguous hit counts.
+ */
+export function findSignal(
+  hay: string,
+  lots: { id: string; name: string; supplier_name: string }[],
+  products: ProductOfLot[],
+  batches: BatchEntry[],
+): Signal | null {
+  const words = tokensOf(hay);
+
+  const byBatch = batches.filter((b) => b.batch.length >= 5 && words.has(b.batch.toLowerCase()));
+  const batchLots = new Set(byBatch.map((b) => b.lotId));
+  if (batchLots.size === 1) {
+    const lotId = byBatch[0]!.lotId;
+    const prods = new Set(byBatch.map((b) => b.productFolderId).filter((p): p is string => !!p));
+    const lot = lots.find((l) => l.id === lotId);
+    return {
+      lotId,
+      productFolderId: prods.size === 1 ? [...prods][0]! : null,
+      reason: `номер партії товару ${byBatch[0]!.batch} (у назві / тексті) → ${lot?.name ?? 'партія'}`,
+    };
+  }
+
+  const byProduct = products.filter((p) => {
+    const need = [...goodsTokens(p.product_key)].filter((t) => !/^\d/.test(t));
+    return need.length > 0 && need.some((t) => t.length >= 4) && need.every((t) => words.has(t));
+  });
+  const productKeys = new Set(byProduct.map((p) => `${p.lot_id}|${p.product_key.toLowerCase()}`));
+  if (productKeys.size === 1) {
+    const p = byProduct[0]!;
+    return { lotId: p.lot_id, productFolderId: p.id, reason: `назва / текст згадує товар «${p.product_key}»` };
+  }
+
+  const bySupplier = lots.filter((l) => {
+    const key = [...goodsTokens(l.supplier_name)].find((t) => t.length >= 5 && !/^(chem|pharm|biotech|industry|co|ltd|limited|trading|import|export|group|bio-engineering|pharmaceutical|chemical)/.test(t));
+    return !!key && words.has(key);
+  });
+  if (bySupplier.length === 1) {
+    return { lotId: bySupplier[0]!.id, productFolderId: null, reason: `назва / текст згадує постачальника «${bySupplier[0]!.name}»` };
+  }
+  return null;
 }

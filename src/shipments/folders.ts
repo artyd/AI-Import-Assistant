@@ -23,7 +23,41 @@ export const FOLDER_SKELETON = [
  * Collections created before spec 006 keep their old 8-folder layout; folder roles
  * are found by name (`fclFolderRole`), so both layouts work.
  */
-export const FCL_FOLDER_SKELETON = ['01_Митниця', '02_Транспорт'] as const;
+export const FCL_FOLDER_SKELETON = ['Митниця', 'Транспорт'] as const;
+
+/**
+ * What a person sees for a folder (spec 007: no numbering). A shipment's skeleton
+ * folders keep their stable code names in the database — classification, the
+ * checklist and the ZIP key off them — and are shown by these names in the tree,
+ * the reading journal, the ZIP and the folder on the server's disk.
+ */
+const DISPLAY_NAMES: Record<string, string> = {
+  '01_Contract_Invoice_PackingList': 'Контракт, інвойс, пакувальний',
+  '02_PO': 'Замовлення',
+  '03_Certificates': 'Сертифікати',
+  '04_Customs': 'Митна декларація',
+  '05_Transport': 'Транспортні документи',
+  '06_Photos': 'Фото',
+  '07_Final': 'Фінальні документи',
+};
+
+export function folderDisplayName(name: string): string {
+  return DISPLAY_NAMES[name] ?? name.replace(/^\d{1,2}[_ .-]+/, '');
+}
+
+/** The root folder for papers that are not part of the customs package. */
+export const OTHER_ROOT_FOLDER = 'Інше';
+/** Its sub-folders, by category (spec 007: nothing is left unfiled). */
+export const OTHER_CATEGORIES = {
+  finance: 'Фінанси (рахунки, платежі)',
+  correspondence: 'Листування й претензії',
+  permits: 'Дозволи, реєстрації, довіреності',
+  tables: 'Таблиці й звіти',
+  photos: 'Фото',
+  unread: 'Не прочитано',
+  other: 'Різне',
+} as const;
+export type OtherCategory = keyof typeof OTHER_CATEGORIES;
 
 /** Sub-folder names of the FCL layout (spec 007). */
 export const FCL_COMMON_FOLDER = 'Весь контейнер';

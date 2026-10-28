@@ -16,6 +16,7 @@ import { readStoredFile } from '../lib/storage.js';
 import { shipmentVerdicts } from '../reconciliation/verdicts.js';
 import { DOC_TYPE_TO_FOLDER } from './classify.js';
 import { folderPaths } from '../shipments/folderPath.js';
+import { folderDisplayName } from '../shipments/folders.js';
 import { buildAndSaveReport } from '../report/report.js';
 import { saveArtifact, getLatestArtifacts, type ArtifactType } from './artifacts.js';
 
@@ -149,11 +150,12 @@ export async function streamWorkspaceZip(ws: WorkspaceRow, reply: FastifyReply):
       const own = pathOf(f.folder_id) ?? f.folder_name;
       targetFolder = f.lot_id && f.folder_role === 'lot' ? `${own}/${derived ?? 'Інше'}` : own;
     }
+    if (targetFolder && ws.kind !== 'fcl') targetFolder = targetFolder.split('/').map(folderDisplayName).join('/');
     const entry = !f.is_latest
-      ? `_OldVersions/v${f.version}_${f.name}`
+      ? `_Старі версії/v${f.version}_${f.name}`
       : targetFolder
         ? `${targetFolder}/${f.name}`
-        : `_Inbox/${f.name}`;
+        : `Інбокс/${f.name}`;
     archive.append(buf, { name: uniqueName(entry) });
     // A document about several products also sits in each product's folder.
     if (f.is_latest && ws.kind === 'fcl') {

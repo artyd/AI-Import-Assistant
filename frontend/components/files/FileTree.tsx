@@ -325,6 +325,22 @@ function FileRow({
           ? {folderPathLabel(folders, suggestedFolder.id, folderLabel)}
         </button>
       )}
+      {!linked && file.folderId && file.folderConfidence === "low" && (
+        <span
+          title={file.folderReason ?? "Штурман не впевнений у цій папці — перевірте"}
+          style={{
+            fontSize: 10,
+            fontWeight: 600,
+            color: "var(--warn)",
+            border: "1px solid var(--warn)",
+            borderRadius: 999,
+            padding: "1px 7px",
+            whiteSpace: "nowrap",
+          }}
+        >
+          перевірте
+        </span>
+      )}
       {file.version && file.version > 1 && (
         <span style={{ fontSize: 10, color: "var(--muted)", fontFamily: "var(--font-mono)" }}>
           v{file.version}

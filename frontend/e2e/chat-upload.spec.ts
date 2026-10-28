@@ -96,7 +96,7 @@ test.describe("Chat file intake", () => {
     await uploadReq;
 
     // Classify bubble reports the folder via the Ukrainian label.
-    await expect(page.getByText(/Віднесено до «03 · Сертифікати»/)).toBeVisible();
+    await expect(page.getByText(/Віднесено до «Сертифікати»/)).toBeVisible();
   });
 
   test("paste stages the file, then send uploads and auto-files it", async ({ page }) => {
@@ -129,6 +129,6 @@ test.describe("Chat file intake", () => {
     await page.getByRole("button", { name: "Надіслати" }).click();
     await uploadReq;
 
-    await expect(page.getByText(/Віднесено до «03 · Сертифікати»/)).toBeVisible();
+    await expect(page.getByText(/Віднесено до «Сертифікати»/)).toBeVisible();
   });
 });

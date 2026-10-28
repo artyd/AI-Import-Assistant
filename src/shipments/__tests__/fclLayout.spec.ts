@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { docProducts, findProductFolder, placeInLot, createsProducts, shortProductName, productFolderByFileName } from '../fclLayout.js';
+import { docProducts, findProductFolder, placeInLot, createsProducts, shortProductName, productFolderByFileName, findSignal } from '../fclLayout.js';
 
 describe('fclLayout', () => {
   it('customs papers go to the lot customs folder, the rest to the product', () => {
@@ -55,5 +55,26 @@ describe('fclLayout', () => {
     expect(productFolderByFileName(folders, '048_photo of DL-Aspartic Acid with pallet.png')?.id).toBe('a');
     expect(productFolderByFileName(folders, '20251202.jpg')).toBeNull();
     expect(productFolderByFileName(folders, 'acid.jpg')).toBeNull(); // two acids → ambiguous
+  });
+
+  it('signals: a batch number, a product name or a supplier in the name / text', () => {
+    const lots = [
+      { id: 'X', name: "Xi'an TaiCheng Chem", supplier_name: "Xi'an TaiCheng Chem Co., Ltd." },
+      { id: 'R', name: 'ZHEJIANG RIVITA BIOTECH', supplier_name: 'ZHEJIANG RIVITA BIOTECH CO., LTD' },
+    ];
+    const products = [
+      { id: 'pa', lot_id: 'X', product_key: 'DL-ASPARTIC ACID' },
+      { id: 'pg', lot_id: 'X', product_key: 'D-Glucosamine Hydrochloride' },
+      { id: 'pb', lot_id: 'R', product_key: 'BETAINE ANHYDROUS 99%' },
+    ];
+    const batches = [
+      { batch: '20251202', lotId: 'X', productFolderId: 'pa' },
+      { batch: 'FWT2025121801', lotId: 'R', productFolderId: 'pb' },
+    ];
+    expect(findSignal('20251202.jpg', lots, products, batches)).toMatchObject({ lotId: 'X', productFolderId: 'pa' });
+    expect(findSignal('фото.jpg [фото: мішки] BETAINE ANHYDROUS Lot FWT2025121801', lots, products, batches)).toMatchObject({ lotId: 'R', productFolderId: 'pb' });
+    expect(findSignal('label: Betaine Anhydrous 25 kg', lots, products, batches)).toMatchObject({ lotId: 'R', productFolderId: 'pb' });
+    expect(findSignal('Shipper: Zhejiang Rivita Biotech', lots, products, [])).toMatchObject({ lotId: 'R', productFolderId: null });
+    expect(findSignal('платіжне доручення 20.04', lots, products, batches)).toBeNull();
   });
 });
