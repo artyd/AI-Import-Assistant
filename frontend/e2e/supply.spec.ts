@@ -112,3 +112,14 @@ test("calendar fits one screen on desktop", async ({ page }, info) => {
   const scrolls = await page.evaluate(() => document.scrollingElement!.scrollHeight > window.innerHeight + 1);
   expect(scrolls).toBe(false);
 });
+
+test("lock screen (/?to=shturman) opens on the Штурман gate with a way to Поставки", async ({ page }) => {
+  await mockSupply(page);
+  await page.goto("/?to=shturman");
+  await expect(page.getByText("Введіть код доступу")).toBeVisible();
+  await expect(page.locator(".ent-sh .ent-dots")).toBeAttached();
+  await shot(page, "lock-screen");
+  await page.getByRole("button", { name: "Повернутись до Поставок" }).click();
+  await expect(page.getByRole("heading", { name: "Поставки" })).toBeVisible();
+  await expect(page).toHaveURL(/\/$/);
+});

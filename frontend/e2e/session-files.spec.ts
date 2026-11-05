@@ -84,7 +84,7 @@ test("a 401 mid-session drops the token and redirects to /login", async ({ page 
   await input.fill("Питання");
   await page.getByRole("button", { name: "Надіслати" }).click();
 
-  await expect(page).toHaveURL(/\/login$/);
+  await expect(page).toHaveURL(/\/\?to=shturman$/);
   expect(await page.evaluate(() => localStorage.getItem("aia_token"))).toBeNull();
 });
 

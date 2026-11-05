@@ -29,7 +29,9 @@
 .ent-enter .arr { width: 50px; height: 50px; border-radius: 16px; display: grid; place-items: center; background: rgba(255,255,255,0.14); transition: transform .3s; }
 .ent-enter:hover .arr { transform: translateX(4px) rotate(-45deg); }
 
-.ent-sh { background: var(--bg); color: var(--text); }
+/* the Штурман gate sits on the same backdrop as Поставки */
+.ent-sh { background: var(--e-paper); color: var(--text); }
+.ent-sh > :not(.ent-atmo):not(.ent-dots) { position: relative; }
 .ent-btn { margin-top: 26px; }
 
 .ent-in .ent-rv { animation: ent-rise .7s cubic-bezier(0.2, 0.8, 0.2, 1) both; animation-delay: calc(var(--d, 0) * 1ms); }

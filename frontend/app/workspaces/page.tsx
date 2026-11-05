@@ -19,7 +19,7 @@ export default function WorkspacesPage() {
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
-    if (!authLoading && !user) router.replace("/login");
+    if (!authLoading && !user) router.replace("/?to=shturman");
   }, [user, authLoading, router]);
 
   useEffect(() => {

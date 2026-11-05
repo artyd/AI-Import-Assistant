@@ -66,7 +66,7 @@ export default function InstructionPage() {
   const [refineOpen, setRefineOpen] = useState(false);
 
   useEffect(() => {
-    if (!authLoading && !user) router.replace("/login");
+    if (!authLoading && !user) router.replace("/?to=shturman");
   }, [user, authLoading, router]);
 
   // ── load ──────────────────────────────────────────────────────────────────

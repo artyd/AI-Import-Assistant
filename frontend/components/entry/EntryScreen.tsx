@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { BrandMark, CodeGate } from "@/components/auth/CodeGate";
@@ -17,7 +17,9 @@ type Side = "supply" | "shturman";
 export function EntryScreen() {
   const router = useRouter();
   const { user, loading, loginWithCode } = useAuth();
-  const [side, setSide] = useState<Side>("supply");
+  // `/?to=shturman` (the lock screen, an expired session) opens on the Штурман gate.
+  const params = useSearchParams();
+  const [side, setSide] = useState<Side>(() => (params.get("to") === "shturman" ? "shturman" : "supply"));
   const [first, setFirst] = useState(true);
   const [play, setPlay] = useState(0);
   const [codeLength, setCodeLength] = useState<number | null>(null);
@@ -88,6 +90,11 @@ export function EntryScreen() {
     }
   }, [side]);
 
+  // Keep the address in step with the side, so a reload stays where you are.
+  useEffect(() => {
+    window.history.replaceState(null, "", side === "shturman" ? "/?to=shturman" : "/");
+  }, [side]);
+
   useEffect(() => {
     if (side !== "shturman") return;
     const onKey = (e: KeyboardEvent) => {
@@ -119,6 +126,8 @@ export function EntryScreen() {
       </div>
 
       <div ref={shRef} className="ent-layer ent-sh ent-in" hidden={!isSh} key={`sh-${play}`} aria-hidden={!isSh}>
+        <div className="ent-atmo" />
+        <div className="ent-dots" />
         {isSh &&
           (!loading && user ? (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center" }}>

@@ -178,7 +178,7 @@ export default function WorkspacePage() {
   const paletteUploadRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (!authLoading && !user) router.replace("/login");
+    if (!authLoading && !user) router.replace("/?to=shturman");
   }, [user, authLoading, router]);
 
   useEffect(() => {
