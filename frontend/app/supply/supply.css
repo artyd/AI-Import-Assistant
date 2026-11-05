@@ -281,3 +281,29 @@
 @media (max-width: 760px) { .sp .drawer { top: auto; height: calc(100dvh - 20px); } .sp .side { gap: 0; } .sp .nb { width: 48px; } }
 .sp a.nb { text-decoration: none; }
 .sp a.nb:hover { color: #f0a0a4; }
+
+/* Sidebar rail: fixed-width items, icon over label, all on one axis. */
+.sp .shell { grid-template-columns: 84px minmax(0, 1fr); }
+.sp .side { padding: 16px 10px; gap: 4px; align-items: center; }
+.sp .side .logo { margin-bottom: 12px; }
+.sp .nb { width: 64px; height: 56px; padding: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
+  font-size: 10.5px; line-height: 1; letter-spacing: .01em; white-space: nowrap; text-align: center; }
+.sp .nb svg { flex: none; display: block; }
+.sp .nb[aria-current="true"]::before { left: -10px; top: 14px; bottom: 14px; }
+.sp .nb .badge { top: 5px; right: 12px; }
+.sp .lockbtn { width: 64px; height: 48px; margin-top: 4px; }
+
+/* List groups by deadline (sort by date). */
+.sp .grp { display: flex; align-items: center; gap: 10px; margin: 10px 2px 0; font-size: 11.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.sp .grp:first-child { margin-top: 0; }
+.sp .grp i { width: 8px; height: 8px; border-radius: 50%; display: block; background: var(--gc); }
+.sp .grp b { font-weight: 700; padding: 1px 8px; border-radius: 999px; background: var(--sunk); color: var(--muted); letter-spacing: 0; }
+.sp .grp::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.sp .row .next .none { color: var(--faint); }
+
+@media (max-width: 760px) {
+  .sp .shell { grid-template-columns: minmax(0, 1fr); }
+  .sp .side { padding: 6px 4px calc(6px + env(safe-area-inset-bottom, 0px)); gap: 0; }
+  .sp .nb { flex: 1; width: auto; min-width: 0; height: 52px; font-size: 9.5px; }
+  .sp .lockbtn { width: 48px; height: 44px; margin: 0 2px; }
+}

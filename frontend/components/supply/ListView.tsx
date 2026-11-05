@@ -6,6 +6,21 @@ import { IArch, ICheck, IChev, IFlag } from "./SupplyIcons";
 
 const BADGE: Record<string, string> = { overdue: "b-over", soon: "b-soon", later: "b-later", none: "b-none", done: "b-ok" };
 
+/** Deadline groups shown as headers when the list is sorted by date. */
+const GROUPS = [
+  { key: "overdue", label: "Прострочено", color: "var(--err)" },
+  { key: "near", label: "Найближчі дні", color: "var(--warn)" },
+  { key: "week", label: "Цього тижня", color: "var(--accent)" },
+  { key: "later", label: "Пізніше", color: "var(--faint)" },
+  { key: "none", label: "Без дати", color: "var(--faint)" },
+  { key: "done", label: "Етап виконано", color: "var(--ok)" },
+] as const;
+function groupOf(s: SupplyShipment, today: string): (typeof GROUPS)[number]["key"] {
+  const d = deadline(s, today);
+  if (d.kind === "overdue" || d.kind === "none" || d.kind === "done" || d.kind === "later") return d.kind;
+  return (d.days ?? 0) <= 2 ? "near" : "week";
+}
+
 export function ListView({
   list, categories, sort, today, editing, onOpen, onComplete, archive, onRestore,
 }: {
@@ -34,15 +49,31 @@ export function ListView({
     );
   }
 
+  const sorted = sortShipments(list, sort, today);
+  const grouped = sort === "date" && !archive;
+  const counts = new Map<string, number>();
+  if (grouped) for (const s of sorted) counts.set(groupOf(s, today), (counts.get(groupOf(s, today)) ?? 0) + 1);
+  let last = "";
+
   return (
     <div className="list">
-      {sortShipments(list, sort, today).map((s, i) => {
+      {sorted.map((s, i) => {
+        const g = grouped ? groupOf(s, today) : "";
+        const head = grouped && g !== last ? GROUPS.find((x) => x.key === g) : null;
+        last = g;
         const st = currentStep(s.steps);
         const dl = deadline(s, today);
         const done = s.steps.filter((x) => x.state === "done").length;
         return (
+          <div key={s.id} style={{ display: "contents" }}>
+          {head && (
+            <div className="grp" style={{ ["--gc" as string]: head.color }}>
+              <i />
+              {head.label}
+              <b className="tn">{counts.get(head.key)}</b>
+            </div>
+          )}
           <article
-            key={s.id}
             className="row"
             style={{ ["--cc" as string]: categoryColor(categories, s.category), animationDelay: `${Math.min(i, 14) * 28}ms` }}
             onClick={() => onOpen(s.id)}
@@ -90,7 +121,7 @@ export function ListView({
               ) : s.action ? (
                 <span className="a"><IFlag />{s.action}</span>
               ) : (
-                <span className="none">Дій не потрібно</span>
+                <span className="none" aria-label="Дій не потрібно">—</span>
               )}
             </div>
             <span className="chev"><IChev /></span>
@@ -103,6 +134,7 @@ export function ListView({
               </div>
             )}
           </article>
+          </div>
         );
       })}
     </div>
