@@ -3,6 +3,7 @@ import type { ChatTool } from '../lib/anthropic/client.js';
 import * as logist from '../customs/logist/index.js';
 import { executeHubTool, isHubTool } from './tools/hub.js';
 import { executeSheetTool, isSheetTool } from './tools/sheet.js';
+import { executeSupplyTool, isSupplyTool } from './tools/supply.js';
 import { type ToolContext, type ToolOutcome } from './tools/shared.js';
 import { runUktzedLookup, runUktzedBrowse, runDualuseBrowse, runExchangeRate, runPubchemIdentify } from './tools/logist.js';
 import { runChecklist, runDiscrepancies, runRegistryCheck, runRisks } from './tools/reconciliation.js';
@@ -549,6 +550,7 @@ export async function executeTool(
     default:
       if (isHubTool(name)) return { ...(await executeHubTool(name, input, ctx)), citations: [] };
       if (isSheetTool(name)) return { ...(await executeSheetTool(name, input)), citations: [] };
+      if (isSupplyTool(name)) return { ...(await executeSupplyTool(name, input)), citations: [] };
       return { result: `Невідомий інструмент: ${name}`, summary: `Невідомий інструмент`, citations: [] };
   }
 }

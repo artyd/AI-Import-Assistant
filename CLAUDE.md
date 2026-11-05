@@ -21,6 +21,7 @@ src/                     backend: Node 20 + TS (ESM/NodeNext), Fastify 5, pg, Bu
   instruction/ report/   supplier instruction constructor; one-page management report
   analysis/              consolidated analysis engine + data/*.json; byok/ (user AI keys)
   hub/ sheet/            logistics hub (tracks, ports, lines, routes); team Google Sheet sync + calendar
+  supply/                Поставки register (/supply, spec 008): open reads, PIN-gated writes, history + undo, legacy import
   news/ notifications/ mcp/   RSS news; in-app bell + reminders; public MCP endpoint
   <area>/*.routes.ts     a Fastify route plugin; <area>/__tests__/*.spec.ts vitest
 frontend/                Next.js 15 app (own package): app/ routes, components/<area>/, lib/<area>/ pure modules + hooks (vitest)
@@ -58,7 +59,7 @@ DEPLOYMENT.md            server setup, host Caddy block, env
 - **The Anthropic key stays server-side** (`lib/anthropic/client.ts`). BYOK keys serve consolidated analysis only (ADR-0011).
 - **Wire contract is frozen**: chat SSE `token|tool_call|tool_result|done|error`, events SSE `file_status`, file status `queued|indexing|ready|error` (the frontend shows `ready` as `done`). Change it only together with `API_CONTRACT.md`.
 - **Shipment changed**: every write to what the verdicts read — files (delete, move, new version), extractions, parties, context, an approved instruction — ends with `shipmentChanged(id, change)` (`shipments/state.ts`). It owns the order autopilot → intake → verdicts → alert; `shipments/__tests__/state.spec.ts` fails on a writer that skips it.
-- **Access**: every shipment-scoped route calls `getOwnedWorkspace(userId, id)` and returns 404 on a miss. SSE authenticates with one-time tickets, never a JWT in the URL (ADR-0007). `/api/mcp` is deliberately open (ADR-0008).
+- **Access**: every shipment-scoped route calls `getOwnedWorkspace(userId, id)` and returns 404 on a miss. Поставки (`/api/supply`) is the exception by design: public reads, writes need a Штурман JWT or the supply token, which never opens a Штурман route. SSE authenticates with one-time tickets, never a JWT in the URL (ADR-0007). `/api/mcp` is deliberately open (ADR-0008).
 - **Code**: local ESM imports end in `.js`. Strict TS with `noUncheckedIndexedAccess`. Every request body is validated with zod. "Workspace" in code means "shipment" (Постачання).
 - **Team sheet is read-only**: never write to it, and never commit real sheet rows (ADR-0009).
 

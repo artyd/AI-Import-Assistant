@@ -1049,6 +1049,40 @@ Body = one JSON-RPC message (legacy batch arrays also accepted). Methods:
 `200` JSON-RPC response; notifications only → `202`. `GET`/`DELETE` → `405`.
 Any Origin allowed (no credentials). Rate limit 120/min per IP.
 
+## Поставки — shipment register (spec 008)
+
+A separate app at `/supply`, isolated from Штурман. **Reads are public** (no
+token). **Writes** need either a Штурман JWT or the **supply token** from
+`POST /api/supply/unlock`; the supply token is signed with a different key, so
+it is rejected by every Штурман route. Shapes: `SupplyStep { id, name, plan,
+actual, state: active|done|pending, note }` (dates `YYYY-MM-DD` or `""`),
+`SupplyShipment { id, name, category, action, note, archived, steps[], custom
+{fieldId: string}, position, createdAt, updatedAt }`, `SupplySettings { stages[],
+categories[], fields[{id,name,type}], templates[{id,name,stages[]}] }`.
+
+### `GET /api/supply`  (no auth) → `{ shipments, settings, revision, canEdit }`
+All shipments incl. archived. `canEdit` — whether the caller's token may write.
+### `GET /api/supply/revision`  (no auth) → `{ revision }`
+Changes on every write; the UI polls it every 30 s and reloads on change.
+### `GET /api/supply/history?limit=&shipmentId=`  (no auth) → `{ history: [{ id, at, actor, kind, text, shipmentId, undoable }] }`
+### `GET /api/supply/export.xlsx`  (no auth) → xlsx (sheets «Поставки», «Етапи»)
+### `GET /api/supply/session`  → `{ canEdit, codeLogin, codeLength }`
+### `POST /api/supply/unlock` `{ code }` → `{ token, expiresAt }` (12 h)
+The Штурман PIN (`ACCESS_CODE`). Same throttles as `/api/auth/login-code`
+(per-IP 5 / 15 min, shared 24 h lockout). `401 invalid_code`, `404
+code_login_disabled`, `429 code_login_locked`.
+### `POST /api/supply/shipments`  (editor) `{ name, category, action?, note?, steps?, custom? }` → `201 { shipment }`
+### `PATCH /api/supply/shipments/:id`  (editor) any of the fields + `expectedUpdatedAt?` → `{ shipment }`
+`409 { error: "conflict", current }` when `expectedUpdatedAt` is stale.
+### `POST /api/supply/shipments/:id/archive`  (editor) `{ archived }` → `{ shipment }`
+No delete: a shipment is archived, never removed.
+### `POST /api/supply/settings`  (editor) `SupplySettings` → `{ settings }`
+### `POST /api/supply/history/:id/undo`  (editor) → `{ ok }`
+Puts back the snapshot from before that entry (undoing a creation archives the
+shipment). `409 not_undoable` for imported or already undone entries.
+
+The chat agent reads the register with the read-only `supply_register` tool.
+
 ---
 
 ## Health

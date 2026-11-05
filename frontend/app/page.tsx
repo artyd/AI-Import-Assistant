@@ -1,29 +1,7 @@
-"use client";
+import { EntryScreen } from "@/components/entry/EntryScreen";
 
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { useAuth } from "@/lib/auth";
-import { IconSpinner } from "@/components/ui/icons";
-
+// The site entry (spec 008): Поставки by default, the corner mark opens the
+// Штурман PIN gate. Signed-in Штурман users get a «Продовжити» there.
 export default function IndexPage() {
-  const { user, loading } = useAuth();
-  const router = useRouter();
-
-  useEffect(() => {
-    if (loading) return;
-    router.replace(user ? "/workspaces" : "/login");
-  }, [user, loading, router]);
-
-  return (
-    <div
-      style={{
-        height: "100vh",
-        display: "grid",
-        placeItems: "center",
-        color: "var(--muted)",
-      }}
-    >
-      <IconSpinner size={26} />
-    </div>
-  );
+  return <EntryScreen />;
 }

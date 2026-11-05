@@ -19,6 +19,7 @@
     "migrate:markdown": "node dist/db/backfillMarkdown.js",
     "reminders:once": "tsx src/scripts/reminders-once.ts",
     "seed": "node dist/auth/seed.js",
+    "supply:import": "node dist/supply/importLegacy.js",
     "smoke": "node scripts/smoke-test.mjs",
     "ingest:registry": "node scripts/ingest-drug-registry.mjs",
     "eval:grounding": "node scripts/eval-grounding.mjs",

@@ -119,6 +119,19 @@ docker compose exec backend node dist/auth/seed.js user@agroup95.com 's3cret' '�
 
 Then `POST /api/auth/login` returns a JWT.
 
+## Поставки: one-time import of the old register (spec 008)
+
+After the first deploy with `/supply`, pull the old site's data once:
+
+```bash
+docker compose exec backend node dist/supply/importLegacy.js
+```
+
+It reads the old site's `/api/workspace` (pass another URL or a JSON file path as
+the first argument) and refuses to run when the register already has shipments;
+`--force` updates the imported rows in place. Editing `/supply` needs the
+Штурман PIN (`ACCESS_CODE`).
+
 ## Drug-registry mirror (Phase 6 — offline registration cross-check)
 
 The registry check (validity / manufacturer / marketing-authorization holder vs

@@ -16,6 +16,7 @@ import { runAgentTurn } from '../agent/loop.js';
 import { toolDefinitions, fclToolDefinitions, logistTools } from '../agent/tools.js';
 import { hubToolDefinitions } from '../agent/tools/hub.js';
 import { sheetTools } from '../agent/tools/sheet.js';
+import { supplyToolDefinitions } from '../agent/tools/supply.js';
 import { buildDocumentsDigest } from '../agent/documentsDigest.js';
 import { listLots } from '../shipments/lots.js';
 import { chatRateLimitConfig } from './chatRateLimit.js';
@@ -24,7 +25,7 @@ import { chatRateLimitConfig } from './chatRateLimit.js';
 // (scoped to the FCL, with an optional lot), the FCL tools and the manifest
 // analysis, plus the customs/logistics reference tools — one agent, more tools.
 function consolidatedTools() {
-  return [...toolDefinitions, ...fclToolDefinitions, ...logistTools(), ...hubToolDefinitions, ...sheetTools()];
+  return [...toolDefinitions, ...fclToolDefinitions, ...logistTools(), ...hubToolDefinitions, ...sheetTools(), ...supplyToolDefinitions];
 }
 
 const chatSchema = z.object({

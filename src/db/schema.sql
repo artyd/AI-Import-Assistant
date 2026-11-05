@@ -1063,3 +1063,53 @@ WHERE w.id = fo.workspace_id AND w.kind = 'fcl' AND fo.parent_id IS NULL AND fo.
   AND fo.name ~ '^[0-9]{1,2}_(Митниця|Транспорт|Маніфест)';
 -- The category a non-customs paper was put under («Інше / Фінанси» …), decided once.
 ALTER TABLE files ADD COLUMN IF NOT EXISTS other_category TEXT;
+
+-- Spec 008: Поставки — the team's shipment register, a separate app at /supply.
+-- Open to read; writes need the Штурман PIN (supply token) or a Штурман session.
+CREATE TABLE IF NOT EXISTS supply_shipments (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  legacy_id   TEXT UNIQUE,
+  name        TEXT NOT NULL,
+  category    TEXT NOT NULL,
+  action      TEXT NOT NULL DEFAULT '',
+  note        TEXT NOT NULL DEFAULT '',
+  archived    BOOLEAN NOT NULL DEFAULT false,
+  steps       JSONB NOT NULL DEFAULT '[]'::jsonb,
+  custom      JSONB NOT NULL DEFAULT '{}'::jsonb,
+  position    INT NOT NULL DEFAULT 0,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_supply_shipments_order ON supply_shipments(position, created_at);
+
+-- Dictionaries: stage names, categories, extra fields, route templates (one row).
+CREATE TABLE IF NOT EXISTS supply_settings (
+  id          INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  stages      JSONB NOT NULL,
+  categories  JSONB NOT NULL,
+  fields      JSONB NOT NULL,
+  templates   JSONB NOT NULL,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+INSERT INTO supply_settings (id, stages, categories, fields, templates) VALUES (1,
+  '["Готовність","Відправка","Прибуття в порт","Вивіз з порту","Відправка по ЖД","Виліт","Прибуття","Доставка","Вивантаження","Оплата","Букінг","Документи"]'::jsonb,
+  '["Международные","Украина","Образцы"]'::jsonb,
+  '[{"id":"qty","name":"Кількість","type":"text"},{"id":"supplier","name":"Постачальник","type":"text"},{"id":"route","name":"Маршрут","type":"text"},{"id":"responsible","name":"Відповідальний","type":"text"}]'::jsonb,
+  '[{"id":"t1","name":"Через порт","stages":["Готовність","Відправка","Прибуття в порт","Вивіз з порту","Доставка","Вивантаження"]},{"id":"t2","name":"Авіа","stages":["Готовність","Виліт","Прибуття","Доставка"]},{"id":"t3","name":"По Україні","stages":["Готовність","Завантаження","Доставка","Вивантаження"]}]'::jsonb)
+ON CONFLICT (id) DO NOTHING;
+
+-- Every write, with before/after snapshots so it can be undone. kind: shipment |
+-- settings | legacy (imported from the old site: no snapshots, not undoable).
+CREATE TABLE IF NOT EXISTS supply_history (
+  id           BIGSERIAL PRIMARY KEY,
+  at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+  actor        TEXT NOT NULL DEFAULT '',
+  kind         TEXT NOT NULL DEFAULT 'shipment',
+  text         TEXT NOT NULL,
+  shipment_id  UUID REFERENCES supply_shipments(id) ON DELETE SET NULL,
+  before       JSONB,
+  after        JSONB,
+  undone_at    TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_supply_history_at ON supply_history(id DESC);
+CREATE INDEX IF NOT EXISTS idx_supply_history_shipment ON supply_history(shipment_id, id DESC);

@@ -18,6 +18,13 @@ _Avoid_: Manager, owner
 
 ## Shipments and documents
 
+**Register** (Поставки):
+The team's list of shipments in progress (`/supply`, spec 008): category, steps
+with plan and fact dates, next action. A separate app: anyone with the link reads
+it, editing needs the Штурман PIN. In code it lives in `src/supply/` (`supply_*`
+tables) — not to be confused with the **supply chat**, which is a Shipment's chat.
+_Avoid_: Постачання (that is a Shipment), sheet (the Google Sheet is separate)
+
 **Shipment** (Постачання):
 One import deal handled as a unit: its documents, parties, context and chat.
 _Avoid_: Workspace (in prose), order, deal, cargo

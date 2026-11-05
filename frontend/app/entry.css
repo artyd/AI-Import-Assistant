@@ -1,0 +1,54 @@
+/* Site entry at / (spec 008): Поставки by default, the corner mark morphs into the Штурман PIN gate. Scoped under .ent. */
+.ent {
+  --e-paper: #f2f4f8; --e-ink: #0e1726; --e-line2: rgba(14,23,38,0.16);
+  --e-glow1: rgba(47,111,235,0.16); --e-glow2: rgba(19,163,159,0.12);
+  --e-display: "Unbounded", "Onest", system-ui, sans-serif;
+  --e-mark: "Hanken Grotesk", system-ui, sans-serif;
+  position: fixed; inset: 0; overflow: hidden; background: var(--bg);
+}
+[data-theme="dark"] .ent { --e-paper: #0f131a; --e-ink: #eef1f6; --e-line2: rgba(255,255,255,0.14); --e-glow1: rgba(91,143,246,0.16); --e-glow2: rgba(19,163,159,0.1); }
+.ent-layer { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; display: grid; place-items: center; padding: 32px 16px 110px; }
+.ent-layer[hidden] { display: none !important; }
+
+.ent-sup { background: var(--e-paper); color: var(--e-ink); }
+.ent-atmo { position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(40% 45% at 30% 30%, var(--e-glow1), transparent 70%), radial-gradient(40% 45% at 72% 72%, var(--e-glow2), transparent 70%); }
+.ent-dots { position: absolute; inset: 0; pointer-events: none; background-image: radial-gradient(var(--e-line2) 1px, transparent 1.2px); background-size: 22px 22px;
+  mask-image: radial-gradient(ellipse 55% 55% at 50% 50%, #000 10%, transparent 75%); -webkit-mask-image: radial-gradient(ellipse 55% 55% at 50% 50%, #000 10%, transparent 75%); }
+.ent-col { position: relative; display: flex; flex-direction: column; align-items: center; gap: 34px; }
+.ent-mark { width: 104px; height: 104px; border-radius: 30px; display: flex; align-items: center; justify-content: center; color: #fff;
+  font-family: var(--e-mark); font-weight: 800; font-size: 54px; line-height: 1; background: #2f6feb; box-shadow: 0 16px 44px rgba(47,111,235,0.28); }
+.ent-first .ent-mark { animation: ent-pop .8s cubic-bezier(0.3, 1.5, 0.5, 1) both; }
+.ent-name { margin: -6px 0 0; font-family: var(--e-display); font-size: clamp(36px, 6vw, 58px); font-weight: 800; letter-spacing: -0.045em; line-height: 1; }
+.ent-enter { position: relative; overflow: hidden; isolation: isolate; display: inline-flex; align-items: center; justify-content: space-between; gap: 28px; min-width: 320px;
+  padding: 24px 24px 24px 42px; border-radius: 24px; font-family: var(--e-display); font-size: 23px; font-weight: 700; letter-spacing: -0.01em; text-decoration: none;
+  color: #fff; background: #0e1726; box-shadow: 0 18px 40px rgba(14,23,38,0.25); transition: transform .25s cubic-bezier(0.2,0.8,0.2,1), box-shadow .25s; }
+.ent-enter::before { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(120deg, #2f6feb, #13a39f); transform: translateX(-101%); transition: transform .5s cubic-bezier(0.76,0,0.24,1); }
+.ent-enter:hover { transform: translateY(-3px); box-shadow: 0 22px 48px rgba(47,111,235,0.38); }
+.ent-enter:hover::before { transform: none; }
+.ent-enter .arr { width: 50px; height: 50px; border-radius: 16px; display: grid; place-items: center; background: rgba(255,255,255,0.14); transition: transform .3s; }
+.ent-enter:hover .arr { transform: translateX(4px) rotate(-45deg); }
+
+.ent-sh { background: var(--bg); color: var(--text); }
+.ent-btn { margin-top: 26px; }
+
+.ent-in .ent-rv { animation: ent-rise .7s cubic-bezier(0.2, 0.8, 0.2, 1) both; animation-delay: calc(var(--d, 0) * 1ms); }
+@keyframes ent-pop { from { opacity: 0; transform: scale(.6) rotate(-12deg); } }
+@keyframes ent-rise { from { opacity: 0; transform: translateY(18px); } }
+
+.ent-switch { position: fixed; right: 26px; bottom: calc(26px + env(safe-area-inset-bottom, 0px)); z-index: 10; display: inline-flex; align-items: center; gap: 11px;
+  padding: 7px 18px 7px 7px; border-radius: 16px; border: 0; cursor: pointer; font-family: "Onest", system-ui, sans-serif; font-weight: 700; font-size: 14px;
+  background: #0e1726; color: #eef1f6; box-shadow: 0 14px 34px rgba(14,23,38,0.32); transition: transform .25s cubic-bezier(0.2,0.8,0.2,1); }
+.ent-switch:hover { transform: translateY(-3px); }
+.ent-switch:focus-visible { outline: 2px solid #2f6feb; outline-offset: 3px; }
+.ent-switch .ic { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; background: #2f6feb; color: #fff; font-family: var(--e-mark); font-weight: 800; font-size: 20px; }
+.ent-switch .txt { text-align: left; line-height: 1.15; }
+.ent-switch small { display: block; font-weight: 500; font-size: 11.5px; opacity: .6; }
+
+.ent-morph { position: fixed; z-index: 50; pointer-events: none; display: flex; align-items: center; justify-content: center; overflow: hidden;
+  background: #2f6feb; color: #fff; font-family: var(--e-mark); font-weight: 800; line-height: 1; }
+.ent-morph span { display: block; }
+.ent-ghost { visibility: hidden !important; }
+
+@media (max-width: 480px) { .ent-enter { min-width: 0; width: 100%; } .ent-col { width: 100%; } }
+@media (prefers-reduced-motion: reduce) { .ent *, .ent *::before, .ent *::after { animation: none !important; transition-duration: 1ms !important; } }

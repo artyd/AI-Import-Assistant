@@ -15,6 +15,7 @@ import { runAgentTurn } from '../agent/loop.js';
 import { logistTools } from '../agent/tools.js';
 import { hubToolDefinitions } from '../agent/tools/hub.js';
 import { sheetTools } from '../agent/tools/sheet.js';
+import { supplyToolDefinitions } from '../agent/tools/supply.js';
 import { chatRateLimitConfig } from './chatRateLimit.js';
 
 const chatSchema = z.object({
@@ -66,6 +67,7 @@ export async function chatNormalRoutes(app: FastifyInstance): Promise<void> {
           ...logistTools(),
           ...hubToolDefinitions.filter((t) => 'name' in t && t.name !== 'find_tracking_numbers'),
           ...sheetTools(),
+          ...supplyToolDefinitions,
         ],
       });
 

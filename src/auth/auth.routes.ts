@@ -4,9 +4,9 @@ import { query } from '../db/pool.js';
 import { verifyPassword } from './passwords.js';
 import { signToken } from './jwt.js';
 import { authenticate } from './hook.js';
-import { createHash, timingSafeEqual } from 'node:crypto';
 import { issueSseTicket } from './sseTicket.js';
 import { config } from '../lib/config.js';
+import { codeLoginEnabled, codeMatches } from './accessCode.js';
 import {
   loginRateLimit,
   isEmailLocked,
@@ -19,21 +19,9 @@ import {
 
 const codeSchema = z.object({ code: z.string().min(1).max(32) });
 
-/** PIN login is on when a 6–8 digit PIN is configured. */
-function codeLoginEnabled(): boolean {
-  return /^\d{6,8}$/.test(config.ACCESS_CODE);
-}
-
 if (config.ACCESS_CODE && !codeLoginEnabled()) {
   // eslint-disable-next-line no-console
   console.warn('ACCESS_CODE ignored: the PIN must be 6–8 digits.');
-}
-
-/** Constant-time PIN comparison (hash first so lengths always match). */
-function codeMatches(input: string): boolean {
-  const a = createHash('sha256').update(input).digest();
-  const b = createHash('sha256').update(config.ACCESS_CODE).digest();
-  return timingSafeEqual(a, b);
 }
 
 const loginSchema = z.object({
