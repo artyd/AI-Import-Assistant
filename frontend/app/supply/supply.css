@@ -279,3 +279,5 @@
 .sp .segc { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
 .sp .segc::-webkit-scrollbar { display: none; }
 @media (max-width: 760px) { .sp .drawer { top: auto; height: calc(100dvh - 20px); } .sp .side { gap: 0; } .sp .nb { width: 48px; } }
+.sp a.nb { text-decoration: none; }
+.sp a.nb:hover { color: #f0a0a4; }

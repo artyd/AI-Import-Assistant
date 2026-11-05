@@ -24,6 +24,7 @@ export const IDl = ({ size = 15 }: P) => svg(size, <path d="M12 4v11M7 10l5 5 5-
 export const ITrash = ({ size = 14 }: P) => svg(size, <path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" />, 2);
 export const IUp = ({ size = 14 }: P) => svg(size, <path d="m6 15 6-6 6 6" />, 2.3);
 export const IDown = ({ size = 14 }: P) => svg(size, <path d="m6 9 6 6 6-6" />, 2.3);
+export const IExit = ({ size = 21 }: P) => svg(size, <><path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4" /><path d="M9 8l-4 4 4 4M5 12h11" /></>);
 export const ICompass = ({ size = 22 }: P) => (
   <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
     <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth={2} />

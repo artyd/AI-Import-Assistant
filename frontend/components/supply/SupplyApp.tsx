@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { SupplyApiError } from "@/lib/supply/api";
+import { SupplyApiError, setSupplyToken } from "@/lib/supply/api";
 import { MONTHS_GEN, WEEKDAYS, completeActiveStep, deadline, kyivToday, type SortKey } from "@/lib/supply/logic";
 import type { ShipmentDraft, SupplyShipment } from "@/lib/supply/types";
 import { useSupply } from "@/lib/supply/useSupply";
@@ -12,7 +12,7 @@ import { ListView } from "./ListView";
 import { Palette } from "./Palette";
 import { PinModal } from "./PinModal";
 import { ShipmentDrawer } from "./ShipmentDrawer";
-import { IArch, ICal, IDl, IHist, IList, ILock, IPlus, ISearch, ISet, IUnlock, IX } from "./SupplyIcons";
+import { IArch, ICal, IDl, IExit, IHist, IList, ILock, IPlus, ISearch, ISet, IUnlock, IX } from "./SupplyIcons";
 
 export type View = "list" | "cal" | "arch" | "hist" | "dict";
 export type ToastFn = (text: string, undo?: () => Promise<void> | void) => void;
@@ -176,6 +176,11 @@ export function SupplyApp() {
             </button>
           ))}
           <span className="grow" />
+          {/* Out to the site entry (Поставки ↔ Штурман); leaving also ends edit mode. */}
+          <a className="nb" href="/" title="Вийти на головну" aria-label="Вийти з Поставок" onClick={() => setSupplyToken(null)}>
+            <IExit />
+            Вихід
+          </a>
           <button className={`lockbtn${editing ? " on" : ""}`} onClick={requestEdit} title={editing ? "Вийти з редагування" : "Редагування за кодом Штурмана"} aria-label={editing ? "Вийти з редагування" : "Увімкнути редагування"}>
             {editing ? <IUnlock /> : <ILock />}
           </button>

@@ -123,3 +123,16 @@ test("lock screen (/?to=shturman) opens on the Штурман gate with a way to
   await expect(page.getByRole("heading", { name: "Поставки" })).toBeVisible();
   await expect(page).toHaveURL(/\/$/);
 });
+
+test("exit leaves Поставки for the site entry and drops edit mode", async ({ page }) => {
+  await mockSupply(page);
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem("seeded")) return; // seed once, not on every navigation
+    sessionStorage.setItem("seeded", "1");
+    localStorage.setItem("supply_token", JSON.stringify({ token: "t", expiresAt: new Date(Date.now() + 3_600_000).toISOString() }));
+  });
+  await page.goto("/supply");
+  await page.getByRole("link", { name: "Вийти з Поставок" }).click();
+  await expect(page.getByRole("link", { name: /Увійти/ })).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem("supply_token"))).toBeNull();
+});
