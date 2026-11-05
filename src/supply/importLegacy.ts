@@ -34,6 +34,9 @@ export interface LegacyImport {
 }
 
 const str = (v: unknown, max = 4000): string => (typeof v === 'string' ? v : v == null ? '' : String(v)).slice(0, max);
+/** The old site's categories were Russian; the register speaks Ukrainian. */
+const CATEGORY_UA: Record<string, string> = { 'Международные': 'Міжнародні', 'Украина': 'Україна', 'Образцы': 'Зразки' };
+const category = (v: unknown): string => { const c = str(v, 60).trim(); return CATEGORY_UA[c] ?? c; };
 const day = (v: unknown): string => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : '');
 
 /** Pure: the old site's JSON → rows for our tables. Bad steps are dropped, not guessed. */
@@ -63,7 +66,7 @@ export function mapLegacy(json: unknown): LegacyImport {
     shipments.push({
       legacyId: str(raw.id, 120) || name,
       name,
-      category: str(raw.category, 60).trim() || 'Без категорії',
+      category: category(raw.category) || 'Без категорії',
       action: str(raw.action, 300).trim(),
       note: str(raw.note, 4000),
       archived: raw.archived === true,
@@ -73,7 +76,7 @@ export function mapLegacy(json: unknown): LegacyImport {
     });
   }
 
-  const categories = Array.isArray(data.categories) ? (data.categories as unknown[]).map((c) => str(c, 60).trim()).filter(Boolean) : [];
+  const categories = Array.isArray(data.categories) ? (data.categories as unknown[]).map(category).filter(Boolean) : [];
   for (const s of shipments) if (!categories.includes(s.category)) categories.push(s.category);
   const settings = settingsSchema.parse({
     stages: Array.isArray(data.stages) ? (data.stages as unknown[]).map((s) => str(s, 80).trim()).filter(Boolean) : [],

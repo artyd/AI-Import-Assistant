@@ -1093,7 +1093,7 @@ CREATE TABLE IF NOT EXISTS supply_settings (
 );
 INSERT INTO supply_settings (id, stages, categories, fields, templates) VALUES (1,
   '["Готовність","Відправка","Прибуття в порт","Вивіз з порту","Відправка по ЖД","Виліт","Прибуття","Доставка","Вивантаження","Оплата","Букінг","Документи"]'::jsonb,
-  '["Международные","Украина","Образцы"]'::jsonb,
+  '["Міжнародні","Україна","Зразки"]'::jsonb,
   '[{"id":"qty","name":"Кількість","type":"text"},{"id":"supplier","name":"Постачальник","type":"text"},{"id":"route","name":"Маршрут","type":"text"},{"id":"responsible","name":"Відповідальний","type":"text"}]'::jsonb,
   '[{"id":"t1","name":"Через порт","stages":["Готовність","Відправка","Прибуття в порт","Вивіз з порту","Доставка","Вивантаження"]},{"id":"t2","name":"Авіа","stages":["Готовність","Виліт","Прибуття","Доставка"]},{"id":"t3","name":"По Україні","stages":["Готовність","Завантаження","Доставка","Вивантаження"]}]'::jsonb)
 ON CONFLICT (id) DO NOTHING;
@@ -1113,3 +1113,13 @@ CREATE TABLE IF NOT EXISTS supply_history (
 );
 CREATE INDEX IF NOT EXISTS idx_supply_history_at ON supply_history(id DESC);
 CREATE INDEX IF NOT EXISTS idx_supply_history_shipment ON supply_history(shipment_id, id DESC);
+
+-- Spec 008: Поставки categories in Ukrainian (the old site's were Russian).
+-- Idempotent: only rows still carrying the old names change.
+UPDATE supply_shipments SET category = CASE category
+    WHEN 'Международные' THEN 'Міжнародні' WHEN 'Украина' THEN 'Україна' WHEN 'Образцы' THEN 'Зразки' ELSE category END
+WHERE category IN ('Международные', 'Украина', 'Образцы');
+UPDATE supply_settings SET categories = (
+    SELECT jsonb_agg(CASE c WHEN 'Международные' THEN 'Міжнародні' WHEN 'Украина' THEN 'Україна' WHEN 'Образцы' THEN 'Зразки' ELSE c END ORDER BY ord)
+    FROM jsonb_array_elements_text(categories) WITH ORDINALITY AS t(c, ord))
+WHERE categories ?| array['Международные', 'Украина', 'Образцы'];

@@ -82,7 +82,7 @@ describe('legacy import mapping', () => {
           custom: { qty: '10 т', supplier: '' } },
         { id: 'p2', name: '   ' },
       ],
-      stages: ['Прибуття'], categories: ['Міжнародні'], fields: [{ id: 'qty', name: 'Кількість', type: 'text' }],
+      stages: ['Прибуття'], categories: ['Международные'], fields: [{ id: 'qty', name: 'Кількість', type: 'text' }],
       templates: [{ id: 't', name: 'Авіа', stages: ['Виліт', 'Прибуття'] }, { id: 'e', name: 'Порожній', stages: [] }],
       history: [{ at: '2026-11-05T08:12:14.473Z', user: 'Logist', text: 'Змінено' }, { at: 'bad', text: 'x' }],
     },
@@ -95,7 +95,7 @@ describe('legacy import mapping', () => {
     expect(s.legacyId).toBe('p1');
     expect(s.steps[1]).toMatchObject({ name: 'Доставка', plan: '', state: 'pending' });
     expect(s.custom).toEqual({ qty: '10 т' });
-    expect(m.settings.categories).toEqual(['Міжнародні', 'Зразки']);
+    expect(m.settings.categories).toEqual(['Міжнародні', 'Зразки']); // Russian names come in Ukrainian
     expect(m.settings.templates.map((t) => t.name)).toEqual(['Авіа']);
     expect(m.history).toEqual([{ at: '2026-11-05T08:12:14.473Z', actor: 'Logist', text: 'Змінено' }]);
   });
