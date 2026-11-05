@@ -1123,3 +1123,52 @@ UPDATE supply_settings SET categories = (
     SELECT jsonb_agg(CASE c WHEN 'Международные' THEN 'Міжнародні' WHEN 'Украина' THEN 'Україна' WHEN 'Образцы' THEN 'Зразки' ELSE c END ORDER BY ord)
     FROM jsonb_array_elements_text(categories) WITH ORDINALITY AS t(c, ord))
 WHERE categories ?| array['Международные', 'Украина', 'Образцы'];
+
+-- Spec 008: every dictionary word of the old (Russian) site in Ukrainian —
+-- stages (dictionary + each shipment's steps), templates, extra-field names.
+-- Keep in sync with src/supply/ua.ts. Idempotent (Ukrainian words map to themselves).
+CREATE OR REPLACE FUNCTION supply_ua(w text) RETURNS text LANGUAGE sql IMMUTABLE AS $$
+  SELECT CASE btrim(w)
+    WHEN 'Международные' THEN 'Міжнародні'
+    WHEN 'Украина' THEN 'Україна'
+    WHEN 'Образцы' THEN 'Зразки'
+    WHEN 'Выгрузка' THEN 'Вивантаження'
+    WHEN 'Прибытие в порт' THEN 'Прибуття в порт'
+    WHEN 'Отправка по ЖД' THEN 'Відправка залізницею'
+    WHEN 'Вывоз из порта' THEN 'Вивіз з порту'
+    WHEN 'Ветеринарный контроль' THEN 'Ветеринарний контроль'
+    WHEN 'Вылет' THEN 'Виліт'
+    WHEN 'Прибытие' THEN 'Прибуття'
+    WHEN 'Отправка' THEN 'Відправка'
+    WHEN 'Поиск автомобиля' THEN 'Пошук автомобіля'
+    WHEN 'Готовность' THEN 'Готовність'
+    WHEN 'Букинг' THEN 'Букінг'
+    WHEN 'Документы' THEN 'Документи'
+    WHEN 'Перемаркировка' THEN 'Перемаркування'
+    WHEN 'Замена тары' THEN 'Заміна тари'
+    WHEN 'Уточнение' THEN 'Уточнення'
+    WHEN 'Адрес доставки' THEN 'Адреса доставки'
+    WHEN 'Вывоз по авто в Украину' THEN 'Вивіз автомобілем в Україну'
+    WHEN 'Новый этап' THEN 'Новий етап'
+    WHEN 'Погрузка' THEN 'Завантаження'
+    WHEN 'Авиа' THEN 'Авіа'
+    WHEN 'По Украине' THEN 'По Україні'
+    WHEN 'Количество' THEN 'Кількість'
+    WHEN 'Поставщик' THEN 'Постачальник'
+    WHEN 'Ответственный' THEN 'Відповідальний'
+    ELSE w END
+$$;
+UPDATE supply_settings SET
+  stages = COALESCE((SELECT jsonb_agg(supply_ua(x) ORDER BY o) FROM jsonb_array_elements_text(stages) WITH ORDINALITY t(x, o)), '[]'::jsonb),
+  categories = COALESCE((SELECT jsonb_agg(supply_ua(x) ORDER BY o) FROM jsonb_array_elements_text(categories) WITH ORDINALITY t(x, o)), '[]'::jsonb),
+  fields = COALESCE((SELECT jsonb_agg(f || jsonb_build_object('name', supply_ua(f->>'name')) ORDER BY o) FROM jsonb_array_elements(fields) WITH ORDINALITY t(f, o)), '[]'::jsonb),
+  templates = COALESCE((SELECT jsonb_agg(tp || jsonb_build_object(
+      'name', supply_ua(tp->>'name'),
+      'stages', COALESCE((SELECT jsonb_agg(supply_ua(y) ORDER BY o2) FROM jsonb_array_elements_text(tp->'stages') WITH ORDINALITY u(y, o2)), '[]'::jsonb)
+    ) ORDER BY o) FROM jsonb_array_elements(templates) WITH ORDINALITY t(tp, o)), '[]'::jsonb)
+WHERE id = 1;
+UPDATE supply_shipments SET
+  steps = COALESCE((SELECT jsonb_agg(e || jsonb_build_object('name', supply_ua(e->>'name')) ORDER BY o) FROM jsonb_array_elements(steps) WITH ORDINALITY t(e, o)), '[]'::jsonb),
+  category = supply_ua(category)
+WHERE supply_ua(category) <> category
+   OR EXISTS (SELECT 1 FROM jsonb_array_elements(steps) e WHERE supply_ua(e->>'name') <> e->>'name');

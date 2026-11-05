@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { pool } from '../db/pool.js';
 import { runMigrations } from '../db/migrate.js';
 import { settingsSchema, stepSchema, type SupplySettings, type SupplyStep } from './types.js';
+import { toUa } from './ua.js';
 
 /**
  * One-time import of the old «Поставки» site (spec 008). Its `GET /api/workspace`
@@ -34,9 +35,8 @@ export interface LegacyImport {
 }
 
 const str = (v: unknown, max = 4000): string => (typeof v === 'string' ? v : v == null ? '' : String(v)).slice(0, max);
-/** The old site's categories were Russian; the register speaks Ukrainian. */
-const CATEGORY_UA: Record<string, string> = { 'Международные': 'Міжнародні', 'Украина': 'Україна', 'Образцы': 'Зразки' };
-const category = (v: unknown): string => { const c = str(v, 60).trim(); return CATEGORY_UA[c] ?? c; };
+/** Dictionary words of the old (Russian) site, in Ukrainian. */
+const category = (v: unknown): string => toUa(str(v, 60).trim());
 const day = (v: unknown): string => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : '');
 
 /** Pure: the old site's JSON → rows for our tables. Bad steps are dropped, not guessed. */
@@ -51,7 +51,7 @@ export function mapLegacy(json: unknown): LegacyImport {
     for (const st of Array.isArray(raw.steps) ? (raw.steps as Record<string, unknown>[]) : []) {
       const parsed = stepSchema.safeParse({
         id: str(st.id, 64) || `s${steps.length}`,
-        name: str(st.name, 120).trim() || 'Етап',
+        name: toUa(str(st.name, 120).trim()) || 'Етап',
         plan: day(st.plan),
         actual: day(st.actual),
         state: ['active', 'done', 'pending'].includes(st.state as string) ? st.state : 'pending',
@@ -79,13 +79,13 @@ export function mapLegacy(json: unknown): LegacyImport {
   const categories = Array.isArray(data.categories) ? (data.categories as unknown[]).map(category).filter(Boolean) : [];
   for (const s of shipments) if (!categories.includes(s.category)) categories.push(s.category);
   const settings = settingsSchema.parse({
-    stages: Array.isArray(data.stages) ? (data.stages as unknown[]).map((s) => str(s, 80).trim()).filter(Boolean) : [],
+    stages: Array.isArray(data.stages) ? (data.stages as unknown[]).map((s) => toUa(str(s, 80).trim())).filter(Boolean) : [],
     categories: categories.length ? categories : ['Без категорії'],
     fields: (Array.isArray(data.fields) ? (data.fields as Record<string, unknown>[]) : [])
-      .map((f) => ({ id: str(f.id, 60), name: str(f.name, 80).trim(), type: f.type === 'number' ? 'number' : 'text' }))
+      .map((f) => ({ id: str(f.id, 60), name: toUa(str(f.name, 80).trim()), type: f.type === 'number' ? 'number' : 'text' }))
       .filter((f) => f.id && f.name),
     templates: (Array.isArray(data.templates) ? (data.templates as Record<string, unknown>[]) : [])
-      .map((t) => ({ id: str(t.id, 64), name: str(t.name, 80).trim(), stages: (Array.isArray(t.stages) ? (t.stages as unknown[]) : []).map((x) => str(x, 80).trim()).filter(Boolean) }))
+      .map((t) => ({ id: str(t.id, 64), name: toUa(str(t.name, 80).trim()), stages: (Array.isArray(t.stages) ? (t.stages as unknown[]) : []).map((x) => toUa(str(x, 80).trim())).filter(Boolean) }))
       .filter((t) => t.id && t.name && t.stages.length),
   });
 

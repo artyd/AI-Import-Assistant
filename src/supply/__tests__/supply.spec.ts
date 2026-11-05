@@ -78,12 +78,12 @@ describe('legacy import mapping', () => {
     data: {
       shipments: [
         { id: 'p1', name: 'Тестовий товар', category: 'Зразки', action: 'Дзвінок', note: 'n', archived: false, updated: '2026-11-05',
-          steps: [{ id: 'x', name: 'Прибуття', plan: '2026-11-10', actual: '', state: 'active', note: '' }, { id: 'y', name: 'Доставка', plan: 'около 17.11', state: 'weird' }],
+          steps: [{ id: 'x', name: 'Прибытие', plan: '2026-11-10', actual: '', state: 'active', note: '' }, { id: 'y', name: 'Доставка', plan: 'около 17.11', state: 'weird' }],
           custom: { qty: '10 т', supplier: '' } },
         { id: 'p2', name: '   ' },
       ],
-      stages: ['Прибуття'], categories: ['Международные'], fields: [{ id: 'qty', name: 'Кількість', type: 'text' }],
-      templates: [{ id: 't', name: 'Авіа', stages: ['Виліт', 'Прибуття'] }, { id: 'e', name: 'Порожній', stages: [] }],
+      stages: ['Прибуття'], categories: ['Международные'], fields: [{ id: 'qty', name: 'Количество', type: 'text' }],
+      templates: [{ id: 't', name: 'Авиа', stages: ['Вылет', 'Прибытие'] }, { id: 'e', name: 'Порожній', stages: [] }],
       history: [{ at: '2026-11-05T08:12:14.473Z', user: 'Logist', text: 'Змінено' }, { at: 'bad', text: 'x' }],
     },
   };
@@ -96,7 +96,9 @@ describe('legacy import mapping', () => {
     expect(s.steps[1]).toMatchObject({ name: 'Доставка', plan: '', state: 'pending' });
     expect(s.custom).toEqual({ qty: '10 т' });
     expect(m.settings.categories).toEqual(['Міжнародні', 'Зразки']); // Russian names come in Ukrainian
-    expect(m.settings.templates.map((t) => t.name)).toEqual(['Авіа']);
+    expect(m.settings.templates).toEqual([{ id: 't', name: 'Авіа', stages: ['Виліт', 'Прибуття'] }]);
+    expect(m.settings.fields[0]?.name).toBe('Кількість');
+    expect(s.steps[0]?.name).toBe('Прибуття');
     expect(m.history).toEqual([{ at: '2026-11-05T08:12:14.473Z', actor: 'Logist', text: 'Змінено' }]);
   });
 });
