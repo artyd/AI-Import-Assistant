@@ -52,6 +52,7 @@ const DOC_LABELS: Record<string, string> = {
   customs_declaration: 'Митна декларація',
   transport: 'Транспортний документ',
   intermediary_agreement: 'Договір з посередником',
+  veterinary_certificate: 'Ветеринарний сертифікат',
 };
 
 /** Human labels for reconciliation fields (raw keys never reach the user). */

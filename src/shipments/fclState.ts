@@ -116,7 +116,7 @@ export async function loadFclVerdicts(ws: WorkspaceRow, now: number = Date.now()
       (k) => k !== 'customs_declaration' && (k !== 'transport' || seaLike),
     );
     const mine = files.filter((f) => f.lot_id === lot.id || hblLot[f.file_id] === lot.id);
-    const snapshotFiles: ShipmentFile[] = mine.map((f) => ({ file_id: f.file_id, file_name: f.file_name, folder_name: f.folder_name, fields: f.fields }));
+    const snapshotFiles: ShipmentFile[] = mine.map((f) => ({ file_id: f.file_id, file_name: f.file_name, folder_name: f.folder_name, fields: f.fields, feed_goods: f.feed_goods, vet_certificate: f.vet_certificate }));
 
     let registry: RegistryFinding[] = [];
     try {

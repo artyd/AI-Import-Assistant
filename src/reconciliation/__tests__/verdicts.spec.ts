@@ -35,6 +35,18 @@ const file = (id: string, fields: Record<string, unknown> | null, folder: string
 });
 
 describe('shipment verdicts', () => {
+  it('feed goods need a veterinary certificate; a draft does not count', () => {
+    const inv = { ...file('inv', { doc_type: 'invoice' }), feed_goods: true };
+    const pl = file('pl', { doc_type: 'packing_list' });
+    const missing = computeVerdicts(snapshot({ files: [inv, pl, { ...file('hc', null), file_name: 'draft HC.pdf', vet_certificate: true }] }), NOW);
+    expect(missing.checklist.find((i) => i.requirement_key === 'veterinary_certificate')?.status).toBe('missing');
+    expect(missing.derivedStatus).toBe('docs_in_progress');
+    const got = computeVerdicts(snapshot({ files: [inv, pl, { ...file('hc', null), vet_certificate: true }] }), NOW);
+    expect(got.checklist.find((i) => i.requirement_key === 'veterinary_certificate')).toMatchObject({ status: 'received', source_file_id: 'hc' });
+    const noFeed = computeVerdicts(snapshot({ files: [file('inv', { doc_type: 'invoice' }), pl] }), NOW);
+    expect(noFeed.checklist.some((i) => i.requirement_key === 'veterinary_certificate')).toBe(false);
+  });
+
   it('an empty shipment: everything missing, status in progress, one docs_missing risk', () => {
     const v = computeVerdicts(snapshot(), NOW);
     expect(v.checklist.map((i) => i.status)).toEqual(['missing', 'missing']);

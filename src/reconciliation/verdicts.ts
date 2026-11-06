@@ -2,6 +2,7 @@ import { query } from '../db/pool.js';
 import type { WorkspaceRow, WorkspaceStatus } from '../shipments/workspaceAccess.js';
 import { latestApproved, type InstructionVersion } from '../instruction/store.js';
 import { registryChecksForDocs, type RegistryFinding } from '../customs/drugRegistry.js';
+import { FEED_SQL_RX, VET_SQL_RX } from './feed.js';
 import { requiredDocumentTypes, resolveItems, type ChecklistItem, type LatestFileRow } from './checklist.js';
 import { findDiscrepancies, type Discrepancy } from './discrepancies.js';
 import type { ReconcileDoc } from './reconcile.js';
@@ -21,6 +22,10 @@ export interface ShipmentFile {
   file_name: string;
   folder_name: string | null;
   fields: Record<string, unknown> | null;
+  /** The text says the goods are animal feed («feed grade», «кормов…»). */
+  feed_goods?: boolean;
+  /** The text is (or contains) a veterinary / health certificate. */
+  vet_certificate?: boolean;
 }
 
 export interface ShipmentSnapshot {
@@ -58,7 +63,9 @@ export async function loadShipmentSnapshot(ws: WorkspaceRow): Promise<ShipmentSn
     requiredDocumentTypes(ws),
     query<ShipmentFile>(
       `SELECT f.id AS file_id, f.name AS file_name, fo.name AS folder_name,
-              de.extracted_fields AS fields
+              de.extracted_fields AS fields,
+              EXISTS (SELECT 1 FROM document_sections ds WHERE ds.file_id = f.id AND ds.text ~* $2) AS feed_goods,
+              EXISTS (SELECT 1 FROM document_sections ds WHERE ds.file_id = f.id AND ds.text ~* $3) AS vet_certificate
        FROM files f
        LEFT JOIN folders fo ON fo.id = f.folder_id
        LEFT JOIN document_extractions de ON de.file_id = f.id
@@ -66,7 +73,7 @@ export async function loadShipmentSnapshot(ws: WorkspaceRow): Promise<ShipmentSn
        -- Stable order: when several files share a doc_type the reconciler and the
        -- checklist pick among them, and the verdict must not change between calls.
        ORDER BY f.created_at, f.name, f.id`,
-      [ws.id],
+      [ws.id, FEED_SQL_RX, VET_SQL_RX],
     ),
     query<{ company_name: string }>(
       `SELECT company_name FROM parties
@@ -121,6 +128,26 @@ export function deriveWorkspaceStatus(
   return 'docs_in_progress';
 }
 
+// Feed goods need a veterinary (health) certificate; the baseline template knows
+// nothing about the product, and the quality-certificate slot used to swallow it
+// (live test «Лизин»: CoA counted, the unsigned health certificate never flagged).
+const DRAFT_NAME_RX = /draft|чернет|черновик|проект/i;
+const FEED_CATEGORY_RX = /feed|корм/i;
+
+/**
+ * The «ветеринарний сертифікат» requirement for feed goods: null when the goods
+ * are not feed. 'received' when a non-draft file reads as a health certificate
+ * (signature and stamp still need a human eye), else 'missing'.
+ */
+export function veterinaryItem(s: Pick<ShipmentSnapshot, 'ws' | 'files'>): ChecklistItem | null {
+  const feed = s.files.some((f) => f.feed_goods) || FEED_CATEGORY_RX.test(s.ws.product_category ?? '');
+  if (!feed) return null;
+  const cert = s.files.find((f) => f.vet_certificate && !DRAFT_NAME_RX.test(f.file_name));
+  return cert
+    ? { requirement_key: 'veterinary_certificate', status: 'received', source_file_id: cert.file_id }
+    : { requirement_key: 'veterinary_certificate', status: 'missing', source_file_id: null };
+}
+
 /** Pure: snapshot → every verdict. `now` drives the expiry/deadline windows. */
 export function computeVerdicts(s: ShipmentSnapshot, now: number = Date.now()): ShipmentVerdicts {
   const checklistRows: LatestFileRow[] = s.files.map((f) => ({
@@ -132,6 +159,8 @@ export function computeVerdicts(s: ShipmentSnapshot, now: number = Date.now()): 
     buyer: f.fields ? text(f.fields.buyer) : null,
   }));
   const checklist = s.required.length === 0 ? [] : resolveItems(s.required, checklistRows, s.intermediary);
+  const vet = veterinaryItem(s);
+  if (vet && s.required.length > 0 && !checklist.some((i) => i.requirement_key === vet.requirement_key)) checklist.push(vet);
 
   const extracted = s.files.filter((f) => f.fields !== null);
   const docs: ReconcileDoc[] = extracted.map((f) => ({

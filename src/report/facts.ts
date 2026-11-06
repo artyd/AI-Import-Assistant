@@ -176,6 +176,7 @@ const DOC_LABEL: Record<string, string> = {
   customs_declaration: 'Митна декларація',
   transport: 'Транспортні документи',
   intermediary_agreement: 'Договір з посередником',
+  veterinary_certificate: 'Ветеринарний сертифікат',
 };
 
 const MODE_ICON: Record<string, string> = { air: 'air', road: 'road', sea: 'sea', rail: 'rail', courier: 'road' };

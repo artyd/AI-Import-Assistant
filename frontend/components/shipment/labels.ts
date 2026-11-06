@@ -63,6 +63,7 @@ export const REQ_LABEL: Record<string, string> = {
   specification: "Специфікація",
   transport: "Транспортні документи",
   intermediary_agreement: "Договір з посередником",
+  veterinary_certificate: "Ветеринарний сертифікат",
 };
 
 // Reconciliation field keys → what the user reads (mirrors backend fieldLabel).

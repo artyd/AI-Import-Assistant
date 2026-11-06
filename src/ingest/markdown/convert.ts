@@ -8,7 +8,7 @@ import * as XLSX from 'xlsx';
 import { config } from '../../lib/config.js';
 import type { FileType } from '../../shipments/folders.js';
 import { extractText } from '../extract/index.js';
-import { htmlToMarkdown, rowsToMarkdownTable, type MarkdownPage } from './format.js';
+import { gridToMarkdown, htmlToMarkdown, type MarkdownPage } from './format.js';
 import { imageToMarkdown, pdfToMarkdown, type PageProgress } from './vision.js';
 
 const run = promisify(execFile);
@@ -73,6 +73,28 @@ async function docxToMarkdown(buf: Buffer): Promise<ConversionResult> {
   }
 }
 
+/**
+ * A sheet as a grid of formatted cell text (raw:false: dates/numbers as shown in
+ * Excel), merged ranges filled ACROSS their first row from the top-left cell (a merged
+ * «Description» header otherwise sits over one column only). Not down: a gross
+ * weight merged over a pallet's rows would read as several weights. Returns the grid
+ * and the Excel number of its first row.
+ */
+function sheetGrid(sheet: XLSX.WorkSheet): [string[][], number] {
+  const ref = sheet['!ref'];
+  if (!ref) return [[], 1];
+  const range = XLSX.utils.decode_range(ref);
+  const grid = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, raw: false, blankrows: true, defval: '' })
+    .map((r) => r.map((c) => (c === null || c === undefined ? '' : String(c))));
+  for (const m of sheet['!merges'] ?? []) {
+    const v = grid[m.s.r - range.s.r]?.[m.s.c - range.s.c] ?? '';
+    if (!v) continue;
+    const row = grid[m.s.r - range.s.r]!;
+    for (let c = m.s.c; c <= m.e.c; c++) if (!row[c - range.s.c]) row[c - range.s.c] = v;
+  }
+  return [grid, range.s.r + 1];
+}
+
 function sheetToMarkdown(buf: Buffer): ConversionResult {
   try {
     const wb = XLSX.read(buf, { type: 'buffer' });
@@ -80,10 +102,9 @@ function sheetToMarkdown(buf: Buffer): ConversionResult {
     for (const name of wb.SheetNames) {
       const sheet = wb.Sheets[name];
       if (!sheet) continue;
-      // raw:false → formatted cell text (dates/numbers as shown in Excel).
-      const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, raw: false, blankrows: false });
-      const table = rowsToMarkdownTable(rows);
-      if (table) pages.push({ page: null, markdown: `## Аркуш: ${name}\n\n${table}` });
+      if (wb.Workbook?.Sheets?.find((s) => s.name === name)?.Hidden) continue; // hidden helper sheets
+      const md = gridToMarkdown(...sheetGrid(sheet));
+      if (md) pages.push({ page: null, markdown: `## Аркуш: ${name}\n\n${md}` });
     }
     return { pages, converter: 'sheet', partial: false, pageCount: null, note: null };
   } catch {

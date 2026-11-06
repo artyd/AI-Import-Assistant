@@ -35,6 +35,30 @@ export function rowsToMarkdownTable(rows: unknown[][]): string {
   return [line(head!), line(head!.map(() => '---')), ...body.map(line)].join('\n');
 }
 
+/**
+ * A spreadsheet grid → Markdown that reads like the document. Exported invoices
+ * and packing lists put a title block («COMMERCIAL INVOICE No …», seller, buyer)
+ * above the table, so «first row = header» made the title the column header.
+ * Here: the header is the first row filled at least 70% as wide as the widest
+ * row; rows above it become text lines; every table row carries its Excel row
+ * number so an answer can cite «рядок 14». `firstRow` = Excel number of grid[0].
+ */
+export function gridToMarkdown(grid: string[][], firstRow = 1): string {
+  const rows = grid
+    .map((r, i) => ({ n: firstRow + i, cells: r.map((c) => escapeCell(c ?? '')) }))
+    .filter((r) => r.cells.some((c) => c !== ''));
+  if (rows.length === 0) return '';
+  const filled = (c: string[]): number => c.filter((x) => x !== '').length;
+  const widest = Math.max(...rows.map((r) => filled(r.cells)));
+  if (widest < 2) return rows.map((r) => r.cells.filter(Boolean).join(' · ')).join('\n');
+  const h = rows.findIndex((r) => filled(r.cells) >= Math.max(2, Math.ceil(widest * 0.7)));
+  const above = rows.slice(0, h).map((r) => r.cells.filter(Boolean).join(' · '));
+  const table = rows.slice(h).map((r) => [String(r.n), ...r.cells]);
+  table[0]![0] = 'Рядок';
+  const md = rowsToMarkdownTable(table);
+  return [...above, ...(above.length ? [''] : []), md].join('\n');
+}
+
 const ENTITIES: Record<string, string> = {
   amp: '&',
   lt: '<',
