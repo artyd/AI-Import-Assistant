@@ -7,6 +7,7 @@ import { Markdown } from "../ui/Markdown";
 import { IconFile, IconSpinner, IconCheck, IconFolder, IconChevronRight } from "../ui/icons";
 import { filesLabel, groupCitations, pagesLabel } from "@/lib/citations";
 import { hasFindings } from "@/lib/letterFromAnswer";
+import { AnswerFeedback, isRateable } from "./AnswerFeedback";
 
 // Local-only chat items for the paperclip flow. These are NOT persisted to the
 // conversation (they don't go through the agent/SSE); on reload they vanish, but
@@ -376,7 +377,12 @@ export const AssistantBubble = memo(function AssistantBubble({
   pending,
   onOpenSource,
   onDraftLetter,
+  messageId,
+  onCorrect,
 }: {
+  messageId?: string;
+  /** «Не так» → the user's comment; the host asks Штурман for a corrected answer. */
+  onCorrect?: (comment: string) => void;
   text: string;
   citations?: Citation[];
   pending?: boolean;
@@ -399,6 +405,7 @@ export const AssistantBubble = memo(function AssistantBubble({
           <Markdown>{text}</Markdown>
         )}
         {citations && citations.length > 0 && <Sources citations={citations} onOpen={onOpenSource} />}
+        {!pending && messageId && isRateable(messageId) && <AnswerFeedback messageId={messageId} onCorrect={onCorrect} />}
         {!pending && onDraftLetter && hasFindings(text) && (
           <button type="button" className="btn answer-action" onClick={() => onDraftLetter(text)}>
             <IconFile size={14} /> Скласти лист постачальнику з цими пунктами

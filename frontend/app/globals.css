@@ -666,3 +666,14 @@ details.sources .source-link:hover { text-decoration: underline; }
 details.sources .source-page { border: 0; background: none; padding: 0 2px; font: inherit; color: var(--muted); cursor: pointer; white-space: nowrap; }
 details.sources .source-page:hover { color: var(--accent, #2f6feb); text-decoration: underline; }
 .answer-action { margin-top: 10px; height: 32px; padding: 0 12px; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
+
+/* Answer rating that teaches Штурман (AnswerFeedback). */
+.fb-row { display: flex; gap: 6px; margin-top: 10px; }
+.fb-btn { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: var(--muted); font-size: 12.5px; cursor: pointer; }
+.fb-btn:hover { color: var(--text); border-color: var(--text); }
+.fb-note { margin-top: 10px; font-size: 13px; color: var(--muted); }
+.fb-note.fb-err { color: var(--err); }
+.fb-ask { margin-top: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; display: grid; gap: 8px; }
+.fb-q { font-size: 13.5px; line-height: 1.45; }
+.fb-input { width: 100%; min-height: 64px; resize: vertical; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font: inherit; font-size: 13.5px; }
+.fb-actions { display: flex; gap: 8px; justify-content: flex-end; }

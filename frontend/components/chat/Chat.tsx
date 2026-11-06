@@ -13,6 +13,7 @@ import {
   type SurveyStatus,
 } from "@/lib/surveyQuestions";
 import type { LogEntry } from "./AgentLog";
+import { correctionMessage } from "./AnswerFeedback";
 import { IconAttach, IconFile, IconFolder, IconCheck, IconSearch } from "../ui/icons";
 import { UPLOAD_ACCEPT, fileKey, acceptFiles } from "@/lib/files/policy";
 import { type ClassifyCard, type QuestionCard, DateSeparator, UserBubble, ClassifyBubble, QuestionBubble, AssistantBubble } from "./bubbles";
@@ -588,6 +589,13 @@ export function Chat({
     })();
     return true;
   }, [streaming, pending, quote, handleFiles, runMessage, onAnalyzeManifest, chatKind, startSurvey]);
+  // «Не так» on an answer: the lesson is already stored by the time this runs
+  // (AnswerFeedback awaits the feedback POST), so this turn already applies it.
+  const sendRef = useRef(send);
+  sendRef.current = send;
+  const askCorrection = useCallback((comment: string) => {
+    sendRef.current(correctionMessage(comment));
+  }, []);
 
   const clearQuote = useCallback(() => setQuote(null), []);
   const clearNotice = useCallback(() => setNotice(null), []);
@@ -862,6 +870,8 @@ export function Chat({
                     pending={streaming && it.content === ""}
                     onOpenSource={onOpenSource}
                     onDraftLetter={onDraftLetter}
+                    messageId={it.id}
+                    onCorrect={askCorrection}
                   />
                 )
               )}
