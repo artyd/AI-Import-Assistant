@@ -18,6 +18,8 @@ import { hubToolDefinitions } from '../agent/tools/hub.js';
 import { sheetTools } from '../agent/tools/sheet.js';
 import { supplyToolDefinitions } from '../agent/tools/supply.js';
 import { chatRateLimitConfig } from './chatRateLimit.js';
+import { lessonsBlockFor } from '../feedback/store.js';
+import { withLessons } from '../feedback/lesson.js';
 
 const chatSchema = z.object({
   message: z.string().min(1).max(20_000),
@@ -55,20 +57,24 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           'SELECT role, company_name FROM parties WHERE workspace_id = $1 ORDER BY created_at',
           [ws.id],
         );
+        const lessons = await lessonsBlockFor({ ownerId: req.user!.sub, chatKind: 'supply', workspaceId: ws.id });
 
         const result = await runAgentTurn({
           workspaceId: ws.id,
           ownerId: req.user!.sub,
-          system: buildSystemPrompt({
-            number: ws.number,
-            supplier: ws.supplier,
-            contract_type: ws.contract_type,
-            contract_type_source: ws.contract_type_source,
-            contract_type_confidence: ws.contract_type_confidence,
-            survey_status: ws.survey_status,
-            parties,
-            documentsDigest,
-          }),
+          system: withLessons(
+            buildSystemPrompt({
+              number: ws.number,
+              supplier: ws.supplier,
+              contract_type: ws.contract_type,
+              contract_type_source: ws.contract_type_source,
+              contract_type_confidence: ws.contract_type_confidence,
+              survey_status: ws.survey_status,
+              parties,
+              documentsDigest,
+            }),
+            lessons,
+          ),
           history,
           userMessage: message,
           sse,

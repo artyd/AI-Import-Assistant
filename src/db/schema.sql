@@ -1186,3 +1186,36 @@ ALTER TABLE supply_settings ADD COLUMN IF NOT EXISTS category_icons JSONB NOT NU
 -- A corrected re-upload hides the earlier file (is_latest=false) and stamps it;
 -- «Це не нова версія» restores it within 7 days, then the sweep deletes it.
 ALTER TABLE files ADD COLUMN IF NOT EXISTS superseded_at TIMESTAMPTZ;
+-- ── Відгуки й уроки: answer feedback that teaches Штурман ───────────────────
+-- A 👍/👎 per (assistant message, user); re-rating replaces. A 👎 with a comment
+-- derives a short reusable lesson (agent_lessons) that is injected into the
+-- system prompt of later chat turns: global lessons per chat kind + workspace
+-- lessons per shipment/FCL. Deleting a lesson only deactivates it.
+CREATE TABLE IF NOT EXISTS answer_feedback (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  message_id      UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+  conversation_id UUID,
+  workspace_id    UUID,
+  user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  rating          TEXT NOT NULL CHECK (rating IN ('up', 'down')),
+  comment         TEXT NOT NULL DEFAULT '',
+  lesson_id       UUID,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (message_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_answer_feedback_user ON answer_feedback(user_id, rating, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS agent_lessons (
+  id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  owner_id           UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  workspace_id       UUID REFERENCES workspaces(id) ON DELETE CASCADE,
+  chat_kind          TEXT NOT NULL CHECK (chat_kind IN ('normal', 'supply', 'consolidated')),
+  text               TEXT NOT NULL,
+  scope              TEXT NOT NULL CHECK (scope IN ('workspace', 'global')),
+  source_feedback_id UUID REFERENCES answer_feedback(id) ON DELETE SET NULL,
+  active             BOOLEAN NOT NULL DEFAULT true,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_agent_lessons_owner ON agent_lessons(owner_id, active, chat_kind);
+CREATE INDEX IF NOT EXISTS idx_agent_lessons_workspace ON agent_lessons(workspace_id, active);

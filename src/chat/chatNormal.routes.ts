@@ -17,6 +17,8 @@ import { hubToolDefinitions } from '../agent/tools/hub.js';
 import { sheetTools } from '../agent/tools/sheet.js';
 import { supplyToolDefinitions } from '../agent/tools/supply.js';
 import { chatRateLimitConfig } from './chatRateLimit.js';
+import { lessonsBlockFor } from '../feedback/store.js';
+import { withLessons } from '../feedback/lesson.js';
 
 const chatSchema = z.object({
   message: z.string().min(1).max(20_000),
@@ -53,10 +55,13 @@ export async function chatNormalRoutes(app: FastifyInstance): Promise<void> {
       );
       const { history, stats: historyStats } = await getConversationHistoryWithStats(conversationId);
       await appendMessage(conversationId, 'user', message);
+      const lessons = await lessonsBlockFor({ ownerId, chatKind: 'normal', workspaceId: null });
 
       const result = await runAgentTurn({
         ownerId,
-        system: buildNormalSystemPrompt(),
+        // Plain string without lessons (cached by the loop as one block);
+        // with lessons → [cached rules, lessons] so the cache entry is unchanged.
+        system: withLessons(buildNormalSystemPrompt(), lessons),
         history,
         userMessage: message,
         sse,

@@ -35,6 +35,7 @@ import { hubRoutes } from './hub/hub.routes.js';
 import { sheetRoutes } from './sheet/sheet.routes.js';
 import { mcpRoutes } from './mcp/mcp.routes.js';
 import { supplyRoutes } from './supply/supply.routes.js';
+import { feedbackRoutes } from './feedback/feedback.routes.js';
 
 async function buildServer() {
   const app = Fastify({
@@ -135,6 +136,7 @@ async function buildServer() {
   await app.register(sheetRoutes);
   await app.register(mcpRoutes);
   await app.register(supplyRoutes);
+  await app.register(feedbackRoutes);
 
   return app;
 }

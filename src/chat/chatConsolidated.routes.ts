@@ -20,6 +20,8 @@ import { supplyToolDefinitions } from '../agent/tools/supply.js';
 import { buildDocumentsDigest } from '../agent/documentsDigest.js';
 import { listLots } from '../shipments/lots.js';
 import { chatRateLimitConfig } from './chatRateLimit.js';
+import { lessonsBlockFor } from '../feedback/store.js';
+import { withLessons } from '../feedback/lesson.js';
 
 // A Збірник is an FCL workspace (spec 006): its chat gets every shipment tool
 // (scoped to the FCL, with an optional lot), the FCL tools and the manifest
@@ -68,16 +70,20 @@ export async function chatConsolidatedRoutes(app: FastifyInstance): Promise<void
         const { history, stats: historyStats } = await getConversationHistoryWithStats(conversationId);
         await appendMessage(conversationId, 'user', message);
 
-        const [documentsDigest, lots] = await Promise.all([
+        const [documentsDigest, lots, lessons] = await Promise.all([
           buildDocumentsDigest(col.id).catch(() => ''),
           listLots(col.id),
+          lessonsBlockFor({ ownerId: req.user!.sub, chatKind: 'consolidated', workspaceId: col.id }),
         ]);
         const result = await runAgentTurn({
-          system: buildConsolidatedSystemPrompt({
-            number: col.number,
-            lots: lots.map((l) => ({ name: l.name, supplier_name: l.supplier_name, status: l.status })),
-            documentsDigest,
-          }),
+          system: withLessons(
+            buildConsolidatedSystemPrompt({
+              number: col.number,
+              lots: lots.map((l) => ({ name: l.name, supplier_name: l.supplier_name, status: l.status })),
+              documentsDigest,
+            }),
+            lessons,
+          ),
           history,
           userMessage: message,
           sse,
