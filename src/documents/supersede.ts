@@ -101,7 +101,10 @@ export async function replaceEarlierVersions(workspaceId: string, fileId: string
 
   const version = Math.max(...older.map((r) => r.version)) + 1;
   for (const old of older) {
-    await query('UPDATE files SET is_latest = false, superseded_at = now() WHERE id = $1 AND workspace_id = $2', [old.id, workspaceId]);
+    await query(
+      'UPDATE files SET is_latest = false, superseded_at = now(), superseded_by = $3 WHERE id = $1 AND workspace_id = $2',
+      [old.id, workspaceId, fileId],
+    );
     await publishFileStatus(workspaceId, { fileId: old.id, status: 'deleted', name: old.name, replacedBy: fileId });
   }
   await query('UPDATE files SET version = $2, replaces_file_id = $3 WHERE id = $1', [fileId, version, older[0]!.id]);
@@ -114,16 +117,15 @@ export async function replaceEarlierVersions(workspaceId: string, fileId: string
  * to undo. The caller runs shipmentChanged.
  */
 export async function undoReplace(workspaceId: string, fileId: string): Promise<{ id: string; name: string }[] | null> {
-  const { rows: self } = await query<{ replaces_file_id: string | null }>(
-    'SELECT replaces_file_id FROM files WHERE id = $1 AND workspace_id = $2',
-    [fileId, workspaceId],
-  );
-  if (!self[0]?.replaces_file_id) return null;
+  // Every file this upload replaced (one upload can replace several); the
+  // replaces_file_id fallback covers files hidden before superseded_by existed.
   const { rows: restored } = await query<{ id: string; name: string }>(
-    `UPDATE files SET is_latest = true, superseded_at = NULL
-     WHERE workspace_id = $1 AND id = $2 AND superseded_at IS NOT NULL
+    `UPDATE files SET is_latest = true, superseded_at = NULL, superseded_by = NULL
+     WHERE workspace_id = $1 AND superseded_at IS NOT NULL
+       AND (superseded_by = $2
+            OR id = (SELECT replaces_file_id FROM files WHERE id = $2 AND workspace_id = $1))
      RETURNING id, name`,
-    [workspaceId, self[0].replaces_file_id],
+    [workspaceId, fileId],
   );
   if (!restored.length) return null;
   await query('UPDATE files SET replaces_file_id = NULL, version = 1 WHERE id = $1', [fileId]);

@@ -1307,7 +1307,7 @@ export default function WorkspacePage() {
       )}
       {aiSettingsOpen && <AiSettingsModal onClose={() => setAiSettingsOpen(false)} />}
       {notice && (
-        <NoticeBanner text={notice.text} tone={notice.tone} action={notice.action} autoHideMs={notice.action ? 30_000 : undefined} onClose={closeNotice} />
+        <NoticeBanner text={notice.text} tone={notice.tone} action={notice.action} autoHideMs={notice.action ? 0 : undefined} onClose={closeNotice} />
       )}
     </div>
   );

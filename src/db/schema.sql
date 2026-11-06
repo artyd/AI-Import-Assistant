@@ -1229,3 +1229,7 @@ CREATE TABLE IF NOT EXISTS hs_requirements (
   source       TEXT NOT NULL DEFAULT '',
   fetched_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Which upload auto-replaced this file: one upload can replace several earlier
+-- files, and «Це не нова версія» must bring all of them back.
+ALTER TABLE files ADD COLUMN IF NOT EXISTS superseded_by UUID REFERENCES files(id) ON DELETE SET NULL;
