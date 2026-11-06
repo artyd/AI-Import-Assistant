@@ -20,6 +20,16 @@ export function FilePreviewModal({ workspaceId, file, page, onClose }: Props) {
   const isPdf = file.type === "pdf";
   const previewable = file.type === "image" || isPdf;
 
+  // Esc closes the preview (listening on window: a click into the PDF viewer moves
+  // focus into the <object>, where the modal's own handlers never see the key).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   useEffect(() => {
     if (!previewable) return;
     let objectUrl: string | null = null;
