@@ -253,3 +253,17 @@ docker compose exec worker node dist/db/backfillMarkdown.js --apply  # enqueue
 Until backfilled, `read_file` converts a file lazily on first read. The old
 `qdrant` container/volume can then be removed (`docker compose up -d --remove-orphans`,
 `docker volume rm <project>_qdrant_data`); `EMBEDDING_*`/`QDRANT_*` in `.env` are ignored.
+
+## Re-reading spreadsheets after a converter change
+
+Spreadsheets read before 2026-11-06 keep the old Markdown layout (converter
+`sheet`: no row numbers, the title block as the header). To re-read them with the
+current layout (`sheet2`), in the deployed directory:
+
+```bash
+docker compose exec backend node dist/ingest/reindexSheets.js          # dry run: what would be re-read
+docker compose exec backend node dist/ingest/reindexSheets.js --apply  # queue them for the worker
+```
+
+Files whose fields were confirmed by hand on the verification screen are skipped
+(a re-read would overwrite the corrections).

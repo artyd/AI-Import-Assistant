@@ -295,7 +295,7 @@ async function reuseMarkdownByHash(file: FileJobRow): Promise<ConversionResult |
     `SELECT m.pages, m.converter, m.page_count
      FROM files f JOIN file_markdown m ON m.file_id = f.id
      WHERE f.content_hash = $1 AND f.id <> $2 AND m.partial = false
-       AND m.converter <> 'none' AND m.char_count > 0
+       AND m.converter NOT IN ('none', 'sheet') AND m.char_count > 0  -- 'sheet' = old spreadsheet layout
        -- a vision transcription is reused only from the current OCR model
        AND (m.converter NOT LIKE 'vision%' OR m.model = $3)
      ORDER BY m.created_at DESC LIMIT 1`,

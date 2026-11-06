@@ -16,7 +16,8 @@ const run = promisify(execFile);
 export interface ConversionResult {
   pages: MarkdownPage[];
   /** How the Markdown was produced — surfaced to the agent/logs. */
-  converter: 'vision' | 'text' | 'vision+text' | 'mammoth' | 'libreoffice+mammoth' | 'sheet' | 'md' | 'none';
+  // 'sheet' = the old spreadsheet layout (no row numbers); 'sheet2' = gridToMarkdown.
+  converter: 'vision' | 'text' | 'vision+text' | 'mammoth' | 'libreoffice+mammoth' | 'sheet' | 'sheet2' | 'md' | 'none';
   /** Some content may be missing (output cap hit or pages not transcribed). */
   partial: boolean;
   pageCount: number | null;
@@ -106,7 +107,7 @@ function sheetToMarkdown(buf: Buffer): ConversionResult {
       const md = gridToMarkdown(...sheetGrid(sheet));
       if (md) pages.push({ page: null, markdown: `## Аркуш: ${name}\n\n${md}` });
     }
-    return { pages, converter: 'sheet', partial: false, pageCount: null, note: null };
+    return { pages, converter: 'sheet2', partial: false, pageCount: null, note: null };
   } catch {
     return { pages: [], converter: 'none', partial: false, pageCount: null, note: 'Таблицю не вдалося прочитати.' };
   }
