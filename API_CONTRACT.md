@@ -620,7 +620,15 @@ from it by a deterministic template (EN for the supplier, UK check copy).
 ### `GET /api/workspaces/:id/risks`  (auth)
 Proactive current + upcoming problems, computed deterministically from extractions,
 the persisted checklist, and intake (never LLM-generated). Categories: `expiry`
-(expired/expiring certificates), `missing_docs`, `discrepancy`, `deadline`.
+(expired/expiring certificates), `missing_docs`, `discrepancy`, `deadline`, `registry`,
+and the document-integrity checks: `payment` (code `bank_beneficiary_buyer` — a bank
+block made out to the buyer), `dangerous_goods` (`dangerous_goods` info — UN number /
+class declared; `dangerous_goods_undeclared` — a transport paper / МД omits it),
+`document_quality` (`certificate_incomplete` — a certificate without signature / stamp
+or with blank fields; `empty_fields` — an invoice / packing list / contract with a blank
+number, consignee, batch or date). Bank details of one seller that differ between its
+payment documents are a discrepancy with `field: "bank_account"` (and so also a
+`discrepancy_bank_account` risk).
 Response `200`: `{ "risks": [ { "code", "category", "severity":"error"|"warning"|"info",
 "title", "detail", "source_file_id":uuid|null } ] }` (most-severe first). The indexing
 worker also raises an in-app `risk_alert` notification to the responsible user on new

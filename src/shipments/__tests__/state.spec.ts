@@ -122,6 +122,8 @@ describe('every verdict-input writer reports shipmentChanged', () => {
     /\bclassifyAndFile\(/,
     /\bupdateVersion\(/,
     /\breplaceEarlierVersions\(/,
+    /\bupsertExtraction\(/,
+    /INSERT INTO document_extractions\b/,
   ];
   // Modules that define the writers, or own no shipment verdicts.
   const EXEMPT = new Set([
@@ -132,7 +134,8 @@ describe('every verdict-input writer reports shipmentChanged', () => {
     'instruction/realign.ts', // parties realign — callers (mode change) report
     'shipments/fclState.ts', // FCL autopilot — runs inside shipmentChanged
     'shipments/collections.routes.ts',
-    'ingest/extraction/extractFields.ts', // upsertExtraction — the worker reports
+    'ingest/extraction/extractFields.ts', // extraction prompt + normaliser, no writes
+    'ingest/extraction/store.ts', // defines upsertExtraction — the worker / reindexExtraction report
     'documents/supersede.ts', // defines replaceEarlierVersions — the worker reports
   ]);
   const files: string[] = [];

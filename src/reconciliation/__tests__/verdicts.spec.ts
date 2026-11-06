@@ -127,4 +127,44 @@ describe('shipment verdicts', () => {
     const ranks = v.risks.map((r) => ({ error: 0, warning: 1, info: 2 })[r.severity]);
     expect(ranks).toEqual([...ranks].sort((a, b) => a - b));
   });
+
+  it('document-integrity checks: bank details, dangerous goods, certificates, blank fields', () => {
+    // A fictional shipment: an advance and a final invoice of one seller with
+    // different accounts at one bank, a pickup notice declaring UN 1940 that the
+    // CMR omits, an unsigned health certificate, a blank batch number.
+    const seller = 'Fictiva Chemicals GmbH';
+    const bank = (iban: string) => ({ iban, swift: 'TESTDEFF', bank_name: 'Testbank AG', beneficiary: seller });
+    const files = [
+      file('adv', { doc_type: 'invoice', seller, buyer: 'TOV Zoriana Trade', currency: 'EUR', total_value: 300, bank_accounts: [bank('DE12500105170000062011')] }),
+      file('inv', { doc_type: 'invoice', seller, buyer: 'TOV Zoriana Trade', currency: 'EUR', total_value: 1000, bank_accounts: [bank('DE12500105170000082011')], empty_fields: ['Batch No.'] }),
+      file('pl', { doc_type: 'packing_list' }),
+      file('pickup', { doc_type: 'other', dangerous_goods: { is_dangerous: true, un_number: 'UN 1940', adr_class: '8' } }),
+      file('cmr', { doc_type: 'transport' }),
+      { ...file('hc', { doc_type: 'other', signed: false, empty_fields: ['Consignee'] }), vet_certificate: true },
+    ];
+    const v = computeVerdicts(snapshot({ files }), NOW);
+    const bankFinding = v.discrepancies.find((d) => d.field === 'bank_account');
+    expect(bankFinding).toMatchObject({ severity: 'error', kind: 'confirmed' });
+    expect(bankFinding!.citations).toHaveLength(2);
+    const codes = v.risks.map((r) => r.code);
+    expect(codes).toEqual(
+      expect.arrayContaining([
+        'discrepancy_bank_account',
+        'dangerous_goods',
+        'dangerous_goods_undeclared',
+        'certificate_incomplete',
+        'empty_fields',
+      ]),
+    );
+    expect(v.risks.find((r) => r.code === 'discrepancy_bank_account')!.title).toBe('Розбіжність: банківські реквізити');
+    // An error-level discrepancy keeps the shipment in progress.
+    expect(v.derivedStatus).toBe('docs_in_progress');
+  });
+
+  it('old extractions without the integrity fields add no new findings', () => {
+    const files = [file('a', { doc_type: 'invoice', seller: 'S' }), file('b', { doc_type: 'invoice', seller: 'S' })];
+    const v = computeVerdicts(snapshot({ files }), NOW);
+    expect(v.discrepancies.some((d) => d.field === 'bank_account')).toBe(false);
+    expect(v.risks.some((r) => ['payment', 'dangerous_goods', 'document_quality'].includes(r.category))).toBe(false);
+  });
 });

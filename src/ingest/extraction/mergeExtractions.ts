@@ -94,6 +94,22 @@ export function mergeExtractions(parts: ExtractedFields[]): ExtractedFields | nu
   }
   merged.parties = parties;
 
+  // Integrity flags: every bank block (de-duped by IBAN, else by beneficiary),
+  // the dangerous-goods marking from the part that declares it, every blank
+  // field. A signature / stamp anywhere (usually the last page) counts.
+  const banks = parts.flatMap((p) => p.bank_accounts ?? []);
+  const bankKey = (b: (typeof banks)[number]): string =>
+    (b.iban ?? '').replace(/\s/g, '').toUpperCase() || `${b.swift ?? ''}|${b.beneficiary ?? ''}`.toLowerCase();
+  merged.bank_accounts = banks.filter((b, i) => banks.findIndex((x) => bankKey(x) === bankKey(b)) === i);
+  const dgs = parts.map((p) => p.dangerous_goods).filter((d): d is NonNullable<typeof d> => !!d);
+  merged.dangerous_goods = dgs.find((d) => d.is_dangerous === true || !!d.un_number) ?? dgs[0] ?? null;
+  const anyFlag = (k: 'signed' | 'stamped'): boolean | null =>
+    parts.some((p) => p[k] === true) ? true : parts.some((p) => p[k] === false) ? false : null;
+  merged.signed = anyFlag('signed');
+  merged.stamped = anyFlag('stamped');
+  const empty = parts.flatMap((p) => p.empty_fields ?? []);
+  merged.empty_fields = empty.filter((e, i) => empty.findIndex((x) => x.toLowerCase() === e.toLowerCase()) === i);
+
   // Confidence follows the part the value came from; keep the LOWEST seen for
   // a field so a shaky read anywhere still surfaces on the verification screen.
   const rank = { low: 0, medium: 1, high: 2 } as const;
