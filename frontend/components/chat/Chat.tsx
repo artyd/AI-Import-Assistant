@@ -839,7 +839,7 @@ export function Chat({
             onMouseUp={onThreadMouseUp}
             style={{ flex: 1, overflowY: "auto", padding: "24px 0" }}
           >
-            <div style={{ maxWidth: 760, margin: "0 auto", padding: "0 28px" }}>
+            <div style={{ maxWidth: 1000, margin: "0 auto", padding: "0 28px" }}>
               <DateSeparator />
               {items.map((it) =>
                 it.kind === "classify" ? (
@@ -861,7 +861,7 @@ export function Chat({
           </div>
 
           <div style={{ flex: "none", padding: "8px 28px 20px" }}>
-            <div style={{ maxWidth: 760, margin: "0 auto" }}>
+            <div style={{ maxWidth: 1000, margin: "0 auto" }}>
               {readingFeed}
               {notice && <Notice text={notice} onClear={clearNotice} />}
               <Composer

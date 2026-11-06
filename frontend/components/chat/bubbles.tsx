@@ -4,7 +4,8 @@ import type { Folder, Citation } from "@/lib/types";
 import { folderLabel } from "@/lib/folderLabels";
 import { type SurveyQuestion, type SurveyOption } from "@/lib/surveyQuestions";
 import { Markdown } from "../ui/Markdown";
-import { IconFile, IconSpinner, IconCheck, IconFolder } from "../ui/icons";
+import { IconFile, IconSpinner, IconCheck, IconFolder, IconChevronRight } from "../ui/icons";
+import { filesLabel, groupCitations, pagesLabel } from "@/lib/citations";
 
 // Local-only chat items for the paperclip flow. These are NOT persisted to the
 // conversation (they don't go through the agent/SSE); on reload they vanish, but
@@ -320,6 +321,41 @@ export function QuestionBubble({
   );
 }
 
+/**
+ * The answer's sources, collapsed to one full-width row («Джерела · 8 файлів»):
+ * with many files the chips used to take more room than the answer. Open, one
+ * line per file with its pages.
+ */
+function Sources({ citations }: { citations: Citation[] }) {
+  const groups = groupCitations(citations);
+  return (
+    <details className="sources" style={{ marginTop: 14, width: "100%" }}>
+      <summary
+        style={{
+          display: "flex", alignItems: "center", gap: 8, cursor: "pointer", listStyle: "none",
+          padding: "8px 12px", borderRadius: 10, border: "1px solid var(--border)",
+          background: "var(--surface-2, transparent)", fontSize: 13, color: "var(--muted)", userSelect: "none",
+        }}
+      >
+        <IconChevronRight size={14} className="sources-chev" />
+        <IconFile size={14} />
+        <span style={{ fontWeight: 600, color: "var(--text)" }}>Джерела</span>
+        <span>· {filesLabel(groups.length)}</span>
+      </summary>
+      <ul style={{ listStyle: "none", margin: "6px 0 0", padding: "4px 12px", display: "grid", gap: 4 }}>
+        {groups.map((g) => (
+          <li key={g.file} style={{ display: "flex", gap: 10, alignItems: "baseline", fontSize: 13, minWidth: 0 }}>
+            <span className="ellipsis" style={{ fontFamily: "var(--font-mono)", minWidth: 0, flex: "0 1 auto" }} title={g.file}>
+              {g.file}
+            </span>
+            {g.pages.length > 0 && <span style={{ color: "var(--muted)", whiteSpace: "nowrap" }}>{pagesLabel(g.pages)}</span>}
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
 export const AssistantBubble = memo(function AssistantBubble({
   text,
   citations,
@@ -344,21 +380,7 @@ export const AssistantBubble = memo(function AssistantBubble({
         ) : (
           <Markdown>{text}</Markdown>
         )}
-        {citations && citations.length > 0 && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 12 }}>
-            {citations.map((c, i) => (
-              <span
-                key={i}
-                className="badge"
-                style={{ fontFamily: "var(--font-mono)", fontWeight: 500 }}
-                title={c.page != null ? `Стор. ${c.page}` : undefined}
-              >
-                {c.file}
-                {c.page != null ? ` · с.${c.page}` : ""}
-              </span>
-            ))}
-          </div>
-        )}
+        {citations && citations.length > 0 && <Sources citations={citations} />}
       </div>
     </div>
   );

@@ -51,7 +51,12 @@ test.describe("Chat streaming", () => {
     await ask(page, "Перевір комплектність");
 
     await expect(page.getByText("Привіт, пакет повний.")).toBeVisible();
-    await expect(page.getByText("invoice.pdf · с.2")).toBeVisible();
+    // Sources: one collapsed full-width row; open — file with its pages.
+    await expect(page.getByText("Джерела")).toBeVisible();
+    await expect(page.getByText("· 1 файл")).toBeVisible();
+    await page.getByText("Джерела").click();
+    await expect(page.getByText("invoice.pdf")).toBeVisible();
+    await expect(page.getByText("с. 2")).toBeVisible();
     // Turn completed → the send button is back (no stop button).
     await expect(page.getByTestId("chat-stop")).toHaveCount(0);
     await expect(page.getByTestId("chat-input")).toHaveValue("");

@@ -655,3 +655,9 @@ a {
     }
   }
 }
+
+/* Answer sources: one collapsed row; the chevron turns when open. */
+details.sources > summary::-webkit-details-marker { display: none; }
+details.sources > summary:hover { color: var(--text); }
+details.sources .sources-chev { transition: transform .15s ease; flex: none; }
+details.sources[open] .sources-chev { transform: rotate(90deg); }
