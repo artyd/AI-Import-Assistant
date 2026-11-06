@@ -1,0 +1,17 @@
+[
+  {
+    "name": "fictional-full-check",
+    "workspaceId": "00000000-0000-0000-0000-000000000000",
+    "chatKind": "supply",
+    "question": "перевір документи",
+    "note": "Fictional example. Real cases go to .local/answer-cases.json (gitignored) — they reference real shipments.",
+    "expect": [
+      { "name": "різні IBAN у двох рахунках", "all": ["IBAN"], "any": ["0620", "0820"] },
+      { "name": "небезпечний вантаж UN 1940", "any": ["UN\\s*1940"] },
+      { "name": "немає CMR", "any": ["CMR"] },
+      { "name": "вага брутто — не розбіжність", "any": ["Розбіжності немає[^\\n]*брутто", "брутто[^\\n]*спростов"] }
+    ],
+    "forbid": ["відповідь на питання не знайдено"],
+    "minScore": 0.85
+  }
+]

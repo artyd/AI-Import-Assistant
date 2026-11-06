@@ -138,7 +138,7 @@ export interface FileExtraction {
 
 export interface Risk {
   code: string;
-  category: "expiry" | "missing_docs" | "discrepancy" | "deadline";
+  category: "expiry" | "missing_docs" | "discrepancy" | "deadline" | "registry" | "payment" | "dangerous_goods" | "document_quality";
   severity: "error" | "warning" | "info";
   title: string;
   detail: string;

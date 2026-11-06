@@ -74,6 +74,7 @@ export const REQ_LABEL: Record<string, string> = {
 // Reconciliation field keys → what the user reads (mirrors backend fieldLabel).
 export const FIELD_LABEL: Record<string, string> = {
   net_weight_kg: "Вага нетто",
+  bank_account: "Банківські реквізити",
   gross_weight_kg: "Вага брутто",
   total_weight_kg: "Загальна вага",
   packages_count: "Кількість місць",
