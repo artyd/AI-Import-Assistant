@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filesLabel, groupCitations, pagesLabel } from "../citations";
+import { filesLabel, findSourceFile, groupCitations, pagesLabel } from "../citations";
 
 describe("answer sources", () => {
   it("one row per file with its distinct pages, in first-seen order", () => {
@@ -22,5 +22,16 @@ describe("answer sources", () => {
     expect([1, 2, 5, 11, 12, 21, 22, 25].map(filesLabel)).toEqual([
       "1 файл", "2 файли", "5 файлів", "11 файлів", "12 файлів", "21 файл", "22 файли", "25 файлів",
     ]);
+  });
+
+  it("a cited file name → the file, current version first, case-insensitive fallback", () => {
+    const files = [
+      { id: "old", name: "PL.pdf", isLatest: false },
+      { id: "new", name: "PL.pdf", isLatest: true },
+      { id: "inv", name: "Invoice.PDF" },
+    ];
+    expect(findSourceFile(files, "PL.pdf")?.id).toBe("new");
+    expect(findSourceFile(files, "invoice.pdf")?.id).toBe("inv");
+    expect(findSourceFile(files, "nope.pdf")).toBeNull();
   });
 });

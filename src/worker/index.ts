@@ -33,7 +33,7 @@ import { logIngest, q } from '../ingest/journal.js';
 import { describeDocument } from '../ingest/describe.js';
 import { shipmentChanged } from '../shipments/state.js';
 import { maybeReconcileBatch } from '../reconciliation/reconcileBatch.js';
-import { replaceEarlierVersions } from '../documents/supersede.js';
+import { purgeSupersededFiles, replaceEarlierVersions } from '../documents/supersede.js';
 import { scanAndNotify } from '../notifications/reminders.js';
 import { ingestNews, purgeOldNews } from '../news/index.js';
 import { publishFileStatus } from '../lib/events/fileStatus.js';
@@ -181,7 +181,7 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
             if (replaced.length) {
               await journal(
                 'done',
-                `${q(file.name)} — нова версія того самого документа; попередню (${replaced.map(q).join(', ')}) видалено.`,
+                `${q(file.name)} — нова версія того самого документа; попередню (${replaced.map(q).join(', ')}) прибрано з перевірок (можна повернути 7 днів).`,
               );
             }
           } catch (err) {
@@ -393,6 +393,11 @@ async function processSheetSync(_job: Job<SheetJobData>): Promise<void> {
  */
 async function processIngestRetry(_job: Job<IngestRetryJobData>): Promise<void> {
   const { requeued, flagged } = await sweepStuckFiles();
+  const purged = await purgeSupersededFiles().catch(() => 0);
+  if (purged > 0) {
+    // eslint-disable-next-line no-console
+    console.log(`Deleted ${purged} auto-replaced file(s) past the grace period.`);
+  }
   if (requeued > 0 || flagged > 0) {
     // eslint-disable-next-line no-console
     console.log(`Ingest retry sweep: re-queued ${requeued}, flagged ${flagged} for manual entry.`);

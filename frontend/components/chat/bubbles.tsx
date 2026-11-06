@@ -326,7 +326,7 @@ export function QuestionBubble({
  * with many files the chips used to take more room than the answer. Open, one
  * line per file with its pages.
  */
-function Sources({ citations }: { citations: Citation[] }) {
+function Sources({ citations, onOpen }: { citations: Citation[]; onOpen?: (file: string, page: number | null) => void }) {
   const groups = groupCitations(citations);
   return (
     <details className="sources" style={{ marginTop: 14, width: "100%" }}>
@@ -345,10 +345,23 @@ function Sources({ citations }: { citations: Citation[] }) {
       <ul style={{ listStyle: "none", margin: "6px 0 0", padding: "4px 12px", display: "grid", gap: 4 }}>
         {groups.map((g) => (
           <li key={g.file} style={{ display: "flex", gap: 10, alignItems: "baseline", fontSize: 13, minWidth: 0 }}>
-            <span className="ellipsis" style={{ fontFamily: "var(--font-mono)", minWidth: 0, flex: "0 1 auto" }} title={g.file}>
-              {g.file}
-            </span>
-            {g.pages.length > 0 && <span style={{ color: "var(--muted)", whiteSpace: "nowrap" }}>{pagesLabel(g.pages)}</span>}
+            {onOpen ? (
+              <button type="button" className="source-link ellipsis" title={`Відкрити ${g.file}`} onClick={() => onOpen(g.file, g.pages[0] ?? null)}>
+                {g.file}
+              </button>
+            ) : (
+              <span className="ellipsis" style={{ fontFamily: "var(--font-mono)", minWidth: 0, flex: "0 1 auto" }} title={g.file}>
+                {g.file}
+              </span>
+            )}
+            {g.pages.map((p, k) =>
+              onOpen ? (
+                <button key={p} type="button" className="source-page" title={`Відкрити стор. ${p}`} onClick={() => onOpen(g.file, p)}>
+                  {k === 0 ? "с. " : ""}{p}
+                </button>
+              ) : null,
+            )}
+            {!onOpen && g.pages.length > 0 && <span style={{ color: "var(--muted)", whiteSpace: "nowrap" }}>{pagesLabel(g.pages)}</span>}
           </li>
         ))}
       </ul>
@@ -360,10 +373,12 @@ export const AssistantBubble = memo(function AssistantBubble({
   text,
   citations,
   pending,
+  onOpenSource,
 }: {
   text: string;
   citations?: Citation[];
   pending?: boolean;
+  onOpenSource?: (file: string, page: number | null) => void;
 }) {
   return (
     <div style={{ display: "flex", gap: 14, margin: "18px 0 28px" }} data-anim>
@@ -380,7 +395,7 @@ export const AssistantBubble = memo(function AssistantBubble({
         ) : (
           <Markdown>{text}</Markdown>
         )}
-        {citations && citations.length > 0 && <Sources citations={citations} />}
+        {citations && citations.length > 0 && <Sources citations={citations} onOpen={onOpenSource} />}
       </div>
     </div>
   );

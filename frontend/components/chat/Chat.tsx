@@ -74,6 +74,8 @@ interface Props {
   onSurveyIntake?: (patch: Partial<Record<SurveyIntakeField, string>>) => void;
   // Which intake fields are already filled (autopilot) — those questions are skipped.
   surveyPrefilled?: Partial<Record<SurveyIntakeField, boolean>>;
+  /** Opens a cited file (at its page) — the «Джерела» rows become links. */
+  onOpenSource?: (file: string, page: number | null) => void;
 }
 
 type ChatItem = ({ kind: "message" } & Message) | ClassifyCard | QuestionCard;
@@ -128,6 +130,7 @@ export function Chat({
   onSurveyPersist,
   onSurveyIntake,
   surveyPrefilled,
+  onOpenSource,
 }: Props) {
   // File intake is only wired when the host supplies the workspace file handlers.
   const fileIntake = !!(onUploadAndClassify && onMoveFile && folders);
@@ -854,6 +857,7 @@ export function Chat({
                     text={it.content}
                     citations={it.citations}
                     pending={streaming && it.content === ""}
+                    onOpenSource={onOpenSource}
                   />
                 )
               )}

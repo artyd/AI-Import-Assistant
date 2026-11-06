@@ -1182,3 +1182,7 @@ ALTER TABLE supply_shipments ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT
 ALTER TABLE supply_settings ADD COLUMN IF NOT EXISTS groups JSONB NOT NULL DEFAULT '[]'::jsonb;
 -- Icon per category (category name → icon key, see frontend lib/supply/icons.ts).
 ALTER TABLE supply_settings ADD COLUMN IF NOT EXISTS category_icons JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+-- A corrected re-upload hides the earlier file (is_latest=false) and stamps it;
+-- «Це не нова версія» restores it within 7 days, then the sweep deletes it.
+ALTER TABLE files ADD COLUMN IF NOT EXISTS superseded_at TIMESTAMPTZ;

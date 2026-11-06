@@ -43,11 +43,14 @@ export function NoticeBanner({
   tone = "error",
   onClose,
   autoHideMs = 10_000,
+  action,
 }: {
   text: string;
   tone?: NoticeTone;
   onClose: () => void;
   autoHideMs?: number;
+  /** One follow-up button (e.g. «Це не нова версія»); clicking it also closes. */
+  action?: { label: string; onClick: () => void };
 }) {
   useEffect(() => {
     if (!autoHideMs) return;
@@ -90,6 +93,18 @@ export function NoticeBanner({
       >
         {text}
       </div>
+      {action && (
+        <button
+          className="btn"
+          style={{ flex: "none", height: 26, padding: "0 10px", fontSize: 12.5 }}
+          onClick={() => {
+            action.onClick();
+            onClose();
+          }}
+        >
+          {action.label}
+        </button>
+      )}
       <button
         onClick={onClose}
         aria-label="Закрити повідомлення"

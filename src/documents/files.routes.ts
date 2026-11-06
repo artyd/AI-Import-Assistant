@@ -18,6 +18,7 @@ import { enqueueIndexJob } from '../lib/queue/index.js';
 import { publishFileStatus } from '../lib/events/fileStatus.js';
 import { classifyAndFile, MANUAL_REASON, refileAll, resetAutoPlacements, sortInbox } from './classify.js';
 import { shipmentChanged } from '../shipments/state.js';
+import { undoReplace } from './supersede.js';
 import { isZipUpload, unpackZip, ZipGuardError } from '../lib/zip.js';
 import { contentType } from '../lib/mime.js';
 import { listIngestEvents, logIngest } from '../ingest/journal.js';
@@ -313,6 +314,20 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       await publishFileStatus(ws.id, { fileId: req.params.fileId, status: 'deleted' });
       await shipmentChanged(ws.id, 'files');
       return reply.send({ ok: true });
+    },
+  );
+
+  // POST /api/workspaces/:id/files/:fileId/undo-replace — «Це не нова версія»:
+  // restore the file(s) this upload auto-replaced (within the grace period).
+  app.post<{ Params: { id: string; fileId: string } }>(
+    '/api/workspaces/:id/files/:fileId/undo-replace',
+    async (req, reply) => {
+      const ws = await getOwnedWorkspace(req.user!.sub, req.params.id);
+      if (!ws) return reply.code(404).send({ error: 'not_found' });
+      const restored = await undoReplace(ws.id, req.params.fileId);
+      if (!restored) return reply.code(404).send({ error: 'nothing_to_undo' });
+      await shipmentChanged(ws.id, 'files');
+      return reply.send({ restored });
     },
   );
 

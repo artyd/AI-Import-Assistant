@@ -280,6 +280,13 @@ Streams the stored file bytes inline (`Content-Type` by file type, `Content-Disp
 for in-app preview / download. The browser fetches it with the Bearer header and renders it
 from a blob URL (PDF in an `<iframe>`, images in `<img>`). `404 not_found` if not owned/found.
 
+### `POST /api/workspaces/:id/files/:fileId/undo-replace`  (auth, no body) → `{ restored: [{ id, name }] }`
+A corrected re-upload (same doc type + number + seller) auto-replaces the earlier
+file: the old one is hidden (`isLatest: false`) and a `file_status` event
+`{ fileId: <old>, status: "deleted", name, replacedBy: <new> }` is sent. Within 7
+days this route («Це не нова версія», called with the NEW file's id) puts the old
+file back as current; after that the sweep deletes it. `404 nothing_to_undo`.
+
 ### `POST /api/workspaces/:id/files/:fileId/reindex`  (auth, no body)
 Requeue indexing for a file (e.g. one whose previous run errored): resets status
 to `queued`, clears `error_reason`, enqueues a fresh index job, emits `file_status`.

@@ -2,13 +2,18 @@ import { query } from '../db/pool.js';
 import { publishFileStatus } from '../lib/events/fileStatus.js';
 import { deleteStoredFile } from '../lib/storage.js';
 
+export const SUPERSEDED_KEEP_DAYS = 7;
+
 /**
  * A corrected re-upload replaces the old file. Users fix a document with errors
  * and upload it again under any name («PL_123_fixed.pdf», «PL 123 (1).pdf»): both
  * stayed «current», the reconciler kept checking the OLD one and the agent mixed
  * them up. After a file is read, an earlier current file that is the SAME document
  * (same type + same number + same seller) is deleted and the new one takes its
- * place. The user chose deletion over keeping a hidden old version (2026-11-06).
+ * place: the old one is hidden (is_latest=false, superseded_at) and deleted by the
+ * sweep after SUPERSEDED_KEEP_DAYS — until then «Це не нова версія» restores it
+ * (undoReplace). The user wanted the old file gone (2026-11-06); the grace
+ * period exists only so a wrong match can be undone.
  *
  * Deliberately strict — deleting the wrong file is worse than a duplicate:
  * - only invoices, packing lists, contracts and transport documents (they carry
@@ -75,7 +80,7 @@ export function isSameDocument(a: DocIdentity, b: DocIdentity): boolean {
 }
 
 /**
- * Delete the earlier current files that `fileId` is a new version of. Returns the
+ * Hide the earlier current files that `fileId` is a new version of. Returns the
  * names of the replaced files (empty when none). The caller runs shipmentChanged.
  */
 export async function replaceEarlierVersions(workspaceId: string, fileId: string): Promise<string[]> {
@@ -96,10 +101,44 @@ export async function replaceEarlierVersions(workspaceId: string, fileId: string
 
   const version = Math.max(...older.map((r) => r.version)) + 1;
   for (const old of older) {
-    await query('DELETE FROM files WHERE id = $1 AND workspace_id = $2', [old.id, workspaceId]);
-    await deleteStoredFile(old.disk_path).catch(() => undefined);
-    await publishFileStatus(workspaceId, { fileId: old.id, status: 'deleted' });
+    await query('UPDATE files SET is_latest = false, superseded_at = now() WHERE id = $1 AND workspace_id = $2', [old.id, workspaceId]);
+    await publishFileStatus(workspaceId, { fileId: old.id, status: 'deleted', name: old.name, replacedBy: fileId });
   }
-  await query('UPDATE files SET version = $2 WHERE id = $1', [fileId, version]);
+  await query('UPDATE files SET version = $2, replaces_file_id = $3 WHERE id = $1', [fileId, version, older[0]!.id]);
   return older.map((r) => r.name);
+}
+
+/**
+ * «Це не нова версія»: put back every file `fileId` auto-replaced (still within
+ * the grace period). Returns the restored files, or null when there is nothing
+ * to undo. The caller runs shipmentChanged.
+ */
+export async function undoReplace(workspaceId: string, fileId: string): Promise<{ id: string; name: string }[] | null> {
+  const { rows: self } = await query<{ replaces_file_id: string | null }>(
+    'SELECT replaces_file_id FROM files WHERE id = $1 AND workspace_id = $2',
+    [fileId, workspaceId],
+  );
+  if (!self[0]?.replaces_file_id) return null;
+  const { rows: restored } = await query<{ id: string; name: string }>(
+    `UPDATE files SET is_latest = true, superseded_at = NULL
+     WHERE workspace_id = $1 AND id = $2 AND superseded_at IS NOT NULL
+     RETURNING id, name`,
+    [workspaceId, self[0].replaces_file_id],
+  );
+  if (!restored.length) return null;
+  await query('UPDATE files SET replaces_file_id = NULL, version = 1 WHERE id = $1', [fileId]);
+  for (const r of restored) await publishFileStatus(workspaceId, { fileId: r.id, status: 'ready', name: r.name });
+  return restored;
+}
+
+/** Sweep: auto-replaced files past the grace period are deleted for good. */
+export async function purgeSupersededFiles(): Promise<number> {
+  const { rows } = await query<{ id: string; disk_path: string }>(
+    `DELETE FROM files WHERE superseded_at IS NOT NULL
+       AND superseded_at < now() - make_interval(days => $1)
+     RETURNING id, disk_path`,
+    [SUPERSEDED_KEEP_DAYS],
+  );
+  for (const r of rows) await deleteStoredFile(r.disk_path).catch(() => undefined);
+  return rows.length;
 }

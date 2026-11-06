@@ -15,6 +15,9 @@ export interface FileStatusEvent {
   // Present when the worker auto-filed an inbox file (e.g. a scan classified via
   // OCR) so the file tree can move it live without a refetch.
   folderId?: string | null;
+  // On 'deleted': the file was replaced by a corrected re-upload (that file's id);
+  // the UI offers «Це не нова версія» to restore it.
+  replacedBy?: string;
 }
 
 function channel(workspaceId: string): string {

@@ -8,10 +8,12 @@ import { IconSpinner, IconDownload } from "../ui/icons";
 interface Props {
   workspaceId: string;
   file: FileItem;
+  /** Open a PDF at this page (from an answer's «Джерела»). */
+  page?: number | null;
   onClose: () => void;
 }
 
-export function FilePreviewModal({ workspaceId, file, onClose }: Props) {
+export function FilePreviewModal({ workspaceId, file, page, onClose }: Props) {
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState(false);
   const contentPath = `/api/workspaces/${workspaceId}/files/${file.id}/content`;
@@ -154,7 +156,8 @@ export function FilePreviewModal({ workspaceId, file, onClose }: Props) {
             // iframe: only the browser's PDF viewer renders it (a sandboxed
             // iframe would block that viewer). CSP: object-src 'self' blob:.
             <object
-              data={url}
+              key={page ?? 0}
+              data={page ? `${url}#page=${page}` : url}
               type="application/pdf"
               aria-label={file.name}
               data-testid="pdf-preview"

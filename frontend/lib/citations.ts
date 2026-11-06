@@ -33,3 +33,14 @@ export function filesLabel(n: number): string {
   const word = d === 1 && dd !== 11 ? "файл" : d >= 2 && d <= 4 && (dd < 12 || dd > 14) ? "файли" : "файлів";
   return `${n} ${word}`;
 }
+
+/**
+ * The file a citation names: exact name (current version first), then the same
+ * name ignoring case. Citations carry the file NAME the agent saw, not an id.
+ */
+export function findSourceFile<T extends { name: string; isLatest?: boolean }>(files: T[], name: string): T | null {
+  const rank = (f: T) => (f.isLatest === false ? 1 : 0);
+  const pick = (list: T[]) => [...list].sort((a, b) => rank(a) - rank(b))[0] ?? null;
+  const want = name.trim();
+  return pick(files.filter((f) => f.name === want)) ?? pick(files.filter((f) => f.name.toLowerCase() === want.toLowerCase()));
+}

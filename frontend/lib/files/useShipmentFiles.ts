@@ -40,9 +40,17 @@ const JOURNAL_MAX = 500;
  */
 export function useShipmentFiles(
   id: string,
-  opts: { live: boolean; folders: Folder[]; notify: (text: string, tone?: NoticeTone) => void },
+  opts: {
+    live: boolean;
+    folders: Folder[];
+    notify: (text: string, tone?: NoticeTone) => void;
+    /** A corrected re-upload auto-replaced a file (the old one is hidden for 7 days). */
+    onReplaced?: (old: { id: string; name: string }, newFileId: string) => void;
+  },
 ) {
   const { live, folders, notify } = opts;
+  const onReplacedRef = useRef(opts.onReplaced);
+  onReplacedRef.current = opts.onReplaced;
   const [files, setFiles] = useState<FileItem[]>([]);
   const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
   // The reading journal (spec 007): history on load, then live lines.
@@ -91,6 +99,7 @@ export function useShipmentFiles(
     const channel = openEventsChannel(id, {
       onFileStatus: (raw) => {
         const ev = raw as FileStatusEvent;
+        if (ev.status === "deleted" && ev.replacedBy) onReplacedRef.current?.({ id: ev.fileId, name: ev.name ?? "файл" }, ev.replacedBy);
         if (refreshInFlight.current > 0) bufferedEvents.current.push(ev);
         setFiles((prev) => applyFileStatus(prev, ev));
       },
@@ -311,7 +320,22 @@ export function useShipmentFiles(
     [id, refreshFiles, notify],
   );
 
+  /** «Це не нова версія»: bring back the file a re-upload auto-replaced. */
+  const undoReplace = useCallback(
+    async (newFileId: string) => {
+      try {
+        await api(`/api/workspaces/${id}/files/${newFileId}/undo-replace`, { method: "POST" });
+        await refreshFiles();
+        notify("Попередню версію повернуто — обидва файли знову в перевірках.", "info");
+      } catch {
+        notify("Не вдалося повернути попередню версію.");
+      }
+    },
+    [id, notify, refreshFiles]
+  );
+
   return {
+    undoReplace,
     files,
     /** Replace the list (the page's initial load). */
     setFiles,

@@ -438,6 +438,8 @@ export interface FileStatusEvent {
   errorReason?: string | null;
   // Present when the worker auto-filed an inbox file (e.g. an OCR'd scan).
   folderId?: string | null;
+  // On "deleted": a corrected re-upload (this id) replaced the file.
+  replacedBy?: string;
 }
 
 export function toUiStatus(s: FileStatus): UiFileStatus {

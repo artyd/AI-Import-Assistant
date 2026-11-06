@@ -85,7 +85,8 @@ _Avoid_: Doc package, paperwork
 Several files that are the same document at different revisions, grouped so that
 they can be compared. A **corrected re-upload** (same doc type + document number
 + seller; transport papers: number + kind) replaces the earlier file
-automatically and the earlier file is deleted (`documents/supersede.ts`). Same
+automatically: the earlier file leaves the checks at once and is deleted after 7
+days, until then «Це не нова версія» restores it (`documents/supersede.ts`). Same
 number with a different seller is a different document (the two legs of a
 trilateral deal).
 _Avoid_: Duplicate, copy

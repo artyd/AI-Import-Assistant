@@ -29,6 +29,7 @@ import { analyzeBody, fetchLatestAnalysis, runAnalysis } from "@/lib/analysis/ru
 import { AgentLog, type LogEntry } from "@/components/chat/AgentLog";
 import { ShipmentPanel } from "@/components/shipment/ShipmentPanel";
 import { VersionsModal } from "@/components/files/VersionsModal";
+import { findSourceFile } from "@/lib/citations";
 import { FilePreviewModal } from "@/components/files/FilePreviewModal";
 import { SidebarNav } from "@/components/layout/SidebarNav";
 import { TopBar, type CompletenessStep } from "@/components/layout/TopBar";
@@ -99,15 +100,27 @@ export default function WorkspacePage() {
   const invalidateShipment = useShipmentData((s) => s.invalidate);
 
   // In-app notice banner (replaces blocking alert()).
-  const [notice, setNotice] = useState<{ text: string; tone: NoticeTone } | null>(null);
+  const [notice, setNotice] = useState<{ text: string; tone: NoticeTone; action?: { label: string; onClick: () => void } } | null>(null);
   const notify = useCallback(
     (text: string, tone: NoticeTone = "error") => setNotice({ text, tone }),
     []
   );
   const closeNotice = useCallback(() => setNotice(null), []);
+  // A corrected re-upload replaced a file: say so, with a way back within 7 days.
+  const undoReplaceRef = useRef<((newFileId: string) => Promise<void>) | null>(null);
+  const announceReplace = useCallback(
+    (oldName: string, undo: () => void) =>
+      setNotice({
+        text: `Завантажено нову версію документа — «${oldName}» прибрано з перевірок.`,
+        tone: "info",
+        action: { label: "Це не нова версія", onClick: undo },
+      }),
+    []
+  );
 
   // The shipment's files: list, live status, uploads and file operations.
   const {
+    undoReplace,
     files,
     setFiles,
     uploadProgress,
@@ -123,7 +136,13 @@ export default function WorkspacePage() {
     rereadAll,
     reindexFile,
     journal,
-  } = useShipmentFiles(id, { live: !!user && workspace != null, folders, notify });
+  } = useShipmentFiles(id, {
+    live: !!user && workspace != null,
+    folders,
+    notify,
+    onReplaced: (old, newId) => announceReplace(old.name, () => void undoReplaceRef.current?.(newId)),
+  });
+  undoReplaceRef.current = undoReplace;
   // Collection (Збірник) folders for the right panel when consolidated is active.
   const [colFolders, setColFolders] = useState<Folder[]>([]);
 
@@ -157,11 +176,22 @@ export default function WorkspacePage() {
   // A Збірник is an FCL workspace (spec 006): its files go through the same
   // pipeline as a shipment's (read, extracted, filed into lots), live via SSE.
   const fclId = chatKind === "consolidated" ? activeCollectionId : null;
+
+  // Opening a shipment means talking about its documents: a remembered «Звичайний»
+  // (global chat, no files) left users asking «перевір документи» into a chat that
+  // can't see them. Switch to «Постачання» whenever the opened shipment changes;
+  // the user can still pick «Звичайний» afterwards. Only the kind — not the view.
+  useEffect(() => {
+    if (useAppStore.getState().chatKind === "normal") useAppStore.setState({ chatKind: "supply" });
+  }, [id]);
   const fclFiles = useShipmentFiles(activeCollectionId ?? id, {
     live: !!user && !!fclId,
     folders: colFolders,
     notify,
+    onReplaced: (old, newId) => announceReplace(old.name, () => void fclUndoRef.current?.(newId)),
   });
+  const fclUndoRef = useRef<((newFileId: string) => Promise<void>) | null>(null);
+  fclUndoRef.current = fclFiles.undoReplace;
   const fcl = useFclOverview(fclId);
   const [fclScope, setFclScope] = useState<string>("fcl");
 
@@ -174,6 +204,17 @@ export default function WorkspacePage() {
 
   const [versionsFile, setVersionsFile] = useState<FileItem | null>(null);
   const [previewFile, setPreviewFile] = useState<FileItem | null>(null);
+  const [previewPage, setPreviewPage] = useState<number | null>(null);
+  // A cited source → its file in the tree (current version first), opened at the page.
+  const openSource = useCallback(
+    (list: FileItem[], name: string, page: number | null) => {
+      const file = findSourceFile(list, name);
+      if (!file) return notify(`Файл «${name}» не знайдено в постачанні`);
+      setPreviewFile(file);
+      setPreviewPage(page);
+    },
+    [notify]
+  );
 
   const paletteUploadRef = useRef<HTMLInputElement>(null);
 
@@ -1048,6 +1089,7 @@ export default function WorkspacePage() {
                     onMoveFile={fclFiles.moveFile}
                     docsStatus={fclFiles.docsStatus}
                     readingFeed={<ReadingFeed events={fclFiles.journal} files={fclFiles.files} />}
+                    onOpenSource={(name, pg) => openSource(fclFiles.files, name, pg)}
                     placeholder="Прикріпіть документи збірника 📎, вставте посилання на маніфест, або спитайте про партії…"
                     emptyTitle="Збірник (FCL)"
                     emptySubtitle={
@@ -1120,6 +1162,7 @@ export default function WorkspacePage() {
               onMoveFile={moveFile}
               docsStatus={chatKind === "supply" ? docsStatus : null}
               readingFeed={chatKind !== "normal" ? <ReadingFeed events={journal} files={files} /> : undefined}
+              onOpenSource={chatKind === "supply" ? (name, pg) => openSource(files, name, pg) : undefined}
               onTurnComplete={chatKind === "supply" ? onSupplyTurnComplete : undefined}
               onSurveyPersist={chatKind === "supply" ? persistSurvey : undefined}
               onSurveyIntake={chatKind === "supply" ? onSurveyIntake : undefined}
@@ -1246,10 +1289,12 @@ export default function WorkspacePage() {
         />
       )}
       {previewFile && (
-        <FilePreviewModal workspaceId={fclId ?? id} file={previewFile} onClose={() => setPreviewFile(null)} />
+        <FilePreviewModal workspaceId={fclId ?? id} file={previewFile} page={previewPage} onClose={() => { setPreviewFile(null); setPreviewPage(null); }} />
       )}
       {aiSettingsOpen && <AiSettingsModal onClose={() => setAiSettingsOpen(false)} />}
-      {notice && <NoticeBanner text={notice.text} tone={notice.tone} onClose={closeNotice} />}
+      {notice && (
+        <NoticeBanner text={notice.text} tone={notice.tone} action={notice.action} autoHideMs={notice.action ? 30_000 : undefined} onClose={closeNotice} />
+      )}
     </div>
   );
 }
