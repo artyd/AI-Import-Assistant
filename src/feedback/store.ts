@@ -113,13 +113,17 @@ export async function lessonsForPrompt(input: {
   workspaceId: string | null;
 }): Promise<DerivedLesson[]> {
   const { rows } = await query<{ text: string; scope: LessonScope }>(
+    // The team learns together: a global lesson applies to everyone's chats of
+    // that kind, a workspace lesson to everyone working on that shipment (the
+    // chat route already checked access to it). ownerId is kept for the caller's
+    // signature; only deleting a lesson is owner-scoped.
     `SELECT text, scope FROM agent_lessons
-      WHERE owner_id = $1 AND active
-        AND ((scope = 'global' AND chat_kind = $2)
-          OR (scope = 'workspace' AND $3::uuid IS NOT NULL AND workspace_id = $3::uuid))
+      WHERE active
+        AND ((scope = 'global' AND chat_kind = $1)
+          OR (scope = 'workspace' AND $2::uuid IS NOT NULL AND workspace_id = $2::uuid))
       ORDER BY created_at DESC
       LIMIT ${MAX_PROMPT_LESSONS}`,
-    [input.ownerId, input.chatKind, input.workspaceId],
+    [input.chatKind, input.workspaceId],
   );
   return rows;
 }
