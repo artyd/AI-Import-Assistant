@@ -37,10 +37,20 @@ separate site) into our product. People who follow the register must not get
 `supply_shipments`: `id`, `legacy_id`, `name`, `category`, `action` (next
 step), `note`, `archived`, `steps` (JSON `[{id,name,plan,actual,state,note}]`,
 `state ∈ active|done|pending`, dates `YYYY-MM-DD` or empty), `custom` (JSON of
-extra-field values), `position`, `created_at`, `updated_at`.
+extra-field values), `pinned`, `groups` (JSON of group ids), `mode`
+(transport, `''` = read from the stage names), `position`, `created_at`, `updated_at`.
 
 `supply_settings` (one row): `stages`, `categories`, `fields`
-(`[{id,name,type}]`), `templates` (`[{id,name,stages[]}]`).
+(`[{id,name,type}]`), `templates` (`[{id,name,stages[]}]`), `groups`
+(`[{id,name}]`), `category_icons` (category → icon key).
+
+**Marks** (2026-11-06): a star (обрані: always on top of the list, in every
+sort), groups (a shipment can be in several; filter chips under the categories;
+made in Довідники or straight from the card) and transport. They are the team's
+own annotations: saved at once in edit mode, one undoable `mark` history line
+each, and never block the legacy sync. Each category wears a Hugeicons icon
+(Міжнародні → globe, Україна → pin, Зразки → test tube by default; changeable in
+Довідники), so a row says what the shipment is without opening it.
 
 `supply_history`: `id`, `at`, `actor`, `text`, `shipment_id`, `before`,
 `after` (JSON snapshots), `undone_at`. Imported old history has no snapshots

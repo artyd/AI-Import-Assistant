@@ -46,6 +46,25 @@ export function describeChange(before: SupplyShipment, after: SupplyShipment): s
   return `${name}: ${parts.slice(0, 3).join('; ')}${parts.length > 3 ? ` і ще ${parts.length - 3}` : ''}`;
 }
 
+const MODE_UA: Record<string, string> = { '': 'за етапами', sea: 'море', air: 'авіа', rail: 'залізниця', road: 'авто', courier: 'курʼєр' };
+
+/** History line for a marks change (star / groups / transport); '' when nothing changed. */
+export function describeMarks(
+  before: Pick<SupplyShipment, 'name' | 'pinned' | 'groups' | 'mode'>,
+  after: Pick<SupplyShipment, 'name' | 'pinned' | 'groups' | 'mode'>,
+  groupNames: Map<string, string>,
+): string {
+  const parts: string[] = [];
+  if (before.pinned !== after.pinned) parts.push(after.pinned ? 'додано в обрані' : 'прибрано з обраних');
+  const name = (id: string) => `«${groupNames.get(id) ?? id}»`;
+  const added = after.groups.filter((g) => !before.groups.includes(g));
+  const removed = before.groups.filter((g) => !after.groups.includes(g));
+  if (added.length) parts.push(`у групу ${added.map(name).join(', ')}`);
+  if (removed.length) parts.push(`з групи ${removed.map(name).join(', ')}`);
+  if (before.mode !== after.mode) parts.push(`транспорт: ${MODE_UA[after.mode] ?? after.mode}`);
+  return parts.length ? `${after.name}: ${parts.join('; ')}` : '';
+}
+
 /** A plain-text line about one shipment, for the agent and the Excel export. */
 export function shipmentLine(s: SupplyShipment, today: string): string {
   const d = deadline(s, today);

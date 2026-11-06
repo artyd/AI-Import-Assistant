@@ -2,9 +2,14 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { supplyApi } from "@/lib/supply/api";
-import { categoryColor, currentStep, daysBetween, deadline, newStepId, normalizeSteps, shortDate } from "@/lib/supply/logic";
-import type { ShipmentDraft, SupplyHistoryEntry, SupplySettings, SupplyShipment, SupplyStep } from "@/lib/supply/types";
+import { MODES, categoryColor, categoryIcon, currentStep, daysBetween, deadline, newStepId, normalizeSteps, shortDate, transportMode } from "@/lib/supply/logic";
+import type { ShipmentDraft, SupplyGroup, SupplyHistoryEntry, SupplyMarks, SupplyMode, SupplySettings, SupplyShipment, SupplyStep } from "@/lib/supply/types";
+import { CategoryIcon, GroupIcon, ModeIcon, StarMark } from "./KindIcon";
 import { IArch, ICheck, IDown, IFlag, ILock, IPlus, ITrash, IUnlock, IUp, IX } from "./SupplyIcons";
+
+function modeLabel(m: SupplyMode | null): string {
+  return m ? MODES.find((x) => x.key === m)?.label ?? "" : "невідомо";
+}
 
 function toDraft(s: SupplyShipment | null, category: string): ShipmentDraft {
   return s
@@ -13,7 +18,7 @@ function toDraft(s: SupplyShipment | null, category: string): ShipmentDraft {
 }
 
 export function ShipmentDrawer({
-  open, shipment, settings, defaultCategory, editing, today, onClose, onSave, onArchive, onComplete, onUnlock,
+  open, shipment, settings, defaultCategory, editing, today, onClose, onSave, onArchive, onComplete, onUnlock, onMarks, onCreateGroup,
 }: {
   open: boolean;
   shipment: SupplyShipment | null;
@@ -26,6 +31,8 @@ export function ShipmentDrawer({
   onArchive: (s: SupplyShipment, archived: boolean) => void;
   onComplete: (s: SupplyShipment) => void;
   onUnlock: () => void;
+  onMarks: (s: SupplyShipment, m: SupplyMarks, toast: string) => Promise<void>;
+  onCreateGroup: (name: string) => Promise<SupplyGroup | null>;
 }) {
   const creating = open && !shipment;
   const [shown, setShown] = useState(false);
@@ -33,6 +40,7 @@ export function ShipmentDrawer({
   const [saving, setSaving] = useState(false);
   const [history, setHistory] = useState<SupplyHistoryEntry[]>([]);
   const [newStage, setNewStage] = useState("");
+  const [newGroup, setNewGroup] = useState("");
 
   useEffect(() => {
     if (!open) return setShown(false);
@@ -73,6 +81,21 @@ export function ShipmentDrawer({
   const dl = deadline({ steps: draft.steps }, today);
   const cur = currentStep(draft.steps);
   const C = 2 * Math.PI * 19;
+  const mode = transportMode({ mode: s?.mode ?? "", steps: draft.steps });
+  const groupName = new Map(settings.groups.map((g) => [g.id, g.name]));
+  const toggleGroup = (g: SupplyGroup) => {
+    if (!s) return;
+    const on = s.groups.includes(g.id);
+    void onMarks(s, { groups: on ? s.groups.filter((x) => x !== g.id) : [...s.groups, g.id] }, on ? `Прибрано з групи «${g.name}»` : `Додано в групу «${g.name}»`);
+  };
+  const addGroup = async () => {
+    const name = newGroup.trim();
+    if (!s || !name) return;
+    const g = await onCreateGroup(name);
+    if (!g) return;
+    setNewGroup("");
+    if (!s.groups.includes(g.id)) void onMarks(s, { groups: [...s.groups, g.id] }, `Додано в групу «${g.name}»`);
+  };
 
   const save = async () => {
     if (!draft.name.trim()) return;
@@ -94,6 +117,14 @@ export function ShipmentDrawer({
             ) : (
               <h2>{draft.name}</h2>
             )}
+            {s && !s.archived && (edit ? (
+              <button className={`x star${s.pinned ? " on" : ""}`} aria-pressed={s.pinned} aria-label={s.pinned ? "Прибрати з обраних" : "Додати в обрані"} title={s.pinned ? "Прибрати з обраних" : "В обрані (завжди вгорі)"}
+                onClick={() => void onMarks(s, { pinned: !s.pinned }, s.pinned ? "Прибрано з обраних" : "В обраних, тепер завжди вгорі")}>
+                <StarMark on={s.pinned} size={18} />
+              </button>
+            ) : s.pinned ? (
+              <span className="x star on" title="Обрана"><StarMark on size={18} /></span>
+            ) : null)}
             <button className="x" onClick={onClose} aria-label="Закрити"><IX /></button>
           </div>
           <div className="meta">
@@ -102,7 +133,15 @@ export function ShipmentDrawer({
                 {settings.categories.map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
             ) : (
-              <span className="chip"><i />{draft.category}</span>
+              <span className="chip" style={{ color: "var(--cc)" }}><CategoryIcon icon={categoryIcon(settings, draft.category)} size={14} /><span style={{ color: "var(--muted)" }}>{draft.category}</span></span>
+            )}
+            {s && edit ? (
+              <select className="ed" style={{ width: "auto", padding: "4px 8px" }} value={s.mode} aria-label="Транспорт"
+                onChange={(e) => { const m = e.target.value as SupplyMode; void onMarks(s, { mode: m }, `Транспорт: ${MODES.find((x) => x.key === m)?.label ?? ""}`); }}>
+                {MODES.map((m) => <option key={m.key} value={m.key}>{m.key ? m.label : `Транспорт: ${modeLabel(transportMode({ mode: "", steps: s.steps }))}`}</option>)}
+              </select>
+            ) : (
+              mode && <span className="chip"><ModeIcon mode={mode} size={14} />{modeLabel(mode)}</span>
             )}
             {s && <span className="chip">Оновлено {shortDate(s.updatedAt.slice(0, 10))}</span>}
             {s?.archived && <span className="chip">В архіві</span>}
@@ -221,6 +260,32 @@ export function ShipmentDrawer({
               <div className="notebox">{draft.note || "—"}</div>
             )}
           </div>
+
+          {s && (edit || s.groups.some((g) => groupName.has(g))) && (
+            <div className="sec">
+              <h5>Групи</h5>
+              {edit ? (
+                <div style={{ display: "grid", gap: 8 }}>
+                  {settings.groups.length > 0 && (
+                    <div className="gpick">
+                      {settings.groups.map((g) => (
+                        <button key={g.id} aria-pressed={s.groups.includes(g.id)} onClick={() => toggleGroup(g)}><GroupIcon />{g.name}</button>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <input className="ed" value={newGroup} placeholder="Нова група…" aria-label="Нова група" maxLength={60}
+                      onChange={(e) => setNewGroup(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void addGroup(); }} />
+                    <button className="ghost" disabled={!newGroup.trim()} onClick={() => void addGroup()}><IPlus />Група</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="gpick">
+                  {s.groups.filter((g) => groupName.has(g)).map((g) => <span key={g}><GroupIcon />{groupName.get(g)}</span>)}
+                </div>
+              )}
+            </div>
+          )}
 
           {settings.fields.length > 0 && (
             <div className="sec">

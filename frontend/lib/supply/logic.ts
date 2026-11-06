@@ -1,4 +1,4 @@
-import type { SupplyShipment, SupplyStep } from "./types";
+import type { SupplyMode, SupplySettings, SupplyShipment, SupplyStep } from "./types";
 
 // Pure helpers for the Поставки register (no DOM, unit-tested).
 
@@ -52,15 +52,53 @@ export function deadlineLabel(d: ReturnType<typeof deadline>): string {
 
 export type SortKey = "date" | "name" | "updated";
 
+/** Starred shipments first, then by the chosen key. */
 export function sortShipments(list: SupplyShipment[], key: SortKey, today: string): SupplyShipment[] {
   const out = [...list];
-  if (key === "name") return out.sort((a, b) => a.name.localeCompare(b.name, "uk"));
-  if (key === "updated") return out.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const star = (a: SupplyShipment, b: SupplyShipment) => Number(b.pinned) - Number(a.pinned);
+  if (key === "name") return out.sort((a, b) => star(a, b) || a.name.localeCompare(b.name, "uk"));
+  if (key === "updated") return out.sort((a, b) => star(a, b) || b.updatedAt.localeCompare(a.updatedAt));
   const rank = (s: SupplyShipment) => {
     const d = deadline(s, today);
     return d.kind === "none" ? "9999" : d.kind === "done" ? `8${d.date}` : d.date;
   };
-  return out.sort((a, b) => rank(a).localeCompare(rank(b)) || a.position - b.position);
+  return out.sort((a, b) => star(a, b) || rank(a).localeCompare(rank(b)) || a.position - b.position);
+}
+
+/** Icon keys a category can wear (drawn in components/supply/KindIcon.tsx). */
+export const CATEGORY_ICONS = ["globe", "ukraine", "sample", "box", "truck", "plane", "ship", "train", "flask", "tag"] as const;
+export type CategoryIconKey = (typeof CATEGORY_ICONS)[number];
+
+/** The icon set for a category in Довідники, else a guess from its name, else a tag. */
+export function categoryIcon(settings: Pick<SupplySettings, "categoryIcons">, category: string): CategoryIconKey {
+  const set = settings.categoryIcons?.[category];
+  if (set && (CATEGORY_ICONS as readonly string[]).includes(set)) return set as CategoryIconKey;
+  const n = category.toLowerCase();
+  if (/міжнар|междунар|імпорт|international/.test(n)) return "globe";
+  if (/україн|украин/.test(n)) return "ukraine";
+  if (/зраз|образ|sample/.test(n)) return "sample";
+  return "tag";
+}
+
+export const MODES: { key: SupplyMode; label: string }[] = [
+  { key: "", label: "За етапами" },
+  { key: "sea", label: "Море" },
+  { key: "air", label: "Авіа" },
+  { key: "rail", label: "Залізниця" },
+  { key: "road", label: "Авто" },
+  { key: "courier", label: "Курʼєр" },
+];
+
+/** Transport: the one set by hand, else read from the stage names; null = unknown. */
+export function transportMode(s: Pick<SupplyShipment, "mode" | "steps">): Exclude<SupplyMode, ""> | null {
+  if (s.mode) return s.mode;
+  const names = s.steps.map((x) => x.name.toLowerCase()).join(" | ");
+  if (/виліт|вылет|авіа|авиа|аеропорт|аэропорт/.test(names)) return "air";
+  if (/порт|судн|фрахт|коносамент|букінг|букинг/.test(names)) return "sea";
+  if (/залізниц|жд|ж\/д|вагон/.test(names)) return "rail";
+  if (/кур.?єр|курьер|dhl|fedex|ups|нова пошта|посилк/.test(names)) return "courier";
+  if (/автомоб|авто|завантаж|погрузк|машин/.test(names)) return "road";
+  return null;
 }
 
 const fold = (s: string) => s.toLowerCase().replace(/ё/g, "е");

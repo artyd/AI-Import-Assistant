@@ -25,12 +25,13 @@ vi.mock('../store.js', async () => {
     }),
     updateShipment: vi.fn(),
     setArchived: vi.fn(),
+    setMarks: vi.fn(async (id: string, marks: object) => ({ id, ...marks })),
     putSettings: vi.fn(),
     undoHistory: vi.fn(),
   };
 });
 
-const { currentStep, deadline, describeChange, shipmentLine } = await import('../logic.js');
+const { currentStep, deadline, describeChange, describeMarks, shipmentLine } = await import('../logic.js');
 const { mapLegacy } = await import('../importLegacy.js');
 const { signSupplyToken, verifySupplyToken } = await import('../access.js');
 const { signToken, verifyToken } = await import('../../auth/jwt.js');
@@ -65,6 +66,15 @@ describe('register logic', () => {
     expect(describeChange(before, after)).toBe('Сорбітол: «Порт» виконано 03.11; «ЖД» план 07.11 → 09.11');
     expect(describeChange(before, { ...before, archived: true })).toBe('В архів: Сорбітол');
     expect(describeChange(before, before)).toBe('Змінено поставку: Сорбітол');
+  });
+
+  it('describes marks: star, groups, transport', () => {
+    const before = { name: 'Сорбітол', pinned: false, groups: ['g1'], mode: '' as const };
+    const names = new Map([['g1', 'Клієнт А'], ['g2', 'Терміново']]);
+    expect(describeMarks(before, { ...before, pinned: true, groups: ['g2'], mode: 'sea' }, names)).toBe(
+      'Сорбітол: додано в обрані; у групу «Терміново»; з групи «Клієнт А»; транспорт: море',
+    );
+    expect(describeMarks(before, before, names)).toBe('');
   });
 
   it('one plain line per shipment for the agent', () => {
@@ -145,5 +155,17 @@ describe('supply routes', () => {
   it('a Штурман session can edit too', async () => {
     const res = await (await app()).inject({ method: 'GET', url: '/api/supply/session', headers: { authorization: `Bearer ${signToken({ sub: 'u', email: 'log@a.ua' })}` } });
     expect(res.json()).toMatchObject({ canEdit: true, codeLogin: true, codeLength: 6 });
+  });
+
+  it('marks need the code and a valid body', async () => {
+    const a = await app();
+    const url = '/api/supply/shipments/6f1c1f8e-2b7a-4c3e-9d7b-1a2b3c4d5e6f/marks';
+    expect((await a.inject({ method: 'PATCH', url, payload: { pinned: true } })).statusCode).toBe(401);
+    const auth = { authorization: `Bearer ${signSupplyToken().token}` };
+    expect((await a.inject({ method: 'PATCH', url, headers: auth, payload: {} })).statusCode).toBe(400);
+    expect((await a.inject({ method: 'PATCH', url, headers: auth, payload: { mode: 'boat' } })).statusCode).toBe(400);
+    const ok = await a.inject({ method: 'PATCH', url, headers: auth, payload: { pinned: true, groups: ['g1'] } });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toMatchObject({ shipment: { pinned: true, groups: ['g1'] } });
   });
 });

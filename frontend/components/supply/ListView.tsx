@@ -1,13 +1,15 @@
 "use client";
 
-import { categoryColor, currentStep, deadline, deadlineLabel, shortDate, sortShipments, type SortKey } from "@/lib/supply/logic";
-import type { SupplyShipment } from "@/lib/supply/types";
+import { categoryColor, categoryIcon, currentStep, deadline, deadlineLabel, shortDate, sortShipments, transportMode, MODES, type SortKey } from "@/lib/supply/logic";
+import type { SupplySettings, SupplyShipment } from "@/lib/supply/types";
+import { CategoryIcon, GroupIcon, ModeIcon, StarMark } from "./KindIcon";
 import { IArch, ICheck, IChev, IFlag } from "./SupplyIcons";
 
 const BADGE: Record<string, string> = { overdue: "b-over", soon: "b-soon", later: "b-later", none: "b-none", done: "b-ok" };
 
 /** Deadline groups shown as headers when the list is sorted by date. */
 const GROUPS = [
+  { key: "pinned", label: "Обрані", color: "var(--star)" },
   { key: "overdue", label: "Прострочено", color: "var(--err)" },
   { key: "near", label: "Найближчі дні", color: "var(--warn)" },
   { key: "week", label: "Цього тижня", color: "var(--accent)" },
@@ -16,21 +18,23 @@ const GROUPS = [
   { key: "done", label: "Етап виконано", color: "var(--ok)" },
 ] as const;
 function groupOf(s: SupplyShipment, today: string): (typeof GROUPS)[number]["key"] {
+  if (s.pinned) return "pinned";
   const d = deadline(s, today);
   if (d.kind === "overdue" || d.kind === "none" || d.kind === "done" || d.kind === "later") return d.kind;
   return (d.days ?? 0) <= 2 ? "near" : "week";
 }
 
 export function ListView({
-  list, categories, sort, today, editing, onOpen, onComplete, archive, onRestore,
+  list, settings, sort, today, editing, onOpen, onComplete, onStar, archive, onRestore,
 }: {
   list: SupplyShipment[];
-  categories: string[];
+  settings: SupplySettings;
   sort: SortKey;
   today: string;
   editing: boolean;
   onOpen: (id: string) => void;
   onComplete?: (s: SupplyShipment) => void;
+  onStar?: (s: SupplyShipment) => void;
   archive?: boolean;
   onRestore?: (s: SupplyShipment) => void;
 }) {
@@ -49,6 +53,8 @@ export function ListView({
     );
   }
 
+  const categories = settings.categories;
+  const groupName = new Map(settings.groups.map((g) => [g.id, g.name]));
   const sorted = sortShipments(list, sort, today);
   const grouped = sort === "date" && !archive;
   const counts = new Map<string, number>();
@@ -64,6 +70,7 @@ export function ListView({
         const st = currentStep(s.steps);
         const dl = deadline(s, today);
         const done = s.steps.filter((x) => x.state === "done").length;
+        const mode = transportMode(s);
         return (
           <div key={s.id} style={{ display: "contents" }}>
           {head && (
@@ -83,9 +90,30 @@ export function ListView({
             aria-label={`Відкрити: ${s.name}`}
           >
             <span className="cb" />
-            <div style={{ minWidth: 0 }}>
-              <div className="nm">{s.name}</div>
-              <div className="nt">{s.note.split("\n")[0] || s.category}</div>
+            <div className="nmw">
+              <span className="kind" title={s.category} aria-label={s.category}>
+                <CategoryIcon icon={categoryIcon(settings, s.category)} />
+              </span>
+              <div style={{ minWidth: 0 }}>
+                <div className="nm">
+                  {s.name}
+                  {onStar && editing && !archive ? (
+                    <button className={`star${s.pinned ? " on" : ""}`} aria-pressed={s.pinned} aria-label={s.pinned ? "Прибрати з обраних" : "Додати в обрані"}
+                      title={s.pinned ? "Прибрати з обраних" : "В обрані (завжди вгорі)"} onClick={(e) => { e.stopPropagation(); onStar(s); }}>
+                      <StarMark on={s.pinned} />
+                    </button>
+                  ) : s.pinned ? (
+                    <span className="star on" title="Обрана"><StarMark on /></span>
+                  ) : null}
+                </div>
+                <div className="nt">
+                  {mode && <span className="mode" title={MODES.find((m) => m.key === mode)?.label}><ModeIcon mode={mode} size={13} /></span>}
+                  {s.groups.filter((g) => groupName.has(g)).map((g) => (
+                    <span key={g} className="gtag"><GroupIcon size={11} />{groupName.get(g)}</span>
+                  ))}
+                  {s.note.split("\n")[0] || s.category}
+                </div>
+              </div>
             </div>
             {archive ? (
               <div className="nt">{s.category}</div>

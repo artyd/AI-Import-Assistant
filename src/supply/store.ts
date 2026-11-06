@@ -1,8 +1,10 @@
 import type pg from 'pg';
 import { pool, query } from '../db/pool.js';
-import { describeChange } from './logic.js';
+import { describeChange, describeMarks } from './logic.js';
 import type {
   ShipmentInput,
+  SupplyMarks,
+  SupplyMode,
   ShipmentPatch,
   SupplyHistoryEntry,
   SupplySettings,
@@ -19,12 +21,15 @@ interface ShipmentRow {
   archived: boolean;
   steps: SupplyStep[];
   custom: Record<string, string>;
+  pinned: boolean;
+  groups: string[];
+  mode: SupplyMode;
   position: number;
   created_at: Date;
   updated_at: Date;
 }
 
-const COLS = 'id, name, category, action, note, archived, steps, custom, position, created_at, updated_at';
+const COLS = 'id, name, category, action, note, archived, steps, custom, pinned, groups, mode, position, created_at, updated_at';
 
 function toShipment(r: ShipmentRow): SupplyShipment {
   return {
@@ -36,6 +41,9 @@ function toShipment(r: ShipmentRow): SupplyShipment {
     archived: r.archived,
     steps: Array.isArray(r.steps) ? r.steps : [],
     custom: r.custom && typeof r.custom === 'object' ? r.custom : {},
+    pinned: r.pinned === true,
+    groups: Array.isArray(r.groups) ? r.groups : [],
+    mode: r.mode ?? '',
     position: r.position,
     createdAt: r.created_at.toISOString(),
     updatedAt: r.updated_at.toISOString(),
@@ -68,7 +76,7 @@ async function tx<T>(fn: (c: pg.PoolClient) => Promise<T>): Promise<T> {
 
 async function logHistory(
   c: pg.PoolClient,
-  e: { actor: string; kind: 'shipment' | 'settings'; text: string; shipmentId: string | null; before: unknown; after: unknown },
+  e: { actor: string; kind: 'shipment' | 'mark' | 'settings'; text: string; shipmentId: string | null; before: unknown; after: unknown },
 ): Promise<void> {
   await c.query(
     'INSERT INTO supply_history (actor, kind, text, shipment_id, before, after) VALUES ($1, $2, $3, $4, $5, $6)',
@@ -81,9 +89,19 @@ export async function listShipments(): Promise<SupplyShipment[]> {
   return rows.map(toShipment);
 }
 
+const SETTINGS_COLS = 'stages, categories, fields, templates, groups, category_icons AS "categoryIcons"';
+
 export async function getSettings(): Promise<SupplySettings> {
-  const { rows } = await query<SupplySettings>('SELECT stages, categories, fields, templates FROM supply_settings WHERE id = 1');
-  return rows[0] ?? { stages: [], categories: ['Міжнародні'], fields: [], templates: [] };
+  const { rows } = await query<SupplySettings>(`SELECT ${SETTINGS_COLS} FROM supply_settings WHERE id = 1`);
+  return rows[0] ?? { stages: [], categories: ['Міжнародні'], fields: [], templates: [], groups: [], categoryIcons: {} };
+}
+
+async function writeSettings(c: pg.PoolClient, s: SupplySettings): Promise<void> {
+  await c.query(
+    `INSERT INTO supply_settings (id, stages, categories, fields, templates, groups, category_icons, updated_at) VALUES (1, $1, $2, $3, $4, $5, $6, now())
+     ON CONFLICT (id) DO UPDATE SET stages = $1, categories = $2, fields = $3, templates = $4, groups = $5, category_icons = $6, updated_at = now()`,
+    [JSON.stringify(s.stages), JSON.stringify(s.categories), JSON.stringify(s.fields), JSON.stringify(s.templates), JSON.stringify(s.groups ?? []), JSON.stringify(s.categoryIcons ?? {})],
+  );
 }
 
 /** Changes whenever anything is written (every write logs history). */
@@ -114,9 +132,10 @@ async function lockShipment(c: pg.PoolClient, id: string): Promise<SupplyShipmen
 
 async function writeShipment(c: pg.PoolClient, s: SupplyShipment): Promise<SupplyShipment> {
   const { rows } = await c.query<ShipmentRow>(
-    `UPDATE supply_shipments SET name = $2, category = $3, action = $4, note = $5, archived = $6, steps = $7, custom = $8, updated_at = now()
+    `UPDATE supply_shipments SET name = $2, category = $3, action = $4, note = $5, archived = $6, steps = $7, custom = $8,
+       pinned = $9, groups = $10, mode = $11, updated_at = now()
      WHERE id = $1 RETURNING ${COLS}`,
-    [s.id, s.name, s.category, s.action, s.note, s.archived, JSON.stringify(s.steps), JSON.stringify(s.custom)],
+    [s.id, s.name, s.category, s.action, s.note, s.archived, JSON.stringify(s.steps), JSON.stringify(s.custom), s.pinned, JSON.stringify(s.groups), s.mode],
   );
   return toShipment(rows[0]!);
 }
@@ -143,14 +162,35 @@ export async function setArchived(id: string, archived: boolean, actor: string):
   });
 }
 
+/**
+ * Star, groups, transport: one history line of kind 'mark'. Not an edit of the
+ * shipment's content, so no optimistic-concurrency check and the legacy sync
+ * still updates it.
+ */
+export async function setMarks(id: string, marks: SupplyMarks, actor: string): Promise<SupplyShipment> {
+  return tx(async (c) => {
+    const before = await lockShipment(c, id);
+    const { rows } = await c.query<{ groups: { id: string; name: string }[] }>('SELECT groups FROM supply_settings WHERE id = 1');
+    const known = new Map((rows[0]?.groups ?? []).map((g) => [g.id, g.name]));
+    const next: SupplyShipment = {
+      ...before,
+      pinned: marks.pinned ?? before.pinned,
+      // Only groups that exist in the dictionary.
+      groups: marks.groups ? [...new Set(marks.groups)].filter((g) => known.has(g)) : before.groups,
+      mode: marks.mode ?? before.mode,
+    };
+    const text = describeMarks(before, next, known);
+    if (!text) return before;
+    const after = await writeShipment(c, next);
+    await logHistory(c, { actor, kind: 'mark', text, shipmentId: id, before, after });
+    return after;
+  });
+}
+
 export async function putSettings(next: SupplySettings, actor: string): Promise<SupplySettings> {
   return tx(async (c) => {
-    const { rows } = await c.query<SupplySettings>('SELECT stages, categories, fields, templates FROM supply_settings WHERE id = 1 FOR UPDATE');
-    await c.query(
-      `INSERT INTO supply_settings (id, stages, categories, fields, templates, updated_at) VALUES (1, $1, $2, $3, $4, now())
-       ON CONFLICT (id) DO UPDATE SET stages = $1, categories = $2, fields = $3, templates = $4, updated_at = now()`,
-      [JSON.stringify(next.stages), JSON.stringify(next.categories), JSON.stringify(next.fields), JSON.stringify(next.templates)],
-    );
+    const { rows } = await c.query<SupplySettings>(`SELECT ${SETTINGS_COLS} FROM supply_settings WHERE id = 1 FOR UPDATE`);
+    await writeSettings(c, next);
     await logHistory(c, { actor, kind: 'settings', text: 'Змінено довідники', shipmentId: null, before: rows[0] ?? null, after: next });
     return next;
   });
@@ -193,20 +233,24 @@ export async function undoHistory(historyId: number, actor: string): Promise<voi
     if (h.kind === 'settings') {
       const prev = h.before as SupplySettings | null;
       if (!prev) throw new SupplyNotUndoable();
-      await c.query(
-        'UPDATE supply_settings SET stages = $1, categories = $2, fields = $3, templates = $4, updated_at = now() WHERE id = 1',
-        [JSON.stringify(prev.stages), JSON.stringify(prev.categories), JSON.stringify(prev.fields), JSON.stringify(prev.templates)],
-      );
+      // Snapshots from before groups/icons existed lack them: restore as empty.
+      await writeSettings(c, { ...prev, groups: prev.groups ?? [], categoryIcons: prev.categoryIcons ?? {} });
       await logHistory(c, { actor, kind: 'settings', text: `Відкочено: ${h.text}`, shipmentId: null, before: h.after, after: prev });
     } else {
       if (!h.shipment_id) throw new SupplyNotUndoable();
       const now = await lockShipment(c, h.shipment_id);
       const prev = h.before as SupplyShipment | null;
-      const restored: SupplyShipment = prev
-        ? { ...now, name: prev.name, category: prev.category, action: prev.action, note: prev.note, archived: prev.archived, steps: prev.steps, custom: prev.custom }
-        : { ...now, archived: true };
+      // A mark undo puts back only the marks; a content undo only the content.
+      const restored: SupplyShipment =
+        h.kind === 'mark'
+          ? prev
+            ? { ...now, pinned: prev.pinned === true, groups: Array.isArray(prev.groups) ? prev.groups : [], mode: prev.mode ?? '' }
+            : now
+          : prev
+            ? { ...now, name: prev.name, category: prev.category, action: prev.action, note: prev.note, archived: prev.archived, steps: prev.steps, custom: prev.custom }
+            : { ...now, archived: true };
       const after = await writeShipment(c, restored);
-      await logHistory(c, { actor, kind: 'shipment', text: `Відкочено: ${h.text}`, shipmentId: now.id, before: now, after });
+      await logHistory(c, { actor, kind: h.kind === 'mark' ? 'mark' : 'shipment', text: `Відкочено: ${h.text}`, shipmentId: now.id, before: now, after });
     }
     await c.query('UPDATE supply_history SET undone_at = now() WHERE id = $1', [historyId]);
   });

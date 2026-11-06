@@ -40,6 +40,24 @@ export type ShipmentPatch = z.infer<typeof shipmentPatchSchema>;
 
 export const archiveSchema = z.object({ archived: z.boolean() });
 
+/** Transport of a shipment; '' = worked out from its steps. */
+export const MODES = ['', 'sea', 'air', 'rail', 'road', 'courier'] as const;
+export type SupplyMode = (typeof MODES)[number];
+
+/**
+ * Marks: the team's own annotations (star, groups, transport). The old site has
+ * none of them, so changing a mark never counts as «edited here» for the sync.
+ */
+export const marksSchema = z
+  .object({
+    pinned: z.boolean(),
+    groups: z.array(z.string().min(1).max(64)).max(20),
+    mode: z.enum(MODES),
+  })
+  .partial()
+  .refine((m) => Object.keys(m).length > 0, 'nothing to change');
+export type SupplyMarks = z.infer<typeof marksSchema>;
+
 export const settingsSchema = z.object({
   stages: z.array(z.string().trim().min(1).max(80)).max(200),
   categories: z.array(z.string().trim().min(1).max(60)).min(1).max(30),
@@ -49,6 +67,8 @@ export const settingsSchema = z.object({
   templates: z
     .array(z.object({ id: z.string().min(1).max(64), name: z.string().trim().min(1).max(80), stages: z.array(z.string().trim().min(1).max(80)).min(1).max(30) }))
     .max(50),
+  groups: z.array(z.object({ id: z.string().min(1).max(64), name: z.string().trim().min(1).max(60) })).max(50).default([]),
+  categoryIcons: z.record(z.string().max(60), z.string().max(30)).default({}),
 });
 export type SupplySettings = z.infer<typeof settingsSchema>;
 
@@ -61,6 +81,9 @@ export interface SupplyShipment {
   archived: boolean;
   steps: SupplyStep[];
   custom: Record<string, string>;
+  pinned: boolean;
+  groups: string[];
+  mode: SupplyMode;
   position: number;
   createdAt: string;
   updatedAt: string;
@@ -70,7 +93,7 @@ export interface SupplyHistoryEntry {
   id: number;
   at: string;
   actor: string;
-  kind: 'shipment' | 'settings' | 'legacy';
+  kind: 'shipment' | 'mark' | 'settings' | 'legacy';
   text: string;
   shipmentId: string | null;
   undoable: boolean;

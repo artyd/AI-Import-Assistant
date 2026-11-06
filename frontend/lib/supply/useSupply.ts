@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SupplyApiError, getSupplyToken, setSupplyToken, supplyApi } from "./api";
-import type { ShipmentDraft, SupplyData, SupplySettings, SupplyShipment } from "./types";
+import type { ShipmentDraft, SupplyData, SupplyMarks, SupplySettings, SupplyShipment } from "./types";
 
 const POLL_MS = 30_000;
 
@@ -118,6 +118,13 @@ export function useSupply() {
     return shipment;
   }), [replace, write]);
 
+  /** Star / groups / transport: saved at once, no edit-conflict check. */
+  const marks = useCallback(async (s: SupplyShipment, m: SupplyMarks) => write(async () => {
+    const { shipment } = await supplyApi.marks(s.id, m);
+    replace(shipment);
+    return shipment;
+  }), [replace, write]);
+
   const archive = useCallback(async (s: SupplyShipment, archived: boolean) => write(async () => {
     const { shipment } = await supplyApi.archive(s.id, archived);
     replace(shipment);
@@ -143,7 +150,7 @@ export function useSupply() {
     await reload();
   }), [reload, write]);
 
-  return { data, error, editing, codeLength, codeLogin, reload, unlock, lock, create, update, archive, saveSettings, undoLast, undo };
+  return { data, error, editing, codeLength, codeLogin, reload, unlock, lock, create, update, marks, archive, saveSettings, undoLast, undo };
 }
 
 export type SupplyStore = ReturnType<typeof useSupply>;

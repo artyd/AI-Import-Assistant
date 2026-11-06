@@ -3,7 +3,7 @@
 // under its own key. Reads are public; writes send the supply token, or the
 // Штурман session token when there is one (a Штурман session may edit too).
 
-import type { ShipmentDraft, SupplyData, SupplyHistoryEntry, SupplySettings, SupplyShipment } from "./types";
+import type { ShipmentDraft, SupplyData, SupplyMarks, SupplyHistoryEntry, SupplySettings, SupplyShipment } from "./types";
 
 const SUPPLY_TOKEN_KEY = "supply_token";
 const SHTURMAN_TOKEN_KEY = "aia_token";
@@ -79,6 +79,7 @@ export const supplyApi = {
   create: (draft: ShipmentDraft) => call<{ shipment: SupplyShipment }>("/api/supply/shipments", { body: draft }),
   update: (id: string, patch: Partial<ShipmentDraft> & { expectedUpdatedAt?: string }) =>
     call<{ shipment: SupplyShipment }>(`/api/supply/shipments/${id}`, { method: "PATCH", body: patch }),
+  marks: (id: string, marks: SupplyMarks) => call<{ shipment: SupplyShipment }>(`/api/supply/shipments/${id}/marks`, { method: "PATCH", body: marks }),
   archive: (id: string, archived: boolean) => call<{ shipment: SupplyShipment }>(`/api/supply/shipments/${id}/archive`, { body: { archived } }),
   saveSettings: (s: SupplySettings) => call<{ settings: SupplySettings }>("/api/supply/settings", { body: s }),
   undo: (historyId: number) => call<{ ok: true }>(`/api/supply/history/${historyId}/undo`, { body: {} }),

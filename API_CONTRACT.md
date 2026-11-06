@@ -1057,8 +1057,12 @@ token). **Writes** need either a Штурман JWT or the **supply token** from
 it is rejected by every Штурман route. Shapes: `SupplyStep { id, name, plan,
 actual, state: active|done|pending, note }` (dates `YYYY-MM-DD` or `""`),
 `SupplyShipment { id, name, category, action, note, archived, steps[], custom
-{fieldId: string}, position, createdAt, updatedAt }`, `SupplySettings { stages[],
-categories[], fields[{id,name,type}], templates[{id,name,stages[]}] }`.
+{fieldId: string}, pinned, groups[], mode, position, createdAt, updatedAt }`
+(`pinned` = starred, always on top; `groups` = ids from `settings.groups`;
+`mode ∈ "" | sea | air | rail | road | courier`, `""` = read from the steps),
+`SupplySettings { stages[], categories[], fields[{id,name,type}],
+templates[{id,name,stages[]}], groups[{id,name}], categoryIcons{category: iconKey} }`.
+History `kind ∈ shipment | mark | settings | legacy`.
 
 ### `GET /api/supply`  (no auth) → `{ shipments, settings, revision, canEdit }`
 All shipments incl. archived. `canEdit` — whether the caller's token may write.
@@ -1074,6 +1078,10 @@ code_login_disabled`, `429 code_login_locked`.
 ### `POST /api/supply/shipments`  (editor) `{ name, category, action?, note?, steps?, custom? }` → `201 { shipment }`
 ### `PATCH /api/supply/shipments/:id`  (editor) any of the fields + `expectedUpdatedAt?` → `{ shipment }`
 `409 { error: "conflict", current }` when `expectedUpdatedAt` is stale.
+### `PATCH /api/supply/shipments/:id/marks`  (editor) `{ pinned?, groups?, mode? }` (at least one) → `{ shipment }`
+Star, groups, transport. No `expectedUpdatedAt`; unknown group ids are dropped.
+Logged as `kind: "mark"` (undo puts back only the marks); the legacy sync does
+not count a mark as an edit made here.
 ### `POST /api/supply/shipments/:id/archive`  (editor) `{ archived }` → `{ shipment }`
 No delete: a shipment is archived, never removed.
 ### `POST /api/supply/settings`  (editor) `SupplySettings` → `{ settings }`

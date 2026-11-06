@@ -2,13 +2,14 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { SupplyApiError, setSupplyToken } from "@/lib/supply/api";
-import { MONTHS_GEN, WEEKDAYS, completeActiveStep, deadline, kyivToday, type SortKey } from "@/lib/supply/logic";
-import type { ShipmentDraft, SupplyShipment } from "@/lib/supply/types";
+import { MONTHS_GEN, WEEKDAYS, categoryIcon, completeActiveStep, deadline, kyivToday, type SortKey } from "@/lib/supply/logic";
+import type { ShipmentDraft, SupplyGroup, SupplyMarks, SupplyShipment } from "@/lib/supply/types";
 import { useSupply } from "@/lib/supply/useSupply";
 import { CalendarView } from "./CalendarView";
 import { DictView } from "./DictView";
 import { HistoryView } from "./HistoryView";
 import { ListView } from "./ListView";
+import { CategoryIcon, GroupIcon, StarMark } from "./KindIcon";
 import { Palette } from "./Palette";
 import { PinModal } from "./PinModal";
 import { ShipmentDrawer } from "./ShipmentDrawer";
@@ -24,6 +25,8 @@ export function SupplyApp() {
   const { data, editing } = store;
   const [view, setView] = useState<View>("list");
   const [cat, setCat] = useState<string>("all");
+  // "all" | "star" (обрані) | a group id
+  const [grp, setGrp] = useState<string>("all");
   const [sort, setSort] = useState<SortKey>("date");
   const [openId, setOpenId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -122,6 +125,41 @@ export function SupplyApp() {
     [fail, showToast, store],
   );
 
+  /** Star / groups / transport: saved at once, one undoable history line. */
+  const setMarks = useCallback(
+    async (s: SupplyShipment, m: SupplyMarks, text: string) => {
+      try {
+        await store.marks(s, m);
+        showToast(text, () => store.undoLast(s.id));
+      } catch (e) {
+        fail(e);
+      }
+    },
+    [fail, showToast, store],
+  );
+  const toggleStar = useCallback(
+    (s: SupplyShipment) => void setMarks(s, { pinned: !s.pinned }, s.pinned ? `«${s.name}» прибрано з обраних` : `«${s.name}» в обраних, тепер завжди вгорі`),
+    [setMarks],
+  );
+
+  /** A new group from the card: added to Довідники, then the shipment joins it. */
+  const createGroup = useCallback(
+    async (name: string): Promise<SupplyGroup | null> => {
+      if (!data) return null;
+      const existing = data.settings.groups.find((g) => g.name.toLowerCase() === name.toLowerCase());
+      if (existing) return existing;
+      const g = { id: `g${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`, name };
+      try {
+        await store.saveSettings({ ...data.settings, groups: [...data.settings.groups, g] });
+        return g;
+      } catch (e) {
+        fail(e);
+        return null;
+      }
+    },
+    [data, fail, store],
+  );
+
   const setArchived = useCallback(
     async (s: SupplyShipment, archived: boolean) => {
       try {
@@ -153,7 +191,12 @@ export function SupplyApp() {
 
   const d = new Date(`${today}T12:00:00Z`);
   const dateLine = `${WEEKDAYS[d.getUTCDay()]!.charAt(0).toUpperCase()}${WEEKDAYS[d.getUTCDay()]!.slice(1)}, ${d.getUTCDate()} ${MONTHS_GEN[d.getUTCMonth()]}`;
-  const visible = cat === "all" ? live : live.filter((s) => s.category === cat);
+  const groups = data?.settings.groups ?? [];
+  const inGroup = (s: SupplyShipment) => (grp === "all" ? true : grp === "star" ? s.pinned : s.groups.includes(grp));
+  const byCat = cat === "all" ? live : live.filter((s) => s.category === cat);
+  const visible = byCat.filter(inGroup);
+  // A group deleted in Довідники while selected → back to all.
+  if (grp !== "all" && grp !== "star" && data && !groups.some((g) => g.id === grp)) setGrp("all");
 
   return (
     <div className={`sp${view === "cal" ? " fixed" : ""}`}>
@@ -219,7 +262,10 @@ export function SupplyApp() {
           </div>
 
           {(view === "list" || view === "cal") && data ? (
-            <Toolbar categories={categories} counts={live} cat={cat} setCat={setCat} sort={view === "list" ? sort : null} setSort={setSort} />
+            <div style={{ display: "grid", gap: 10, gridTemplateColumns: "minmax(0, 1fr)", minWidth: 0 }}>
+              <Toolbar categories={categories} categoryIcons={data.settings.categoryIcons} counts={live.filter(inGroup)} cat={cat} setCat={setCat} sort={view === "list" ? sort : null} setSort={setSort} />
+              <GroupBar groups={groups} list={byCat} value={grp} onChange={setGrp} />
+            </div>
           ) : (
             <div />
           )}
@@ -238,11 +284,11 @@ export function SupplyApp() {
                 )}
               </div>
             ) : view === "list" ? (
-              <ListView list={visible} categories={categories} sort={sort} today={today} editing={editing} onOpen={setOpenId} onComplete={completeStep} />
+              <ListView list={visible} settings={data.settings} sort={sort} today={today} editing={editing} onOpen={setOpenId} onComplete={completeStep} onStar={toggleStar} />
             ) : view === "cal" ? (
               <CalendarView list={visible} categories={categories} today={today} editing={editing} onOpen={setOpenId} onReschedule={reschedule} />
             ) : view === "arch" ? (
-              <ListView list={shipments.filter((s) => s.archived)} categories={categories} sort="updated" today={today} editing={editing} onOpen={setOpenId} archive
+              <ListView list={shipments.filter((s) => s.archived)} settings={data.settings} sort="updated" today={today} editing={editing} onOpen={setOpenId} archive
                 onRestore={(s) => void setArchived(s, false)} />
             ) : view === "hist" ? (
               <HistoryView revision={data.revision} editing={editing} onUndo={async (id) => { try { await store.undo(id); showToast("Зміну відкочено"); } catch (e) { fail(e); } }} />
@@ -265,6 +311,8 @@ export function SupplyApp() {
           onClose={() => { setOpenId(null); setCreating(false); }}
           onSave={saveDraft}
           onArchive={setArchived}
+          onMarks={setMarks}
+          onCreateGroup={createGroup}
           onComplete={completeStep}
           onUnlock={requestEdit}
         />
@@ -300,10 +348,30 @@ export function SupplyApp() {
   );
 }
 
+/** Обрані + the team's groups as filter chips (shown once there is something to filter by). */
+function GroupBar({ groups, list, value, onChange }: { groups: SupplyGroup[]; list: SupplyShipment[]; value: string; onChange: (v: string) => void }) {
+  const starred = list.filter((s) => s.pinned).length;
+  if (!groups.length && !starred && value === "all") return null;
+  return (
+    <div className="gbar" role="group" aria-label="Групи">
+      <button aria-pressed={value === "all"} onClick={() => onChange("all")}>Усі групи</button>
+      <button aria-pressed={value === "star"} onClick={() => onChange(value === "star" ? "all" : "star")}>
+        <StarMark on size={14} />Обрані<b className="tn">{starred}</b>
+      </button>
+      {groups.map((g) => (
+        <button key={g.id} aria-pressed={value === g.id} onClick={() => onChange(value === g.id ? "all" : g.id)}>
+          <GroupIcon />{g.name}<b className="tn">{list.filter((s) => s.groups.includes(g.id)).length}</b>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function Toolbar({
-  categories, counts, cat, setCat, sort, setSort,
+  categories, categoryIcons, counts, cat, setCat, sort, setSort,
 }: {
   categories: string[];
+  categoryIcons: Record<string, string>;
   counts: SupplyShipment[];
   cat: string;
   setCat: (c: string) => void;
@@ -330,7 +398,9 @@ function Toolbar({
         {ind && <span className="ind" style={{ left: ind.left, width: ind.width }} />}
         {items.map(([k, label, n], i) => (
           <button key={k} aria-pressed={cat === k} onClick={() => setCat(k)}>
-            {k !== "all" && <i style={{ background: `var(--c-${(i - 1) % 5 + 1})` }} />}
+            {k !== "all" && (
+              <span className="segi" style={{ color: `var(--c-${(i - 1) % 5 + 1})` }}><CategoryIcon icon={categoryIcon({ categoryIcons }, k)} size={15} /></span>
+            )}
             {label}
             <b className="tn">{n}</b>
           </button>

@@ -1172,3 +1172,13 @@ UPDATE supply_shipments SET
   category = supply_ua(category)
 WHERE supply_ua(category) <> category
    OR EXISTS (SELECT 1 FROM jsonb_array_elements(steps) e WHERE supply_ua(e->>'name') <> e->>'name');
+
+-- Spec 008: marks — the team's own annotations the old site never had, so the
+-- legacy sync neither reads nor overwrites them. pinned = starred (always on top),
+-- groups = ids from supply_settings.groups, mode = transport ('' = from the steps).
+ALTER TABLE supply_shipments ADD COLUMN IF NOT EXISTS pinned BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE supply_shipments ADD COLUMN IF NOT EXISTS groups JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE supply_shipments ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT '';
+ALTER TABLE supply_settings ADD COLUMN IF NOT EXISTS groups JSONB NOT NULL DEFAULT '[]'::jsonb;
+-- Icon per category (category name → icon key, see frontend lib/supply/icons.ts).
+ALTER TABLE supply_settings ADD COLUMN IF NOT EXISTS category_icons JSONB NOT NULL DEFAULT '{}'::jsonb;

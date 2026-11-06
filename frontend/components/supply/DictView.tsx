@@ -1,10 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import { CATEGORY_ICONS, categoryIcon, type CategoryIconKey } from "@/lib/supply/logic";
 import type { SupplySettings } from "@/lib/supply/types";
+import { CATEGORY_ICON_LABEL, CategoryIcon, GroupIcon } from "./KindIcon";
 import { IPlus, IX } from "./SupplyIcons";
 
-/** Dictionaries: route templates, stage names, categories, extra fields. */
+/** Dictionaries: route templates, stage names, categories (+ icons), groups, extra fields. */
 export function DictView({ settings, editing, onSave }: { settings: SupplySettings; editing: boolean; onSave: (s: SupplySettings) => Promise<boolean> }) {
   const [draft, setDraft] = useState<SupplySettings>(settings);
   const [base, setBase] = useState(settings);
@@ -30,7 +32,17 @@ export function DictView({ settings, editing, onSave }: { settings: SupplySettin
           <h4>Довідник етапів · {settings.stages.length}</h4>
           <div className="chips">{settings.stages.map((s) => <span key={s}>{s}</span>)}</div>
           <h4>Категорії</h4>
-          <div className="chips">{settings.categories.map((c, i) => <span key={c} style={{ boxShadow: `inset 3px 0 0 var(--c-${i % 5 + 1})` }}>{c}</span>)}</div>
+          <div className="chips">
+            {settings.categories.map((c, i) => (
+              <span key={c} style={{ boxShadow: `inset 3px 0 0 var(--c-${i % 5 + 1})`, display: "inline-flex", gap: 6, alignItems: "center" }}>
+                <span style={{ color: `var(--c-${i % 5 + 1})`, display: "grid" }}><CategoryIcon icon={categoryIcon(settings, c)} size={14} /></span>{c}
+              </span>
+            ))}
+          </div>
+          <h4>Групи поставок</h4>
+          {settings.groups.length ? (
+            <div className="chips">{settings.groups.map((g) => <span key={g.id} style={{ display: "inline-flex", gap: 5, alignItems: "center" }}><GroupIcon size={12} />{g.name}</span>)}</div>
+          ) : <span style={{ color: "var(--muted)", fontSize: 12.5 }}>Груп ще немає.</span>}
           <h4>Додаткові поля</h4>
           <div className="chips">{settings.fields.map((f) => <span key={f.id}>{f.name}</span>)}</div>
           <span style={{ color: "var(--muted)", fontSize: 12.5 }}>Змінювати довідники можна з кодом Штурмана.</span>
@@ -61,6 +73,25 @@ export function DictView({ settings, editing, onSave }: { settings: SupplySettin
           <ChipEditor values={draft.stages} placeholder="Новий етап" onChange={(v) => set("stages", v)} />
           <h4>Категорії</h4>
           <ChipEditor values={draft.categories} placeholder="Нова категорія" min={1} onChange={(v) => set("categories", v)} />
+          <h4>Іконки категорій</h4>
+          {draft.categories.map((c, i) => (
+            <div key={c} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <span style={{ color: `var(--c-${i % 5 + 1})`, display: "grid", width: 22 }}><CategoryIcon icon={categoryIcon(draft, c)} /></span>
+              <span style={{ flex: 1, fontWeight: 600 }}>{c}</span>
+              <select className="sort" aria-label={`Іконка категорії ${c}`} value={categoryIcon(draft, c)}
+                onChange={(e) => set("categoryIcons", { ...draft.categoryIcons, [c]: e.target.value as CategoryIconKey })}>
+                {CATEGORY_ICONS.map((k) => <option key={k} value={k}>{CATEGORY_ICON_LABEL[k]}</option>)}
+              </select>
+            </div>
+          ))}
+          <h4>Групи поставок</h4>
+          {draft.groups.map((g, i) => (
+            <div key={g.id} style={{ display: "flex", gap: 6 }}>
+              <input className="ed" value={g.name} aria-label="Назва групи" maxLength={60} onChange={(e) => set("groups", draft.groups.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} />
+              <button className="x" aria-label="Видалити групу" title="Видалити групу (поставки залишаться)" onClick={() => set("groups", draft.groups.filter((_, j) => j !== i))}><IX /></button>
+            </div>
+          ))}
+          <button className="ghost" onClick={() => set("groups", [...draft.groups, { id: uid("g"), name: "Нова група" }])}><IPlus />Група</button>
           <h4>Додаткові поля</h4>
           {draft.fields.map((f, i) => (
             <div key={f.id} style={{ display: "flex", gap: 6 }}>

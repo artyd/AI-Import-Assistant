@@ -20,6 +20,9 @@ export interface SupplyShipment {
   archived: boolean;
   steps: SupplyStep[];
   custom: Record<string, string>;
+  pinned: boolean; // starred: always on top
+  groups: string[]; // SupplyGroup ids
+  mode: SupplyMode; // '' = worked out from the steps
   position: number;
   createdAt: string;
   updatedAt: string;
@@ -29,6 +32,19 @@ export interface SupplyField {
   id: string;
   name: string;
   type: "text" | "number";
+}
+
+export type SupplyMode = "" | "sea" | "air" | "rail" | "road" | "courier";
+
+export interface SupplyGroup {
+  id: string;
+  name: string;
+}
+
+export interface SupplyMarks {
+  pinned?: boolean;
+  groups?: string[];
+  mode?: SupplyMode;
 }
 
 export interface SupplyTemplate {
@@ -42,13 +58,15 @@ export interface SupplySettings {
   categories: string[];
   fields: SupplyField[];
   templates: SupplyTemplate[];
+  groups: SupplyGroup[];
+  categoryIcons: Record<string, string>; // category → icon key (lib/supply/logic.ts CATEGORY_ICONS)
 }
 
 export interface SupplyHistoryEntry {
   id: number;
   at: string;
   actor: string;
-  kind: "shipment" | "settings" | "legacy";
+  kind: "shipment" | "mark" | "settings" | "legacy";
   text: string;
   shipmentId: string | null;
   undoable: boolean;

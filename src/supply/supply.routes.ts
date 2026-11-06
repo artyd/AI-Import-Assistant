@@ -16,10 +16,11 @@ import {
   putSettings,
   revision,
   setArchived,
+  setMarks,
   undoHistory,
   updateShipment,
 } from './store.js';
-import { archiveSchema, settingsSchema, shipmentInputSchema, shipmentPatchSchema } from './types.js';
+import { archiveSchema, marksSchema, settingsSchema, shipmentInputSchema, shipmentPatchSchema } from './types.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 const historyParam = z.object({ id: z.coerce.number().int().positive() });
@@ -110,6 +111,18 @@ export async function supplyRoutes(app: FastifyInstance): Promise<void> {
     if (!p.success || !body.success) return reply.code(400).send({ error: 'invalid_request' });
     try {
       return reply.send({ shipment: await setArchived(p.data.id, body.data.archived, req.supplyActor!) });
+    } catch (err) {
+      return storeError(reply, err);
+    }
+  });
+
+  // PATCH /api/supply/shipments/:id/marks { pinned?, groups?, mode? } — star, groups, transport.
+  app.patch('/api/supply/shipments/:id/marks', { preHandler: requireSupplyEditor }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    const body = marksSchema.safeParse(req.body);
+    if (!p.success || !body.success) return reply.code(400).send({ error: 'invalid_request' });
+    try {
+      return reply.send({ shipment: await setMarks(p.data.id, body.data, req.supplyActor!) });
     } catch (err) {
       return storeError(reply, err);
     }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  categoryIcon,
   completeActiveStep,
   deadline,
   deadlineLabel,
@@ -9,12 +10,13 @@ import {
   monthGrid,
   normalizeSteps,
   sortShipments,
+  transportMode,
 } from "../logic";
 import type { SupplyShipment, SupplyStep } from "../types";
 
 const step = (o: Partial<SupplyStep>): SupplyStep => ({ id: "s", name: "Етап", plan: "", actual: "", state: "pending", note: "", ...o });
 const ship = (o: Partial<SupplyShipment>): SupplyShipment => ({
-  id: "a", name: "Товар", category: "Міжнародні", action: "", note: "", archived: false, steps: [], custom: {}, position: 0,
+  id: "a", name: "Товар", category: "Міжнародні", action: "", note: "", archived: false, steps: [], custom: {}, pinned: false, groups: [], mode: "", position: 0,
   createdAt: "", updatedAt: "2026-11-01T00:00:00.000Z", ...o,
 });
 const TODAY = "2026-11-05";
@@ -77,5 +79,34 @@ describe("calendar", () => {
 
   it("today is a Kyiv calendar day", () => {
     expect(kyivToday(new Date("2026-11-04T22:30:00Z"))).toBe("2026-11-05");
+  });
+});
+
+describe("marks", () => {
+  it("starred shipments stay on top whatever the sort", () => {
+    const list = [
+      ship({ id: "a", name: "Альфа", steps: [step({ state: "active", plan: "2026-11-06" })] }),
+      ship({ id: "z", name: "Зета", pinned: true }),
+    ];
+    for (const key of ["date", "name", "updated"] as const) expect(sortShipments(list, key, TODAY)[0]!.id).toBe("z");
+  });
+
+  it("category icon: set in Довідники, else guessed from the name", () => {
+    expect(categoryIcon({ categoryIcons: {} }, "Міжнародні")).toBe("globe");
+    expect(categoryIcon({ categoryIcons: {} }, "Україна")).toBe("ukraine");
+    expect(categoryIcon({ categoryIcons: {} }, "Зразки")).toBe("sample");
+    expect(categoryIcon({ categoryIcons: {} }, "Інше")).toBe("tag");
+    expect(categoryIcon({ categoryIcons: { "Зразки": "box" } }, "Зразки")).toBe("box");
+    expect(categoryIcon({ categoryIcons: { "Зразки": "nope" } }, "Зразки")).toBe("sample");
+  });
+
+  it("transport: set by hand, else read from the stages, else unknown", () => {
+    const by = (...names: string[]) => transportMode({ mode: "", steps: names.map((name) => step({ name })) });
+    expect(by("Готовність", "Виліт", "Прибуття")).toBe("air");
+    expect(by("Відправка", "Прибуття в порт", "Вивіз з порту")).toBe("sea");
+    expect(by("Відправка залізницею")).toBe("rail");
+    expect(by("Завантаження", "Доставка")).toBe("road");
+    expect(by("Готовність")).toBeNull();
+    expect(transportMode({ mode: "courier", steps: [step({ name: "Виліт" })] })).toBe("courier");
   });
 });
