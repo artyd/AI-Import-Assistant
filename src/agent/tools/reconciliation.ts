@@ -19,7 +19,7 @@ export async function runChecklist(ctx: ToolContext, input: unknown = {}): Promi
       citations: [],
     };
   }
-  const lines = checklist.map((i) => `- ${i.requirement_key}: ${statusUa(i.status)}`);
+  const lines = checklist.map((i) => `- ${i.requirement_key}: ${statusUa(i.status)}${i.basis ? ` (підстава: ${i.basis})` : ''}`);
   return {
     result: `Статус постачання: ${status}\n${lines.join('\n')}`,
     summary: `Чек-лист: ${checklist.length} пунктів`,

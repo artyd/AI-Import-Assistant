@@ -99,7 +99,7 @@ export async function fclChecklist(ws: WorkspaceRow, input: unknown): Promise<To
   if (ref) {
     const lot = findLot(v, ref);
     if (!lot) return noLot(v, ref);
-    const lines = lot.verdicts.checklist.map((i) => `- ${i.requirement_key}: ${statusUa(i.status)}`);
+    const lines = lot.verdicts.checklist.map((i) => `- ${i.requirement_key}: ${statusUa(i.status)}${i.basis ? ` (підстава: ${i.basis})` : ''}`);
     return {
       result: `${lot.lot.name}: ${STATUS_UA[lot.verdicts.derivedStatus] ?? lot.verdicts.derivedStatus}\n${lines.join('\n') || '(вимог немає — не задано контекст партії)'}`,
       summary: `Чек-лист партії ${lot.lot.name}`,

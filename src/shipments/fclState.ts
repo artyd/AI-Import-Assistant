@@ -8,6 +8,8 @@ import { upsertParties } from '../reconciliation/parties.js';
 import { requiredDocumentTypes, persistChecklist, type ChecklistItem } from '../reconciliation/checklist.js';
 import { computeVerdicts, type ShipmentFile, type ShipmentVerdicts } from '../reconciliation/verdicts.js';
 import { registryChecksForDocs, type RegistryFinding } from '../customs/drugRegistry.js';
+import { loadCachedRequirements } from '../customs/hsRequirementsCache.js';
+import { hsCodesOf, type CachedHsRequirements } from '../customs/qdproRequirements.js';
 import { computeFclLevel, findManifestFile, matchHblsToLots, type FclLevelVerdicts, type FclLot } from '../reconciliation/fcl.js';
 import type { ManifestLine } from '../reconciliation/manifest.js';
 import { readStoredFile } from '../lib/storage.js';
@@ -96,7 +98,7 @@ export async function loadManifestLines(fileId: string): Promise<ManifestLine[] 
 export async function loadFclVerdicts(ws: WorkspaceRow, now: number = Date.now()): Promise<FclVerdicts> {
   const [lots, files, { rows: parties }] = await Promise.all([
     listLots(ws.id),
-    loadFclFiles(ws.id),
+    loadFclFiles(ws.id, { requirementHits: true }),
     query<{ lot_id: string | null; role: string; company_name: string }>(
       "SELECT lot_id, role, company_name FROM parties WHERE workspace_id = $1 AND company_name <> '' ORDER BY created_at",
       [ws.id],
@@ -109,6 +111,16 @@ export async function loadFclVerdicts(ws: WorkspaceRow, now: number = Date.now()
     ws.transport_mode === 'sea' ||
     files.some((f) => docType(f) === 'transport' && transportDocKind(f.file_name, f.fields) === 'hbl');
 
+  // qdpro requirements for every code in the FCL (cache only); each lot's
+  // verdicts use the codes of its own files.
+  let hsRequirements: CachedHsRequirements[] = [];
+  try {
+    hsRequirements = await loadCachedRequirements([...new Set(files.flatMap((f) => hsCodesOf(f.fields)))]);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(`HS requirements load failed for FCL ${ws.id}:`, (err as Error).message);
+  }
+
   const lotVerdicts: LotVerdict[] = [];
   for (const lot of lots) {
     const view = lotWorkspaceView(ws, lot);
@@ -116,7 +128,7 @@ export async function loadFclVerdicts(ws: WorkspaceRow, now: number = Date.now()
       (k) => k !== 'customs_declaration' && (k !== 'transport' || seaLike),
     );
     const mine = files.filter((f) => f.lot_id === lot.id || hblLot[f.file_id] === lot.id);
-    const snapshotFiles: ShipmentFile[] = mine.map((f) => ({ file_id: f.file_id, file_name: f.file_name, folder_name: f.folder_name, fields: f.fields, feed_goods: f.feed_goods, vet_certificate: f.vet_certificate }));
+    const snapshotFiles: ShipmentFile[] = mine.map((f) => ({ file_id: f.file_id, file_name: f.file_name, folder_name: f.folder_name, fields: f.fields, feed_goods: f.feed_goods, vet_certificate: f.vet_certificate, requirement_hits: f.requirement_hits }));
 
     let registry: RegistryFinding[] = [];
     try {
@@ -134,7 +146,7 @@ export async function loadFclVerdicts(ws: WorkspaceRow, now: number = Date.now()
     const intermediary = lotParties.find((p) => p.role === 'intermediary')?.company_name ?? null;
     const recipient = lotParties.find((p) => p.role === 'recipient')?.company_name ?? null;
     const approvedInstruction = await latestApproved(ws.id, lot.id);
-    const verdicts = computeVerdicts({ ws: view, required, files: snapshotFiles, intermediary, approvedInstruction, registry }, now);
+    const verdicts = computeVerdicts({ ws: view, required, files: snapshotFiles, intermediary, approvedInstruction, registry, hsRequirements }, now);
     lotVerdicts.push({
       lot,
       verdicts,

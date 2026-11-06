@@ -1182,3 +1182,14 @@ ALTER TABLE supply_shipments ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT
 ALTER TABLE supply_settings ADD COLUMN IF NOT EXISTS groups JSONB NOT NULL DEFAULT '[]'::jsonb;
 -- Icon per category (category name → icon key, see frontend lib/supply/icons.ts).
 ALTER TABLE supply_settings ADD COLUMN IF NOT EXISTS category_icons JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+-- Documents an УКТ ЗЕД code requires on import, parsed from the qdpro ІМПОРТ
+-- regime (customs/qdproRequirements.ts). A cache: refreshed best-effort from the
+-- shipment pipeline when missing or older than 7 days; the verdicts only read it.
+-- requirements = [{ "key": <requirement key>, "evidence": <qdpro line> }].
+CREATE TABLE IF NOT EXISTS hs_requirements (
+  hs_code      TEXT PRIMARY KEY,
+  requirements JSONB NOT NULL DEFAULT '[]'::jsonb,
+  source       TEXT NOT NULL DEFAULT '',
+  fetched_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);

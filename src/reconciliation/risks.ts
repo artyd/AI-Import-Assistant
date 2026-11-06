@@ -53,6 +53,11 @@ const DOC_LABELS: Record<string, string> = {
   transport: 'Транспортний документ',
   intermediary_agreement: 'Договір з посередником',
   veterinary_certificate: 'Ветеринарний сертифікат',
+  phytosanitary_certificate: 'Фітосанітарний сертифікат',
+  import_license: 'Ліцензія на імпорт',
+  precursor_permit: 'Дозвіл на імпорт прекурсорів / контрольованих речовин',
+  conformity_document: 'Документ про відповідність техрегламенту',
+  dual_use_permit: 'Дозвіл на товари подвійного використання',
 };
 
 /** Human labels for reconciliation fields (raw keys never reach the user). */

@@ -628,7 +628,13 @@ error-level risks.
 
 ### `GET /api/workspaces/:id/checklist`  (auth)
 Recomputes + returns the completeness checklist and derived status.
-Response `200`: `{ "items": [ { "requirement_key", "status":"missing"|"received"|"verified", "source_file_id":uuid|null } ], "status": <workspace status> }`.
+Response `200`: `{ "items": [ { "requirement_key", "status":"missing"|"received"|"verified", "source_file_id":uuid|null, "basis"?:string } ], "status": <workspace status> }`.
+Besides the template keys, items may carry the official per-code requirements read
+from qdpro for the goods' УКТ ЗЕД codes (cached in `hs_requirements`):
+`veterinary_certificate`, `phytosanitary_certificate`, `import_license`,
+`precursor_permit`, `conformity_document`, `dual_use_permit`. Optional `basis`
+says why a non-template item is required (e.g. `"вимога qdpro для коду 2922410000"`,
+`"товар кормового призначення"`); it is computed, not persisted.
 
 ### `GET /api/workspaces/:id/discrepancies`  (auth)
 Deterministic invoice/PO/packing-list reconciliation; also saves a

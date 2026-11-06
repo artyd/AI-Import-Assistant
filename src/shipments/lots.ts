@@ -1,5 +1,6 @@
 import { pool, query } from '../db/pool.js';
 import { FEED_SQL_RX, VET_SQL_RX } from '../reconciliation/feed.js';
+import { REQUIREMENT_RX_PARAMS, requirementHitsSql } from '../customs/qdproRequirements.js';
 import { sameCompany } from './contextDerive.js';
 import {
   FCL_COMMON_FOLDER,
@@ -395,20 +396,28 @@ export interface FclFileRow {
   fields: Record<string, unknown> | null;
   feed_goods?: boolean;
   vet_certificate?: boolean;
+  /** Requirement keys (qdpro measures) whose document this file's text reads as. */
+  requirement_hits?: string[];
 }
 
-export async function loadFclFiles(workspaceId: string): Promise<FclFileRow[]> {
+/**
+ * Latest files of an FCL. `requirementHits` adds the per-file qdpro-requirement
+ * regexes (`requirement_hits`) — only the verdicts need them.
+ */
+export async function loadFclFiles(workspaceId: string, opts: { requirementHits?: boolean } = {}): Promise<FclFileRow[]> {
+  const hits = opts.requirementHits === true;
   const { rows } = await query<FclFileRow>(
     `SELECT f.id AS file_id, f.name AS file_name, f.type AS file_type, f.folder_id,
             fo.name AS folder_name, fo.lot_id, de.extracted_fields AS fields,
             EXISTS (SELECT 1 FROM document_sections ds WHERE ds.file_id = f.id AND ds.text ~* $2) AS feed_goods,
             EXISTS (SELECT 1 FROM document_sections ds WHERE ds.file_id = f.id AND ds.text ~* $3) AS vet_certificate
+            ${hits ? `, ${requirementHitsSql(4, 5)}` : ''}
      FROM files f
      LEFT JOIN folders fo ON fo.id = f.folder_id
      LEFT JOIN document_extractions de ON de.file_id = f.id
      WHERE f.workspace_id = $1 AND f.is_latest = true
      ORDER BY f.created_at, f.name, f.id`,
-    [workspaceId, FEED_SQL_RX, VET_SQL_RX],
+    hits ? [workspaceId, FEED_SQL_RX, VET_SQL_RX, ...REQUIREMENT_RX_PARAMS] : [workspaceId, FEED_SQL_RX, VET_SQL_RX],
   );
   return rows;
 }
