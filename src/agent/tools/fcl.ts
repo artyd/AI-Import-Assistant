@@ -63,7 +63,7 @@ function discrepancyLines(findings: (Discrepancy & { lot?: string })[]): { text:
   const citations: Citation[] = [];
   const text = findings
     .map((f) => {
-      const mark = f.kind === 'confirmed' ? '🔴' : '🟡';
+      const mark = f.kind === 'confirmed' ? '[підтверджено]' : '[підозра]';
       const srcs = f.citations
         .map((c) => (c.file_name ? `${c.doc_type}: «${c.file_name}» = ${c.value}` : `${c.doc_type} = ${c.value}`))
         .join('; ');
@@ -88,7 +88,7 @@ function lotLine(l: LotVerdict): string {
   return (
     `- ${l.lot.name} (постачальник ${l.lot.supplier_name || '—'}; отримувач ${l.consignee ?? '—'}): ` +
     `${STATUS_UA[l.verdicts.derivedStatus] ?? l.verdicts.derivedStatus}, комплектність ${done}/${checklist.length}, ` +
-    `розбіжності 🔴${red} 🟡${yellow}, критичні ризики ${err}, файлів ${l.fileCount}`
+    `розбіжності: підтверджено ${red}, підозра ${yellow}; критичні ризики ${err}; файлів ${l.fileCount}`
   );
 }
 
@@ -138,7 +138,7 @@ export async function fclDiscrepancies(ws: WorkspaceRow, input: unknown): Promis
   const { text, citations } = discrepancyLines(findings);
   return {
     result:
-      `${text}\n\nЛегенда: 🔴 підтверджено (обидва значення прочитано впевнено), 🟡 підозра — перевір у документі ` +
+      `${text}\n\nЛегенда: «підтверджено» — обидва значення прочитано впевнено; «підозра» — перевір у документі ` +
       '(read_file). Рівень передавай як є — НЕ підвищуй його.',
     summary: `Розбіжності (${scope}): ${findings.length}`,
     citations,

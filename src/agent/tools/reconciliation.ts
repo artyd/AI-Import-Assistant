@@ -45,7 +45,7 @@ export async function runDiscrepancies(ctx: ToolContext, input: unknown = {}): P
   }
   const result = findings
     .map((f) => {
-      const mark = f.kind === 'confirmed' ? '🔴' : '🟡';
+      const mark = f.kind === 'confirmed' ? '[підтверджено]' : '[підозра]';
       const srcs = f.citations
         .map((c) => (c.file_name ? `${c.doc_type}: «${c.file_name}» = ${c.value}` : `${c.doc_type} = ${c.value}`))
         .join('; ');
@@ -54,7 +54,7 @@ export async function runDiscrepancies(ctx: ToolContext, input: unknown = {}): P
     })
     .join('\n')
     .concat(
-      '\n\nЛегенда: 🔴 підтверджено (обидва значення прочитано впевнено), 🟡 підозра — перевір ' +
+      '\n\nЛегенда: «підтверджено» — обидва значення прочитано впевнено; «підозра» — перевір ' +
         'у документі (read_file), перш ніж називати критичним. Рівень (error/warning/info) ' +
         'передавай як є — НЕ підвищуй його. Якщо прочитаний документ спростовує знахідку, ' +
         'скажи про це прямо.',
@@ -73,7 +73,7 @@ export async function runDiscrepancies(ctx: ToolContext, input: unknown = {}): P
   const confirmed = findings.filter((f) => f.kind === 'confirmed').length;
   return {
     result,
-    summary: `Розбіжності: ${findings.length} (🔴 ${confirmed})`,
+    summary: `Розбіжності: ${findings.length} (підтверджено ${confirmed})`,
     citations,
   };
 }
