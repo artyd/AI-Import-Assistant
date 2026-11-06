@@ -37,6 +37,9 @@ vi.mock('../fclState.js', () => ({
   }),
 }));
 vi.mock('../../lib/diskTree.js', () => ({ scheduleDiskTree: vi.fn() }));
+vi.mock('../../customs/hsRequirementsCache.js', () => ({
+  refreshShipmentHsRequirements: vi.fn(async () => { calls.push('qdpro'); }),
+}));
 vi.mock('../../documents/classify.js', () => ({ refileFclInbox: vi.fn(async () => { calls.push('refile'); return 0; }) }));
 
 const { shipmentChanged } = await import('../state.js');
@@ -54,12 +57,12 @@ beforeEach(() => {
 
 describe('shipmentChanged — order of steps per change', () => {
   it.each([
-    ['documents', ['autopilot', 'intake', 'verdicts']],
-    ['verification', ['autopilot', 'intake', 'verdicts']],
-    ['context', ['intake', 'verdicts']],
-    ['parties', ['intake', 'verdicts']],
-    ['files', ['intake', 'verdicts']],
-    ['instruction', ['intake', 'verdicts']],
+    ['documents', ['autopilot', 'intake', 'qdpro', 'verdicts']],
+    ['verification', ['autopilot', 'intake', 'qdpro', 'verdicts']],
+    ['context', ['intake', 'qdpro', 'verdicts']],
+    ['parties', ['intake', 'qdpro', 'verdicts']],
+    ['files', ['intake', 'qdpro', 'verdicts']],
+    ['instruction', ['intake', 'qdpro', 'verdicts']],
   ] as const)('%s → %j', async (change, steps) => {
     await shipmentChanged('ws1', change);
     expect(calls).toEqual(steps);
@@ -67,13 +70,13 @@ describe('shipmentChanged — order of steps per change', () => {
 
   it('an explicit intake flag is kept', async () => {
     await shipmentChanged('ws1', 'context', { keepIntakeFlag: true });
-    expect(calls).toEqual(['verdicts']);
+    expect(calls).toEqual(['qdpro', 'verdicts']);
   });
 
   it('no intake write when the flag already matches', async () => {
     row = { ...complete, intake_complete: true };
     await shipmentChanged('ws1', 'files');
-    expect(calls).toEqual(['verdicts']);
+    expect(calls).toEqual(['qdpro', 'verdicts']);
   });
 
   it('critical risks alert only when asked', async () => {
@@ -93,9 +96,9 @@ describe('shipmentChanged — order of steps per change', () => {
 
 describe('shipmentChanged — an FCL (Збірник)', () => {
   it.each([
-    ['documents', ['refile', 'fcl-autopilot', 'fcl-verdicts']],
-    ['files', ['fcl-autopilot', 'fcl-verdicts']],
-    ['context', ['fcl-verdicts']],
+    ['documents', ['refile', 'fcl-autopilot', 'qdpro', 'fcl-verdicts']],
+    ['files', ['fcl-autopilot', 'qdpro', 'fcl-verdicts']],
+    ['context', ['qdpro', 'fcl-verdicts']],
   ] as const)('%s → %j', async (change, steps) => {
     row = { ...complete, kind: 'fcl' };
     const res = await shipmentChanged('ws1', change);

@@ -3,6 +3,15 @@ import type { WorkspaceRow, WorkspaceStatus } from '../shipments/workspaceAccess
 import { latestApproved, type InstructionVersion } from '../instruction/store.js';
 import { registryChecksForDocs, type RegistryFinding } from '../customs/drugRegistry.js';
 import { FEED_SQL_RX, VET_SQL_RX } from './feed.js';
+import { loadCachedRequirements } from '../customs/hsRequirementsCache.js';
+import {
+  HS_REQUIREMENT_KEYS,
+  REQUIREMENT_RX_PARAMS,
+  hsCodesOf,
+  requirementHitsSql,
+  type CachedHsRequirements,
+  type HsRequirementKey,
+} from '../customs/qdproRequirements.js';
 import { requiredDocumentTypes, resolveItems, type ChecklistItem, type LatestFileRow } from './checklist.js';
 import { findDiscrepancies, type Discrepancy } from './discrepancies.js';
 import type { ReconcileDoc } from './reconcile.js';
@@ -26,6 +35,8 @@ export interface ShipmentFile {
   feed_goods?: boolean;
   /** The text is (or contains) a veterinary / health certificate. */
   vet_certificate?: boolean;
+  /** Requirement keys (qdpro measures) whose document this file's text reads as. */
+  requirement_hits?: string[];
 }
 
 export interface ShipmentSnapshot {
@@ -38,6 +49,12 @@ export interface ShipmentSnapshot {
   intermediary: string | null;
   approvedInstruction: InstructionVersion | null;
   registry: RegistryFinding[];
+  /**
+   * Cached qdpro import requirements (`hs_requirements`) for the codes in the
+   * files' extractions. `computeVerdicts` uses the entries whose code a file of
+   * THIS snapshot carries, so an FCL can pass one list for every lot.
+   */
+  hsRequirements?: CachedHsRequirements[];
 }
 
 export interface ShipmentVerdicts {
@@ -65,7 +82,8 @@ export async function loadShipmentSnapshot(ws: WorkspaceRow): Promise<ShipmentSn
       `SELECT f.id AS file_id, f.name AS file_name, fo.name AS folder_name,
               de.extracted_fields AS fields,
               EXISTS (SELECT 1 FROM document_sections ds WHERE ds.file_id = f.id AND ds.text ~* $2) AS feed_goods,
-              EXISTS (SELECT 1 FROM document_sections ds WHERE ds.file_id = f.id AND ds.text ~* $3) AS vet_certificate
+              EXISTS (SELECT 1 FROM document_sections ds WHERE ds.file_id = f.id AND ds.text ~* $3) AS vet_certificate,
+              ${requirementHitsSql(4, 5)}
        FROM files f
        LEFT JOIN folders fo ON fo.id = f.folder_id
        LEFT JOIN document_extractions de ON de.file_id = f.id
@@ -73,7 +91,7 @@ export async function loadShipmentSnapshot(ws: WorkspaceRow): Promise<ShipmentSn
        -- Stable order: when several files share a doc_type the reconciler and the
        -- checklist pick among them, and the verdict must not change between calls.
        ORDER BY f.created_at, f.name, f.id`,
-      [ws.id, FEED_SQL_RX, VET_SQL_RX],
+      [ws.id, FEED_SQL_RX, VET_SQL_RX, ...REQUIREMENT_RX_PARAMS],
     ),
     query<{ company_name: string }>(
       `SELECT company_name FROM parties
@@ -99,7 +117,16 @@ export async function loadShipmentSnapshot(ws: WorkspaceRow): Promise<ShipmentSn
     console.error(`Registry check failed for workspace ${ws.id}:`, (err as Error).message);
   }
 
-  return { ws, required, files, intermediary: inter[0]?.company_name ?? null, approvedInstruction, registry };
+  // Official per-code requirements, from the cache only (no network here).
+  let hsRequirements: CachedHsRequirements[] = [];
+  try {
+    hsRequirements = await loadCachedRequirements([...new Set(files.flatMap((f) => hsCodesOf(f.fields)))]);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(`HS requirements load failed for workspace ${ws.id}:`, (err as Error).message);
+  }
+
+  return { ws, required, files, intermediary: inter[0]?.company_name ?? null, approvedInstruction, registry, hsRequirements };
 }
 
 /**
@@ -143,9 +170,48 @@ export function veterinaryItem(s: Pick<ShipmentSnapshot, 'ws' | 'files'>): Check
   const feed = s.files.some((f) => f.feed_goods) || FEED_CATEGORY_RX.test(s.ws.product_category ?? '');
   if (!feed) return null;
   const cert = s.files.find((f) => f.vet_certificate && !DRAFT_NAME_RX.test(f.file_name));
+  const basis = 'товар кормового призначення';
   return cert
-    ? { requirement_key: 'veterinary_certificate', status: 'received', source_file_id: cert.file_id }
-    : { requirement_key: 'veterinary_certificate', status: 'missing', source_file_id: null };
+    ? { requirement_key: 'veterinary_certificate', status: 'received', source_file_id: cert.file_id, basis }
+    : { requirement_key: 'veterinary_certificate', status: 'missing', source_file_id: null, basis };
+}
+
+// Papers that LIST the documents a deal needs (a contract's «documents to be
+// provided», an invoice note) are not the documents themselves.
+const LISTING_DOC_TYPES = new Set(['invoice', 'packing_list', 'contract', 'customs_declaration', 'transport']);
+
+/**
+ * Requirements the official qdpro measures for the snapshot's УКТ ЗЕД codes add
+ * (cached in `hs_requirements`). 'received' when a non-draft file is that
+ * document — its doc_type is the key, or its text reads as it and it is not a
+ * listing paper — else 'missing'. `basis` names the code(s) for the agent.
+ */
+export function hsRequirementItems(s: Pick<ShipmentSnapshot, 'files' | 'hsRequirements'>): ChecklistItem[] {
+  if (!s.hsRequirements || s.hsRequirements.length === 0) return [];
+  const codes = new Set(s.files.flatMap((f) => hsCodesOf(f.fields)));
+  const byKey = new Map<HsRequirementKey, string[]>();
+  for (const c of s.hsRequirements) {
+    if (!codes.has(c.hs_code)) continue;
+    for (const r of c.requirements) {
+      const list = byKey.get(r.key) ?? [];
+      if (!list.includes(c.hs_code)) list.push(c.hs_code);
+      byKey.set(r.key, list);
+    }
+  }
+  return HS_REQUIREMENT_KEYS.filter((k) => byKey.has(k)).map((key) => {
+    const forCodes = byKey.get(key)!.sort();
+    const basis = `вимога qdpro для ${forCodes.length > 1 ? 'кодів' : 'коду'} ${forCodes.join(', ')}`;
+    const file = s.files.find((f) => {
+      if (DRAFT_NAME_RX.test(f.file_name)) return false;
+      const type = docType(f);
+      if (type === key) return true;
+      const reads = (f.requirement_hits ?? []).includes(key) || (key === 'veterinary_certificate' && f.vet_certificate === true);
+      return reads && !LISTING_DOC_TYPES.has(type ?? '');
+    });
+    return file
+      ? { requirement_key: key, status: 'received' as const, source_file_id: file.file_id, basis }
+      : { requirement_key: key, status: 'missing' as const, source_file_id: null, basis };
+  });
 }
 
 /** Pure: snapshot → every verdict. `now` drives the expiry/deadline windows. */
@@ -161,6 +227,16 @@ export function computeVerdicts(s: ShipmentSnapshot, now: number = Date.now()): 
   const checklist = s.required.length === 0 ? [] : resolveItems(s.required, checklistRows, s.intermediary);
   const vet = veterinaryItem(s);
   if (vet && s.required.length > 0 && !checklist.some((i) => i.requirement_key === vet.requirement_key)) checklist.push(vet);
+  // Official measures for the goods' УКТ ЗЕД codes (qdpro). One row per key: a
+  // requirement already listed (e.g. the feed-based veterinary certificate)
+  // keeps its status and gains the qdpro basis.
+  if (s.required.length > 0) {
+    for (const item of hsRequirementItems(s)) {
+      const existing = checklist.find((i) => i.requirement_key === item.requirement_key);
+      if (!existing) checklist.push(item);
+      else existing.basis = existing.basis ? `${existing.basis}; ${item.basis}` : item.basis;
+    }
+  }
 
   const extracted = s.files.filter((f) => f.fields !== null);
   const docs: ReconcileDoc[] = extracted.map((f) => ({

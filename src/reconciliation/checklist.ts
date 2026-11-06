@@ -20,6 +20,11 @@ export interface ChecklistItem {
   requirement_key: string;
   status: ChecklistStatus;
   source_file_id: string | null;
+  /**
+   * Why the requirement is there when it is not from the baseline template, e.g.
+   * «вимога qdpro для коду 2922410000» (computed, not persisted).
+   */
+  basis?: string;
 }
 
 // Folder → document categories it can satisfy (weak "received" signal). The

@@ -47,6 +47,56 @@ describe('shipment verdicts', () => {
     expect(noFeed.checklist.some((i) => i.requirement_key === 'veterinary_certificate')).toBe(false);
   });
 
+  describe('qdpro requirements for the goods УКТ ЗЕД code (cached)', () => {
+    const CODE = '2922410000';
+    const inv = file('inv', { doc_type: 'invoice', hs_code: '2922 41 00 00' });
+    const pl = file('pl', { doc_type: 'packing_list' });
+    const vetCached = [{ hs_code: CODE, requirements: [{ key: 'veterinary_certificate' as const, evidence: 'Ветеринарно-санітарний контроль' }] }];
+    const vetItems = (v: ReturnType<typeof computeVerdicts>) => v.checklist.filter((i) => i.requirement_key === 'veterinary_certificate');
+
+    it('a required document with no matching file is missing, with the qdpro basis', () => {
+      const v = computeVerdicts(snapshot({ files: [inv, pl], hsRequirements: vetCached }), NOW);
+      expect(vetItems(v)).toEqual([
+        { requirement_key: 'veterinary_certificate', status: 'missing', source_file_id: null, basis: `вимога qdpro для коду ${CODE}` },
+      ]);
+      expect(v.derivedStatus).toBe('docs_in_progress');
+      const risk = v.risks.find((r) => r.code === 'docs_missing');
+      expect(risk?.detail).toContain('Ветеринарний сертифікат');
+    });
+
+    it('a file that reads as the document makes it received', () => {
+      const hc = { ...file('hc', { doc_type: 'other' }), vet_certificate: true, requirement_hits: ['veterinary_certificate'] };
+      const v = computeVerdicts(snapshot({ files: [inv, pl, hc], hsRequirements: vetCached }), NOW);
+      expect(vetItems(v)).toEqual([expect.objectContaining({ status: 'received', source_file_id: 'hc' })]);
+    });
+
+    it('a draft does not count, nor a contract that merely lists the document', () => {
+      const draft = { ...file('hc', null), file_name: 'HC draft.pdf', requirement_hits: ['phytosanitary_certificate'] };
+      const contract = { ...file('k', { doc_type: 'contract' }), requirement_hits: ['phytosanitary_certificate'] };
+      const phyto = [{ hs_code: CODE, requirements: [{ key: 'phytosanitary_certificate' as const, evidence: 'Фітосанітарний контроль' }] }];
+      const v = computeVerdicts(snapshot({ files: [inv, pl, draft, contract], hsRequirements: phyto }), NOW);
+      expect(v.checklist.find((i) => i.requirement_key === 'phytosanitary_certificate')?.status).toBe('missing');
+    });
+
+    it('feed goods + qdpro veterinary control → ONE veterinary row with both bases', () => {
+      const feedInv = { ...inv, feed_goods: true };
+      const v = computeVerdicts(snapshot({ files: [feedInv, pl], hsRequirements: vetCached }), NOW);
+      expect(vetItems(v)).toHaveLength(1);
+      expect(vetItems(v)[0]?.basis).toBe(`товар кормового призначення; вимога qdpro для коду ${CODE}`);
+    });
+
+    it('a cached code no file of this snapshot carries adds nothing (an FCL passes one list for all lots)', () => {
+      const other = [{ hs_code: '1111111111', requirements: [{ key: 'import_license' as const, evidence: 'Ліцензування імпорту' }] }];
+      const v = computeVerdicts(snapshot({ files: [inv, pl], hsRequirements: other }), NOW);
+      expect(v.checklist.map((i) => i.requirement_key)).toEqual(['invoice', 'packing_list']);
+    });
+
+    it('no template requirements → no checklist at all, as for the feed item', () => {
+      const v = computeVerdicts(snapshot({ required: [], files: [inv], hsRequirements: vetCached }), NOW);
+      expect(v.checklist).toEqual([]);
+    });
+  });
+
   it('an empty shipment: everything missing, status in progress, one docs_missing risk', () => {
     const v = computeVerdicts(snapshot(), NOW);
     expect(v.checklist.map((i) => i.status)).toEqual(['missing', 'missing']);

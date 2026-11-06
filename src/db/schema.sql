@@ -1219,3 +1219,13 @@ CREATE TABLE IF NOT EXISTS agent_lessons (
 );
 CREATE INDEX IF NOT EXISTS idx_agent_lessons_owner ON agent_lessons(owner_id, active, chat_kind);
 CREATE INDEX IF NOT EXISTS idx_agent_lessons_workspace ON agent_lessons(workspace_id, active);
+-- Documents an УКТ ЗЕД code requires on import, parsed from the qdpro ІМПОРТ
+-- regime (customs/qdproRequirements.ts). A cache: refreshed best-effort from the
+-- shipment pipeline when missing or older than 7 days; the verdicts only read it.
+-- requirements = [{ "key": <requirement key>, "evidence": <qdpro line> }].
+CREATE TABLE IF NOT EXISTS hs_requirements (
+  hs_code      TEXT PRIMARY KEY,
+  requirements JSONB NOT NULL DEFAULT '[]'::jsonb,
+  source       TEXT NOT NULL DEFAULT '',
+  fetched_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);

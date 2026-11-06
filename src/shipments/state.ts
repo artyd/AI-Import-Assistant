@@ -7,6 +7,7 @@ import { insertNotification } from '../notifications/notifications.js';
 import { autoFillFclContext, refreshFclState } from './fclState.js';
 import { refileFclInbox } from '../documents/classify.js';
 import { scheduleDiskTree } from '../lib/diskTree.js';
+import { refreshShipmentHsRequirements } from '../customs/hsRequirementsCache.js';
 
 /**
  * Shipment state: the ONE entry point after anything a shipment's verdicts read
@@ -15,8 +16,10 @@ import { scheduleDiskTree } from '../lib/diskTree.js';
  *
  *   1. documents / verification → the context autopilot (best-effort)
  *   2. intake_complete from the "required five" (unless the caller set it)
- *   3. the shipment verdicts: checklist persisted, status advanced forward-only
- *   4. optionally, a notification about critical (error-level) risks
+ *   3. the official per-code requirements (qdpro) cached for the goods' УКТ ЗЕД
+ *      codes — best-effort, bounded wait, never fails the verdicts
+ *   4. the shipment verdicts: checklist persisted, status advanced forward-only
+ *   5. optionally, a notification about critical (error-level) risks
  *
  * Rule for new code: every write to those inputs ends with `shipmentChanged`.
  */
@@ -79,11 +82,14 @@ export async function shipmentChanged(
     }
   }
 
-  // 3. Verdicts.
+  // 3. Official per-code requirements the checklist reads (cache; bounded wait).
+  await refreshShipmentHsRequirements(ws.id);
+
+  // 4. Verdicts.
   const state = await refreshWorkspaceState(ws);
   const workspace = { ...ws, status: state.status };
 
-  // 4. Critical-risk alert. De-duped per (user, workspace, type) per day.
+  // 5. Critical-risk alert. De-duped per (user, workspace, type) per day.
   if (opts.alertRisks && ws.responsible_user_id) {
     const critical = state.risks.filter((r) => r.severity === 'error');
     if (critical.length > 0) {
@@ -104,7 +110,8 @@ export async function shipmentChanged(
 
 /**
  * The same order for an FCL (Збірник, spec 006): autopilot per lot + FCL, inbox
- * files re-filed now that their lot may exist, then every lot's verdicts and the
+ * files re-filed now that their lot may exist, the qdpro per-code requirements
+ * cached (best-effort), then every lot's verdicts and the
  * FCL level (`refreshFclState`, which also owns the FCL intake flag).
  */
 async function fclChanged(
@@ -123,6 +130,7 @@ async function fclChanged(
   }
   const ws = await getWorkspaceById(initial.id);
   if (!ws) return null;
+  await refreshShipmentHsRequirements(ws.id);
   const state = await refreshFclState(ws);
   const workspace = { ...ws, status: state.status, intake_complete: state.intakeComplete };
 
