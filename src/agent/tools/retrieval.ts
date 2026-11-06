@@ -21,6 +21,8 @@ interface FileRow {
   doc_type?: string | null;
   /** First page of the stored Markdown (for version hints). */
   md_head?: string | null;
+  /** false = an older version replaced by a newer upload (not used in checks). */
+  is_latest?: boolean;
 }
 
 /**
@@ -249,6 +251,7 @@ function sameNameCounts(files: FileRow[]): Map<string, number> {
 function fileLine(f: FileRow, sameName: Map<string, number>): string {
   const dt = f.doc_type ? `, тип: ${f.doc_type}` : '';
   const hints = versionHints(f.name, f.md_head ?? '');
+  if (f.is_latest === false) hints.unshift('ЗАСТАРІЛА ВЕРСІЯ — замінена новішою, у перевірках не бере участі');
   const twins = sameName.get(baseNameKey(f.name)) ?? 1;
   if (twins > 1) hints.push(`ще ${twins - 1} файл(и) з такою ж назвою — звір версії`);
   const h = hints.length ? ` {${hints.join('; ')}}` : '';
@@ -365,7 +368,7 @@ async function findFile(
 
 async function listFiles(workspaceId: string): Promise<FileRow[]> {
   const { rows } = await query<FileRow>(
-    `SELECT f.id, f.name, f.type, f.disk_path, f.status, fo.name AS folder_name, f.folder_id,
+    `SELECT f.id, f.name, f.type, f.disk_path, f.status, fo.name AS folder_name, f.folder_id, f.is_latest,
             de.extracted_fields->>'doc_type' AS doc_type,
             (SELECT left(ds.text, 3000) FROM document_sections ds
              WHERE ds.file_id = f.id ORDER BY ds.seq LIMIT 1) AS md_head

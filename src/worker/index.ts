@@ -33,6 +33,7 @@ import { logIngest, q } from '../ingest/journal.js';
 import { describeDocument } from '../ingest/describe.js';
 import { shipmentChanged } from '../shipments/state.js';
 import { maybeReconcileBatch } from '../reconciliation/reconcileBatch.js';
+import { replaceEarlierVersions } from '../documents/supersede.js';
 import { scanAndNotify } from '../notifications/reminders.js';
 import { ingestNews, purgeOldNews } from '../news/index.js';
 import { publishFileStatus } from '../lib/events/fileStatus.js';
@@ -172,6 +173,20 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
           if (meta.truncated) {
             // eslint-disable-next-line no-console
             console.warn(`Extraction TRUNCATED (max_tokens) for file ${file.id} (${file.name}); stored as partial.`);
+          }
+          // A corrected re-upload of the same document replaces the old file.
+          // Best-effort: a failure leaves both files, never fails the read.
+          try {
+            const replaced = await replaceEarlierVersions(file.workspace_id, file.id);
+            if (replaced.length) {
+              await journal(
+                'done',
+                `${q(file.name)} — нова версія того самого документа; попередню (${replaced.map(q).join(', ')}) видалено.`,
+              );
+            }
+          } catch (err) {
+            // eslint-disable-next-line no-console
+            console.error(`Version replace failed for file ${file.id}:`, (err as Error).message);
           }
         } else if (pages.length === 0) {
           // Honest unreadable status (plan Q29): the document could not be read.

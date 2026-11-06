@@ -18,3 +18,6 @@ skills-lock.json
 # Python bytecode (logist-mcp)
 __pycache__/
 *.pyc
+
+# Local-only data (prod exports with customer content) — never commit
+.local/

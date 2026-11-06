@@ -83,7 +83,11 @@ _Avoid_: Doc package, paperwork
 
 **Document version** (Версії):
 Several files that are the same document at different revisions, grouped so that
-they can be compared.
+they can be compared. A **corrected re-upload** (same doc type + document number
++ seller; transport papers: number + kind) replaces the earlier file
+automatically and the earlier file is deleted (`documents/supersede.ts`). Same
+number with a different seller is a different document (the two legs of a
+trilateral deal).
 _Avoid_: Duplicate, copy
 
 ## Reading documents
