@@ -1,4 +1,5 @@
 import { reconcile, type Discrepancy, type ReconcileDoc } from './reconcile.js';
+import { checkBankAccounts } from './documentChecks.js';
 import { checkInstructionCompliance } from '../instruction/compliance.js';
 import type { InstructionVersion } from '../instruction/store.js';
 import type { WorkspaceRow } from '../shipments/workspaceAccess.js';
@@ -40,6 +41,8 @@ export function findDiscrepancies(
     incotermOut: ws.incoterm_out ?? null,
     intermediaryName: intermediary,
   });
+  // Bank details of one seller must agree across its payment documents.
+  findings.push(...checkBankAccounts(docs));
   // Did the supplier follow our approved instruction? (no-op until one is approved
   // and shipping documents have arrived)
   if (approvedInstruction) {

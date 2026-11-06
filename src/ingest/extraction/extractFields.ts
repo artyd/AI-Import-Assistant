@@ -115,6 +115,22 @@ export interface ExtractedLineItem {
   cas_number?: string | null;
 }
 
+/** One bank-details (payment instructions) block, exactly as written in the document. */
+export interface ExtractedBankAccount {
+  iban: string | null;
+  swift: string | null;
+  bank_name: string | null;
+  beneficiary: string | null;
+}
+
+/** Dangerous-goods (ADR / IMDG / IATA) marking stated in the document. */
+export interface ExtractedDangerousGoods {
+  is_dangerous: boolean | null;
+  un_number: string | null;
+  adr_class: string | null;
+  packing_group: string | null;
+}
+
 export interface ExtractedFields {
   doc_type: DocType;
   // Additional document types this SAME file also represents — e.g. a combined
@@ -185,6 +201,17 @@ export interface ExtractedFields {
   exchange_rate: number | null;
   /** For a bill for SERVICES (doc_type other): what was billed. Amount = total_value. */
   service_kind: 'freight' | 'broker' | 'storage' | 'insurance' | 'other' | null;
+  // ── Document integrity (deterministic flags, «картка документа») ──────────
+  // Optional: extractions made before these fields existed lack them — every
+  // consumer treats a missing value as null / [].
+  /** Every bank-details block (payment instructions) in the document. */
+  bank_accounts?: ExtractedBankAccount[];
+  dangerous_goods?: ExtractedDangerousGoods | null;
+  /** The document bears a signature / an official stamp (null = not stated / unknown). */
+  signed?: boolean | null;
+  stamped?: boolean | null;
+  /** Labels of printed form fields left blank (transcribed as «[порожньо]»). */
+  empty_fields?: string[];
   // ── Extraction metadata ──────────────────────────────────────────────────
   field_confidence: FieldConfidence;
   extraction_note: string | null;
@@ -333,6 +360,54 @@ const EXTRACTION_TOOL: ChatTool = {
         description:
           'ЛИШЕ для рахунку/акту за ПОСЛУГИ (doc_type other): що оплачується — фрахт/перевезення, ' +
           'митний брокер, зберігання, страхування, інше. Сума — у total_value.',
+      },
+      bank_accounts: {
+        type: 'array',
+        description:
+          'КОЖЕН блок банківських реквізитів (платіжні інструкції: Bank details, Beneficiary, IBAN, SWIFT) ' +
+          'у документі — окремим записом, ДОСЛІВНО як написано. Якщо реквізитів немає — порожній масив.',
+        items: {
+          type: 'object',
+          properties: {
+            iban: { type: 'string', description: 'IBAN або номер рахунку, дослівно.' },
+            swift: { type: 'string', description: 'SWIFT/BIC банку.' },
+            bank_name: { type: 'string', description: 'Назва банку.' },
+            beneficiary: { type: 'string', description: 'Отримувач платежу (Beneficiary / Account name).' },
+          },
+        },
+      },
+      dangerous_goods: {
+        type: 'object',
+        description:
+          'ЛИШЕ якщо документ згадує небезпечний вантаж (Dangerous goods, ADR/RID/IMDG/IATA, UN-номер, клас ' +
+          'небезпеки) — що саме вказано. Якщо прямо сказано «not dangerous / non-DG» — is_dangerous=false. ' +
+          'Якщо документ про це мовчить — пропусти поле.',
+        properties: {
+          is_dangerous: { type: 'boolean', description: 'Чи заявлено вантаж як небезпечний.' },
+          un_number: { type: 'string', description: 'UN-номер (напр. «UN 1940»).' },
+          adr_class: { type: 'string', description: 'Клас небезпеки (напр. «8», «3», «6.1»).' },
+          packing_group: { type: 'string', description: 'Пакувальна група (I, II, III).' },
+        },
+      },
+      signed: {
+        type: 'boolean',
+        description:
+          'Чи є на документі підпис (у транскрипції — [підпис]). true — є; false — місце для підпису ' +
+          'порожнє або підпису немає; пропусти, якщо не зрозуміло.',
+      },
+      stamped: {
+        type: 'boolean',
+        description:
+          'Чи є на документі печатка / штамп (у транскрипції — [печатка: …], [штамп: …]). true — є; ' +
+          'false — немає; пропусти, якщо не зрозуміло.',
+      },
+      empty_fields: {
+        type: 'array',
+        items: { type: 'string' },
+        description:
+          'Назви надрукованих полів форми, залишених ПОРОЖНІМИ (у транскрипції — «[порожньо]»), так, як ' +
+          'вони підписані в документі (напр. "Consignee", "Invoice No.", "Batch No.", "Date of issue"). ' +
+          'Інакше — порожній масив.',
       },
       line_items: {
         type: 'array',
@@ -506,7 +581,8 @@ function normalizeLineItems(v: unknown): ExtractedLineItem[] {
   return out;
 }
 
-function normalize(input: Record<string, unknown>): ExtractedFields {
+/** Model tool input → ExtractedFields (exported for tests). */
+export function normalizeExtraction(input: Record<string, unknown>): ExtractedFields {
   const rawType = toStr(input.doc_type);
   const doc_type = (DOC_TYPES as readonly string[]).includes(rawType ?? '')
     ? (rawType as DocType)
@@ -557,6 +633,11 @@ function normalize(input: Record<string, unknown>): ExtractedFields {
     vat_uah: toNum(input.vat_uah),
     exchange_rate: toNum(input.exchange_rate),
     service_kind: oneOf(input.service_kind, ['freight', 'broker', 'storage', 'insurance', 'other'] as const),
+    bank_accounts: normalizeBankAccounts(input.bank_accounts),
+    dangerous_goods: normalizeDangerousGoods(input.dangerous_goods),
+    signed: toBool(input.signed),
+    stamped: toBool(input.stamped),
+    empty_fields: normalizeLabels(input.empty_fields),
     field_confidence: normalizeFieldConfidence(input.field_confidence),
     extraction_note: toStr(input.extraction_note),
   };
@@ -569,6 +650,60 @@ export function normalizeContainers(v: unknown): string[] {
   for (const item of v) {
     const s = toStr(item)?.toUpperCase().replace(/[^A-Z0-9]/g, '');
     if (s && /^[A-Z]{4}\d{7}$/.test(s) && !out.includes(s)) out.push(s);
+  }
+  return out;
+}
+
+/** true / false from a JSON boolean or a "true"/"так"-style string; anything else → null. */
+export function toBool(v: unknown): boolean | null {
+  if (typeof v === 'boolean') return v;
+  const s = toStr(v)?.toLowerCase();
+  if (!s) return null;
+  if (['true', 'yes', 'так', '1'].includes(s)) return true;
+  if (['false', 'no', 'ні', '0'].includes(s)) return false;
+  return null;
+}
+
+/** Bank-details blocks; a block with no IBAN, SWIFT, bank or beneficiary is dropped. */
+export function normalizeBankAccounts(v: unknown): ExtractedBankAccount[] {
+  if (!Array.isArray(v)) return [];
+  const out: ExtractedBankAccount[] = [];
+  for (const item of v) {
+    if (!item || typeof item !== 'object') continue;
+    const rec = item as Record<string, unknown>;
+    const acc: ExtractedBankAccount = {
+      iban: toStr(rec.iban),
+      swift: toStr(rec.swift),
+      bank_name: toStr(rec.bank_name),
+      beneficiary: toStr(rec.beneficiary),
+    };
+    if (!acc.iban && !acc.swift && !acc.bank_name && !acc.beneficiary) continue;
+    out.push(acc);
+  }
+  return out;
+}
+
+/** Dangerous-goods block; null when the document states nothing about it. */
+export function normalizeDangerousGoods(v: unknown): ExtractedDangerousGoods | null {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+  const rec = v as Record<string, unknown>;
+  const dg: ExtractedDangerousGoods = {
+    is_dangerous: toBool(rec.is_dangerous),
+    un_number: toStr(rec.un_number),
+    adr_class: toStr(rec.adr_class),
+    packing_group: toStr(rec.packing_group),
+  };
+  if (dg.is_dangerous === null && !dg.un_number && !dg.adr_class && !dg.packing_group) return null;
+  return dg;
+}
+
+/** Non-empty, de-duplicated (case-insensitive) labels. */
+export function normalizeLabels(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  const out: string[] = [];
+  for (const item of v) {
+    const s = toStr(item);
+    if (s && !out.some((o) => o.toLowerCase() === s.toLowerCase())) out.push(s);
   }
   return out;
 }
@@ -605,6 +740,9 @@ const INSTRUCTION =
   'Якщо документ називає вантажовідправника і вантажоодержувача (у контракті — пункти про ' +
   'відвантаження/поставку, у B/L/CMR — графи Shipper/Consignee), заповни consignor_name/consignor_address ' +
   'і consignee_name/consignee_address адресами САМЕ з цих пунктів (не юридичною адресою з преамбули). ' +
+  'Перепиши кожен блок банківських реквізитів у bank_accounts (IBAN, SWIFT, банк, отримувач — дослівно). ' +
+  'Якщо згадано небезпечний вантаж (UN-номер, клас ADR) — заповни dangerous_goods. Познач signed / stamped ' +
+  'за наявністю [підпис] / [печатка] і перелічи в empty_fields поля, позначені «[порожньо]». ' +
   'Не вигадуй значень: якщо поля немає в документі — пропусти його. ' +
   'Числові поля повертай як число (крапка — десятковий роздільник, без роздільників ' +
   'тисяч): «12 500,00» → 12500, «1,234.50» → 1234.5; у line_items завжди вказуй unit. ' +
@@ -678,7 +816,7 @@ async function runExtraction(content: ChatContentBlockParam[]): Promise<Extracti
     const truncated = msg.stop_reason === 'max_tokens';
     const block = msg.content.find((b) => b.type === 'tool_use');
     if (block && block.type === 'tool_use') {
-      return { fields: normalize(block.input as Record<string, unknown>), truncated };
+      return { fields: normalizeExtraction(block.input as Record<string, unknown>), truncated };
     }
     // Cut off before the call, or a refusal — retrying the same request won't help.
     if (truncated || msg.stop_reason === 'refusal') return { fields: null, truncated };

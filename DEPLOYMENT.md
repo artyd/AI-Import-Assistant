@@ -267,3 +267,21 @@ docker compose exec backend node dist/ingest/reindexSheets.js --apply  # queue t
 
 Files whose fields were confirmed by hand on the verification screen are skipped
 (a re-read would overwrite the corrections).
+
+## Re-extracting fields after an extraction-schema change
+
+Extractions made before 2026-11-06 lack the document-integrity fields (bank
+details, dangerous goods, signature / stamp, blank form fields), so the bank /
+dangerous-goods / certificate checks stay silent for those files. To re-run the
+field extraction from the already stored Markdown (no repeat OCR; one extraction
+call per file), in the deployed directory:
+
+```bash
+docker compose exec backend node dist/ingest/reindexExtraction.js                             # dry run: what would be re-extracted
+docker compose exec backend node dist/ingest/reindexExtraction.js --apply                     # re-extract every shipment
+docker compose exec backend node dist/ingest/reindexExtraction.js --workspace <uuid> --apply  # one shipment only
+```
+
+It prints a line per file and the totals, then recomputes every affected shipment
+once. Files whose fields were confirmed by hand on the verification screen are
+skipped, and a re-extraction that comes back empty keeps the old fields.

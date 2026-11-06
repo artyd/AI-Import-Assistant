@@ -23,11 +23,11 @@ import { readStoredFile } from '../lib/storage.js';
 import { convertToMarkdown, type ConversionResult } from '../ingest/markdown/convert.js';
 import { saveFileMarkdown } from '../ingest/markdown/store.js';
 import {
-  extractFieldsFromMarkdown,
   correctLabelDocType,
   extractDocumentFieldsFromDocumentWithMeta,
   type ExtractedFields,
 } from '../ingest/extraction/extractFields.js';
+import { extractFromPages, extractionIsSubstantive, upsertExtraction } from '../ingest/extraction/store.js';
 import { batchStillReading, classifyAndFile, needsAutoFiling } from '../documents/classify.js';
 import { logIngest, q } from '../ingest/journal.js';
 import { describeDocument } from '../ingest/describe.js';
@@ -49,27 +49,6 @@ interface FileJobRow {
   batch_id: string | null;
   content_hash: string | null;
   kind: string;
-}
-
-/**
- * True when an extraction carries at least one real signal. A forced-tool call
- * (tool_choice) essentially always returns a non-null object, so "vision produced
- * garbage/near-empty" was previously indistinguishable from "good data" and got
- * marked `ok`. This gate downgrades an all-null extraction to no_fields/unreadable
- * so it reaches the manual-verification screen instead of silently looking read.
- */
-function extractionIsSubstantive(f: ExtractedFields): boolean {
-  const backbone = [
-    f.invoice_number, f.contract_number, f.po_number, f.total_value, f.currency,
-    f.hs_code, f.country_of_origin, f.buyer, f.seller, f.incoterm, f.manufacturer,
-    f.registration_number, f.document_date, f.net_weight_kg, f.gross_weight_kg,
-    f.total_weight_kg, f.packages_count,
-  ];
-  const hasBackbone = backbone.some((v) => v !== null && v !== undefined && v !== '');
-  const hasLines = Array.isArray(f.line_items) && f.line_items.length > 0;
-  const hasParties = Array.isArray(f.parties) && f.parties.length > 0;
-  const hasDocType = !!f.doc_type && f.doc_type !== 'other';
-  return hasBackbone || hasLines || hasParties || hasDocType;
 }
 
 async function setStatus(
@@ -152,7 +131,7 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
         // faithful Claude transcription, so no second vision pass is needed).
         // Fallback: direct vision on the original file when no Markdown came out.
         let meta: { fields: ExtractedFields | null; truncated: boolean } =
-          pages.length > 0 ? await extractFieldsFromMarkdown(pages) : { fields: null, truncated: false };
+          await extractFromPages(pages, file.name);
         if (!meta.fields && (file.type === 'pdf' || file.type === 'image')) {
           meta = await extractDocumentFieldsFromDocumentWithMeta(buf, file.type, file.name);
         }
@@ -306,18 +285,6 @@ async function reuseMarkdownByHash(file: FileJobRow): Promise<ConversionResult |
   // eslint-disable-next-line no-console
   console.log(`Reusing Markdown for ${file.id} (${file.name}) from an identical file (content hash).`);
   return { pages: r.pages, converter: r.converter, partial: false, pageCount: r.page_count, note: null };
-}
-
-/** One extraction row per file (UNIQUE file_id) — replace atomically. */
-async function upsertExtraction(fileId: string, workspaceId: string, fields: unknown): Promise<void> {
-  await query(
-    `INSERT INTO document_extractions (file_id, workspace_id, extracted_fields, model_version)
-     VALUES ($1, $2, $3::jsonb, $4)
-     ON CONFLICT (file_id) DO UPDATE SET
-       extracted_fields = EXCLUDED.extracted_fields, model_version = EXCLUDED.model_version,
-       extracted_at = now()`,
-    [fileId, workspaceId, JSON.stringify(fields), config.EXTRACTION_MODEL],
-  );
 }
 
 /**

@@ -16,6 +16,7 @@ import { requiredDocumentTypes, resolveItems, type ChecklistItem, type LatestFil
 import { findDiscrepancies, type Discrepancy } from './discrepancies.js';
 import type { ReconcileDoc } from './reconcile.js';
 import { assessRisks, type Risk } from './risks.js';
+import { documentRisks } from './documentChecks.js';
 
 /**
  * Shipment verdicts: completeness (checklist), discrepancies, risks and the
@@ -266,6 +267,8 @@ export function computeVerdicts(s: ShipmentSnapshot, now: number = Date.now()): 
       .sort(),
     discrepancies,
     registry: s.registry,
+    // Bank, dangerous-goods, certificate and blank-field flags (documentChecks.ts).
+    flags: documentRisks(docs.map((d, i) => ({ ...d, vet_certificate: extracted[i]!.vet_certificate ?? false }))),
     now,
   });
 

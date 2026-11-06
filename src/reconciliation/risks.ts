@@ -17,7 +17,10 @@ export type RiskCategory =
   | 'missing_docs'
   | 'discrepancy'
   | 'deadline'
-  | 'registry';
+  | 'registry'
+  | 'payment'
+  | 'dangerous_goods'
+  | 'document_quality';
 
 export interface Risk {
   code: string;
@@ -93,6 +96,13 @@ export const DISCREPANCY_FIELD_LABELS: Record<string, string> = {
   manifest_price: 'ціна в маніфесті',
   manifest_line: 'позиція маніфесту без інвойсу',
   manifest_extra: 'товар поза маніфестом',
+  // Document integrity (documentChecks.ts).
+  bank_account: 'банківські реквізити',
+  bank_accounts: 'банківські реквізити',
+  dangerous_goods: 'небезпечний вантаж',
+  signed: 'підпис',
+  stamped: 'печатка',
+  empty_fields: 'порожні поля',
 };
 
 export function fieldLabel(field: string): string {
@@ -119,12 +129,14 @@ export interface RiskInput {
   missing: string[];
   discrepancies: Discrepancy[];
   registry: RegistryFinding[];
+  /** Document-integrity risks (documentChecks.ts): bank, dangerous goods, certificates, blank fields. */
+  flags?: Risk[];
   now: number;
 }
 
 /** The current risk list for a shipment, most severe first. */
-export function assessRisks({ extractions, missing, discrepancies, registry, now }: RiskInput): Risk[] {
-  const risks: Risk[] = [];
+export function assessRisks({ extractions, missing, discrepancies, registry, flags = [], now }: RiskInput): Risk[] {
+  const risks: Risk[] = [...flags];
   // A customs declaration in the package means the goods have been declared —
   // a passed delivery date is history then, not a pending risk.
   const declared = extractions.some((r) => r.doc_type === 'customs_declaration');
