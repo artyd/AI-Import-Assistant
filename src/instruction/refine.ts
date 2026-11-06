@@ -18,14 +18,14 @@ export async function proposeRefinement(d: InstructionDraft, request: string): P
   const msg = await runWithAnthropicLimit(() =>
     anthropic.messages.create({
       model: config.REPORT_SUMMARY_MODEL,
-      max_tokens: 1200,
+      max_tokens: 2400,
       output_config: { effort: 'low' },
       system:
         'You add extra clauses to a shipping-instruction letter to a supplier. Write only what the user ' +
         'asked for, concise and professional, consistent with the existing letter; do not repeat what the ' +
         'letter already says and do not invent facts (names, numbers, dates) that are not in the letter or ' +
         'the request. Reply with JSON only: {"clauses":[{"en":"…","uk":"…"}]} — en = clause for the ' +
-        'supplier in English, uk = the same in Ukrainian. 1–3 clauses.',
+        'supplier in English, uk = the same in Ukrainian. 1–5 clauses (one per distinct requirement).',
       messages: [{ role: 'user', content: `LETTER:\n${renderText(d, 'en')}\n\nREQUEST:\n${request}` }],
     }),
   );
@@ -36,7 +36,7 @@ export async function proposeRefinement(d: InstructionDraft, request: string): P
     const clauses = (parsed.clauses ?? [])
       .map((c) => ({ en: String(c.en ?? '').trim(), uk: String(c.uk ?? '').trim() }))
       .filter((c) => c.en)
-      .slice(0, 3);
+      .slice(0, 5);
     return { clauses };
   } catch {
     return { clauses: [] };

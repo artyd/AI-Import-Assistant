@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { clearLetterRequest, peekLetterRequest } from "@/lib/letterFromAnswer";
 import { api, ApiError, downloadBlob } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { runTurn, turnContent } from "@/lib/chat/turn";
@@ -64,6 +65,13 @@ export default function InstructionPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [refineOpen, setRefineOpen] = useState(false);
+  // From the chat («Скласти лист постачальнику»): the answer's findings, run once.
+  const [chatRequest] = useState<string | null>(() => (typeof window === "undefined" ? null : peekLetterRequest(id)));
+  useEffect(() => {
+    if (!chatRequest) return;
+    clearLetterRequest(id);
+    setRefineOpen(true);
+  }, [chatRequest, id]);
 
   useEffect(() => {
     if (!authLoading && !user) router.replace("/?to=shturman");
@@ -595,6 +603,7 @@ export default function InstructionPage() {
       )}
       {refineOpen && (
         <RefineModal
+          initialRequest={chatRequest ?? undefined}
           ensureSaved={save}
           workspaceId={id}
           draft={draft}
@@ -734,14 +743,16 @@ function RefineModal({
   ensureSaved,
   onClose,
   onAccept,
+  initialRequest,
 }: {
+  initialRequest?: string;
   workspaceId: string;
   draft: InstructionDraft;
   ensureSaved: () => Promise<InstructionVersion>;
   onClose: () => void;
   onAccept: (clauses: { en: string; uk: string }[]) => void;
 }) {
-  const [request, setRequest] = useState("");
+  const [request, setRequest] = useState(initialRequest ?? "");
   const [clauses, setClauses] = useState<{ en: string; uk: string }[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -762,6 +773,15 @@ function RefineModal({
       setBusy(false);
     }
   };
+  // Opened from the chat with findings: propose at once (still nothing saved until «Прийняти»).
+  const autoAsked = useRef(false);
+  useEffect(() => {
+    if (initialRequest && !autoAsked.current) {
+      autoAsked.current = true;
+      void ask();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialRequest]);
   const diff = useMemo(() => (clauses ?? []).map((c) => `+ ${c.en}`).join("\n\n"), [clauses]);
   return (
     <div className={s.modal} onClick={(e) => e.target === e.currentTarget && onClose()}>

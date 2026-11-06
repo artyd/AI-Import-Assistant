@@ -169,7 +169,7 @@ export async function supplierInstructionRoutes(app: FastifyInstance): Promise<v
     const ws = await getOwnedWorkspace(req.user!.sub, req.params.id);
     if (!ws) return reply.code(404).send({ error: 'not_found' });
     const ver = verParam.safeParse(req.params.ver);
-    const body = z.object({ request: z.string().trim().min(3).max(2000), draft: draftSchema.optional() }).safeParse(req.body);
+    const body = z.object({ request: z.string().trim().min(3).max(4000), draft: draftSchema.optional() }).safeParse(req.body);
     if (!ver.success || !body.success) return reply.code(400).send({ error: 'invalid_request' });
     const v = await getVersion(ws.id, ver.data);
     if (!v) return reply.code(404).send({ error: 'not_found' });

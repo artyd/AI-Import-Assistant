@@ -76,6 +76,8 @@ interface Props {
   surveyPrefilled?: Partial<Record<SurveyIntakeField, boolean>>;
   /** Opens a cited file (at its page) — the «Джерела» rows become links. */
   onOpenSource?: (file: string, page: number | null) => void;
+  /** «Скласти лист постачальнику» under an answer that lists problems with actions. */
+  onDraftLetter?: (answer: string) => void;
 }
 
 type ChatItem = ({ kind: "message" } & Message) | ClassifyCard | QuestionCard;
@@ -131,6 +133,7 @@ export function Chat({
   onSurveyIntake,
   surveyPrefilled,
   onOpenSource,
+  onDraftLetter,
 }: Props) {
   // File intake is only wired when the host supplies the workspace file handlers.
   const fileIntake = !!(onUploadAndClassify && onMoveFile && folders);
@@ -858,6 +861,7 @@ export function Chat({
                     citations={it.citations}
                     pending={streaming && it.content === ""}
                     onOpenSource={onOpenSource}
+                    onDraftLetter={onDraftLetter}
                   />
                 )
               )}

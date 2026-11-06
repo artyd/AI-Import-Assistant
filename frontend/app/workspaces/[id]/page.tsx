@@ -30,6 +30,7 @@ import { AgentLog, type LogEntry } from "@/components/chat/AgentLog";
 import { ShipmentPanel } from "@/components/shipment/ShipmentPanel";
 import { VersionsModal } from "@/components/files/VersionsModal";
 import { findSourceFile } from "@/lib/citations";
+import { letterRequest, stashLetterRequest } from "@/lib/letterFromAnswer";
 import { FilePreviewModal } from "@/components/files/FilePreviewModal";
 import { SidebarNav } from "@/components/layout/SidebarNav";
 import { TopBar, type CompletenessStep } from "@/components/layout/TopBar";
@@ -205,6 +206,18 @@ export default function WorkspacePage() {
   const [versionsFile, setVersionsFile] = useState<FileItem | null>(null);
   const [previewFile, setPreviewFile] = useState<FileItem | null>(null);
   const [previewPage, setPreviewPage] = useState<number | null>(null);
+  // «Скласти лист постачальнику»: the answer's findings → the instruction
+  // constructor, which opens «Доопрацювати з ШІ» with them (nothing is saved
+  // until the user accepts the proposed clauses).
+  const draftLetter = useCallback(
+    (answer: string) => {
+      const request = letterRequest(answer);
+      if (!request) return notify("У цій відповіді немає пунктів для листа.", "info");
+      stashLetterRequest(id, request);
+      router.push(`/workspaces/${id}/instruction?from=chat`);
+    },
+    [id, notify, router]
+  );
   // A cited source → its file in the tree (current version first), opened at the page.
   const openSource = useCallback(
     (list: FileItem[], name: string, page: number | null) => {
@@ -1163,6 +1176,7 @@ export default function WorkspacePage() {
               docsStatus={chatKind === "supply" ? docsStatus : null}
               readingFeed={chatKind !== "normal" ? <ReadingFeed events={journal} files={files} /> : undefined}
               onOpenSource={chatKind === "supply" ? (name, pg) => openSource(files, name, pg) : undefined}
+              onDraftLetter={chatKind === "supply" ? draftLetter : undefined}
               onTurnComplete={chatKind === "supply" ? onSupplyTurnComplete : undefined}
               onSurveyPersist={chatKind === "supply" ? persistSurvey : undefined}
               onSurveyIntake={chatKind === "supply" ? onSurveyIntake : undefined}
