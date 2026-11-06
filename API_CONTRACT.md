@@ -564,6 +564,55 @@ Same message shape as above.
 
 ---
 
+## Відгуки й уроки (answer feedback)
+
+The user rates an assistant answer 👍/👎. A 👎 with a comment derives a **lesson**:
+a short reusable rule in Ukrainian with a `scope` — `workspace` (about this
+shipment's / FCL's documents) or `global` (a general behaviour rule). Active lessons
+go into the system prompt of every later chat turn under «УРОКИ З ВІДГУКІВ
+КОРИСТУВАЧІВ (обовʼязково враховуй)»: the 15 newest of the user's global lessons for
+that chat kind + the workspace lessons of the chat's shipment (consolidated chat:
+the FCL id). The lesson is derived **before** the feedback response returns, so the
+next chat message (e.g. «Відповідь вище неправильна. Що не так: … Перевір ще раз
+за документами й дай виправлену відповідь.», sent as an ordinary chat message)
+already sees it. Lessons belong to the user who gave the feedback.
+
+### `POST /api/messages/:messageId/feedback`  (auth)
+Request: `{ "rating": "up"|"down", "comment"?: string (≤ 2000) }`
+Response `200`:
+`{ "ok": true, "feedbackId": string, "lesson": { "id": string, "text": string, "scope": "workspace"|"global" } | null }`
+
+- `messageId` is the `messageId` from the chat `done` event (or a message `id` from
+  the conversation endpoints). `404` if it is not a uuid, not an `assistant`
+  message, or its conversation is not the user's (supply: owned shipment;
+  consolidated: owned FCL; normal: conversation owner). `400` on an invalid body.
+- One rating per (message, user): re-rating replaces rating + comment.
+- `lesson` is non-null only when this call derived one (`down` + non-empty
+  comment, and the model call succeeded). If derivation fails the feedback is
+  still stored and `lesson` is `null`. A re-rated 👎 with a new comment replaces
+  (deactivates) the lesson that feedback produced before; a later `up` keeps it.
+- Normal-chat lessons are always `global`.
+
+### `GET /api/lessons?workspaceId=<uuid>`  (auth)
+`workspaceId` is optional (a shipment or FCL id). Response `200`:
+`{ "lessons": [ { "id", "text", "scope": "workspace"|"global", "workspaceId": string|null, "chatKind": "supply"|"consolidated"|"normal", "createdAt", "active": boolean } ] }`
+— the user's global lessons + (when `workspaceId` is given) that workspace's
+lessons, newest first, **active and deactivated** (filter on `active`). `404` if
+`workspaceId` is not the user's; `400` if it is not a uuid.
+
+### `DELETE /api/lessons/:id`  (auth)
+Deactivates the lesson (`active=false`; it stops going into prompts and stays in
+the list). Response `200`: `{ "ok": true }`. `404` if it is not the user's.
+
+### `GET /api/feedback?rating=up|down&limit=<1..500, default 100>`  (auth)
+The user's feedback, newest first, for building answer-eval regression cases.
+Response `200`:
+`{ "feedback": [ { "id", "messageId", "conversationId", "workspaceId": string|null, "chatKind", "rating", "question", "answer", "comment", "lesson": string|null, "createdAt" } ] }`
+— `question` is the user message before the answer, `answer` is truncated to 2000
+chars, `lesson` is the text of the lesson linked to that feedback (if any).
+
+---
+
 ## Live events channel (SSE)
 
 ### `GET /api/workspaces/:id/events`  (auth via `?access_token=`)
