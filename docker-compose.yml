@@ -82,6 +82,10 @@ services:
       MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-104857600}
       # Internal logist-mcp URL (Phase 1). Empty disables the Phase-2 tools.
       LOGIST_MCP_URL: ${LOGIST_MCP_URL:-http://logist-mcp:8015}
+      # Open MCP endpoint limits (per UTC day, counted in Redis).
+      MCP_DAILY_PER_IP: ${MCP_DAILY_PER_IP:-3000}
+      MCP_AI_DAILY_CALLS: ${MCP_AI_DAILY_CALLS:-300}
+      MCP_AI_DAILY_PER_IP: ${MCP_AI_DAILY_PER_IP:-60}
       # Logistics hub tracking (hybrid: carrier APIs → carrier page via logist-mcp/Chromium).
       TRACKING_ENABLED: ${TRACKING_ENABLED:-true}
       TRACKING_CRON: ${TRACKING_CRON:-*/30 * * * *}

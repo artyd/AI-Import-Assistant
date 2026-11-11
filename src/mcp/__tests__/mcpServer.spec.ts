@@ -10,6 +10,11 @@ vi.mock('../../agent/tools.js', () => ({
     citations: [{ file: 'https://qdpro.com.ua/x', page: null }],
   })),
 }));
+vi.mock('../../customs/logist/uktzedDigest.js', async () => {
+  const { AsyncLocalStorage } = await import('node:async_hooks');
+  return { aiGateStorage: new AsyncLocalStorage() };
+});
+vi.mock('../../agent/tools/sheet.js', () => ({ sheetTools: () => [] }));
 vi.mock('../../customs/drugRegistry.js', () => ({ getRegistration: vi.fn(async () => null) }));
 vi.mock('../../agent/tools/hub.js', () => ({
   publicTrackTool: { name: 'track_by_number', description: 'track', input_schema: { type: 'object', properties: {} } },

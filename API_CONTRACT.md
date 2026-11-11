@@ -1117,7 +1117,18 @@ Body = one JSON-RPC message (legacy batch arrays also accepted). Methods:
 `initialize` (negotiates `2025-11-25|2025-06-18|2025-03-26|2024-11-05`), `ping`,
 `tools/list`, `tools/call`, empty `resources/list`/`prompts/list`. Requests →
 `200` JSON-RPC response; notifications only → `202`. `GET`/`DELETE` → `405`.
-Any Origin allowed (no credentials). Rate limit 120/min per IP.
+Any Origin allowed (no credentials).
+
+**Limits** (Redis-backed, UTC day; see ADR-0008): 120 requests/min and
+`MCP_DAILY_PER_IP` (3000)/day per IP; body ≤ 256 KB (`413`); JSON-RPC batch ≤ 20
+(`400`, error `-32600`); each tool argument ≤ 200 chars (`-32602`); tool call ≤ 30 s
+(`-32001`). Over a request limit → `429` with `Retry-After: <seconds>` and a
+JSON-RPC-shaped body:
+`{ "jsonrpc": "2.0", "id": null, "error": { "code": -32000, "message": "…", "data": { "limit": "burst"|"daily", "retryAfterSec": 42 } } }`.
+`uktzed_lookup_code` spends our Anthropic key: after `MCP_AI_DAILY_CALLS` (300, all IPs)
+or `MCP_AI_DAILY_PER_IP` (60) calls per day it still answers, with the raw qdpro text and a
+Ukrainian note that the AI summary is unavailable today. If Redis is down the request
+limits fail open and the AI digest is off.
 
 ## Поставки — shipment register (spec 008)
 

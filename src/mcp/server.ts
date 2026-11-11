@@ -1,4 +1,7 @@
+import { z } from 'zod';
 import { executeTool, logistTools } from '../agent/tools.js';
+import { aiGateStorage } from '../customs/logist/uktzedDigest.js';
+import type { McpLimiter } from './limits.js';
 import { getRegistration } from '../customs/drugRegistry.js';
 import { portStatusTool, publicTrackTool, whereNowTool } from '../agent/tools/hub.js';
 import { sheetTools } from '../agent/tools/sheet.js';
@@ -20,6 +23,34 @@ import { sheetTools } from '../agent/tools/sheet.js';
 
 export const SUPPORTED_PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 const LATEST_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[0]!;
+
+/** Hard input limits (ADR-0008, "Abuse and cost limits"). */
+export const MCP_MAX_BATCH = 20;
+export const MCP_MAX_ARG_CHARS = 200;
+export const MCP_CALL_TIMEOUT_MS = 30_000;
+
+const AI_UNAVAILABLE_NOTE =
+  'ℹ️ ШІ-зведення на сьогодні недоступне (вичерпано добовий ліміт або сховище лімітів недоступне). ' +
+  'Нижче сирі дані qdpro без ШІ-обробки; великі розділи скорочено. Спробуйте завтра або зверніться до команди Штурман.';
+
+const ArgValue = z.union([
+  z.string().max(MCP_MAX_ARG_CHARS),
+  z.number(),
+  z.boolean(),
+  z.null(),
+  z.array(z.union([z.string().max(MCP_MAX_ARG_CHARS), z.number(), z.boolean()])).max(20),
+]);
+/** Tool arguments: a flat object of short strings / numbers / booleans. */
+const ToolArgsSchema = z
+  .record(z.string().max(64), ArgValue)
+  .refine((o) => Object.keys(o).length <= 20, 'too many arguments');
+
+export interface McpCallContext {
+  /** Client IP, for the per-IP AI budget. Without a limiter no AI budget applies (tests / chat). */
+  ip?: string;
+  limiter?: McpLimiter;
+  timeoutMs?: number;
+}
 
 const SERVER_INFO = { name: 'shturman', title: 'Shturman', version: '1.0.0' };
 
@@ -126,20 +157,46 @@ async function runRegistryLookup(input: unknown): Promise<{ text: string; isErro
   return { text: lines.join('\n'), isError: false };
 }
 
-async function callTool(name: string, args: unknown): Promise<{ content: { type: 'text'; text: string }[]; isError: boolean }> {
+async function callTool(name: string, rawArgs: unknown, ctx: McpCallContext): Promise<{ content: { type: 'text'; text: string }[]; isError: boolean }> {
   if (!toolCatalog().some((t) => t.name === name)) {
     throw new RpcError(-32602, `Unknown tool: ${name}`);
   }
+  const parsedArgs = ToolArgsSchema.safeParse(rawArgs ?? {});
+  if (!parsedArgs.success) {
+    const issue = parsedArgs.error.issues[0];
+    const where = issue?.path.join('.') || 'arguments';
+    throw new RpcError(
+      -32602,
+      `Невалідні аргументи інструмента (${where}): рядки до ${MCP_MAX_ARG_CHARS} символів, до 20 полів.`,
+    );
+  }
+  const args = parsedArgs.data;
   if (name === 'check_drug_registration') {
     const r = await runRegistryLookup(args);
     return { content: [{ type: 'text', text: r.text }], isError: r.isError };
   }
-  // Logist tools are scope-less: an empty context is all they need.
-  const out = await executeTool(name, args ?? {}, {});
+  // Logist tools are scope-less: an empty context is all they need. Calls that
+  // may spend the Anthropic key run behind the daily AI budget gate.
+  const gate = ctx.limiter ? ctx.limiter.aiGate(ctx.ip ?? 'unknown') : undefined;
+  const out = await (gate ? aiGateStorage.run(gate, () => executeTool(name, args, {})) : executeTool(name, args, {}));
   const failed = out.summary.endsWith('помилка');
   const sources = out.citations.map((c) => c.file).filter(Boolean);
-  const text = sources.length ? `${out.result}\n\nДжерело: ${sources.join(', ')}` : out.result;
+  let text = sources.length ? `${out.result}\n\nДжерело: ${sources.join(', ')}` : out.result;
+  if (gate?.skipped) text = `${AI_UNAVAILABLE_NOTE}\n\n${text}`;
   return { content: [{ type: 'text', text }], isError: failed };
+}
+
+function withCallTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(
+      () => reject(new RpcError(-32001, `Час виконання інструмента вичерпано (${Math.round(ms / 1000)} с). Спробуйте ще раз.`)),
+      ms,
+    );
+    p.then(
+      (v) => (clearTimeout(t), resolve(v)),
+      (e) => (clearTimeout(t), reject(e)),
+    );
+  });
 }
 
 class RpcError extends Error {
@@ -166,7 +223,7 @@ function isId(v: unknown): v is string | number {
   return typeof v === 'string' || typeof v === 'number';
 }
 
-async function dispatch(method: string, params: Record<string, unknown>): Promise<unknown> {
+async function dispatch(method: string, params: Record<string, unknown>, ctx: McpCallContext): Promise<unknown> {
   switch (method) {
     case 'initialize': {
       const requested = typeof params.protocolVersion === 'string' ? params.protocolVersion : '';
@@ -184,7 +241,7 @@ async function dispatch(method: string, params: Record<string, unknown>): Promis
     case 'tools/call': {
       const name = typeof params.name === 'string' ? params.name : '';
       if (!name) throw new RpcError(-32602, 'Missing tool name');
-      return callTool(name, params.arguments);
+      return withCallTimeout(callTool(name, params.arguments, ctx), ctx.timeoutMs ?? MCP_CALL_TIMEOUT_MS);
     }
     case 'resources/list':
       return { resources: [] };
@@ -198,7 +255,7 @@ async function dispatch(method: string, params: Record<string, unknown>): Promis
 }
 
 /** Handles one JSON-RPC message; returns null for notifications/responses. */
-async function handleOne(msg: unknown): Promise<RpcResponse | null> {
+async function handleOne(msg: unknown, ctx: McpCallContext): Promise<RpcResponse | null> {
   if (!msg || typeof msg !== 'object' || Array.isArray(msg)) {
     return { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Invalid Request' } };
   }
@@ -211,7 +268,7 @@ async function handleOne(msg: unknown): Promise<RpcResponse | null> {
   if (!isId(m.id)) return null; // notification (initialized, cancelled, …)
   const params = m.params && typeof m.params === 'object' ? (m.params as Record<string, unknown>) : {};
   try {
-    const result = await dispatch(m.method, params);
+    const result = await dispatch(m.method, params, ctx);
     return { jsonrpc: '2.0', id: m.id, result };
   } catch (err) {
     if (err instanceof RpcError) {
@@ -225,11 +282,17 @@ async function handleOne(msg: unknown): Promise<RpcResponse | null> {
  * Processes a POST body. Returns the response payload, or null when the body
  * held only notifications/responses (the route answers 202 Accepted).
  */
-export async function handleMcpPayload(body: unknown): Promise<RpcResponse | RpcResponse[] | null> {
+export async function handleMcpPayload(
+  body: unknown,
+  ctx: McpCallContext = {},
+): Promise<RpcResponse | RpcResponse[] | null> {
   if (Array.isArray(body)) {
     if (body.length === 0) return { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Invalid Request' } };
-    const out = (await Promise.all(body.map(handleOne))).filter((r): r is RpcResponse => r !== null);
+    if (body.length > MCP_MAX_BATCH) {
+      return { jsonrpc: '2.0', id: null, error: { code: -32600, message: `Забагато викликів у пакеті (макс. ${MCP_MAX_BATCH}).` } };
+    }
+    const out = (await Promise.all(body.map((m) => handleOne(m, ctx)))).filter((r): r is RpcResponse => r !== null);
     return out.length ? out : null;
   }
-  return handleOne(body);
+  return handleOne(body, ctx);
 }

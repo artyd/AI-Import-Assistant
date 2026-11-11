@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 import type { Redis } from 'ioredis';
 import { anthropic } from '../../lib/anthropic/client.js';
@@ -106,11 +107,26 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
   return results;
 }
 
+/**
+ * Optional "AI allowed" gate for the current call. The open MCP endpoint runs
+ * tool calls inside `aiGateStorage.run(gate, …)`; the gate is asked right before
+ * the first Anthropic call and answers false once a daily budget is spent (or
+ * the budget store is unreachable). No gate (chat agent) = always allowed. When
+ * the gate says no, large sections are returned raw (truncated), uncached.
+ */
+export interface AiGateLike {
+  allow(): Promise<boolean>;
+  readonly skipped: boolean;
+}
+export const aiGateStorage = new AsyncLocalStorage<AiGateLike>();
+
 /** Digest ONE section (batched if large). Returns '' if it yields nothing. */
 async function digestSection(code: string, section: string, text: string): Promise<string> {
   const t = text.trim();
   if (!t) return '';
   if (t.length <= DIGEST_THRESHOLD) return t;
+  const gate = aiGateStorage.getStore();
+  if (gate && !(await gate.allow())) return t.slice(0, DIGEST_THRESHOLD);
   const chunks = splitChunks(t);
   const parts = await mapLimit(chunks, CHUNK_CONCURRENCY, (c) =>
     summarizeChunk(code, section, c).catch(() => ''),
@@ -130,6 +146,16 @@ function getCache(): Redis {
   return cache;
 }
 
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('timeout')), ms);
+    p.then(
+      (v) => (clearTimeout(t), resolve(v)),
+      (e) => (clearTimeout(t), reject(e)),
+    );
+  });
+}
+
 export async function digestUktzedSections(
   code: string,
   common: string,
@@ -139,10 +165,15 @@ export async function digestUktzedSections(
   const key =
     'uktzed_digest:' +
     createHash('sha256').update(JSON.stringify([code, common, tabs])).digest('hex');
-  const hit = await getCache().get(key).catch(() => null);
+  // The shared Redis client retries forever, so bound each cache call: a Redis
+  // outage must slow this lookup by milliseconds, not hang it.
+  const hit = await withTimeout(getCache().get(key), 1500).catch(() => null);
   if (hit !== null) return hit;
   const digest = await buildDigest(code, common, tabs);
-  if (digest) await getCache().set(key, digest, 'EX', CACHE_TTL_S).catch(() => undefined);
+  // Never cache a raw (no-AI) fallback: it would hide the real digest for a day.
+  if (digest && !aiGateStorage.getStore()?.skipped) {
+    await withTimeout(getCache().set(key, digest, 'EX', CACHE_TTL_S), 1500).catch(() => undefined);
+  }
   return digest;
 }
 

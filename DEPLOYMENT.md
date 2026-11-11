@@ -388,6 +388,9 @@ Caddy add it to the matcher: `@backend path /api/* /health /health/*`. **A full 
 | `ACCESS_CODE` | — | `` (off) | Quick PIN for the UI keypad: 6–8 digits; empty disables it |
 | `ACCESS_CODE_EMAIL` | — | — | Account the PIN opens; default = the main (first-created) account |
 | `ACCESS_CODE_MAX_FAILURES` | — | `20` | Wrong PINs (all IPs) per 24 h before PIN login locks for 24 h |
+| `MCP_DAILY_PER_IP` | — | `3000` | Open `/api/mcp`: requests per IP per UTC day (Redis); over → 429 |
+| `MCP_AI_DAILY_CALLS` | — | `300` | Open `/api/mcp`: tool calls per UTC day (all IPs) allowed to spend the Anthropic key; then answers without the AI digest |
+| `MCP_AI_DAILY_PER_IP` | — | `60` | Same, per IP |
 | `TRUST_PROXY` | — | `loopback,uniquelocal` | Proxies trusted for `X-Forwarded-For` (real client IP for login throttling) |
 | `CORS_ORIGIN` | — | `` (empty) | Comma-separated exact origins to allow. Same-origin behind Caddy needs none; set only if the API is served cross-origin |
 | `STORAGE_DIR` | — | `./storage` | On-disk file storage root |
