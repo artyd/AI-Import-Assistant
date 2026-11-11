@@ -143,7 +143,12 @@ test("marks: starred on top, category icons, groups filter, star needs edit mode
   const calls: string[] = [];
   await mockSupply(page, calls);
   await page.goto("/supply");
-  // The starred sample is the first row, under «Обрані».
+  // The list opens sorted by name; the starred sample is still the first row.
+  await expect(page.getByRole("combobox", { name: "Сортування" })).toHaveValue("name");
+  await expect(page.locator("article.row").first()).toContainText("Зразок фарби");
+  await expect(page.locator(".grp")).toHaveCount(0);
+  // By date, it sits under «Обрані».
+  await page.getByRole("combobox", { name: "Сортування" }).selectOption("date");
   await expect(page.locator("article.row").first()).toContainText("Зразок фарби");
   await expect(page.locator(".grp").first()).toContainText("Обрані");
   // Every row wears its category icon.

@@ -27,7 +27,7 @@ export function SupplyApp() {
   const [cat, setCat] = useState<string>("all");
   // "all" | "star" (обрані) | a group id
   const [grp, setGrp] = useState<string>("all");
-  const [sort, setSort] = useState<SortKey>("date");
+  const [sort, setSort] = useState<SortKey>("name");
   const [openId, setOpenId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [pinOpen, setPinOpen] = useState(false);
