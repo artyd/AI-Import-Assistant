@@ -171,6 +171,38 @@ Locally against `npm run dev` the default `BASE_URL=http://localhost:8080`
 works. `SKIP_CHAT=1` skips the Anthropic-billed chat step; `INDEX_TIMEOUT_MS`
 tunes how long to wait for indexing. Exit code is non-zero if any check fails.
 
+### What CI runs (no manual release check)
+
+`.github/workflows/ci.yml` also runs, on every PR/push to `main` (and on `ci/**`
+branches or by hand via *Run workflow*):
+
+- **`e2e`** — builds the frontend, serves it with `next start -p 3100` and runs
+  `npx playwright test --project=desktop-chromium` (backend-dependent specs self-skip).
+- **`full-stack`** — brings up the production compose with `docker-compose.ci.yml`
+  (a deterministic **mock Anthropic API**, `scripts/mock-anthropic.mjs`, so no key and
+  no cost; tracking/news/sheet pollers off; a CI Caddy on `http://localhost:8088`
+  with the same `/api/*`+`/health` → backend split), seeds a user, runs this smoke
+  test **with chat on**, then Playwright with `PW_BACKEND=1`. Logs and the
+  Playwright report are uploaded on failure.
+
+Same thing locally (needs Docker):
+
+```bash
+printf 'POSTGRES_USER=aia
+POSTGRES_PASSWORD=ci
+POSTGRES_DB=aia
+JWT_SECRET=ci-jwt-secret-0123456789abcdef
+CORS_ORIGIN=http://localhost:8088
+ANTHROPIC_API_KEY=ci-dummy-key
+' > .env
+docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --build --wait
+docker compose -f docker-compose.yml -f docker-compose.ci.yml exec -T backend node dist/auth/seed.js ci@example.com ci-password-123
+BASE_URL=http://localhost:8088 EMAIL=ci@example.com PASSWORD=ci-password-123 node scripts/smoke-test.mjs
+cd frontend && PW_BACKEND=1 PW_BASE_URL=http://localhost:8088 npx playwright test --project=desktop-chromium
+```
+
+(Use a throwaway `.env`, not the production one.) Deploys stay manual or via `deploy.yml`.
+
 ## Operations
 
 - **Logs:** `docker compose logs -f backend worker frontend`

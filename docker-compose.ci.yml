@@ -1,0 +1,58 @@
+# CI override for the full-stack job (.github/workflows/ci.yml, `full-stack`).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --build --wait
+#
+# Production-like (same images, same compose), but with NO real Anthropic key
+# and no internet pollers:
+#   - mock-anthropic answers /v1/messages deterministically (scripts/mock-anthropic.mjs)
+#   - tracking / news / sheet sync are switched off
+#   - a small Caddy on http://localhost:8088 mirrors the host Caddy's split routing
+#     (/api/* + /health -> backend, everything else -> frontend)
+# Needs only the variables from a CI .env (see the workflow); ANTHROPIC_API_KEY is a dummy.
+
+services:
+  mock-anthropic:
+    image: node:20-alpine
+    working_dir: /app
+    command: ['node', 'mock-anthropic.mjs']
+    environment:
+      PORT: '8099'
+    volumes:
+      - ./scripts/mock-anthropic.mjs:/app/mock-anthropic.mjs:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:8099/health >/dev/null || exit 1']
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    environment:
+      ANTHROPIC_BASE_URL: http://mock-anthropic:8099
+      ANTHROPIC_API_KEY: ci-dummy-key
+      TRACKING_ENABLED: 'false'
+      TRACKING_SCRAPE_ENABLED: 'false'
+      SHEET_ID: ''
+      NEWS_ENABLED: 'false'
+    depends_on:
+      mock-anthropic: { condition: service_healthy }
+
+  worker:
+    environment:
+      ANTHROPIC_BASE_URL: http://mock-anthropic:8099
+      ANTHROPIC_API_KEY: ci-dummy-key
+      TRACKING_ENABLED: 'false'
+      TRACKING_SCRAPE_ENABLED: 'false'
+      SHEET_ID: ''
+      NEWS_ENABLED: 'false'
+    depends_on:
+      mock-anthropic: { condition: service_healthy }
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - '127.0.0.1:8088:8088'
+    volumes:
+      - ./scripts/ci/Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - backend
+      - frontend

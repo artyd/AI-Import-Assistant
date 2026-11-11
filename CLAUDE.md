@@ -43,6 +43,7 @@ DEPLOYMENT.md            server setup, host Caddy block, env
    - Agent tool: definition in `agent/tools.ts`, handler in `agent/tools/<area>.ts` (`/add-agent-tool`).
    - File format: `convertToMarkdown` + `inferFileType` + the allow-list in `lib/storage.ts`.
 3. **Check**: `npm run typecheck && npm test && npm run build` for the backend (`/verify`), and `cd frontend && npm run typecheck && npm test && npm run build && npx playwright test` for the frontend. Run `npm run eval:grounding` when you touch the prompt or tools.
+   CI (`ci.yml`) also runs Playwright on the production build (`e2e`) and a docker `full-stack` smoke + Playwright against a mock Anthropic API; to reproduce locally see `DEPLOYMENT.md` "Smoke test".
 4. **Commit** on `main` and push only when asked. A push to `main` can deploy to production (see Deploy).
 
 ## Invariants
