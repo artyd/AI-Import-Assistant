@@ -16,6 +16,9 @@ const envSchema = z.object({
   // Infra
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
   REDIS_URL: z.string().min(1).default('redis://localhost:6379'),
+  // Queries slower than this (ms) are logged at warn level (duration + first 200
+  // chars of SQL, never parameters). 0 disables.
+  SLOW_QUERY_MS: z.coerce.number().int().min(0).default(500),
 
   // Auth
   JWT_SECRET: z.string().min(16, 'JWT_SECRET must be at least 16 chars'),
