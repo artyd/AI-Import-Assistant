@@ -265,6 +265,14 @@ const envSchema = z.object({
   // tools that call it become available once this is set (e.g.
   // http://logist-mcp:8015). Compose sets it by default.
   LOGIST_MCP_URL: z.string().default(''),
+
+  // Open MCP endpoint (/api/mcp) abuse and cost limits, counted in Redis per UTC
+  // day (ADR-0008). MCP_DAILY_PER_IP = requests per IP; MCP_AI_DAILY_CALLS = tool
+  // calls that spend the Anthropic key, all IPs together; MCP_AI_DAILY_PER_IP =
+  // the same, per IP. A spent AI budget degrades to the raw data without an AI digest.
+  MCP_DAILY_PER_IP: z.coerce.number().int().positive().default(3000),
+  MCP_AI_DAILY_CALLS: z.coerce.number().int().positive().default(300),
+  MCP_AI_DAILY_PER_IP: z.coerce.number().int().positive().default(60),
 });
 
 export type AppConfig = z.infer<typeof envSchema>;
