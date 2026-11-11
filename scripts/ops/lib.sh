@@ -100,7 +100,9 @@ ensure_storage_volume() {
 # Run one SQL statement in the current project's postgres; credentials come from the container env.
 psql_c() {
   # shellcheck disable=SC2016 # expanded inside the container, on purpose
-  dc exec -T postgres sh -c 'psql -X -At -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "$1"' sh "$1"
+  # </dev/null: `docker compose exec` reads stdin, and callers loop with `while read`;
+  # without it the first call swallows the rest of the loop's input (only one table compared).
+  dc exec -T postgres sh -c 'psql -X -At -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "$1"' sh "$1" </dev/null
 }
 
 # "table count" lines for BACKUP_TABLES in the current project.

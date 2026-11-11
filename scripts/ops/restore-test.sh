@@ -75,7 +75,11 @@ else
 fi
 
 echo "== sample of up to $SAMPLE_FILES files vs archive =="
-mapfile -t SAMPLE < <(tar tzf "$BACKUP/storage.tar.gz" | grep -v '/$' | shuf -n "$SAMPLE_FILES" || true)
+# Regular files only ('-' in `tar tv`). The storage tree (`_tree/`) is made of hard links;
+# tar stores the second name of a hard-linked file as a link entry with no data, so
+# `tar xO` of that entry prints nothing and would look like an empty (corrupt) file.
+mapfile -t SAMPLE < <(tar --quoting-style=literal -tvzf "$BACKUP/storage.tar.gz" |
+  sed -nE 's/^-[^ ]+ +[^ ]+ +[0-9]+ +[0-9-]+ +[0-9:]+ //p' | shuf -n "$SAMPLE_FILES" || true)
 if [ "${#SAMPLE[@]}" -eq 0 ]; then
   echo "  (archive holds no files - nothing to sample)"
 else
