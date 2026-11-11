@@ -1,0 +1,26 @@
+# CI-only Caddy: mirrors the production split routing from DEPLOYMENT.md
+# ("System Caddy block") on plain HTTP :8088, with no TLS and no real domain.
+{
+	auto_https off
+	admin off
+}
+
+:8088 {
+	encode zstd gzip
+
+	# API + health check -> Fastify backend (SSE-safe: no buffering).
+	@backend path /api/* /health
+	handle @backend {
+		reverse_proxy backend:8080 {
+			flush_interval -1
+			transport http {
+				response_header_timeout 0
+			}
+		}
+	}
+
+	# Everything else -> Next.js frontend.
+	handle {
+		reverse_proxy frontend:3000
+	}
+}
