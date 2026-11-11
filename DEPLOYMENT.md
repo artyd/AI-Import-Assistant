@@ -65,7 +65,7 @@ ai-import-assistant.duckdns.org {
 	encode zstd gzip
 
 	# API + health check → Fastify backend (docker, localhost-only).
-	@backend path /api/* /health
+	@backend path /api/* /health /health/*
 	handle @backend {
 		reverse_proxy 127.0.0.1:8006 {
 			# Server-Sent Events: never buffer, keep long-lived streams open.
@@ -187,6 +187,43 @@ tunes how long to wait for indexing. Exit code is non-zero if any check fails.
   `storage_data` (raw files). `redis_data` is a transient job queue.
 - **Rotate secrets:** edit `.env`, then `docker compose up -d`.
 
+## Alerts
+
+Production failures show up in the app's bell (🔔) as `⚠ Збій: <area> — <title> (<time>)`,
+with a distinct «Збій» tag. No outside service is involved.
+
+**What triggers one**
+- a backend 5xx response (route pattern + status only, never the request body);
+- a chat turn that ends with a server-side failure (user aborts and 429 rate limits do not);
+- an ingest job that failed its **last** attempt; a failed reminder / news / tracking / sheet-sync / retry-sweep job;
+- `uncaughtException` / `unhandledRejection` in the backend or the worker (the process still exits, as before);
+- Anthropic outages: bad key (401/403, key `anthropic-auth`), billing/credits (`anthropic-billing`),
+  repeated 429/529 — 3 within 10 min (`anthropic-overloaded`).
+
+The same alert key is delivered at most once per `ALERT_THROTTLE_MINUTES`; the next one carries «(+N схожих)».
+Messages never contain secrets, tokens, request bodies, document/chat text or emails.
+Every alert is also logged as one JSON line, so the history is:
+
+```bash
+cd /opt/AI-Import-Assistant && docker compose logs backend worker | grep ops_alert
+```
+
+If the database itself is down, the bell cannot be written; the log line (`delivery_failed`) is the fallback.
+
+**Who gets them:** set `OPS_ADMIN_EMAILS=a@x.com,b@x.com` in `.env` (case-insensitive; empty = every user),
+then `docker compose up -d`. The recipient list is cached for 5 minutes. `ops_alert` rows are deleted after 30 days.
+
+**Send a test**
+
+```bash
+cd /opt/AI-Import-Assistant && docker compose exec backend node dist/scripts/alert-test.js
+# prints: Test ops alert delivered to N recipient(s).   (locally: npm run alert:test)
+```
+
+**Readiness:** `GET /health/ready` checks Postgres and Redis (2 s each): 200 or 503. To make it reachable through
+Caddy add it to the matcher: `@backend path /api/* /health /health/*`. **A full server outage is not covered**
+(nothing is left to write the bell) — a later external uptime monitor can poll `/health/ready`.
+
 ## Environment variables (backend)
 
 | Variable | Required | Default | Purpose |
@@ -222,6 +259,8 @@ tunes how long to wait for indexing. Exit code is non-zero if any check fails.
 | `EXTRACTION_ENABLED` | — | `true` | Worker structured field extraction (`true`/`false`) |
 | `REMINDERS_ENABLED` | — | `true` | Daily in-app reminder job (`true`/`false`) |
 | `REMINDERS_CRON` | — | `0 6 * * *` | Cron for the reminder scan |
+| `OPS_ADMIN_EMAILS` | — | `` | Comma-separated emails that get ops alerts in the bell; empty = every user |
+| `ALERT_THROTTLE_MINUTES` | — | `15` | The same alert reaches the bell at most once per this many minutes (next one says «+N схожих») |
 | `NOVA_POSHTA_API_KEY` (or `NOVAPOSHTA_API_KEY`) | — | `` | Нова Пошта tracking (works keyless; key = richer data) |
 | `SEVENTEEN_TRACK_KEY` (or `TRACK17_API_KEY`) | — | `` | 17TRACK parcels / express tracking |
 | `TRACKING_SEA_MODE` | — | `manual` | Sea containers kept by hand / from the sheet (`auto` = scrape carrier pages) |

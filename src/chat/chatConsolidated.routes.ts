@@ -20,6 +20,7 @@ import { supplyToolDefinitions } from '../agent/tools/supply.js';
 import { buildDocumentsDigest } from '../agent/documentsDigest.js';
 import { listLots } from '../shipments/lots.js';
 import { chatRateLimitConfig } from './chatRateLimit.js';
+import { alertChatFailure } from '../lib/alertHooks.js';
 import { lessonsBlockFor } from '../feedback/store.js';
 import { withLessons } from '../feedback/lesson.js';
 
@@ -111,6 +112,7 @@ export async function chatConsolidatedRoutes(app: FastifyInstance): Promise<void
 
         if (result.error) {
           req.log.error({ err: result.error }, 'consolidated chat turn errored (partial persisted)');
+          alertChatFailure({ kind: 'consolidated', workspaceId: col.id, aborted: sse.signal.aborted, message: result.error, anthropicHandled: result.anthropicOutage });
           sse.send('error', { message: 'Відповідь перервалася. Спробуйте ще раз.' });
         } else {
           sse.send('done', {
@@ -123,6 +125,7 @@ export async function chatConsolidatedRoutes(app: FastifyInstance): Promise<void
         }
       } catch (err) {
         req.log.error({ err }, 'consolidated chat turn failed');
+        alertChatFailure({ kind: 'consolidated', workspaceId: col.id, aborted: sse.signal.aborted, err });
         sse.send('error', { message: 'Не вдалося обробити запит. Спробуйте ще раз.' });
       } finally {
         clearInterval(heartbeat);

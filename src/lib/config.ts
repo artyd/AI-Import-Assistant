@@ -265,6 +265,12 @@ const envSchema = z.object({
   // tools that call it become available once this is set (e.g.
   // http://logist-mcp:8015). Compose sets it by default.
   LOGIST_MCP_URL: z.string().default(''),
+
+  // Ops alerts → the in-app bell (type `ops_alert`). Recipients: users whose email
+  // is listed here (comma-separated, case-insensitive); empty = every user.
+  // The same alert key reaches the bell at most once per ALERT_THROTTLE_MINUTES.
+  OPS_ADMIN_EMAILS: z.string().default(''),
+  ALERT_THROTTLE_MINUTES: z.coerce.number().positive().default(15),
 });
 
 export type AppConfig = z.infer<typeof envSchema>;

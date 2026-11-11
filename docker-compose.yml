@@ -70,6 +70,9 @@ services:
       # Quick PIN login (off unless set): 6–8 digits, bound to ACCESS_CODE_EMAIL.
       ACCESS_CODE: ${ACCESS_CODE:-}
       ACCESS_CODE_EMAIL: ${ACCESS_CODE_EMAIL:-}
+      # Ops alerts → in-app bell (see DEPLOYMENT.md «Alerts»).
+      OPS_ADMIN_EMAILS: ${OPS_ADMIN_EMAILS:-}
+      ALERT_THROTTLE_MINUTES: ${ALERT_THROTTLE_MINUTES:-15}
       CORS_ORIGIN: ${CORS_ORIGIN}
       STORAGE_DIR: /data/storage
       # File analysis (spec 007): vision transcription, extraction, classification.
@@ -119,6 +122,9 @@ services:
       # never passed here, so the worker silently used the code default.
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5-5}
       JWT_SECRET: ${JWT_SECRET}
+      # Ops alerts → in-app bell (see DEPLOYMENT.md «Alerts»).
+      OPS_ADMIN_EMAILS: ${OPS_ADMIN_EMAILS:-}
+      ALERT_THROTTLE_MINUTES: ${ALERT_THROTTLE_MINUTES:-15}
       CORS_ORIGIN: ${CORS_ORIGIN}
       STORAGE_DIR: /data/storage
       # File analysis (spec 007): vision transcription, extraction, classification.
