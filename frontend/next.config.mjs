@@ -32,6 +32,9 @@ const securityHeaders = [
   { key: "Referrer-Policy", value: "same-origin" },
   { key: "X-Frame-Options", value: "DENY" },
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+  // Browsers ignore HSTS on plain-http responses, so this is safe in dev; in prod
+  // (HTTPS only, host Caddy) it stops downgrade-to-http on later visits.
+  { key: "Strict-Transport-Security", value: "max-age=31536000" },
 ];
 
 /** @type {import('next').NextConfig} */
