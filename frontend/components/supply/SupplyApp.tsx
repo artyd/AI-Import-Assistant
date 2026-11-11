@@ -13,6 +13,7 @@ import { CategoryIcon, GroupIcon, StarMark } from "./KindIcon";
 import { Palette } from "./Palette";
 import { PinModal } from "./PinModal";
 import { ShipmentDrawer } from "./ShipmentDrawer";
+import { LegalLinks } from "@/components/legal/LegalLinks";
 import { IArch, ICal, IDl, IExit, IHist, IList, ILock, IPlus, ISearch, ISet, IUnlock, IX } from "./SupplyIcons";
 
 export type View = "list" | "cal" | "arch" | "hist" | "dict";
@@ -344,6 +345,7 @@ export function SupplyApp() {
           <button aria-label="Закрити" onClick={() => setToast(null)} style={{ background: "transparent", padding: 4 }}><IX size={13} /></button>
         </div>
       )}
+      <LegalLinks fixed />
     </div>
   );
 }

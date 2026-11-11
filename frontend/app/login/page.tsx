@@ -7,6 +7,7 @@ import { api, ApiError } from "@/lib/api";
 import { useTheme } from "@/lib/theme";
 import { IconMoon, IconSun, IconSpinner } from "@/components/ui/icons";
 import { BrandMark, CodeGate } from "@/components/auth/CodeGate";
+import { LegalLinks } from "@/components/legal/LegalLinks";
 
 export default function LoginPage() {
   const { user, loading, login, loginWithCode } = useAuth();
@@ -55,6 +56,7 @@ export default function LoginPage() {
           <EmailForm onWantCode={codeLength ? () => setMode("code") : undefined} login={login} router={router} />
         )}
       </div>
+      <LegalLinks fixed />
     </div>
   );
 }
