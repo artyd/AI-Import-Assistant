@@ -1404,8 +1404,8 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
               📅 {compactHud ? "" : "На дату"}
             </button>
             <span style={{ color: "var(--muted)" }} title="Живі позиції суден (aisstream.io)">
-              <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: (snap?.vessels.length ?? 0) > 0 ? "var(--ok)" : "var(--faint)", marginRight: 6 }} />
-              AIS: {(snap?.vessels.length ?? 0) > 0 ? `${snap!.vessels.length}${compactHud ? "" : " суден"}` : "—"}
+              <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: (snap?.vessels?.length ?? 0) > 0 ? "var(--ok)" : "var(--faint)", marginRight: 6 }} />
+              AIS: {(snap?.vessels?.length ?? 0) > 0 ? `${snap!.vessels!.length}${compactHud ? "" : " суден"}` : "—"}
             </span>
             <span style={{ color: "var(--faint)", display: compactHud ? "none" : undefined }}>
               оновлено {snap ? new Date(snapAt.current).toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" }) : "—"}
