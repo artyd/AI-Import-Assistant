@@ -42,6 +42,11 @@ describe("sorting and search", () => {
     expect(sortShipments(list, "date", TODAY).map((s) => s.id)).toEqual(["late", "next", "none"]);
   });
 
+  it("by name, numbers go up: 2 before 10", () => {
+    const list = ["№10 Метопрен", "№2 Лактоза", "№1 Гліцин", "№21 Сорбіт"].map((name) => ship({ id: name, name }));
+    expect(sortShipments(list, "name", TODAY).map((s) => s.name)).toEqual(["№1 Гліцин", "№2 Лактоза", "№10 Метопрен", "№21 Сорбіт"]);
+  });
+
   it("search looks into steps and extra fields", () => {
     const s = ship({ steps: [step({ name: "Ветеринарний контроль" })], custom: { supplier: "Макрохим" } });
     expect(matches(s, "ветеринар")).toBe(true);

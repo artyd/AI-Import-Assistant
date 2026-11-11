@@ -56,7 +56,8 @@ export type SortKey = "date" | "name" | "updated";
 export function sortShipments(list: SupplyShipment[], key: SortKey, today: string): SupplyShipment[] {
   const out = [...list];
   const star = (a: SupplyShipment, b: SupplyShipment) => Number(b.pinned) - Number(a.pinned);
-  if (key === "name") return out.sort((a, b) => star(a, b) || a.name.localeCompare(b.name, "uk"));
+  // numeric: "Поставка 2" before "Поставка 10"
+  if (key === "name") return out.sort((a, b) => star(a, b) || a.name.localeCompare(b.name, "uk", { numeric: true }));
   if (key === "updated") return out.sort((a, b) => star(a, b) || b.updatedAt.localeCompare(a.updatedAt));
   const rank = (s: SupplyShipment) => {
     const d = deadline(s, today);
