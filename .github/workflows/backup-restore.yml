@@ -1,0 +1,167 @@
+name: Backup & restore
+
+# Proves the backup scripts work end to end: backup -> destroy volumes -> restore ->
+# compare. Runs the SAME scripts/ops/*.sh that run on the server.
+on:
+  push:
+    branches: [main, 'ci/**']
+  workflow_dispatch:
+
+concurrency:
+  group: backup-restore-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cycle:
+    name: Backup -> wipe -> restore -> verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      POSTGRES_USER: aiia
+      POSTGRES_PASSWORD: ci-only-password
+      POSTGRES_DB: aiia
+      COMPOSE_FILES: docker-compose.yml docker-compose.backup-ci.yml
+      COMPOSE_PROJECT_NAME: aiia-ci-src
+      BACKUP_DIR: ${{ github.workspace }}/../backups
+      BACKUP_KEEP_DAILY: '3'
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Scripts are syntactically valid
+        run: |
+          for f in scripts/ops/*.sh; do bash -n "$f"; done
+          command -v shellcheck >/dev/null || sudo apt-get install -y shellcheck >/dev/null
+          shellcheck -x scripts/ops/*.sh
+
+      - name: Start the "production" stack (postgres from the real compose file + storage volume)
+        run: |
+          DC="docker compose -p $COMPOSE_PROJECT_NAME -f docker-compose.yml -f docker-compose.backup-ci.yml"
+          echo "DC=$DC" >> "$GITHUB_ENV"
+          $DC up -d --wait postgres storage-holder
+
+      - name: Apply the real schema and insert fixture rows
+        run: |
+          $DC exec -T postgres sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < src/db/schema.sql
+          $DC exec -T postgres sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
+          INSERT INTO users (id, email, password_hash, name) VALUES
+            ('00000000-0000-0000-0000-000000000001', 'a@example.test', 'hash-a', 'Аня'),
+            ('00000000-0000-0000-0000-000000000002', 'b@example.test', 'hash-b', 'Борис'),
+            ('00000000-0000-0000-0000-000000000003', 'c@example.test', 'hash-c', 'Ciri');
+          INSERT INTO workspaces (id, owner_id, number, supplier) VALUES
+            ('10000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', '2026-0001', 'Supplier One'),
+            ('10000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000002', '2026-0002', 'Постачальник Два');
+          INSERT INTO files (workspace_id, name, type, disk_path, size_bytes) VALUES
+            ('10000000-0000-0000-0000-000000000001', 'invoice.pdf', 'pdf', '/data/storage/ws1/a.bin', 200000),
+            ('10000000-0000-0000-0000-000000000001', 'notes.md', 'md', '/data/storage/ws1/b.txt', 6),
+            ('10000000-0000-0000-0000-000000000002', 'with space.pdf', 'pdf', '/data/storage/ws 2/with space.pdf', 9),
+            ('10000000-0000-0000-0000-000000000002', 'ящик.csv', 'csv', '/data/storage/ws 2/ящик.csv', 4);
+          INSERT INTO conversations (id, workspace_id, title) VALUES
+            ('20000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'Chat 1');
+          INSERT INTO messages (conversation_id, role, content) VALUES
+            ('20000000-0000-0000-0000-000000000001', 'user', 'Привіт'),
+            ('20000000-0000-0000-0000-000000000001', 'assistant', 'Hello'),
+            ('20000000-0000-0000-0000-000000000001', 'user', 'Check the invoice'),
+            ('20000000-0000-0000-0000-000000000001', 'assistant', 'Done'),
+            ('20000000-0000-0000-0000-000000000001', 'user', 'Thanks');
+          SQL
+          cat > "$RUNNER_TEMP/state.sh" <<'EOS'
+          # usage: state.sh <compose-project> <storage-volume>  -> prints DB + storage fingerprint
+          P="$1"; V="$2"
+          docker compose -p "$P" -f docker-compose.yml -f docker-compose.backup-ci.yml exec -T postgres sh -c 'psql -X -At -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL2'
+          SELECT 'users', count(*), md5(string_agg(email || password_hash, ',' ORDER BY email)) FROM users;
+          SELECT 'workspaces', count(*), md5(string_agg(number || supplier, ',' ORDER BY number)) FROM workspaces;
+          SELECT 'files', count(*), md5(string_agg(name || disk_path, ',' ORDER BY name)) FROM files;
+          SELECT 'conversations', count(*), md5(string_agg(title, ',' ORDER BY title)) FROM conversations;
+          SELECT 'messages', count(*), md5(string_agg(content, ',' ORDER BY content)) FROM messages;
+          SQL2
+          docker run --rm -v "$V:/data:ro" alpine:3.20 sh -c 'cd /data && find . -type f -exec sha256sum {} + | sort -k2'
+          EOS
+
+      - name: Put files into the storage volume and record the "before" state
+        run: |
+          docker run --rm -v aiia-ci-src_storage_data:/data alpine:3.20 sh -c '
+            mkdir -p /data/ws1 "/data/ws 2" &&
+            head -c 200000 /dev/urandom > /data/ws1/a.bin &&
+            echo hello > /data/ws1/b.txt &&
+            echo "spaces ok" > "/data/ws 2/with space.pdf" &&
+            echo "ддд" > "/data/ws 2/ящик.csv"'
+          bash "$RUNNER_TEMP/state.sh" aiia-ci-src aiia-ci-src_storage_data | tee "$RUNNER_TEMP/before.txt"
+          test "$(wc -l < "$RUNNER_TEMP/before.txt")" -ge 9
+
+      - name: Failed backup exits non-zero and writes last-status.json (ok=false)
+        run: |
+          if COMPOSE_PROJECT_NAME=aiia-ci-does-not-exist bash scripts/ops/backup.sh; then
+            echo "backup.sh should have failed"; exit 1
+          fi
+          cat "$BACKUP_DIR/last-status.json"
+          grep -q '"ok":false' "$BACKUP_DIR/last-status.json"
+          test -z "$(ls -d "$BACKUP_DIR"/20* 2>/dev/null)"
+
+      - name: Backup
+        run: |
+          bash scripts/ops/backup.sh
+          cat "$BACKUP_DIR/last-status.json"
+          grep -q '"ok":true' "$BACKUP_DIR/last-status.json"
+          B="$(ls -d "$BACKUP_DIR"/20*/ | tail -n 1)"
+          echo "BACKUP=${B%/}" >> "$GITHUB_ENV"
+          ls -l "$B"
+          cat "$B/manifest.json"
+
+      - name: Wipe the "production" stack (containers and volumes)
+        run: |
+          $DC down -v --remove-orphans
+          test -z "$(docker volume ls -q --filter label=com.docker.compose.project=aiia-ci-src)"
+
+      - name: Restore into a fresh scratch project and compare
+        run: |
+          bash scripts/ops/restore.sh "$BACKUP"
+          bash "$RUNNER_TEMP/state.sh" aiia-restore aiia-restore_storage_data > "$RUNNER_TEMP/after-scratch.txt"
+          diff "$RUNNER_TEMP/before.txt" "$RUNNER_TEMP/after-scratch.txt"
+          docker compose -p aiia-restore down -v --remove-orphans
+          docker volume rm -f aiia-restore_storage_data || true
+
+      - name: A tampered backup is refused
+        run: |
+          cp -r "$BACKUP" "$BACKUP_DIR/tampered"
+          printf 'x' >> "$BACKUP_DIR/tampered/storage.tar.gz"
+          if bash scripts/ops/restore.sh "$BACKUP_DIR/tampered"; then
+            echo "tampered backup was accepted"; exit 1
+          fi
+          test -z "$(docker volume ls -q --filter label=com.docker.compose.project=aiia-restore)"
+          rm -rf "$BACKUP_DIR/tampered"
+
+      - name: Production restore needs --into-production AND --yes
+        run: |
+          if bash scripts/ops/restore.sh --into-production "$BACKUP"; then
+            echo "production restore ran without --yes"; exit 1
+          fi
+          if bash scripts/ops/restore.sh --yes "$BACKUP"; then
+            echo "--yes alone was accepted"; exit 1
+          fi
+          test -z "$(docker volume ls -q --filter label=com.docker.compose.project=aiia-ci-src)"
+
+      - name: Restore into production (new-server disaster recovery path) and compare
+        run: |
+          bash scripts/ops/restore.sh --into-production --yes "$BACKUP"
+          bash "$RUNNER_TEMP/state.sh" aiia-ci-src aiia-ci-src_storage_data > "$RUNNER_TEMP/after-prod.txt"
+          diff "$RUNNER_TEMP/before.txt" "$RUNNER_TEMP/after-prod.txt"
+
+      - name: Restore drill (restore-test.sh)
+        run: |
+          bash scripts/ops/restore-test.sh | tee "$RUNNER_TEMP/drill.txt"
+          grep -q 'RESTORE DRILL PASS' "$RUNNER_TEMP/drill.txt"
+          test -z "$(docker volume ls -q --filter label=com.docker.compose.project=aiia-restore)"
+          # the drill must not have touched the "production" data
+          bash "$RUNNER_TEMP/state.sh" aiia-ci-src aiia-ci-src_storage_data | diff "$RUNNER_TEMP/before.txt" -
+
+      - name: Logs on failure
+        if: failure()
+        run: |
+          $DC logs --no-color postgres || true
+          docker ps -a || true
+
+      - name: Cleanup
+        if: always()
+        run: |
+          $DC down -v --remove-orphans || true
+          docker compose -p aiia-restore -f docker-compose.yml down -v --remove-orphans || true

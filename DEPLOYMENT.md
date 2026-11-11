@@ -183,9 +183,130 @@ tunes how long to wait for indexing. Exit code is non-zero if any check fails.
   red build is never deployed. Deploy stays inert until you configure it — run
   **`bash scripts/setup-deploy.sh`** once (generates a deploy key, stores the
   `DEPLOY_*` GitHub secrets, and sets the `DEPLOY_ENABLED=true` repo variable).
-- **Backups:** persist the named volumes `postgres_data` and
-  `storage_data` (raw files). `redis_data` is a transient job queue.
+- **Backups:** see [Backups & restore](#backups--restore) below.
 - **Rotate secrets:** edit `.env`, then `docker compose up -d`.
+
+## Backups & restore
+
+Scripts live in `scripts/ops/` (bash, Docker Compose v2). CI
+(`.github/workflows/backup-restore.yml`) runs the same scripts through a full
+backup → wipe → restore → compare cycle on every push to `main`.
+
+**What is backed up** (into `/var/backups/ai-import-assistant/<UTC yyyy-mm-dd_HHMMSS>/`):
+
+| File | Content |
+|------|---------|
+| `db.dump` | `pg_dump -Fc` of the Postgres database (`postgres_data`) |
+| `storage.tar.gz` | the whole `storage_data` volume: uploaded files + derived artifacts |
+| `manifest.json` | time, git commit, sizes, sha256 of both files, storage file count, row counts of `users, workspaces, folders, files, conversations, messages` |
+
+**What is not backed up:** `redis_data` — it only holds BullMQ queues, which are
+rebuilt (the retry sweep re-queues unfinished files), so losing it loses no user data.
+`logist_cache` is a re-downloadable cache. `.env` holds secrets and is **not** in the
+backup: keep a copy in a password manager, you need it for disaster recovery.
+
+A backup is built in `<name>.partial` and renamed only when complete, so a crashed run
+never looks like a good backup. Only the newest `BACKUP_KEEP_DAILY` (14) complete
+backups are kept. Every run writes `/var/backups/ai-import-assistant/last-status.json`:
+`{"ok":true,"at":"…","backup":"…"}` or `{"ok":false,"at":"…","error":"…"}`; on failure
+the script also exits non-zero and prints the error to stderr (so it lands in the log).
+There is no push alert — see "Checking it ran" below.
+
+### Install the daily job (03:15 server time)
+
+On `alliance-server`, once:
+
+```bash
+cd /opt/AI-Import-Assistant && git pull
+sudo bash scripts/ops/backup.sh            # first run by hand; prints "backup OK: …"
+sudo tee /etc/cron.d/ai-import-backup >/dev/null <<'EOF'
+15 3 * * * root cd /opt/AI-Import-Assistant && BACKUP_RCLONE_REMOTE=gdrive:ai-import-backups bash scripts/ops/backup.sh >> /var/log/ai-import-backup.log 2>&1
+EOF
+```
+
+(Leave out `BACKUP_RCLONE_REMOTE=…` until the offsite remote below exists. `BACKUP_*`
+variables can alternatively go into `/opt/AI-Import-Assistant/.env`.) Optional
+`/etc/logrotate.d/ai-import-backup`: `/var/log/ai-import-backup.log { monthly rotate 6 compress missingok notifempty }`.
+
+**Checking it ran** (no alerting is configured): `cat /var/backups/ai-import-assistant/last-status.json`;
+or a one-liner for a cron/uptime check that fails when the last run is older than 26 h or not ok:
+`find /var/backups/ai-import-assistant/last-status.json -mmin -1560 | grep -q . && grep -q '"ok":true' /var/backups/ai-import-assistant/last-status.json`.
+
+**Disk:** each backup ≈ size of the DB dump + size of the storage volume (uploads are
+mostly PDFs/images that do not compress, so count the volume at full size). Rule of
+thumb: `14 × (dump + volume)` plus 20 % headroom on `/var/backups`. Measure with
+`docker system df -v | grep -E 'postgres_data|storage_data'` and `du -sh /var/backups/ai-import-assistant`.
+Lower `BACKUP_KEEP_DAILY` if the disk is small.
+
+### Offsite copy (recommended — a backup on the same disk dies with the server)
+
+Set `BACKUP_RCLONE_REMOTE` and `backup.sh` runs `rclone copy` of each new backup
+after it is complete. If it is set but `rclone` is missing or the copy fails, the
+run is reported as failed (the local backup is still kept). Optional
+`BACKUP_RCLONE_KEEP_DAYS=60` deletes offsite copies older than 60 days (default: keep all).
+The owner decides where; Google Drive example, as `root` (the cron user) on the server:
+
+```bash
+sudo apt-get install -y rclone          # or: curl https://rclone.org/install.sh | sudo bash
+sudo rclone config                       # n) New remote → name: gdrive → Storage: drive
+#   client_id / client_secret: use your OWN (Google Cloud → APIs → Drive API → OAuth client,
+#     "Desktop app"; publish the consent screen to "In production", otherwise Google
+#     expires the token after 7 days and the offsite copy silently starts failing)
+#   scope: drive.file (or drive) · service account: leave empty
+#   "Use web browser to automatically authenticate?" → n (the server has no browser)
+#   → on your own PC run:  rclone authorize "drive"   and paste the token back
+sudo rclone mkdir gdrive:ai-import-backups
+sudo rclone lsd gdrive:                  # must list the folder
+```
+
+Then add `BACKUP_RCLONE_REMOTE=gdrive:ai-import-backups` to the cron line (above) and run
+`sudo BACKUP_RCLONE_REMOTE=gdrive:ai-import-backups bash scripts/ops/backup.sh` once by hand.
+The token lives in `/root/.config/rclone/rclone.conf` — treat it as a secret. Backups hold
+user data and password hashes: prefer a Google account used only for this, or add an
+rclone `crypt` remote on top (`gdrive-crypt:`) and point `BACKUP_RCLONE_REMOTE` at that.
+Any other rclone backend (SFTP to another machine, S3, …) works the same way.
+
+### Restore drill (monthly)
+
+```bash
+cd /opt/AI-Import-Assistant
+sudo bash scripts/ops/restore-test.sh              # newest backup; or pass a backup directory
+```
+
+It restores into a **separate scratch compose project** `aiia-restore` (own volumes,
+no published ports, never production), compares row counts with the manifest, checks
+the file count and a random sample of 20 files against the archive, prints
+`RESTORE DRILL PASS|FAIL in <N>s`, and always removes the scratch project. Write the
+date and time of each drill into the table below.
+
+| Date | Backup | Result | Elapsed |
+|------|--------|--------|---------|
+| _first server run pending_ | | | |
+
+### Recovery targets
+
+- **RPO: 24 h** — one backup per day; at worst you lose everything since 03:15 of the last good day.
+- **RTO:** the elapsed time printed by the latest drill above, plus the time to provision a server and rebuild images (`docker compose up -d --build`) in the new-server case below. Fill in the measured value after the first server drill.
+
+### Disaster recovery on a new server
+
+1. Install Docker Engine + Compose v2, `git`, `rclone`; set up Caddy as in "System Caddy block".
+2. `sudo mkdir -p /opt && cd /opt && sudo git clone <repo-url> AI-Import-Assistant && cd AI-Import-Assistant`
+3. Restore `.env` from your password manager (same `POSTGRES_*`, `JWT_SECRET`, API keys). It must be in place **before** the restore: the new database is created with these credentials.
+4. Get the newest backup directory onto the server:
+   `sudo mkdir -p /var/backups/ai-import-assistant && sudo rclone copy gdrive:ai-import-backups /var/backups/ai-import-assistant`
+   (configure the rclone remote first, see above; backup directories are named `YYYY-MM-DD_HHMMSS`.)
+5. Restore into the (empty) production project — this starts only postgres, loads the dump, fills the storage volume and compares row counts:
+   `sudo bash scripts/ops/restore.sh --into-production --yes /var/backups/ai-import-assistant/<newest-dir>`
+6. Start everything: `docker compose up -d --build` (migrations run on backend boot; a backup from an older schema is upgraded automatically).
+7. Verify: `docker compose ps`, `curl -s http://127.0.0.1:8006/health`, log in, open a shipment and a file; optionally `npm run smoke` (see "Smoke test").
+8. Re-install the cron job from "Install the daily job".
+
+Restoring over a **live** server (e.g. after bad data) is the same step 5 without the
+new-server steps; it stops backend/worker/frontend, **deletes all files in the storage
+volume** and overwrites the database objects, so take a fresh `backup.sh` first if the
+current state might still matter. `restore.sh` without `--into-production` always goes
+to the scratch project and is safe to run any time.
 
 ## Environment variables (backend)
 

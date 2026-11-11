@@ -1,0 +1,11 @@
+# CI-only override for .github/workflows/backup-restore.yml.
+# Used together with the real file:  -f docker-compose.yml -f docker-compose.backup-ci.yml
+# and only `postgres` + `storage-holder` are started. storage-holder is a stand-in
+# for backend/worker: it mounts the same storage_data volume so the volume exists
+# and the test can put files into it. Never used in production.
+services:
+  storage-holder:
+    image: alpine:3.20
+    command: ['sleep', 'infinity']
+    volumes:
+      - storage_data:/data/storage
