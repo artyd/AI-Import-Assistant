@@ -18,6 +18,9 @@ const BASE_URL = (process.env.BASE_URL ?? 'http://localhost:8080').replace(/\/$/
 const EMAIL = process.env.EMAIL;
 const PASSWORD = process.env.PASSWORD;
 const SKIP_CHAT = process.env.SKIP_CHAT === '1';
+// Size of FOLDER_SKELETON in src/shipments/folders.ts (6 since '02_PO' was removed).
+// Keep in sync with that file; override with EXPECTED_FOLDERS if it changes.
+const EXPECTED_FOLDERS = Number(process.env.EXPECTED_FOLDERS ?? 6);
 const INDEX_TIMEOUT_MS = Number(process.env.INDEX_TIMEOUT_MS ?? 60000);
 
 if (!EMAIL || !PASSWORD) {
@@ -154,8 +157,8 @@ async function main() {
     );
     const one = await api('GET', `/api/workspaces/${workspaceId}`);
     check(
-      'GET /api/workspaces/:id has 7-folder skeleton',
-      one.status === 200 && one.json.folders?.length === 7,
+      `GET /api/workspaces/:id has ${EXPECTED_FOLDERS}-folder skeleton`,
+      one.status === 200 && one.json.folders?.length === EXPECTED_FOLDERS,
       `folders ${one.json.folders?.length}`,
     );
   }
