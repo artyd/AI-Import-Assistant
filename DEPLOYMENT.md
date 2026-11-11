@@ -377,6 +377,12 @@ cd /opt/AI-Import-Assistant && docker compose exec backend node dist/scripts/ale
 Caddy add it to the matcher: `@backend path /api/* /health /health/*`. **A full server outage is not covered**
 (nothing is left to write the bell) — a later external uptime monitor can poll `/health/ready`.
 
+## Performance monitoring
+
+- **Postgres must be recreated once** to load the new `command:` (`pg_stat_statements`, `log_min_duration_statement=500`): on `alliance-server` run `cd /opt/AI-Import-Assistant && git pull && docker compose up -d postgres`. Data lives in the `postgres_data` volume and survives. Then restart the backend (`docker compose up -d --build`) — boot runs `CREATE EXTENSION IF NOT EXISTS pg_stat_statements`; if the preload is missing it only warns.
+- **Read slow queries:** `cd /opt/AI-Import-Assistant && scripts/ops/slow-queries.sh` prints the top 20 statements by total and by mean time; `scripts/ops/slow-queries.sh --reset` clears the counters. Statements over 500 ms also appear in `docker compose logs postgres`, and the backend logs `[slow-query] <ms>ms <first 200 chars of SQL>` at warn level (threshold: `SLOW_QUERY_MS`, default 500, 0 disables; parameters are never logged).
+- **Budgets:** bundle size per route in `frontend/perf-budget.json` (`npm run perf:bundle` after `npm run build`; `node scripts/check-bundle.mjs --update` re-bases it to size + 10 %); Lighthouse thresholds in `frontend/lighthouserc.json` (`npm run perf:lh`). CI runs both in `.github/workflows/perf.yml` and uploads the report as the `lhci-report` artifact. Baselines and numbers: `docs/audits/2026-11-11-performance.md`.
+
 ## Environment variables (backend)
 
 | Variable | Required | Default | Purpose |

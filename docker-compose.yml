@@ -15,6 +15,16 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    # Performance monitoring: pg_stat_statements + slow-statement log (>500 ms).
+    # Needs a one-off `docker compose up -d postgres` to take effect.
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - pg_stat_statements.track=all
+      - -c
+      - log_min_duration_statement=500
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}

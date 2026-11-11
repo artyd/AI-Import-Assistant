@@ -7,6 +7,20 @@ import { pool } from './pool.js';
 const MIGRATION_LOCK_KEY = 815_004_2026;
 
 /**
+ * Creates the pg_stat_statements extension (slow-query monitoring). It needs
+ * shared_preload_libraries on the server, so a failure here must never break
+ * boot: warn and continue.
+ */
+async function ensureStatStatements(client: { query: (sql: string) => Promise<unknown> }): Promise<void> {
+  try {
+    await client.query('CREATE EXTENSION IF NOT EXISTS pg_stat_statements');
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('pg_stat_statements not available — slow-query stats disabled:', (err as Error).message);
+  }
+}
+
+/**
  * Applies schema.sql idempotently (all statements are IF NOT EXISTS / guarded).
  *
  * Server and worker both call this on boot. It runs under a Postgres advisory
@@ -30,6 +44,9 @@ export async function runMigrations(): Promise<void> {
          applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
        )`,
     );
+    // Outside the schema-hash skip: postgres may be recreated with the preload
+    // library after the schema was last applied. Idempotent and lock-free when present.
+    await ensureStatStatements(client);
     const { rows } = await client.query<{ schema_hash: string }>('SELECT schema_hash FROM schema_meta WHERE id = 1');
     if (rows[0]?.schema_hash === hash) return;
     await client.query(ddl);
