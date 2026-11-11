@@ -10,7 +10,9 @@
     "typecheck": "tsc --noEmit",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "test": "vitest run"
+    "test": "vitest run",
+    "perf:bundle": "node scripts/check-bundle.mjs",
+    "perf:lh": "npx --yes @lhci/cli@0.16.0 autorun --config=lighthouserc.json"
   },
   "dependencies": {
     "@hugeicons/core-free-icons": "^4.4.0",
@@ -25,6 +27,7 @@
     "zustand": "^5.0.15"
   },
   "devDependencies": {
+    "@lhci/cli": "0.16.0",
     "@playwright/test": "^1.63.0",
     "@types/leaflet": "^1.9.12",
     "@types/node": "^20.17.0",

@@ -1,0 +1,12 @@
+{
+  "unit": "KB gzip, first-load JS per route",
+  "rule": "measured + 10% rounded up",
+  "routes": {
+    "/": 125,
+    "/login": 121,
+    "/supply": 137,
+    "/workspaces": 122,
+    "/workspaces/[id]": 251,
+    "/workspaces/[id]/instruction": 183
+  }
+}
