@@ -11,9 +11,9 @@ Spec: `docs/specs/009-mvp-launch-readiness.md`. Production: https://ai-import-as
 | Production error alerts | done | in-app bell `ops_alert` (5xx, chat, final ingest failures, jobs, crashes, Anthropic outages), unit tests; on the server `alert-test.js` → "delivered to 3 recipient(s)" (`OPS_ADMIN_EMAILS` left empty = every user; login is by PIN) |
 | Privacy and terms pages | done in code; **operator details missing** | `/privacy`, `/terms`, Playwright `legal-pages.spec.ts`; placeholders in `frontend/lib/legal/operator.ts` must be filled by the owner |
 | Live server setup | done | see "Live checks" |
-| Backup and tested restore | done in CI; server drill left | `Backup & restore` workflow (backup → wipe → restore → verify) green; on the server: cron, rclone remote, first `restore-test.sh` |
+| Backup and tested restore | done | `Backup & restore` workflow green; server drill 2026-11-11 **PASS in 199 s** (6 tables, 2026 files, 20 sampled files). Offsite rclone copy and the daily cron are not set up yet (`offsite=no`) |
 | Public tool endpoint rate limit | done | `src/mcp/limits.ts`: per-IP 120/min + 3000/day (fail open), AI budget 300/day total, 60/day per IP (fail closed), body/batch limits; unit tests; ADR-0008 |
-| Staging launch rehearsal | done except the server restore drill | see "Rehearsal" |
+| Staging launch rehearsal | done | see "Rehearsal" |
 
 ## Should
 
@@ -33,6 +33,7 @@ Spec: `docs/specs/009-mvp-launch-readiness.md`. Production: https://ai-import-as
 ## Defects found during the work
 
 - Smoke test expected 7 folders; the skeleton has 6. Fixed.
+- The first server restore drill reported FAIL although the data was intact: the drill hashed hard-link entries of `_tree/` as empty, and its row-count loop compared only `users` (stdin swallowed by `docker compose exec`). Fixed in 89a7249; the rerun passed.
 - The «Карта» view crashed when `/api/hub/live` answered without `vessels`
   (`HubCanvas.tsx` read `snap.vessels.length`). Fixed with a guard spec
   (`frontend/e2e/hub-map-no-crash.spec.ts`).
@@ -45,10 +46,10 @@ Spec: `docs/specs/009-mvp-launch-readiness.md`. Production: https://ai-import-as
 | Upload + reading | pass (smoke test, mock Anthropic) | pass: test shipment №2026-3310, `MVP_test_invoice.csv` read 1/1, fields extracted, auto-filed into «Контракт, інвойс, пакувальний» |
 | Chat | pass (smoke test, chat on) | pass: amount 2 100 USD CIF Odesa, net 500 kg, gross 540 kg, with a source link |
 | Export | pass (smoke test) | pass: `GET /api/workspaces/:id/export` 200 `application/zip`, the file + `_Generated/` (discrepancy report, checklist, `shipment_report.html`) |
-| Recovery | pass (`Backup & restore` workflow) | first `restore-test.sh` on the server |
+| Recovery | pass (`Backup & restore` workflow) | pass: `restore-test.sh` PASS in 199 s |
 
 ## Left before launch
 
-1. Backup cron (03:15) + rclone remote + `BACKUP_RCLONE_REMOTE`; run `sudo bash scripts/ops/restore-test.sh` and write the result into DEPLOYMENT.md.
-2. Owner sends the operator details for the legal pages.
-3. Optional: `docker compose up -d postgres` once so `pg_stat_statements` loads.
+1. Owner sends the operator details for the legal pages (`frontend/lib/legal/operator.ts`). This is the only Must item still open.
+
+Recommended soon after launch: the daily backup cron (03:15) and the offsite rclone copy (`BACKUP_RCLONE_REMOTE`): today the only backup sits on the server's own disk. Optional: `docker compose up -d postgres` once so `pg_stat_statements` loads.

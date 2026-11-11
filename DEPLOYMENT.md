@@ -313,12 +313,12 @@ date and time of each drill into the table below.
 
 | Date | Backup | Result | Elapsed |
 |------|--------|--------|---------|
-| _first server run pending_ | | | |
+| 2026-11-11 | `2026-11-11_123512` (db 10.8 MB, storage 1.13 GB, 2026 files; backup took 75 s) | PASS: 6 tables, file count, 20 sampled files | 199 s |
 
 ### Recovery targets
 
 - **RPO: 24 h** — one backup per day; at worst you lose everything since 03:15 of the last good day.
-- **RTO:** the elapsed time printed by the latest drill above, plus the time to provision a server and rebuild images (`docker compose up -d --build`) in the new-server case below. Fill in the measured value after the first server drill.
+- **RTO:** measured 199 s (≈ 3.5 min) for the data restore in the 2026-11-11 drill; add the time to provision a server and rebuild images (`docker compose up -d --build`) in the new-server case below.
 
 ### Disaster recovery on a new server
 
