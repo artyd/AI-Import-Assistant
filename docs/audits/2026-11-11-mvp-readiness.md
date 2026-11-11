@@ -8,12 +8,12 @@ Spec: `docs/specs/009-mvp-launch-readiness.md`. Production: https://ai-import-as
 | Line | Status | Proof |
 |------|--------|-------|
 | Browser + full-flow tests automated | done | `CI` workflow: `e2e` (Playwright on a production build) and `full-stack` (compose stack + mock Anthropic, smoke test with chat, Playwright through Caddy) |
-| Production error alerts | done in code; server step left | in-app bell `ops_alert` (5xx, chat, final ingest failures, jobs, crashes, Anthropic outages), unit tests; on the server: set `OPS_ADMIN_EMAILS`, run `alert-test.js` |
+| Production error alerts | done | in-app bell `ops_alert` (5xx, chat, final ingest failures, jobs, crashes, Anthropic outages), unit tests; on the server `alert-test.js` → "delivered to 3 recipient(s)" (`OPS_ADMIN_EMAILS` left empty = every user; login is by PIN) |
 | Privacy and terms pages | done in code; **operator details missing** | `/privacy`, `/terms`, Playwright `legal-pages.spec.ts`; placeholders in `frontend/lib/legal/operator.ts` must be filled by the owner |
 | Live server setup | done | see "Live checks" |
 | Backup and tested restore | done in CI; server drill left | `Backup & restore` workflow (backup → wipe → restore → verify) green; on the server: cron, rclone remote, first `restore-test.sh` |
 | Public tool endpoint rate limit | done | `src/mcp/limits.ts`: per-IP 120/min + 3000/day (fail open), AI budget 300/day total, 60/day per IP (fail closed), body/batch limits; unit tests; ADR-0008 |
-| Staging launch rehearsal | CI part done; prod part after deploy | see "Rehearsal" |
+| Staging launch rehearsal | done except the server restore drill | see "Rehearsal" |
 
 ## Should
 
@@ -25,7 +25,8 @@ Spec: `docs/specs/009-mvp-launch-readiness.md`. Production: https://ai-import-as
 
 - DNS + HTTPS: Let's Encrypt cert valid to 2027-01-04; http → https 308.
 - `/`, `/login`, `/supply`, `/health`: 200. `/api/mcp` answers.
-- HSTS was missing; added in `frontend/next.config.mjs` (`max-age=31536000`), live after the next deploy.
+- HSTS was missing; added in `frontend/next.config.mjs` (`max-age=31536000`); live after the deploy.
+- After the deploy: `/privacy`, `/terms` 200 (operator placeholders still shown); `/health/ready` is not routed through Caddy (404 outside). The owner kept the Caddy matcher as is: no external uptime monitor uses it.
 - Live Anthropic key and first user: production chat and login work (owner's account).
 - Deploy mode: **manual by decision** (`DEPLOY_ENABLED` stays off).
 
@@ -40,17 +41,14 @@ Spec: `docs/specs/009-mvp-launch-readiness.md`. Production: https://ai-import-as
 
 | Step | CI stack | Production |
 |------|----------|------------|
-| Login | pass (full-stack Playwright) | after deploy |
-| Upload + reading | pass (smoke test, mock Anthropic) | after deploy |
-| Chat | pass (smoke test, chat on) | after deploy |
-| Export | pass (smoke test) | after deploy |
+| Login | pass (full-stack Playwright) | pass (PIN session) |
+| Upload + reading | pass (smoke test, mock Anthropic) | pass: test shipment №2026-3310, `MVP_test_invoice.csv` read 1/1, fields extracted, auto-filed into «Контракт, інвойс, пакувальний» |
+| Chat | pass (smoke test, chat on) | pass: amount 2 100 USD CIF Odesa, net 500 kg, gross 540 kg, with a source link |
+| Export | pass (smoke test) | pass: `GET /api/workspaces/:id/export` 200 `application/zip`, the file + `_Generated/` (discrepancy report, checklist, `shipment_report.html`) |
 | Recovery | pass (`Backup & restore` workflow) | first `restore-test.sh` on the server |
 
 ## Left before launch
 
-1. Deploy: `cd /opt/AI-Import-Assistant && git pull && docker compose up -d --build`, then `docker compose up -d postgres` once (pg_stat_statements).
-2. Caddy matcher: `@backend path /api/* /health /health/*`.
-3. `OPS_ADMIN_EMAILS` in `.env`, then `docker compose exec backend node dist/scripts/alert-test.js`; check the bell.
-4. Backup cron (03:15) + rclone remote + `BACKUP_RCLONE_REMOTE`; run `sudo bash scripts/ops/restore-test.sh` and write the result into DEPLOYMENT.md.
-5. Owner sends the operator details for the legal pages.
-6. Production rehearsal on a test shipment: login, upload, reading, chat, export.
+1. Backup cron (03:15) + rclone remote + `BACKUP_RCLONE_REMOTE`; run `sudo bash scripts/ops/restore-test.sh` and write the result into DEPLOYMENT.md.
+2. Owner sends the operator details for the legal pages.
+3. Optional: `docker compose up -d postgres` once so `pg_stat_statements` loads.
