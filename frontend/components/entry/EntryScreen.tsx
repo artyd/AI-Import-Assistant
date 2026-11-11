@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { BrandMark, CodeGate } from "@/components/auth/CodeGate";
+import { LegalLinks } from "@/components/legal/LegalLinks";
 
 type Side = "supply" | "shturman";
 
@@ -146,6 +147,8 @@ export function EntryScreen() {
             </div>
           ))}
       </div>
+
+      <LegalLinks fixed />
 
       <button className="ent-switch" onClick={() => void toggle()} aria-label={isSh ? "Повернутись до Поставок" : "Відкрити вхід у Штурман"}>
         <span className="ic" ref={icRef}>{isSh ? "П" : "Ш"}</span>
