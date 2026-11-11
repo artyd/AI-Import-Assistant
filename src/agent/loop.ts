@@ -12,6 +12,7 @@ import type { SseStream } from '../lib/sse.js';
 import type { Citation, ToolCallRecord } from '../chat/conversations.js';
 import { toolDefinitions, executeTool, type ToolContext } from './tools.js';
 import { repairBlocks, stripToolBlocks } from './historyRepair.js';
+import { reportAnthropicError } from '../lib/alerts.js';
 
 export interface AgentTurnParams {
   /**
@@ -51,6 +52,8 @@ export interface AgentTurnResult {
   turnBlocks: ChatMessageParam[];
   /** Set when the model/stream errored — caller persists partial text + surfaces it. */
   error?: string;
+  /** The failure was an Anthropic outage already reported to ops (no second alert). */
+  anthropicOutage?: boolean;
   /** Context-window usage of this turn (for the UI's context widget). */
   usage: TurnUsage;
 }
@@ -352,6 +355,7 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
   const toolCalls: ToolCallRecord[] = [];
   let toolsStillPending = false;
   let error: string | undefined;
+  let anthropicOutage = false;
 
   try {
     for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
@@ -483,6 +487,7 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
     // Stream/model failure: keep whatever text streamed so the caller can persist a
     // partial answer (survives reload) instead of losing it.
     error = (err as Error).message;
+    if (!params.signal?.aborted) anthropicOutage = reportAnthropicError(err, 'chat');
   }
 
   // One line per turn so prompt-cache effectiveness is visible in prod logs.
@@ -502,6 +507,7 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
     toolCalls,
     turnBlocks,
     error,
+    anthropicOutage,
     usage: {
       contextTokens: ctxStats.last,
       peakContextTokens: ctxStats.peak,

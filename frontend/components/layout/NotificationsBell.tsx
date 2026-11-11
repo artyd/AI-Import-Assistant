@@ -12,6 +12,7 @@ const TYPE_TAG: Record<string, { label: string; color: string }> = {
   reconcile_ready: { label: "Звірка", color: "var(--accent)" },
   risk_alert: { label: "Ризик", color: "var(--err)" },
   checklist_incomplete: { label: "Документи", color: "var(--warn)" },
+  ops_alert: { label: "Збій", color: "var(--err)" },
 };
 
 // Logistics-hub tracking alerts carry a per-item type (`hub:<id>:<event>`).

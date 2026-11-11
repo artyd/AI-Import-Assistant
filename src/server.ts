@@ -36,6 +36,9 @@ import { sheetRoutes } from './sheet/sheet.routes.js';
 import { mcpRoutes } from './mcp/mcp.routes.js';
 import { supplyRoutes } from './supply/supply.routes.js';
 import { feedbackRoutes } from './feedback/feedback.routes.js';
+import { healthRoutes } from './health/health.routes.js';
+import { registerOpsAlertHooks } from './lib/alertHooks.js';
+import { installProcessAlerts } from './lib/alerts.js';
 
 async function buildServer() {
   const app = Fastify({
@@ -102,6 +105,8 @@ async function buildServer() {
   });
 
   app.get('/health', async () => ({ status: 'ok' }));
+  await app.register(healthRoutes); // GET /health/ready (DB + Redis)
+  registerOpsAlertHooks(app); // 5xx → ops alert in the bell
 
   // Route plugins live in their area folders (`<area>/*.routes.ts`). Keep this
   // registration order (and the import order above) as is: Fastify applies
@@ -142,6 +147,7 @@ async function buildServer() {
 }
 
 async function main(): Promise<void> {
+  installProcessAlerts('backend');
   await runMigrations();
   const app = await buildServer();
   // Logistics-hub gazetteer → ports atlas (idempotent, only changed rows written).

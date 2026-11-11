@@ -38,6 +38,20 @@ import { scanAndNotify } from '../notifications/reminders.js';
 import { ingestNews, purgeOldNews } from '../news/index.js';
 import { publishFileStatus } from '../lib/events/fileStatus.js';
 import type { FileType } from '../shipments/folders.js';
+import { installProcessAlerts, notifyOps, describeError, reportAnthropicError } from '../lib/alerts.js';
+import { isFinalFailure } from './failurePolicy.js';
+
+/** A repeatable job failed on its last attempt → ops alert (throttled per queue). */
+function alertJobFailure(queue: string, job: Job | undefined, err: Error): void {
+  if (job && !isFinalFailure(job.attemptsMade, job.opts.attempts)) return;
+  notifyOps({
+    source: 'worker',
+    severity: 'error',
+    title: `фонова задача «${queue}» не вдалася`,
+    detail: `job ${job?.id ?? '?'}: ${describeError(err)}`,
+    key: `job-failed:${queue}`,
+  });
+}
 
 interface FileJobRow {
   id: string;
@@ -249,6 +263,7 @@ async function processJob(job: Job<IndexJobData>): Promise<void> {
     }
   } catch (err) {
     const reason = (err as Error).message?.slice(0, 300) ?? 'unknown error';
+    reportAnthropicError(err, 'ingest');
     // Only the LAST attempt is a real 'error' (the retry sweep re-queues errors —
     // doing it while BullMQ still retries ran two jobs for one file).
     const finalAttempt = job.attemptsMade + 1 >= (job.opts.attempts ?? 1);
@@ -372,6 +387,7 @@ async function processIngestRetry(_job: Job<IngestRetryJobData>): Promise<void> 
 }
 
 async function main(): Promise<void> {
+  installProcessAlerts('worker');
   await runMigrations();
   await seedPlaces().catch(() => undefined);
 
@@ -389,8 +405,9 @@ async function main(): Promise<void> {
     console.error(`Indexing job ${job?.id} failed:`, err.message);
     // A job that stalled out (worker OOM/SIGKILL) never ran processJob's catch —
     // on the final attempt make sure the file doesn't stay 'indexing' forever.
-    if (job && job.attemptsMade >= (job.opts.attempts ?? 1)) {
+    if (job && isFinalFailure(job.attemptsMade, job.opts.attempts)) {
       const reason = err.message?.slice(0, 300) ?? 'failed';
+      let failedWs: string | null = null;
       void query(
         `UPDATE files SET status = 'error', error_reason = $2, status_changed_at = now()
          WHERE id = $1 AND status IN ('queued', 'indexing')
@@ -399,9 +416,20 @@ async function main(): Promise<void> {
       )
         .then(({ rows }) => {
           const ws = (rows[0] as { workspace_id?: string } | undefined)?.workspace_id;
+          failedWs = ws ?? null;
           if (ws) return publishFileStatus(ws, { fileId: job.data.fileId, status: 'error', errorReason: reason });
         })
-        .catch(() => undefined);
+        .catch(() => undefined)
+        .finally(() =>
+          notifyOps({
+            source: 'ingest',
+            severity: 'error',
+            title: 'файл не прочитано після всіх спроб',
+            detail: `file ${job.data.fileId}, job ${job.id}: ${describeError(err)}`,
+            key: 'ingest-final-failure',
+            workspaceId: failedWs,
+          }),
+        );
     }
   });
 
@@ -415,6 +443,7 @@ async function main(): Promise<void> {
     remindersWorker.on('failed', (job, err) => {
       // eslint-disable-next-line no-console
       console.error(`Reminder job ${job?.id} failed:`, err.message);
+      alertJobFailure('reminders', job, err);
     });
   }
 
@@ -428,6 +457,7 @@ async function main(): Promise<void> {
     newsWorker.on('failed', (job, err) => {
       // eslint-disable-next-line no-console
       console.error(`News job ${job?.id} failed:`, err.message);
+      alertJobFailure('news', job, err);
     });
   }
 
@@ -441,6 +471,7 @@ async function main(): Promise<void> {
     trackingWorker.on('failed', (job, err) => {
       // eslint-disable-next-line no-console
       console.error(`Tracking job ${job?.id} failed:`, err.message);
+      alertJobFailure('tracking', job, err);
     });
     await startAis().catch((err: Error) => {
       // eslint-disable-next-line no-console
@@ -456,6 +487,7 @@ async function main(): Promise<void> {
     sheetWorker.on('failed', (job, err) => {
       // eslint-disable-next-line no-console
       console.error(`Sheet sync job ${job?.id} failed:`, err.message);
+      alertJobFailure('sheet-sync', job, err);
     });
     // First sync right away so a fresh deploy doesn't wait up to an hour.
     void runSheetSync('Sheet sync (startup)').catch((err: Error) => {
@@ -474,6 +506,7 @@ async function main(): Promise<void> {
     ingestRetryWorker.on('failed', (job, err) => {
       // eslint-disable-next-line no-console
       console.error(`Ingest retry job ${job?.id} failed:`, err.message);
+      alertJobFailure('ingest-retry', job, err);
     });
   }
 

@@ -18,6 +18,7 @@ import { hubToolDefinitions } from '../agent/tools/hub.js';
 import { sheetTools } from '../agent/tools/sheet.js';
 import { supplyToolDefinitions } from '../agent/tools/supply.js';
 import { chatRateLimitConfig } from './chatRateLimit.js';
+import { alertChatFailure } from '../lib/alertHooks.js';
 import { lessonsBlockFor } from '../feedback/store.js';
 import { withLessons } from '../feedback/lesson.js';
 
@@ -102,6 +103,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
 
         if (result.error) {
           req.log.error({ err: result.error }, 'chat turn errored (partial persisted)');
+          alertChatFailure({ kind: 'supply', workspaceId: ws.id, aborted: sse.signal.aborted, message: result.error, anthropicHandled: result.anthropicOutage });
           sse.send('error', { message: 'Відповідь перервалася. Спробуйте ще раз.' });
         } else {
           sse.send('done', {
@@ -114,6 +116,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         }
       } catch (err) {
         req.log.error({ err }, 'chat turn failed');
+        alertChatFailure({ kind: 'supply', workspaceId: ws.id, aborted: sse.signal.aborted, err });
         sse.send('error', { message: 'Не вдалося обробити запит. Спробуйте ще раз.' });
       } finally {
         clearInterval(heartbeat);

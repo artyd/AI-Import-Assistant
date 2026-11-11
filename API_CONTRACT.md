@@ -1166,3 +1166,13 @@ The chat agent reads the register with the read-only `supply_register` tool.
 ## Health
 
 ### `GET /health`  (no auth) → `{ "status": "ok" }`
+
+### `GET /health/ready`  (no auth)
+Readiness: Postgres (`select 1`) and Redis (`PING`), 2 s timeout each.
+`200 { "status": "ok", "db": "ok", "redis": "ok" }`, or
+`503 { "status": "unavailable", "db": "ok"|"fail", "redis": "ok"|"fail" }`.
+
+### Ops alerts in `GET /api/notifications`
+Server failures arrive as ordinary notifications with `type: "ops_alert"` (admins only —
+`OPS_ADMIN_EMAILS`, empty = all users). `message` is Ukrainian (`⚠ Збій: …` / `⚠ Попередження: …`);
+`workspace_id` is set only when the failure belongs to a shipment the user owns. No contract change.

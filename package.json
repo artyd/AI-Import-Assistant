@@ -18,6 +18,7 @@
     "migrate:cert-merge": "tsx src/db/migrateCertMerge.ts",
     "migrate:markdown": "node dist/db/backfillMarkdown.js",
     "reminders:once": "tsx src/scripts/reminders-once.ts",
+    "alert:test": "tsx src/scripts/alert-test.ts",
     "seed": "node dist/auth/seed.js",
     "supply:import": "node dist/supply/importLegacy.js",
     "smoke": "node scripts/smoke-test.mjs",
