@@ -21,7 +21,26 @@
 //             line, no tool names, no emoji, a «Дія» line when there are findings.
 // Exit code 1 when any case scores below its `minScore` (default 1.0).
 
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
+import { assertCaseLimit, compareRuns, formatCompare, MAX_CASES, score } from './eval-answers-lib.mjs';
+
+const USAGE = `Answer eval — питання до Штурмана через живий чат-API + оцінка відповідей.
+
+  TOKEN=<aia_token> node scripts/eval-answers.mjs [опції]
+
+  --cases <file>      файл кейсів (за замовчуванням .local/answer-cases.json)
+  --only <text>       лише кейси, в назві яких є <text>
+  --out <file>        куди записати прогін (JSON); за замовчуванням .local/eval-runs/<дата>.json
+  --no-out            не записувати прогін
+  --compare <old>     порівняти з минулим прогоном (вірність, слів, без джерела, секунди);
+                      код виходу 1, якщо загальна вірність впала
+  --force             дозволити більше ${MAX_CASES} кейсів за запуск (за замовчуванням — відмова)
+  --from-feedback     вивести відповіді з «Не так» як чернетки кейсів
+  --help              ця довідка
+
+  Оточення: BASE_URL, TOKEN або EMAIL + PASSWORD. Формат кейсів: eval/answers/README.md.
+`;
 
 const args = process.argv.slice(2);
 const arg = (name) => {
@@ -94,27 +113,7 @@ async function ask(c) {
   return { text, tools, citations };
 }
 
-const rx = (p) => new RegExp(p, 'iu');
-
-/** Pure scoring — exported shape mirrored in eval/answers/README. */
-export function score(c, answer) {
-  const expect = (c.expect ?? []).map((e) => {
-    const all = (e.all ?? []).every((p) => rx(p).test(answer));
-    const any = !e.any?.length || e.any.some((p) => rx(p).test(answer));
-    return { name: e.name, found: all && any };
-  });
-  const forbidden = (c.forbid ?? []).filter((p) => rx(p).test(answer));
-  const firstLine = answer.trim().split('\n')[0] ?? '';
-  const shape = [
-    { name: 'висновок жирним у першому рядку', ok: /^\s*\*\*.+\*\*/u.test(firstLine) },
-    { name: 'без назв інструментів', ok: !/\b(get_[a-z_]+|read_file|list_files|find_files|search_documents)\b|інструмент/iu.test(answer) },
-    { name: 'без емодзі', ok: !/\p{Extended_Pictographic}/u.test(answer) },
-    { name: '«Дія» за наявності знахідок', ok: !(c.expect ?? []).length || /(^|\n)\s*(\*\*)?Дія/u.test(answer) },
-  ];
-  const points = expect.filter((e) => e.found).length + shape.filter((s) => s.ok).length;
-  const total = expect.length + shape.length + forbidden.length;
-  return { expect, forbidden, shape, score: total ? points / total : 1 };
-}
+export { score };
 
 async function fromFeedback() {
   await login();
@@ -136,8 +135,22 @@ async function fromFeedback() {
   console.error(`${C.d}${drafts.length} чернеток кейсів — допишіть expect і додайте в ${CASES}.${C.x}`);
 }
 
+async function readRun(file) {
+  try {
+    return JSON.parse(await readFile(file, 'utf8'));
+  } catch {
+    console.error(`Не вдалося прочитати прогін ${file}.`);
+    process.exit(2);
+  }
+}
+
 async function main() {
+  if (args.includes('--help') || args.includes('-h')) {
+    console.log(USAGE);
+    return;
+  }
   if (args.includes('--from-feedback')) return fromFeedback();
+  const oldRun = arg('--compare') ? await readRun(arg('--compare')) : null;
   let cases;
   try {
     cases = JSON.parse(await readFile(CASES, 'utf8'));
@@ -146,32 +159,75 @@ async function main() {
     process.exit(2);
   }
   if (ONLY) cases = cases.filter((c) => c.name.includes(ONLY));
+  try {
+    assertCaseLimit(cases.length, args.includes('--force'));
+  } catch (err) {
+    console.error(err.message);
+    process.exit(2);
+  }
   await login();
   let failed = 0;
   let sum = 0;
+  const runCases = [];
   for (const c of cases) {
     process.stdout.write(`${C.b}${c.name}${C.x} — ${c.question}\n`);
     let res;
+    const t0 = Date.now();
     try {
       res = await ask(c);
     } catch (err) {
       console.log(`  ${C.r}помилка: ${err.message}${C.x}\n`);
       failed++;
+      runCases.push({ name: c.name, question: c.question, error: err.message, correctness: 0, words: 0, unsupported: 0, seconds: (Date.now() - t0) / 1000 });
       continue;
     }
+    const seconds = Math.round((Date.now() - t0) / 100) / 10;
     const s = score(c, res.text);
     sum += s.score;
+    runCases.push({
+      name: c.name,
+      question: c.question,
+      answer: res.text,
+      expect: s.expect,
+      forbidden: s.forbidden,
+      shape: s.shape,
+      score: s.score,
+      correctness: s.correctness,
+      words: s.words,
+      verdictFirst: s.verdictFirst,
+      figures: s.figures,
+      unsupported: s.unsupportedFigures.length,
+      unsupportedFigures: s.unsupportedFigures,
+      seconds,
+      tools: res.tools,
+    });
+    if (s.unsupportedFigures.length) console.log(`  ${C.y}✗ цифри без джерела: ${s.unsupportedFigures.map((u) => u.figure).join(', ')}${C.x}`);
     for (const e of s.expect) console.log(`  ${e.found ? `${C.g}✓` : `${C.r}✗`} ${e.name}${C.x}`);
     for (const f of s.forbidden) console.log(`  ${C.r}✗ заборонене: /${f}/${C.x}`);
     for (const sh of s.shape) if (!sh.ok) console.log(`  ${C.y}✗ форма: ${sh.name}${C.x}`);
     const min = c.minScore ?? 1;
     const ok = s.score >= min;
     if (!ok) failed++;
-    console.log(`  ${ok ? C.g : C.r}оцінка ${(s.score * 100).toFixed(0)}%${C.x} ${C.d}(${res.text.length} знаків, інструменти: ${res.tools.join(', ') || '—'})${C.x}\n`);
+    console.log(`  ${ok ? C.g : C.r}оцінка ${(s.score * 100).toFixed(0)}%${C.x} ${C.d}(${s.words} слів, ${seconds} с, інструменти: ${res.tools.join(', ') || '—'})${C.x}\n`);
   }
   const avg = cases.length ? (sum / cases.length) * 100 : 0;
   console.log(`${C.b}Разом: ${cases.length} кейсів, середня оцінка ${avg.toFixed(0)}%, нижче порогу: ${failed}.${C.x}`);
-  process.exit(failed ? 1 : 0);
+
+  const run = { date: new Date().toISOString(), baseUrl: BASE_URL, cases: runCases };
+  if (!args.includes('--no-out')) {
+    const out = arg('--out') ?? `.local/eval-runs/${run.date.replace(/[:.]/g, '-')}.json`;
+    await mkdir(dirname(out), { recursive: true });
+    await writeFile(out, JSON.stringify(run, null, 2));
+    console.log(`${C.d}Прогін записано: ${out}${C.x}`);
+  }
+  let dropped = false;
+  if (oldRun) {
+    const cmp = compareRuns(oldRun, run);
+    console.log(`\n${C.b}Порівняння (було → стало):${C.x}\n${formatCompare(cmp)}`);
+    dropped = cmp.dropped;
+    if (dropped) console.log(`${C.r}Загальна вірність впала.${C.x}`);
+  }
+  process.exit(failed || dropped ? 1 : 0);
 }
 
 if (process.argv[1]?.endsWith('eval-answers.mjs')) {
