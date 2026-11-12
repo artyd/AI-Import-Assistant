@@ -327,7 +327,7 @@ function statusLabel(status: string): string {
         : 'у черзі';
 }
 
-async function findFile(
+export async function findFile(
   workspaceId: string,
   path: string,
   fileId?: string,

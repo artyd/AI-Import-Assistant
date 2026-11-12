@@ -405,6 +405,7 @@ Caddy add it to the matcher: `@backend path /api/* /health /health/*`. **A full 
 | `AGENT_CLEAR_TRIGGER_TOKENS` | — | `500000` | Above this request size the API clears the oldest tool results (documents read earlier) so reading continues |
 | `AGENT_CLEAR_KEEP_TOOL_USES` | — | `8` | Newest tool results always kept word for word |
 | `AGENT_EFFORT` | — | `high` | Chat agent reasoning effort (`low`…`max`) |
+| `AGENT_FACT_CHECK` | — | `log` | Post-answer check of figures/numbers/codes against the source text: `off`, `log` (unsupported figures logged + `usage.unsupportedFigures`), `correct` (+ one short «Уточнення:» continuation when `verify_facts` was not used) |
 | `AGENT_MAX_TOKENS` | — | `64000` | Output cap per chat model call (adaptive thinking counts against it) |
 | `AGENT_HISTORY_CHAR_BUDGET` | — | `1200000` | Prior turns replayed into a chat (incl. documents read), in chars (~400k tokens) |
 | `READ_FILE_MAX_CHARS` | — | `200000` | One `read_file` result before the agent pages on with `range` |
