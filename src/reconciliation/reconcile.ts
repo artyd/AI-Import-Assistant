@@ -180,8 +180,8 @@ export function reconcile(docs: ReconcileDoc[], opts: ReconcileOptions = {}): Di
   //    that states them (invoices, packing lists, AWB/CMR/T1, МД, COO) — the
   //    transport and customs documents are where a rounded 31.85→32 kg or a
   //    T1 "net = gross" slip shows up. Legacy total stays invoice↔packing. ───
-  checkPhysicalConsistency(docs, 'net_weight_kg', out);
-  checkPhysicalConsistency(docs, 'gross_weight_kg', out);
+  checkPhysicalConsistency(docs, 'net_weight_kg', out, trilateral);
+  checkPhysicalConsistency(docs, 'gross_weight_kg', out, trilateral);
   if (
     !hasNum(invoice, 'net_weight_kg') && !hasNum(packing, 'net_weight_kg') &&
     !hasNum(invoice, 'gross_weight_kg') && !hasNum(packing, 'gross_weight_kg')
@@ -190,7 +190,7 @@ export function reconcile(docs: ReconcileDoc[], opts: ReconcileOptions = {}): Di
   }
 
   // ── Packages count: exact, across every document that states it. ─────────
-  checkPhysicalConsistency(docs, 'packages_count', out);
+  checkPhysicalConsistency(docs, 'packages_count', out, trilateral);
 
   // ── Currency: invoice vs contract, explicit. ───────────────────────────────
   {
@@ -328,7 +328,7 @@ export function reconcile(docs: ReconcileDoc[], opts: ReconcileOptions = {}): Di
           (others.length ? `; інші не звірено: ${others.join(', ')}` : ''),
         severity: 'warning',
         kind: 'suspected',
-        citations: [],
+        citations: docs.filter((d) => d.doc_type === t).map((d) => cite(toRef(d), d.fields.invoice_number ?? d.fields.contract_number ?? d.file_name)),
       });
     }
   }
@@ -656,6 +656,7 @@ function checkPhysicalConsistency(
   docs: ReconcileDoc[],
   field: 'net_weight_kg' | 'gross_weight_kg' | 'packages_count',
   out: Discrepancy[],
+  trilateral = false,
 ): void {
   // Editable drafts (.doc/.xlsx) are skipped when an issued document of the same
   // type exists — a superseded draft's weights are not a mismatch.
@@ -688,12 +689,22 @@ function checkPhysicalConsistency(
   const list = (refs: DocRef[]): string => refs.map((r) => r.file_name ?? r.doc_type).join(', ');
   const [major, ...rest] = ordered;
   const lowConf = [...groups.values()].flat().some((r) => confidenceOf(r, field) === 'low');
+  // Bilateral with several issued invoices / packing lists = partial deliveries:
+  // each document states its own part, so their figures legitimately differ.
+  const issued = (t: string): number => docs.filter((d) => d.doc_type === t && !isLikelyDraft(d.file_name)).length;
+  const partial = !trilateral && (issued('invoice') > 1 || issued('packing_list') > 1);
+  // A sub-half-kilo spread inside the tolerance is a rounding artifact (31.85 → 32).
+  const rounding = field !== 'packages_count' && !big && max - min <= 0.5;
+  const severity = partial ? 'warning' : big ? 'error' : rounding ? 'info' : 'warning';
   out.push({
     field,
     expected: `${PHYSICAL_LABEL[field]}: ${major![0]} (${list(major![1])})`,
-    actual: rest.map(([v, refs]) => `${v} (${list(refs)})`).join(' · '),
-    severity: big ? 'error' : 'warning',
-    kind: big && !lowConf ? 'confirmed' : 'suspected',
+    actual:
+      rest.map(([v, refs]) => `${v} (${list(refs)})`).join(' · ') +
+      (partial ? ' — кілька інвойсів/пакувальних листів (часткові поставки?), значення можуть бути частинами' : '') +
+      (rounding && !partial ? ' — схоже на округлення' : ''),
+    severity,
+    kind: big && !lowConf && !partial ? 'confirmed' : 'suspected',
     citations: ordered.flatMap(([v, refs]) => refs.map((r) => cite(r, v))),
   });
 }
@@ -779,7 +790,10 @@ function reconcileLineItems(
   }
 
   // Small shipment: reconcile the item count between the two docs…
-  if (invItems.length > 0 && plItems.length > 0 && invItems.length !== plItems.length) {
+  // Rows with neither description nor batch (bare carton lines) cannot be matched
+  // to an invoice row, so their COUNT says nothing — skip the count check.
+  const keyless = [...invItems, ...plItems].some((it) => !lineKey(it));
+  if (!keyless && invItems.length > 0 && plItems.length > 0 && invItems.length !== plItems.length) {
     out.push({
       field: 'line_items',
       expected: `invoice: ${invItems.length} позицій`,
