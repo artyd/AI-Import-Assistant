@@ -200,8 +200,14 @@ export function assessRisks({ extractions, missing, discrepancies, registry, fla
       category: 'discrepancy',
       severity: d.severity === 'info' ? 'info' : d.severity,
       title: `Розбіжність: ${fieldLabel(d.field)}`,
-      detail: `${d.expected} → ${d.actual}`,
-      source_file_id: null,
+      // Evidence: the files and values that produced the finding, so the agent
+      // can check it against the documents (there is no dismiss mechanism).
+      detail:
+        `${d.expected} → ${d.actual}` +
+        (d.citations.length
+          ? ` [джерела: ${d.citations.map((c) => `${c.file_name ?? c.doc_type}=${c.value}`).join('; ')}]`
+          : ''),
+      source_file_id: d.citations[0]?.file_id ?? null,
     });
   }
 

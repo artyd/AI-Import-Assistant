@@ -107,6 +107,15 @@ const goldenShipmentSchema = z.object({
   shipment_id: z.string(),
   title: z.string().optional(),
   notes: z.string().optional(),
+  // Shipment context for reconcile() (e.g. trilateral two-leg checks).
+  reconcile_options: z
+    .object({
+      contractMode: z.enum(['bilateral', 'trilateral']).nullable().optional(),
+      incotermIn: z.string().nullable().optional(),
+      incotermOut: z.string().nullable().optional(),
+      intermediaryName: z.string().nullable().optional(),
+    })
+    .optional(),
   documents: z.array(goldenDocSchema).min(1),
   expected_discrepancies: z.array(expectedDiscrepancySchema),
 });
@@ -247,7 +256,10 @@ function scoreDiscrepancies(
   let tp = 0;
   for (const exp of expected) {
     const i = remainingActual.findIndex(
-      (a) => a.field === exp.field && (exp.kind === undefined || a.kind === exp.kind),
+      (a) =>
+        a.field === exp.field &&
+        (exp.kind === undefined || a.kind === exp.kind) &&
+        (exp.severity === undefined || a.severity === exp.severity),
     );
     if (i !== -1) {
       tp += 1;
@@ -350,7 +362,7 @@ async function main(): Promise<void> {
       console.log(`  ${C.d}discrepancy scoring skipped (missing extractions)${C.x}`);
       continue;
     }
-    const actualDisc = reconcile(reconcileDocs);
+    const actualDisc = reconcile(reconcileDocs, ship.reconcile_options ?? {});
     const { totals, unmatchedExpected, unmatchedActual } = scoreDiscrepancies(
       ship.expected_discrepancies,
       actualDisc,

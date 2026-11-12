@@ -1,0 +1,81 @@
+{
+  "shipment_id": "trilateral-cartons",
+  "title": "Synthetic trilateral — carton split, two invoice legs, rounded gross weight",
+  "notes": "Anonymised synthetic case (no customer data). Guards spec 010 part E: PL split per carton (10+10+5) vs invoice 25 is NOT a quantity mismatch; two invoices are the two trilateral legs (not a duplicate); gross 31.85 vs 32 is a rounding note (info), not a warning; markup inbound<outbound is info. The only real findings: no HS code on the invoice (yellow) and the markup note. No contract→invoice mismatches.",
+  "reconcile_options": {
+    "contractMode": "trilateral",
+    "incotermIn": "FCA",
+    "incotermOut": "CPT",
+    "intermediaryName": "Alpha Trade Ltd"
+  },
+  "documents": [
+    {
+      "id": "contract",
+      "file_name": "contract.pdf",
+      "fixture": "trilateral-cartons/contract.json",
+      "expected": {
+        "doc_type": "contract"
+      }
+    },
+    {
+      "id": "invoice-in",
+      "file_name": "invoice-in.pdf",
+      "fixture": "trilateral-cartons/invoice-in.json",
+      "expected": {
+        "doc_type": "invoice",
+        "invoice_number": "SUP-001",
+        "total_value": 6500,
+        "gross_weight_kg": 31.85
+      }
+    },
+    {
+      "id": "invoice-out",
+      "file_name": "invoice-out.pdf",
+      "fixture": "trilateral-cartons/invoice-out.json",
+      "expected": {
+        "doc_type": "invoice",
+        "invoice_number": "ALP-010",
+        "total_value": 9000,
+        "gross_weight_kg": 32
+      }
+    },
+    {
+      "id": "packing",
+      "file_name": "packing.pdf",
+      "fixture": "trilateral-cartons/packing.json",
+      "expected": {
+        "doc_type": "packing_list",
+        "packages_count": 3
+      }
+    },
+    {
+      "id": "awb",
+      "file_name": "awb.pdf",
+      "fixture": "trilateral-cartons/awb.json",
+      "expected": {
+        "doc_type": "transport",
+        "gross_weight_kg": 32
+      }
+    }
+  ],
+  "expected_discrepancies": [
+    {
+      "field": "hs_code",
+      "kind": "suspected",
+      "severity": "warning",
+      "note": "HS code absent from the invoice"
+    },
+    {
+      "field": "markup",
+      "kind": "suspected",
+      "severity": "info",
+      "note": "expected intermediary markup"
+    },
+    {
+      "field": "gross_weight_kg",
+      "kind": "suspected",
+      "severity": "info",
+      "note": "31.85 vs 32 — rounding on the transport document"
+    }
+  ]
+}

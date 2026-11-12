@@ -93,10 +93,10 @@ describe('reconcile — Метопрен live-test regressions', () => {
     expect(q?.actual).toContain('20');
   });
 
-  it('gross 31.85 vs 32 across invoice/PL/AWB/T1/МД is surfaced as a grouped warning', () => {
+  it('gross 31.85 vs 32 across invoice/PL/AWB/T1/МД is surfaced as a grouped rounding note', () => {
     const out = reconcile(ALL, TRI);
     const g = out.find((d) => d.field === 'gross_weight_kg');
-    expect(g?.severity).toBe('warning');
+    expect(g?.severity).toBe('info');
     const text = `${g?.expected} ${g?.actual}`;
     expect(text).toContain('31.85');
     expect(text).toContain('AIRWAY BILL.PDF');

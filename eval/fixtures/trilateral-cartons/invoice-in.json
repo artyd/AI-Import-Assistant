@@ -1,0 +1,36 @@
+{
+  "doc_type": "invoice",
+  "also_contains": [],
+  "po_number": null,
+  "invoice_number": "SUP-001",
+  "contract_number": null,
+  "total_value": 6500,
+  "currency": "USD",
+  "hs_code": null,
+  "country_of_origin": "India",
+  "buyer": "Alpha Trade Ltd",
+  "seller": "Zeta Chem Co",
+  "incoterm": "FCA Mumbai",
+  "document_date": null,
+  "expiry_date": null,
+  "shipment_date": null,
+  "delivery_deadline": null,
+  "parties": [],
+  "total_weight_kg": null,
+  "net_weight_kg": 25,
+  "gross_weight_kg": 31.85,
+  "packages_count": 3,
+  "line_items": [
+    {
+      "description": "Substance X",
+      "quantity": 25,
+      "unit": "kg",
+      "unit_price": null,
+      "amount": 6500,
+      "hs_code": null,
+      "batch_no": "B-2026-01"
+    }
+  ],
+  "field_confidence": {},
+  "extraction_note": null
+}
