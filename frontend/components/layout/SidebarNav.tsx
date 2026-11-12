@@ -4,7 +4,6 @@ import type { ChatKind, Collection, ConversationMeta, Workspace } from "@/lib/ty
 import type { AppView } from "@/lib/store";
 import { useState } from "react";
 import { McpConnectModal } from "./McpConnectModal";
-import { LegalLinks } from "@/components/legal/LegalLinks";
 import {
   LnChat,
   LnChevronDown,
@@ -277,7 +276,6 @@ export function SidebarNav(props: Props) {
         </button>
       </div>
       {mcpModal}
-      <LegalLinks style={{ justifyContent: "flex-start", padding: "0 24px 6px" }} />
 
       {/* Chat type switcher (Звичайний / Постачання / Збірний) — dubs the composer one */}
       <div style={{ flex: "none", padding: "2px 12px 8px" }}>

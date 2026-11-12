@@ -2,17 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Workspace, WorkspaceStatus } from "@/lib/types";
-import {
-  LnCheck,
-  LnLock,
-  LnMoon,
-  LnPanelRight,
-  LnPencil,
-  LnSearch,
-  LnSoundOff,
-  LnSoundOn,
-  LnSun,
-} from "../ui/LineIcons";
+import { LnCheck, LnPanelRight, LnPencil, LnSearch } from "../ui/LineIcons";
+import { SettingsMenu } from "./SettingsMenu";
 
 export const STATUS_LABEL: Record<WorkspaceStatus, string> = {
   active: "Активна",
@@ -89,20 +80,6 @@ export function TopBar({
     const next = supplierText.trim();
     if (next !== (workspace.supplier ?? "")) onSaveSupplier(next);
   }
-
-  const iconBtn: React.CSSProperties = {
-    flex: "none",
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    background: "transparent",
-    border: "1px solid var(--border)",
-    color: "var(--muted)",
-    cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-  };
 
   return (
     <div
@@ -318,20 +295,7 @@ export function TopBar({
         </button>
       )}
 
-      <button style={iconBtn} onClick={onToggleTheme} title="Тема оформлення" aria-label="Тема оформлення">
-        {theme === "dark" ? <LnSun size={17} /> : <LnMoon size={16} />}
-      </button>
-      <button
-        style={iconBtn}
-        onClick={onToggleSound}
-        title={sound ? "Звук увімкнено" : "Звук вимкнено"}
-        aria-label="Звук"
-      >
-        {sound ? <LnSoundOn size={17} /> : <LnSoundOff size={17} />}
-      </button>
-      <button style={iconBtn} onClick={onLock} title="Заблокувати (вийти)" aria-label="Заблокувати">
-        <LnLock size={16} />
-      </button>
+      <SettingsMenu theme={theme} onToggleTheme={onToggleTheme} sound={sound} onToggleSound={onToggleSound} onLock={onLock} />
     </div>
   );
 }
