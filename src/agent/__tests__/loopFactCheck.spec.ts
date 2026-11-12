@@ -55,6 +55,7 @@ const loadShipmentCorpus = vi.fn(async () => [{ file: 'other.pdf', pages: [{ pag
 vi.mock('../tools/verify.js', () => ({ loadShipmentCorpus: (...a: unknown[]) => loadShipmentCorpus(...(a as [])) }));
 
 import { runAgentTurn } from '../loop.js';
+import { executeTool } from '../tools.js';
 import { config } from '../../lib/config.js';
 
 const sse = () => {
@@ -124,5 +125,38 @@ describe('post-answer fact check in the loop', () => {
     const r = await run(sse());
     expect(requests).toHaveLength(2);
     expect(r.usage.unsupportedFigures).toEqual(['MSKU7654321']);
+  });
+});
+
+describe('tool calls of one step', () => {
+  const twoReads = {
+    content: [
+      { type: 'tool_use', id: 'a', name: 'read_file', input: { path: 'a.pdf' } },
+      { type: 'tool_use', id: 'b', name: 'read_file', input: { path: 'b.pdf' } },
+    ],
+    stop_reason: 'tool_use',
+  };
+
+  it('read-only calls run in parallel; results keep the call order', async () => {
+    (config as { AGENT_FACT_CHECK: string }).AGENT_FACT_CHECK = 'off';
+    let inFlight = 0;
+    let maxInFlight = 0;
+    vi.mocked(executeTool).mockImplementation(async (_name, input) => {
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      const path = String((input as { path: string }).path);
+      await new Promise((r) => setTimeout(r, path === 'a.pdf' ? 30 : 5));
+      inFlight--;
+      return { result: `text of ${path}`, summary: `Прочитано: ${path}`, citations: [] };
+    });
+    replies.push(twoReads, answer('**Готово.**'));
+    const s = sse();
+    const r = await run(s);
+    expect(maxInFlight).toBe(2);
+    expect(s.events.filter((e) => e.ev === 'tool_call')).toHaveLength(2);
+    expect(r.toolCalls.map((c) => c.summary)).toEqual(['Прочитано: a.pdf', 'Прочитано: b.pdf']);
+    const results = (requests[1]!.messages.at(-1) as { content: { tool_use_id: string; content: string }[] }).content;
+    expect(results.map((b) => b.tool_use_id)).toEqual(['a', 'b']);
+    expect(results[0]!.content).toBe('text of a.pdf');
   });
 });

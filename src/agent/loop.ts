@@ -168,6 +168,15 @@ const FINAL_ANSWER_NUDGE =
   'Сформулюй відповідь користувачу на основі вже зібраних даних (без нових викликів інструментів). ' +
   'Якщо чогось не встиг перевірити — прямо скажи, що саме.';
 const FACT_CHECK_BUDGET_MS = 10_000;
+/** 'log' mode only records; keep it from holding up the «done» event on big shipments. */
+const FACT_CHECK_LOG_BUDGET_MS = 3_000;
+/** Tools with no writes: several of them in one step run in parallel. */
+const PARALLEL_SAFE_TOOLS = new Set([
+  'search_documents', 'read_file', 'list_files', 'find_files', 'verify_facts',
+  'get_missing_context', 'get_contract_mode', 'get_instruction_draft', 'compare_document_versions',
+  'list_lots', 'get_fcl_overview', 'check_drug_registration', 'uktzed_lookup_code',
+  'uktzed_browse_classifier', 'dualuse_browse_classifier', 'get_exchange_rate', 'pubchem_identify_substance',
+]);
 const correctionNudge = (figures: string[]): string =>
   'Перевірка відповіді: ці значення не підтверджені ні текстом документів постачання, ні результатами ' +
   `інструментів цього ходу: ${figures.join('; ')}. Напиши коротке уточнення (1–4 речення) без заголовка й без ` +
@@ -444,41 +453,49 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
       const cutToolUse = msg.stop_reason === 'max_tokens' && msg.content.some((b) => b.type === 'tool_use');
       if (msg.stop_reason !== 'tool_use' && !cutToolUse) break;
 
-      const toolResults: ChatContentBlockParam[] = [];
-      for (const block of msg.content) {
-        if (block.type !== 'tool_use') continue;
-        if (cutToolUse) {
-          toolResults.push({
-            type: 'tool_result',
-            tool_use_id: block.id,
-            content: 'Виклик обрізано лімітом відповіді — повтори його коротше або відповідай без нього.',
-            is_error: true,
-          });
-          continue;
-        }
-        sse.send('tool_call', { tool: block.name, input: block.input });
-
-        let outcome;
+      const toolUses = msg.content.filter((b): b is Extract<typeof b, { type: 'tool_use' }> => b.type === 'tool_use');
+      const runOne = async (block: (typeof toolUses)[number]) => {
         try {
-          outcome = await executeTool(block.name, block.input, ctx);
+          return await executeTool(block.name, block.input, ctx);
         } catch (err) {
-          outcome = {
+          return {
             result: `Помилка інструмента: ${(err as Error).message}`,
             summary: `Помилка: ${block.name}`,
             citations: [] as Citation[],
           };
         }
+      };
+      let outcomes: Awaited<ReturnType<typeof runOne>>[] = [];
+      if (!cutToolUse) {
+        for (const block of toolUses) sse.send('tool_call', { tool: block.name, input: block.input });
+        // Read-only calls of one step run side by side (several files read at once);
+        // a step with any write keeps the old one-by-one order.
+        const parallel = toolUses.length > 1 && toolUses.every((b) => PARALLEL_SAFE_TOOLS.has(b.name));
+        const finish = (block: (typeof toolUses)[number], outcome: Awaited<ReturnType<typeof runOne>>) => {
+          sse.send('tool_result', { tool: block.name, summary: outcome.summary });
+          return outcome;
+        };
+        if (parallel) {
+          outcomes = await Promise.all(toolUses.map(async (b) => finish(b, await runOne(b))));
+        } else {
+          for (const b of toolUses) outcomes.push(finish(b, await runOne(b)));
+        }
+      }
 
+      const toolResults: ChatContentBlockParam[] = toolUses.map((block, k) => {
+        if (cutToolUse) {
+          return {
+            type: 'tool_result' as const,
+            tool_use_id: block.id,
+            content: 'Виклик обрізано лімітом відповіді — повтори його коротше або відповідай без нього.',
+            is_error: true,
+          };
+        }
+        const outcome = outcomes[k]!;
         toolCalls.push({ tool: block.name, input: block.input, summary: outcome.summary });
         citations.push(...outcome.citations);
-        sse.send('tool_result', { tool: block.name, summary: outcome.summary });
-
-        toolResults.push({
-          type: 'tool_result',
-          tool_use_id: block.id,
-          content: outcome.result,
-        });
-      }
+        return { type: 'tool_result' as const, tool_use_id: block.id, content: outcome.result };
+      });
 
       messages.push({ role: 'user', content: toolResults });
 
@@ -551,7 +568,7 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
         toolTexts: toolResultTexts(messages.slice(seedLen)),
         userMessage,
         loadShipment: workspaceId ? () => loadShipmentCorpus(workspaceId) : undefined,
-        deadline: Date.now() + FACT_CHECK_BUDGET_MS,
+        deadline: Date.now() + (config.AGENT_FACT_CHECK === 'correct' ? FACT_CHECK_BUDGET_MS : FACT_CHECK_LOG_BUDGET_MS),
       });
       if (check.unsupported.length > 0) {
         unsupportedFigures = check.unsupported.slice(0, 20);
