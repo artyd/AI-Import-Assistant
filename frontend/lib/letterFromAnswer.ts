@@ -25,16 +25,31 @@ function tableRows(md: string): string[] {
   return out;
 }
 
+/** Numbered problem lines «N. **Що** — де → що зробити» (the short answer form). */
+function listFindings(md: string): string[] {
+  return md
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => /^\d+[.)]\s/.test(l) && /→|->/.test(l))
+    .map((l) => strip(l.replace(/^\d+[.)]\s*/, "")));
+}
+
+/** Older answers: a table plus a «Дія» line; current ones: numbered «… → дія» lines. */
+function findings(md: string): string[] {
+  const table = /(^|\n)\s*(\*\*)?Дія/u.test(md) ? tableRows(md) : [];
+  return [...table, ...listFindings(md)];
+}
+
 /** True when the answer lists problems with actions — worth a letter. */
 export function hasFindings(md: string): boolean {
-  return tableRows(md).length > 0 && /(^|\n)\s*(\*\*)?Дія/u.test(md);
+  return findings(md).length > 0;
 }
 
 const MAX = 3800;
 
 /** The request text for «Доопрацювати з ШІ», or null when there is nothing to send. */
 export function letterRequest(md: string): string | null {
-  const rows = tableRows(md).filter((r) => !/^Розбіжності немає/u.test(r));
+  const rows = findings(md).filter((r) => !/^Розбіжності немає/u.test(r));
   if (!rows.length) return null;
   const action = md.split("\n").map((l) => strip(l)).find((l) => /^Дія:/u.test(l));
   const body = [

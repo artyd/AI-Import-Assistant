@@ -18,7 +18,7 @@
 //             and at least one `any` pattern match the answer (regex, case-insensitive).
 //   forbid  — patterns that must NOT appear (emoji, «інструмент», a wrong figure…).
 //   shape   — built-in checks of the answer rules: verdict in bold on the first
-//             line, no tool names, no emoji, a «Дія» line when there are findings.
+//             line, no tool names, no emoji, an action («→ …» or a «Дія» line) when there are findings.
 // Exit code 1 when any case scores below its `minScore` (default 1.0).
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises';

@@ -30,4 +30,19 @@ describe("letter from an answer", () => {
     expect(r).toContain("Дія: запросити комерційний інвойс.");
     expect(letterRequest("без таблиці")).toBeNull();
   });
+
+  it("the short form: numbered «що — де → дія» lines are findings", () => {
+    const short = [
+      "**2 проблеми: бракує CMR, нетто не збігається.**",
+      "1. **Немає CMR** → запросити в перевізника.",
+      "2. **Нетто** — INV-0421 стор. 2: 25 000 кг ≠ PL-0421 стор. 1: 20 000 кг → запросити виправлений PL.",
+      "Решта збігається: брутто.",
+    ].join("\n");
+    expect(hasFindings(short)).toBe(true);
+    const r = letterRequest(short)!;
+    expect(r).toContain("- Немає CMR → запросити в перевізника.");
+    expect(r).toContain("- Нетто — INV-0421 стор. 2: 25 000 кг ≠ PL-0421 стор. 1: 20 000 кг → запросити виправлений PL.");
+    // A plain numbered list without actions is not a findings list.
+    expect(hasFindings("1. Інвойс\n2. PL")).toBe(false);
+  });
 });

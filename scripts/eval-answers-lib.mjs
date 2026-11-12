@@ -75,7 +75,7 @@ export function score(c, answer) {
     { name: 'висновок жирним у першому рядку', ok: verdictFirst },
     { name: 'без назв інструментів', ok: !/\b(get_[a-z_]+|read_file|list_files|find_files|search_documents)\b|інструмент/iu.test(answer) },
     { name: 'без емодзі', ok: !/\p{Extended_Pictographic}/u.test(answer) },
-    { name: '«Дія» за наявності знахідок', ok: !(c.expect ?? []).length || /(^|\n)\s*(\*\*)?Дія/u.test(answer) },
+    { name: 'дія за наявності знахідок («→ …» або «Дія»)', ok: !(c.expect ?? []).length || /(^|\n)\s*(\*\*)?Дія/u.test(answer) || /→|->/u.test(answer) },
   ];
   if (c.maxWords) shape.push({ name: `довжина ≤ ${c.maxWords} слів`, ok: words <= c.maxWords });
   const points = expect.filter((e) => e.found).length + shape.filter((s) => s.ok).length;
