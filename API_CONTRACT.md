@@ -479,7 +479,7 @@ Response: `Content-Type: text/event-stream`. The single agent ("Штурман")
 tool-use loop over the tools it chooses at runtime — retrieval (`find_files`, `search_documents`,
 `read_file`, `list_files`) plus shipment tools (`get_checklist`,
 `get_discrepancies`, `get_risks`, `generate_supplier_instruction`, `generate_report`,
-`get_missing_context`, `save_workspace_context`, `classify_and_file`,
+`get_missing_context`, `save_workspace_context`, `verify_facts`, `classify_and_file`,
 `sort_inbox`, `normalize_shipment_files`, `compare_document_versions`) — and streams:
 
 | event | data | UI usage |
@@ -494,10 +494,12 @@ tool-use loop over the tools it chooses at runtime — retrieval (`find_files`, 
 the conversation messages endpoints, `null` for older turns):
 `{ "contextTokens": number, "peakContextTokens": number, "contextWindow": number,
 "clearedTokens": number, "clearedToolUses": number, "outputTokens": number, "model": string,
+"unsupportedFigures"?: string[],
 "history": { "totalTurns": number, "keptTurns": number, "historyChars": number, "historyBudgetChars": number } }`
 — context tokens of the turn's last model call (after server-side clearing of old
 tool results), the model window, what was cleared so reading could continue, and how
-many prior user turns are still replayed to the model.
+many prior user turns are still replayed to the model. `unsupportedFigures` (optional, absent when
+none) lists figures the answer states that no source text supports (`AGENT_FACT_CHECK` ≠ `off`).
 
 The stream also emits periodic `: ping` comments as keep-alives. `citations`
 feeds the prototype's source chips; reconciliation diff-tables and completeness

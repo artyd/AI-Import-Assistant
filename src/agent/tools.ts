@@ -13,6 +13,7 @@ import { runClassifyAndFile, runCompareVersions, runSortInbox, runNormalizeShipm
 import { runGenerateReport } from './tools/report.js';
 import { runConsolidatedAnalysis } from './tools/analysis.js';
 import { runListLots, runAssignFileToLot, runGetFclOverview } from './tools/fcl.js';
+import { runVerifyFacts } from './tools/verify.js';
 import { runSearch, runReadFile, runListFiles, runFindFiles } from './tools/retrieval.js';
 export type { ToolContext, ToolOutcome } from './tools/shared.js';
 
@@ -74,6 +75,36 @@ export const toolDefinitions: ChatTool[] = [
         query: { type: 'string', description: 'Частина назви файлу, номер документа, тип або слово з вмісту.' },
       },
       required: ['query'],
+    },
+  },
+  {
+    name: 'verify_facts',
+    description:
+      'Детермінована перевірка цифр, номерів і кодів за текстом документів постачання та витягнутими полями ' +
+      '(без моделі): суми, ваги/кількості з одиницями, номери інвойсів/контейнерів/коносаментів, коди УКТ ЗЕД, дати. ' +
+      'ОБОВʼЯЗКОВО виклич ОДИН РАЗ перед відповіддю, у якій названо цифри, номери чи коди з документів: передай усі ' +
+      'значення разом (до 40), за можливості з файлом і сторінкою, звідки ти їх узяв. Враховує пробіли/розділювачі ' +
+      '(«1 000,50» = «1,000.50»), регістр, написання одиниць («кг» = «kg») і формат дат. Повертає для кожного значення ' +
+      'файл і сторінку або «НЕ ЗНАЙДЕНО» — таке значення не став як факт, перечитай джерело чи познач «(висновок)». ' +
+      'Не замінює read_file: лише підтверджує, що значення є в тексті, а не що воно доречне.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        facts: {
+          type: 'array',
+          description: 'Значення для перевірки (1–40).',
+          items: {
+            type: 'object',
+            properties: {
+              value: { type: 'string', description: 'Значення як у відповіді: «25 000 кг», «INV-2024-001», «2915 90 00 00», «12.03.2025».' },
+              file: { type: 'string', description: 'Необовʼязково: файл, де ти це прочитав (шукається спершу в ньому, потім у всіх).' },
+              page: { type: 'integer', description: 'Необовʼязково: сторінка в цьому файлі.' },
+            },
+            required: ['value'],
+          },
+        },
+      },
+      required: ['facts'],
     },
   },
   {
@@ -495,6 +526,8 @@ export async function executeTool(
       return runReadFile(input, ctx);
     case 'list_files':
       return runListFiles(ctx);
+    case 'verify_facts':
+      return runVerifyFacts(input, ctx);
     case 'find_files':
       return runFindFiles(input, ctx);
     case 'get_checklist':

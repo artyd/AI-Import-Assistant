@@ -93,6 +93,10 @@ const envSchema = z.object({
   // Reasoning effort for the chat agent (Sonnet 5.5 levels are recalibrated;
   // multistep document work → high).
   AGENT_EFFORT: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).default('high'),
+  // Deterministic check of the figures an answer states against the source text
+  // (spec 010 C): off | log (unsupported figures are logged and put in the turn's
+  // usage) | correct (+ one short «Уточнення:» continuation when verify_facts was not used).
+  AGENT_FACT_CHECK: z.enum(['off', 'log', 'correct']).default('log'),
   AGENT_MAX_TOKENS: z.coerce.number().int().positive().default(64_000),
   AGENT_HISTORY_CHAR_BUDGET: z.coerce.number().int().positive().default(1_200_000),
   READ_FILE_MAX_CHARS: z.coerce.number().int().positive().default(200_000),

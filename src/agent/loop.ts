@@ -13,6 +13,8 @@ import type { Citation, ToolCallRecord } from '../chat/conversations.js';
 import { toolDefinitions, executeTool, type ToolContext } from './tools.js';
 import { repairBlocks, stripToolBlocks } from './historyRepair.js';
 import { reportAnthropicError } from '../lib/alerts.js';
+import { runAnswerCheck, toolResultTexts } from './answerCheck.js';
+import { loadShipmentCorpus } from './tools/verify.js';
 
 export interface AgentTurnParams {
   /**
@@ -70,6 +72,8 @@ export interface TurnUsage {
   clearedToolUses: number;
   outputTokens: number;
   model: string;
+  /** Figures of the answer no source text supports (AGENT_FACT_CHECK ≠ off); absent when none. */
+  unsupportedFigures?: string[];
 }
 
 // ── Prompt caching ────────────────────────────────────────────────────────────
@@ -163,6 +167,12 @@ const STEP_CEILING_TOKENS = Math.floor(config.AGENT_CONTEXT_TOKENS * 0.95);
 const FINAL_ANSWER_NUDGE =
   'Сформулюй відповідь користувачу на основі вже зібраних даних (без нових викликів інструментів). ' +
   'Якщо чогось не встиг перевірити — прямо скажи, що саме.';
+const FACT_CHECK_BUDGET_MS = 10_000;
+const correctionNudge = (figures: string[]): string =>
+  'Перевірка відповіді: ці значення не підтверджені ні текстом документів постачання, ні результатами ' +
+  `інструментів цього ходу: ${figures.join('; ')}. Напиши коротке уточнення (1–4 речення) без заголовка й без ` +
+  'повторення решти відповіді: для кожного значення або виправ його за джерелом, або познач «(висновок)», ' +
+  'або прямо скажи, що даних немає. Нових викликів інструментів не роби.';
 const EMPTY_ANSWER_FALLBACK =
   'Не вдалося сформувати відповідь на це питання. Спробуйте переформулювати або звузити його ' +
   '(наприклад, до одного документа чи одного товару).';
@@ -357,6 +367,44 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
   let error: string | undefined;
   let anthropicOutage = false;
 
+  // One short corrective continuation (no tools, never forced tool_choice other than
+  // «none» like the closing pass). Streams «Уточнення: …» after the answer and merges
+  // it into the last assistant message so replay stays a valid alternation.
+  const correctAnswer = async (figures: string[]): Promise<void> => {
+    const nudgeIdx = messages.push({ role: 'user', content: correctionNudge(figures) }) - 1;
+    let correction = '';
+    let started = false;
+    try {
+      const msg = await callModel(
+        { system: systemParam, messages: request(), tools: toolsParam, signal: params.signal },
+        toolsParam.length > 0 ? { tool_choice: { type: 'none' } } : {},
+        (stream) => {
+          stream.on('text', (t: string) => {
+            let piece = t;
+            if (!started) {
+              if (!piece.trim()) return;
+              started = true;
+              piece = `\n\nУточнення: ${piece.replace(/^\s*(?:\*\*)?Уточнення:?(?:\*\*)?\s*/iu, '')}`;
+            }
+            correction += piece;
+            text += piece;
+            sse.send('token', { text: piece });
+          });
+        },
+      );
+      track(msg.usage);
+      noteContext(msg);
+    } finally {
+      messages.splice(nudgeIdx, 1);
+    }
+    if (correction.trim()) {
+      const lastMsg = messages[messages.length - 1];
+      if (lastMsg && lastMsg.role === 'assistant' && Array.isArray(lastMsg.content)) {
+        lastMsg.content = [...lastMsg.content, { type: 'text', text: correction }] as ChatMessageParam['content'];
+      }
+    }
+  };
+
   try {
     for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
       if (params.signal?.aborted) throw new Error('client_disconnected');
@@ -490,6 +538,45 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
     if (!params.signal?.aborted) anthropicOutage = reportAnthropicError(err, 'chat');
   }
 
+  // Fact check (spec 010 C): figures the answer states vs the turn's tool results and
+  // the shipment's source text. The streamed text is never altered; the wire events
+  // are unchanged. Unsupported figures go to the log and the turn's usage; in
+  // 'correct' mode (and only if verify_facts was not used) one short «Уточнення:»
+  // continuation is streamed after the answer.
+  let unsupportedFigures: string[] | undefined;
+  if (config.AGENT_FACT_CHECK !== 'off' && !error && !params.signal?.aborted && text.trim()) {
+    try {
+      const check = await runAnswerCheck({
+        answer: text,
+        toolTexts: toolResultTexts(messages.slice(seedLen)),
+        userMessage,
+        loadShipment: workspaceId ? () => loadShipmentCorpus(workspaceId) : undefined,
+        deadline: Date.now() + FACT_CHECK_BUDGET_MS,
+      });
+      if (check.unsupported.length > 0) {
+        unsupportedFigures = check.unsupported.slice(0, 20);
+        const usedVerify = toolCalls.some((c) => c.tool === 'verify_facts');
+        // eslint-disable-next-line no-console
+        console.warn(
+          JSON.stringify({
+            event: 'answer_unsupported_figures',
+            workspaceId: workspaceId ?? null,
+            mode: config.AGENT_FACT_CHECK,
+            usedVerifyFacts: usedVerify,
+            checked: check.figures,
+            unsupported: unsupportedFigures,
+          }),
+        );
+        if (config.AGENT_FACT_CHECK === 'correct' && !usedVerify) {
+          await correctAnswer(unsupportedFigures);
+        }
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(`Agent: fact check failed: ${(err as Error).message}`);
+    }
+  }
+
   // One line per turn so prompt-cache effectiveness is visible in prod logs.
   // eslint-disable-next-line no-console
   console.log(
@@ -516,6 +603,7 @@ export async function runAgentTurn(params: AgentTurnParams): Promise<AgentTurnRe
       clearedToolUses: ctxStats.clearedToolUses,
       outputTokens: usage.output,
       model: MODEL,
+      ...(unsupportedFigures ? { unsupportedFigures } : {}),
     },
   };
 }
