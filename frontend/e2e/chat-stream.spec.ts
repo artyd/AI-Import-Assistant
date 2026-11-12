@@ -51,6 +51,11 @@ test.describe("Chat streaming", () => {
     await ask(page, "Перевір комплектність");
 
     await expect(page.getByText("Привіт, пакет повний.")).toBeVisible();
+    // The folded «Хід роботи» names the step in plain words.
+    const trace = page.getByTestId("turn-trace");
+    await expect(trace).toContainText("Хід роботи · 1 крок");
+    await trace.locator("summary").click();
+    await expect(trace).toContainText("Перевіряю комплектність пакета");
     // Sources: one collapsed full-width row; open — file with its pages.
     await expect(page.getByText("Джерела")).toBeVisible();
     await expect(page.getByText("· 1 файл")).toBeVisible();
@@ -138,7 +143,8 @@ test.describe("Chat streaming", () => {
 
     const stop = page.getByTestId("chat-stop");
     await expect(stop).toBeVisible();
-    await expect(page.getByText("Обмірковує…")).toBeVisible();
+    await expect(page.getByTestId("thinking-progress")).toBeVisible();
+    await expect(page.getByTestId("thinking-now")).toHaveText("Розбираю питання й план перевірки…");
     expect(chatRequested).toBe(true);
 
     await stop.click();

@@ -8,6 +8,8 @@ import { IconFile, IconSpinner, IconCheck, IconFolder, IconChevronRight } from "
 import { filesLabel, groupCitations, pagesLabel } from "@/lib/citations";
 import { hasFindings } from "@/lib/letterFromAnswer";
 import { AnswerFeedback, isRateable } from "./AnswerFeedback";
+import { ThinkingProgress, TurnTraceSummary } from "./ThinkingProgress";
+import type { TurnTrace } from "@/lib/chat/progress";
 
 // Local-only chat items for the paperclip flow. These are NOT persisted to the
 // conversation (they don't go through the agent/SSE); on reload they vanish, but
@@ -379,7 +381,10 @@ export const AssistantBubble = memo(function AssistantBubble({
   onDraftLetter,
   messageId,
   onCorrect,
+  trace,
 }: {
+  /** This session's turn: live steps + timer while it runs, a folded «Хід роботи» after. */
+  trace?: TurnTrace;
   messageId?: string;
   /** «Не так» → the user's comment; the host asks Штурман for a corrected answer. */
   onCorrect?: (comment: string) => void;
@@ -397,13 +402,19 @@ export const AssistantBubble = memo(function AssistantBubble({
         <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8 }}>
           Штурман
         </div>
+        {trace && trace.endedAt !== undefined && <TurnTraceSummary trace={trace} />}
         {pending ? (
-          <span style={{ color: "var(--muted)" }}>
-            <IconSpinner size={16} /> Обмірковує…
-          </span>
+          trace ? (
+            <ThinkingProgress trace={trace} />
+          ) : (
+            <span style={{ color: "var(--muted)" }}>
+              <IconSpinner size={16} /> Обмірковує…
+            </span>
+          )
         ) : (
           <Markdown>{text}</Markdown>
         )}
+        {!pending && trace && trace.endedAt === undefined && <ThinkingProgress trace={trace} writing />}
         {citations && citations.length > 0 && <Sources citations={citations} onOpen={onOpenSource} />}
         {!pending && messageId && isRateable(messageId) && <AnswerFeedback messageId={messageId} onCorrect={onCorrect} />}
         {!pending && onDraftLetter && hasFindings(text) && (

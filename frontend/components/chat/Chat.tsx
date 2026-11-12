@@ -13,6 +13,7 @@ import {
   type SurveyStatus,
 } from "@/lib/surveyQuestions";
 import type { LogEntry } from "./AgentLog";
+import { endTrace, finishStep, recordDuration, startStep, stepLabel, type TurnTrace } from "@/lib/chat/progress";
 import { correctionMessage } from "./AnswerFeedback";
 import { IconAttach, IconFile, IconFolder, IconCheck, IconSearch } from "../ui/icons";
 import { UPLOAD_ACCEPT, fileKey, acceptFiles } from "@/lib/files/policy";
@@ -81,7 +82,7 @@ interface Props {
   onDraftLetter?: (answer: string) => void;
 }
 
-type ChatItem = ({ kind: "message" } & Message) | ClassifyCard | QuestionCard;
+type ChatItem = ({ kind: "message"; trace?: TurnTrace } & Message) | ClassifyCard | QuestionCard;
 
 // Typed command that starts the survey (supply chat only). A dedicated button
 // lands in Phase 5; a typed command works today.
@@ -98,17 +99,6 @@ function hhmm() {
 }
 
 let logSeq = 0;
-function labelToolCall(tool: string, input: Record<string, unknown>): string {
-  if (tool === "search_documents")
-    return `Пошук: «${String(input.query ?? "")}»`;
-  if (tool === "read_file")
-    return `Читаю: ${String(input.path ?? input.file ?? input.fileName ?? "")}`;
-  if (tool === "list_files") return "Перелік файлів";
-  if (tool === "find_files")
-    return `Шукаю файли: «${String(input.query ?? "")}»`;
-  return `Інструмент: ${tool}`;
-}
-
 export function Chat({
   postPath,
   chatKind,
@@ -402,35 +392,54 @@ export function Chat({
       content: text,
     };
     const assistantId = `stream-${Date.now()}`;
+    let trace: TurnTrace = { startedAt: Date.now(), steps: [] };
     setItems((m) => [
       ...m,
       userMsg,
-      { kind: "message", id: assistantId, role: "assistant", content: "" },
+      { kind: "message", id: assistantId, role: "assistant", content: "", trace },
     ]);
+    let liveId = assistantId;
 
-    const updateAssistant = (patch: Partial<Message>) =>
+    // The id is read NOW: React runs the updater later, after `done` may have
+    // renamed the bubble to its server id.
+    const updateAssistant = (patch: Partial<Message> & { trace?: TurnTrace }) => {
+      const id = liveId;
       setItems((m) =>
         m.map((it) =>
-          it.kind === "message" && it.id === assistantId
+          it.kind === "message" && it.id === id
             ? { ...it, ...patch }
             : it
         )
       );
+    };
+    const setTrace = (next: TurnTrace) => {
+      trace = next;
+      updateAssistant({ trace });
+    };
 
     try {
       await runTurn(
         postPath,
         { message: text, conversationId: convRef.current },
         {
-          onUpdate: (t) =>
-            updateAssistant(
-              t.phase === "done" && t.done
-                ? { id: t.done.messageId || assistantId, content: turnContent(t), citations: t.done.citations }
-                : { content: turnContent(t) }
-            ),
-          onToolCall: (e) =>
-            onLog({ id: `l${logSeq++}`, time: hhmm(), text: labelToolCall(e.tool, e.input), kind: "call" }),
-          onToolResult: (e) => onLog({ id: `l${logSeq++}`, time: hhmm(), text: e.summary, kind: "result" }),
+          onUpdate: (t) => {
+            if (t.phase === "done" && t.done) {
+              trace = endTrace(trace, Date.now());
+              recordDuration((trace.endedAt ?? Date.now()) - trace.startedAt);
+              updateAssistant({ id: t.done.messageId || assistantId, content: turnContent(t), citations: t.done.citations, trace });
+              liveId = t.done.messageId || assistantId;
+            } else {
+              updateAssistant({ content: turnContent(t) });
+            }
+          },
+          onToolCall: (e) => {
+            setTrace(startStep(trace, e.tool, e.input ?? {}, Date.now()));
+            onLog({ id: `l${logSeq++}`, time: hhmm(), text: stepLabel(e.tool, e.input), kind: "call" });
+          },
+          onToolResult: (e) => {
+            setTrace(finishStep(trace, e.tool, Date.now()));
+            onLog({ id: `l${logSeq++}`, time: hhmm(), text: e.summary, kind: "result" });
+          },
           onDone: (e) => {
             if (e.usage) setUsage(e.usage);
             if (e.conversationId && convRef.current !== e.conversationId) {
@@ -444,6 +453,8 @@ export function Chat({
       );
     } finally {
       if (abortRef.current === ctrl) abortRef.current = null;
+      // Error or stop: freeze the timer and the open steps.
+      if (trace.endedAt === undefined) setTrace(endTrace(trace, Date.now()));
       setStreaming(false);
     }
   }, [streaming, postPath, onConversationStarted, onLog, onTurnComplete]);
@@ -872,6 +883,7 @@ export function Chat({
                     onDraftLetter={onDraftLetter}
                     messageId={it.id}
                     onCorrect={askCorrection}
+                    trace={it.trace}
                   />
                 )
               )}

@@ -665,6 +665,31 @@ details.sources .source-link { border: 0; background: none; padding: 0; font: in
 details.sources .source-link:hover { text-decoration: underline; }
 details.sources .source-page { border: 0; background: none; padding: 0 2px; font: inherit; color: var(--muted); cursor: pointer; white-space: nowrap; }
 details.sources .source-page:hover { color: var(--accent, #2f6feb); text-decoration: underline; }
+/* Live progress of a Штурман turn (ThinkingProgress). */
+.tp-card { border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; max-width: 560px; background: var(--surface-2, transparent); }
+.tp-head { display: flex; align-items: center; gap: 9px; font-size: 14px; }
+.tp-now { flex: 1; min-width: 0; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tp-time { font-family: var(--font-mono); font-size: 12px; color: var(--muted); white-space: nowrap; flex: none; }
+.tp-bar { position: relative; height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; margin: 10px 0 6px; }
+.tp-bar-fill { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 2px; background: var(--accent, #2f6feb); transition: width 1s linear; }
+.tp-bar-indeterminate { width: 30%; animation: tpSlide 1.6s ease-in-out infinite; }
+@keyframes tpSlide { 0% { left: -30%; } 100% { left: 100%; } }
+.tp-meta { font-size: 12.5px; color: var(--muted); }
+.tp-steps { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 3px; }
+.tp-step { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); min-width: 0; animation: fadeUp .2s ease both; }
+.tp-step[data-done] { color: var(--muted); }
+.tp-step-icon { flex: none; width: 16px; display: flex; justify-content: center; color: var(--accent, #2f6feb); }
+.tp-step[data-done] .tp-step-icon { color: var(--ok, #22a06b); }
+.tp-more { font-size: 12px; color: var(--faint, var(--muted)); padding-left: 24px; }
+.tp-quiet { margin-top: 10px; font-size: 12.5px; color: var(--muted); line-height: 1.45; }
+.tp-inline { margin-top: 8px; font-size: 12.5px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
+details.tp-summary { margin: 0 0 8px; font-size: 12.5px; color: var(--muted); }
+details.tp-summary > summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; user-select: none; }
+details.tp-summary > summary::-webkit-details-marker { display: none; }
+details.tp-summary > summary:hover { color: var(--text); }
+details.tp-summary .sources-chev { transition: transform .15s ease; flex: none; }
+details.tp-summary[open] .sources-chev { transform: rotate(90deg); }
+details.tp-summary .tp-steps { padding: 4px 0 2px 2px; max-width: 560px; }
 .answer-action { margin-top: 10px; height: 32px; padding: 0 12px; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
 
 /* Answer rating that teaches Штурман (AnswerFeedback). */
