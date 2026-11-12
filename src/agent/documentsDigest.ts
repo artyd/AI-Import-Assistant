@@ -1,4 +1,5 @@
 import { query } from '../db/pool.js';
+import { buildFactBlock } from './factSheet.js';
 import { sameCompany } from '../shipments/contextDerive.js';
 import {
   bankAccountsOf,
@@ -20,7 +21,9 @@ import {
  */
 
 // Bound the size so a huge shipment can't bloat the (cacheable) system prompt.
-const MAX = 4000;
+// The fact sheet (≤ FACTS_MAX) comes first; the per-document cards fill the rest.
+const MAX = 6000;
+const FACTS_MAX = 3200;
 
 const str = (v: unknown): string | null =>
   typeof v === 'string' && v.trim() ? v.trim() : typeof v === 'number' ? String(v) : null;
@@ -60,12 +63,40 @@ function ibans(f: Record<string, unknown>): string | null {
   return `IBAN=${list.slice(0, 2).join(', ')}${list.length > 2 ? ` +${list.length - 2}` : ''}`;
 }
 
+interface DigestRow {
+  name: string;
+  fields: Record<string, unknown>;
+  version?: number | null;
+  created_at?: string | Date | null;
+  lot_id?: string | null;
+}
+
 export async function buildDocumentsDigest(workspaceId: string): Promise<string> {
   // Only the headline keys + a line count — not the whole extraction JSONB (a
   // packing list's line_items can be hundreds of rows), on every chat turn.
-  const { rows } = await query<{ name: string; fields: Record<string, unknown> }>(
-    `SELECT f.name AS name,
+  const { rows } = await query<DigestRow>(
+    `SELECT f.name AS name, f.version AS version, f.created_at AS created_at, fo.lot_id AS lot_id,
             jsonb_build_object(
+              'net_weight_kg', de.extracted_fields->'net_weight_kg',
+              'gross_weight_kg', de.extracted_fields->'gross_weight_kg',
+              'packages_count', de.extracted_fields->'packages_count',
+              'contract_number', de.extracted_fields->'contract_number',
+              'document_date', de.extracted_fields->'document_date',
+              'shipment_date', de.extracted_fields->'shipment_date',
+              'consignee_name', de.extracted_fields->'consignee_name',
+              'transport_doc_number', de.extracted_fields->'transport_doc_number',
+              'transport_doc_kind', de.extracted_fields->'transport_doc_kind',
+              'container_numbers', de.extracted_fields->'container_numbers',
+              'parties', de.extracted_fields->'parties',
+              'field_pages', de.extracted_fields->'field_pages',
+              'line_items_brief',
+                CASE WHEN jsonb_typeof(de.extracted_fields->'line_items') = 'array'
+                     THEN (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+                                    'name', COALESCE(e.li->>'product_name', e.li->>'description'),
+                                    'hs_code', e.li->'hs_code', 'quantity', e.li->'quantity',
+                                    'unit', e.li->'unit', 'batch_no', e.li->'batch_no')), '[]'::jsonb)
+                           FROM (SELECT li FROM jsonb_array_elements(de.extracted_fields->'line_items') AS li LIMIT 30) e)
+                     ELSE '[]'::jsonb END,
               'doc_type', de.extracted_fields->'doc_type',
               'seller', de.extracted_fields->'seller',
               'buyer', de.extracted_fields->'buyer',
@@ -88,10 +119,27 @@ export async function buildDocumentsDigest(workspaceId: string): Promise<string>
             ) AS fields
      FROM files f
      JOIN document_extractions de ON de.file_id = f.id
+     LEFT JOIN folders fo ON fo.id = f.folder_id
      WHERE f.workspace_id = $1 AND f.is_latest = true
      ORDER BY f.created_at`,
     [workspaceId],
   );
+  // Declared incoterms of the shipment and, for an FCL collection, its lots — one
+  // small read for the fact sheet's trilateral in / out and per-lot grouping.
+  const { rows: metaRows } = await query<{
+    incoterm_in: string | null;
+    incoterm_out: string | null;
+    lots: { id: string; name: string; supplier: string | null; incoterm_in: string | null; incoterm_out: string | null }[] | null;
+  }>(
+    `SELECT w.incoterm_in, w.incoterm_out,
+            (SELECT jsonb_agg(jsonb_build_object('id', l.id, 'name', l.name, 'supplier', NULLIF(l.supplier_name, ''),
+                                                 'incoterm_in', l.incoterm_in, 'incoterm_out', l.incoterm_out)
+                              ORDER BY l.position, l.created_at)
+             FROM lots l WHERE l.workspace_id = w.id) AS lots
+     FROM workspaces w WHERE w.id = $1`,
+    [workspaceId],
+  ).catch(() => ({ rows: [] }));
+  const meta = metaRows[0];
   // Files not yet readable: the agent must not present an answer as covering
   // "all documents" while some are still being converted / extracted.
   const { rows: pending } = await query<{ name: string; status: string }>(
@@ -142,8 +190,24 @@ export async function buildDocumentsDigest(workspaceId: string): Promise<string>
     };
   });
 
+  // Fact sheet first; the cards get what is left of the budget and shrink first.
+  const factBlock = buildFactBlock(
+    rows.map((r) => ({
+      name: r.name,
+      fields: r.fields ?? {},
+      version: r.version ?? null,
+      createdAt: r.created_at ? new Date(r.created_at).toISOString() : null,
+      lotId: r.lot_id ?? null,
+    })),
+    { incotermIn: meta?.incoterm_in ?? null, incotermOut: meta?.incoterm_out ?? null },
+    FACTS_MAX,
+    (meta?.lots ?? []).map((l) => ({ id: l.id, name: l.name, supplier: l.supplier, incotermIn: l.incoterm_in, incotermOut: l.incoterm_out })),
+  );
+  const prefix = [pendingNote, factBlock, factBlock ? 'КАРТКИ ДОКУМЕНТІВ:' : ''].filter(Boolean).join('\n');
+  const budget = Math.max(800, MAX - prefix.length - 1);
+
   let digest = cards.map((c) => c.full).join('\n');
-  if (digest.length > MAX) digest = cards.map((c) => c.short ?? c.full).join('\n');
-  if (digest.length > MAX) digest = `${digest.slice(0, MAX)}\n…(перелік скорочено)`;
-  return pendingNote ? `${pendingNote}\n${digest}` : digest;
+  if (digest.length > budget) digest = cards.map((c) => c.short ?? c.full).join('\n');
+  if (digest.length > budget) digest = `${digest.slice(0, budget)}\n…(перелік скорочено)`;
+  return prefix ? `${prefix}\n${digest}` : digest;
 }

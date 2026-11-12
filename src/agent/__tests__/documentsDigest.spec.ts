@@ -54,11 +54,15 @@ describe('document cards in the digest', () => {
       { name: 'coa.pdf', fields: { doc_type: 'quality_certificate' } },
     ];
     const digest = await buildDocumentsDigest('ws1');
-    expect(digest).toBe(
+    // The fact sheet comes first, the cards follow unchanged.
+    expect(digest.startsWith('ФАКТИ ПОСТАВКИ')).toBe(true);
+    expect(digest).toContain('продавець: Fictiva Chemicals GmbH (invoice-1.pdf)');
+    expect(digest.indexOf('КАРТКИ ДОКУМЕНТІВ:')).toBeGreaterThan(digest.indexOf('ФАКТИ ПОСТАВКИ'));
+    expect(digest.endsWith(
       '- invoice-1.pdf (invoice): продавець=Fictiva Chemicals GmbH, інвойс№=FC-104, IBAN=DE12500105170000062011, ' +
         '2 позицій; увага: порожні поля Batch No.\n' +
         '- coa.pdf (quality_certificate): (без ключових полів)',
-    );
+    )).toBe(true);
   });
 
   it('over budget, documents without flags shrink to their name so the flags survive', async () => {
@@ -66,7 +70,8 @@ describe('document cards in the digest', () => {
     docs = Array.from({ length: 60 }, (_, i) => ({ name: `doc-${i}.pdf`, fields: { doc_type: 'other', seller: long, buyer: long } }));
     docs.push({ name: 'hc.pdf', fields: { doc_type: 'other', signed: false } });
     const digest = await buildDocumentsDigest('ws1');
-    expect(digest.length).toBeLessThanOrEqual(4100);
+    expect(digest.length).toBeLessThanOrEqual(6100);
+    expect(digest).toContain('ФАКТИ ПОСТАВКИ');
     expect(digest).toContain('- doc-0.pdf (other)\n');
     expect(digest).toContain('- hc.pdf (other): (без ключових полів); увага: без підпису');
   });
