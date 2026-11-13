@@ -12,7 +12,11 @@ const LIVE = JSON.parse(readFileSync(join(__dirname, "fixtures", "hub-live.json"
  */
 
 const DAY = 86_400_000;
-const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Kyiv" }).format(new Date());
+// The browser clock is pinned to this day, so the fixtures below always sit in the visible week /
+// month regardless of the real date (the legend only lists forwarders of the visible period, and
+// the fixtures span plus(-2)..plus(3) within one week). The week view is Mon..Sun, so today must
+// be a Wednesday or Thursday; the month must hold plus(-2)..plus(10). CAL_TODAY overrides it.
+const today = process.env.CAL_TODAY ?? "2026-11-11";
 const plus = (n: number) => new Date(Date.parse(`${today}T00:00:00Z`) + n * DAY).toISOString().slice(0, 10);
 
 function row(id: string, extra: Record<string, unknown>) {
@@ -182,8 +186,9 @@ async function openCalendar(page: Page) {
 }
 
 test.describe("Logist calendar (team sheet)", () => {
-  test.beforeEach(({}, info) => {
+  test.beforeEach(async ({ page }, info) => {
     test.skip(info.project.name === "mobile", "desktop-only feature");
+    await page.clock.setFixedTime(new Date(`${today}T12:00:00Z`));
   });
 
   test("month view shows the sheet's events on their days, with sync state", async ({ page }, info) => {
