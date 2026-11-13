@@ -423,6 +423,8 @@ export interface DoneEvent {
   citations: Citation[];
   conversationId: string;
   messageId: string;
+  /** The stored question (for «Редагувати»); absent on older backends. */
+  userMessageId?: string;
   /** Present on current backends; absent on older ones. */
   usage?: ChatUsage;
 }

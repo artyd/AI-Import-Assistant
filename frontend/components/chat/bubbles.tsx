@@ -94,9 +94,98 @@ function AgentAvatar() {
 
 // Bubbles are memoised on primitive/stable props: while a reply streams only
 // the last (assistant) item gets a new object, so earlier messages skip render.
-export const UserBubble = memo(function UserBubble({ text }: { text: string }) {
+const ACTION_BTN: React.CSSProperties = {
+  border: "none",
+  background: "none",
+  padding: "2px 4px",
+  cursor: "pointer",
+  fontSize: 12,
+  color: "var(--muted)",
+};
+
+/**
+ * The user's own question. «Копіювати» puts it on the clipboard; «Редагувати»
+ * opens it in place — «Надіслати» replaces this question (and everything after
+ * it) with the edited one and asks again, to add context or re-ask.
+ */
+export const UserBubble = memo(function UserBubble({
+  id,
+  text,
+  busy = false,
+  onEdit,
+}: {
+  id?: string;
+  text: string;
+  /** A turn is streaming — editing waits for it to finish. */
+  busy?: boolean;
+  onEdit?: (id: string, text: string) => void;
+}) {
+  const [hover, setHover] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(text);
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // Clipboard API blocked (http / permissions): fall back to a hidden textarea.
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      ta.remove();
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+  const submit = () => {
+    const next = draft.trim();
+    if (!next || !id || !onEdit) return;
+    setEditing(false);
+    onEdit(id, next);
+  };
+
+  if (editing) {
+    return (
+      <div style={{ display: "flex", justifyContent: "flex-end", margin: "14px 0 26px" }}>
+        <div style={{ width: "78%", display: "flex", flexDirection: "column", gap: 8 }}>
+          <textarea
+            className="input"
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setEditing(false);
+              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) submit();
+            }}
+            rows={Math.min(12, Math.max(3, draft.split("\n").length + 1))}
+            style={{ width: "100%", resize: "vertical", fontSize: 15, lineHeight: 1.5, padding: "10px 12px" }}
+            aria-label="Редагування питання"
+          />
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, alignItems: "center" }}>
+            <span style={{ fontSize: 12, color: "var(--muted)", marginRight: "auto" }}>
+              Питання і відповіді після нього буде замінено.
+            </span>
+            <button type="button" className="btn" onClick={() => { setDraft(text); setEditing(false); }}>
+              Скасувати
+            </button>
+            <button type="button" className="btn btn-primary" onClick={submit} disabled={busy || !draft.trim()}>
+              Надіслати
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div style={{ display: "flex", justifyContent: "flex-end", margin: "14px 0 26px" }}>
+    <div
+      style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", margin: "14px 0 26px" }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+    >
       <div
         style={{
           background: "var(--bubble)",
@@ -110,6 +199,25 @@ export const UserBubble = memo(function UserBubble({ text }: { text: string }) {
         }}
       >
         {text}
+      </div>
+      <div style={{ display: "flex", gap: 4, marginTop: 4, minHeight: 20, visibility: hover || copied ? "visible" : "hidden" }}>
+        <button type="button" style={ACTION_BTN} onClick={() => void copy()} title="Копіювати питання">
+          {copied ? "Скопійовано" : "Копіювати"}
+        </button>
+        {onEdit && id ? (
+          <button
+            type="button"
+            style={{ ...ACTION_BTN, opacity: busy ? 0.5 : 1, cursor: busy ? "default" : "pointer" }}
+            onClick={() => {
+              if (busy) return;
+              setDraft(text);
+              setEditing(true);
+            }}
+            title={busy ? "Зачекайте, поки Штурман відповість" : "Змінити питання і надіслати знову"}
+          >
+            Редагувати
+          </button>
+        ) : null}
       </div>
     </div>
   );

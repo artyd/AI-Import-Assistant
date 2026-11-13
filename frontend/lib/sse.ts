@@ -136,7 +136,7 @@ export interface ChatHandlers {
  */
 export async function streamChat(
   path: string,
-  payload: { message: string; conversationId?: string },
+  payload: { message: string; conversationId?: string; replaceFrom?: string },
   handlers: ChatHandlers,
   signal?: AbortSignal
 ): Promise<void> {

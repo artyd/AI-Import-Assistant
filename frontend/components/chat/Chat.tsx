@@ -382,7 +382,9 @@ export function Chat({
     [onMoveFile, patchCard]
   );
 
-  const runMessage = useCallback(async (raw: string) => {
+  // `replaceFrom` (a stored user message id): «Редагувати й надіслати знову» —
+  // the server drops that question and everything after it before answering.
+  const runMessage = useCallback(async (raw: string, opts?: { replaceFrom?: string }) => {
     const text = raw.trim();
     if (!text || streaming) return;
     setStreaming(true);
@@ -425,7 +427,11 @@ export function Chat({
     try {
       await runTurn(
         postPath,
-        { message: text, conversationId: convRef.current },
+        {
+          message: text,
+          conversationId: convRef.current,
+          ...(opts?.replaceFrom && convRef.current ? { replaceFrom: opts.replaceFrom } : {}),
+        },
         {
           onUpdate: (t) => {
             if (t.phase === "done" && t.done) {
@@ -447,6 +453,11 @@ export function Chat({
           },
           onDone: (e) => {
             if (e.usage) setUsage(e.usage);
+            // The question gets its stored id, so it can be edited and re-sent.
+            if (e.userMessageId) {
+              const stored = e.userMessageId;
+              setItems((m) => m.map((it) => (it.kind === "message" && it.id === userMsg.id ? { ...it, id: stored } : it)));
+            }
             if (e.conversationId && convRef.current !== e.conversationId) {
               convRef.current = e.conversationId;
               onConversationStarted(e.conversationId);
@@ -465,6 +476,26 @@ export function Chat({
   }, [streaming, postPath, onConversationStarted, onLog, onTurnComplete]);
 
   const stop = useCallback(() => abortRef.current?.abort(), []);
+
+  // «Редагувати» on the user's own question: the edited text replaces it and
+  // everything after it — locally and on the server — and is answered afresh.
+  // A question without a stored id (older backend) is simply asked again.
+  const editAndResend = useCallback(
+    (id: string, text: string) => {
+      if (streaming || !text.trim()) return;
+      const stored = !id.startsWith("local-") ? id : undefined;
+      if (stored && convRef.current) {
+        setItems((list) => {
+          const i = list.findIndex((it) => it.kind === "message" && it.id === id);
+          return i >= 0 ? list.slice(0, i) : list;
+        });
+        void runMessage(text, { replaceFrom: stored });
+      } else {
+        void runMessage(text);
+      }
+    },
+    [streaming, runMessage],
+  );
 
   // ── Shipment survey (client-driven question cards) ──────────────────────────
   // Answers are collected locally and submitted as ONE chat message at the end,
@@ -887,7 +918,7 @@ export function Chat({
                 ) : it.kind === "question" ? (
                   <QuestionBubble key={it.id} card={it} onAnswer={answerQuestion} onSkip={skipSurvey} />
                 ) : it.role === "user" ? (
-                  <UserBubble key={it.id} text={it.content} />
+                  <UserBubble key={it.id} id={it.id} text={it.content} busy={streaming} onEdit={editAndResend} />
                 ) : (
                   <AssistantBubble
                     key={it.id}

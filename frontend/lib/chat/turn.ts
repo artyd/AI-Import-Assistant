@@ -75,7 +75,7 @@ export interface TurnHandlers {
 /** Stream one turn; resolves with the final state (never throws). */
 export async function runTurn(
   path: string,
-  payload: { message: string; conversationId?: string },
+  payload: { message: string; conversationId?: string; replaceFrom?: string },
   handlers: TurnHandlers,
   signal: AbortSignal,
 ): Promise<TurnState> {

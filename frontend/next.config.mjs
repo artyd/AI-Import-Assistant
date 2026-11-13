@@ -4,6 +4,9 @@ import { dirname } from "node:path";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const isDev = process.env.NODE_ENV !== "production";
+// Opt-in for a local preview pane (IDE / Zveno): `DEV_ALLOW_FRAMING=1 npm run dev`.
+// Never in production, and off by default in dev so the e2e header checks hold.
+const allowFraming = isDev && process.env.DEV_ALLOW_FRAMING === "1";
 
 // Content-Security-Policy. 'unsafe-inline' scripts are required by Next's inline
 // bootstrap and the pre-hydration theme script in app/layout.tsx; 'unsafe-eval'
@@ -21,9 +24,8 @@ const csp = [
   `connect-src 'self' https://nominatim.openstreetmap.org${isDev ? " ws: wss:" : ""}`,
   "object-src 'self' blob:",
   "frame-src 'self' blob:",
-  // Prod: never framed (clickjacking). Dev: allowed, so an IDE / Zveno preview
-  // pane can show the running app.
-  ...(isDev ? [] : ["frame-ancestors 'none'"]),
+  // Never framed (clickjacking) — except a local preview pane that opted in.
+  ...(allowFraming ? [] : ["frame-ancestors 'none'"]),
   "base-uri 'self'",
   "form-action 'self'",
 ].join("; ");
@@ -32,7 +34,7 @@ const securityHeaders = [
   { key: "Content-Security-Policy", value: csp },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "same-origin" },
-  ...(isDev ? [] : [{ key: "X-Frame-Options", value: "DENY" }]),
+  ...(allowFraming ? [] : [{ key: "X-Frame-Options", value: "DENY" }]),
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
   // Browsers ignore HSTS on plain-http responses, so this is safe in dev; in prod
   // (HTTPS only, host Caddy) it stops downgrade-to-http on later visits.
