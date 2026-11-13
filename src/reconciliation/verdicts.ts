@@ -18,6 +18,8 @@ import { isLikelyDraft, type ReconcileDoc } from './reconcile.js';
 import { assessRisks, type Risk } from './risks.js';
 import { documentRisks } from './documentChecks.js';
 import { isImportDeclaration } from './fcl.js';
+import { decorateFindings, type TriageRow } from './fingerprint.js';
+import { loadTriage } from './triage.js';
 
 /**
  * A customs declaration that is plainly NOT the Ukrainian import МД: a Chinese
@@ -68,6 +70,10 @@ export interface ShipmentSnapshot {
    * THIS snapshot carries, so an FCL can pass one list for every lot.
    */
   hsRequirements?: CachedHsRequirements[];
+  /** The user's decisions on findings (spec 011); decided findings carry `triage`. */
+  triage?: TriageRow[];
+  /** The lot's name in an FCL — part of its findings' fingerprints. */
+  lotName?: string;
 }
 
 export interface ShipmentVerdicts {
@@ -150,7 +156,16 @@ export async function loadShipmentSnapshot(ws: WorkspaceRow): Promise<ShipmentSn
     console.error(`HS requirements load failed for workspace ${ws.id}:`, (err as Error).message);
   }
 
-  return { ws, required, files, intermediary: inter[0]?.company_name ?? null, approvedInstruction, registry, hsRequirements };
+  // The user's decisions on findings (best-effort: without them every finding is open).
+  let triage: TriageRow[] = [];
+  try {
+    triage = (await loadTriage(ws.id)) ?? [];
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(`Triage load failed for workspace ${ws.id}:`, (err as Error).message);
+  }
+
+  return { ws, required, files, intermediary: inter[0]?.company_name ?? null, approvedInstruction, registry, hsRequirements, triage };
 }
 
 /**
@@ -170,7 +185,8 @@ export function deriveWorkspaceStatus(
   if (checklist.length === 0) return 'docs_in_progress';
 
   const anyMissing = checklist.some((i) => i.status === 'missing');
-  const hasErrors = discrepancies.some((d) => d.severity === 'error');
+  // A finding the user decided («Не проблема» / «Вирішено») no longer blocks.
+  const hasErrors = discrepancies.some((d) => d.severity === 'error' && !d.triage);
   if (anyMissing) return 'docs_in_progress';
 
   const allVerified = checklist.every((i) => i.status === 'verified');
@@ -303,6 +319,7 @@ export function computeVerdicts(s: ShipmentSnapshot, now: number = Date.now()): 
     now,
   });
 
+  decorateFindings(discrepancies, risks, s.triage, s.lotName);
   return { checklist, discrepancies, risks, derivedStatus: deriveWorkspaceStatus(s.ws, checklist, discrepancies) };
 }
 

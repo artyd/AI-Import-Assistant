@@ -1,6 +1,6 @@
 # 011 — Finding triage: decide, resolve, report
 
-Status: in work (2026-11-13)
+Status: built (2026-11-13) — deploy and acceptance on prod pending
 
 ## Goal
 

@@ -714,6 +714,26 @@ share a type, the issued PDF/scan is reconciled before an editable draft and the
 `documents` note names the reconciled and skipped files.
 Response `200`: `{ "discrepancies": [ { "field", "expected", "actual", "severity":"error"|"warning"|"info" } ], "artifactId": uuid }`.
 
+### Finding triage  (auth, spec 011)
+Every `Discrepancy` and `Risk` returned by `GET /api/workspaces/:id/discrepancies`,
+`/risks`, `/fcl` (incl. `all_discrepancies`) and `/lots/:lotId` carries additive fields:
+`"fingerprint": string` (stable id: `sha1` hex of
+`kind | field-or-code | lot | sorted(file_id=value of each citation)`; a risk uses
+`r | code | lot | source_file_id | title`; display texts are not part of it) and, when the
+user decided it, `"triage": { "status":"not_problem"|"resolved", "reason": "legs"|"version"|"lots"|"agreed"|"other"|null, "note": string, "user_name": string, "decided_at": ISO }`.
+A triaged finding stays in the lists (so the UI can show «Розібрано (N)»), but the derived
+status, the lot/FCL status and risk alerts ignore it; a risk built from a triaged
+discrepancy inherits its `triage`. Changed evidence (another file/value) gives a new
+fingerprint, so the finding returns as open.
+
+- `PUT /api/workspaces/:id/findings/:fingerprint/triage` — body
+  `{ "status":"not_problem"|"resolved", "reason"?: "legs"|"version"|"lots"|"agreed"|"other", "note"?: string (≤1000), "title": string (≤300), "lot"?: string|null }`
+  → `200 { "triage": {…} }`. `400 invalid_request` for `not_problem` without `reason`, `reason:"other"` without `note`, or a fingerprint that is not 40 hex chars. Works for a shipment or FCL id (lot findings send `lot` = lot name). `404` on a foreign/unknown workspace.
+- `DELETE /api/workspaces/:id/findings/:fingerprint/triage` — «Повернути» → `204`.
+- `GET /api/workspaces/:id/problems-report` → `200 { "html": string }` — one printable Ukrainian page: «Відкриті проблеми» (with «перевірити»), «Вирішено», «Не проблема» (reason, note, who, when), count of notes; an FCL groups by lot.
+
+Both writes run `shipmentChanged(id, 'triage')`, so the checklist/status/counts are recomputed.
+
 ### `POST /api/workspaces/:id/compare-versions`  (auth)
 Request: `{ "fileIdA": uuid, "fileIdB": uuid }` (both must be in the workspace).
 Field-level diff of the two files' latest structured extractions.

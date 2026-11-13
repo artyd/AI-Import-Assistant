@@ -35,7 +35,9 @@ export type ShipmentChange =
   /** Files deleted, moved between folders, or a new version uploaded. */
   | 'files'
   /** A supplier instruction was approved / sent (compliance check input). */
-  | 'instruction';
+  | 'instruction'
+  /** A finding was decided («Не проблема» / «Вирішено») or brought back (spec 011). */
+  | 'triage';
 
 export interface ShipmentChangeOptions {
   /** Notify the responsible user about critical risks (single uploads). */
@@ -91,7 +93,7 @@ export async function shipmentChanged(
 
   // 5. Critical-risk alert. De-duped per (user, workspace, type) per day.
   if (opts.alertRisks && ws.responsible_user_id) {
-    const critical = state.risks.filter((r) => r.severity === 'error');
+    const critical = state.risks.filter((r) => r.severity === 'error' && !r.triage);
     if (critical.length > 0) {
       await insertNotification(
         ws.responsible_user_id,
@@ -135,7 +137,7 @@ async function fclChanged(
   const workspace = { ...ws, status: state.status, intake_complete: state.intakeComplete };
 
   if (opts.alertRisks && ws.responsible_user_id) {
-    const critical = state.risks.filter((r) => r.severity === 'error');
+    const critical = state.risks.filter((r) => r.severity === 'error' && !r.triage);
     if (critical.length > 0) {
       await insertNotification(
         ws.responsible_user_id,

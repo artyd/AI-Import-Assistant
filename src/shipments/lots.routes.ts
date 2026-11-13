@@ -48,13 +48,14 @@ function lotSummary(v: LotVerdict) {
     consignee: v.consignee,
     intake_complete: v.intakeComplete,
     completeness: { done: checklist.filter((i) => i.status !== 'missing').length, total: checklist.length },
+    // Decided findings (spec 011: «Не проблема» / «Вирішено») never count.
     discrepancies: {
-      confirmed: discrepancies.filter((d) => d.kind === 'confirmed').length,
-      suspected: discrepancies.filter((d) => d.kind !== 'confirmed').length,
+      confirmed: discrepancies.filter((d) => !d.triage && d.kind === 'confirmed').length,
+      suspected: discrepancies.filter((d) => !d.triage && d.kind !== 'confirmed').length,
     },
     risks: {
-      error: risks.filter((r) => r.severity === 'error').length,
-      warning: risks.filter((r) => r.severity === 'warning').length,
+      error: risks.filter((r) => !r.triage && r.severity === 'error').length,
+      warning: risks.filter((r) => !r.triage && r.severity === 'warning').length,
     },
     context: lotContext(v.lot),
   };

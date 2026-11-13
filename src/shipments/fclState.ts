@@ -11,6 +11,8 @@ import { registryChecksForDocs, type RegistryFinding } from '../customs/drugRegi
 import { loadCachedRequirements } from '../customs/hsRequirementsCache.js';
 import type { CachedHsRequirements } from '../customs/qdproRequirements.js';
 import { computeFclLevel, findManifestFile, matchHblsToLots, type FclLevelVerdicts, type FclLot } from '../reconciliation/fcl.js';
+import { loadTriage } from '../reconciliation/triage.js';
+import type { TriageRow } from '../reconciliation/fingerprint.js';
 import type { ManifestLine } from '../reconciliation/manifest.js';
 import { readStoredFile } from '../lib/storage.js';
 import { parseWorkbook, extractRows } from '../analysis/sheets/parse.js';
@@ -121,6 +123,15 @@ export async function loadFclVerdicts(ws: WorkspaceRow, now: number = Date.now()
     console.error(`HS requirements load failed for FCL ${ws.id}:`, (err as Error).message);
   }
 
+  // The user's decisions on findings (spec 011); best-effort.
+  let triage: TriageRow[] = [];
+  try {
+    triage = (await loadTriage(ws.id)) ?? [];
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(`Triage load failed for FCL ${ws.id}:`, (err as Error).message);
+  }
+
   const lotVerdicts: LotVerdict[] = [];
   for (const lot of lots) {
     const view = lotWorkspaceView(ws, lot);
@@ -146,7 +157,7 @@ export async function loadFclVerdicts(ws: WorkspaceRow, now: number = Date.now()
     const intermediary = lotParties.find((p) => p.role === 'intermediary')?.company_name ?? null;
     const recipient = lotParties.find((p) => p.role === 'recipient')?.company_name ?? null;
     const approvedInstruction = await latestApproved(ws.id, lot.id);
-    const verdicts = computeVerdicts({ ws: view, required, files: snapshotFiles, intermediary, approvedInstruction, registry, hsRequirements }, now);
+    const verdicts = computeVerdicts({ ws: view, required, files: snapshotFiles, intermediary, approvedInstruction, registry, hsRequirements, triage, lotName: lot.name }, now);
     lotVerdicts.push({
       lot,
       verdicts,
@@ -166,6 +177,7 @@ export async function loadFclVerdicts(ws: WorkspaceRow, now: number = Date.now()
     eu_transit: ws.eu_transit,
     consignee: fclRecipient,
     files: files.map((f) => ({ ...f })),
+    triage,
     manifest: manifestFile && manifestLines ? { file_id: manifestFile.file_id, file_name: manifestFile.file_name, lines: manifestLines } : null,
     lots: lotVerdicts.map((v) => ({
       id: v.lot.id,

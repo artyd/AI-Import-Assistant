@@ -4,7 +4,7 @@ import { fieldLabel, label } from '../../reconciliation/risks.js';
 import { shipmentVerdicts } from '../../reconciliation/verdicts.js';
 import { refreshWorkspaceState } from '../../shipments/status.js';
 import type { Citation } from '../../chat/conversations.js';
-import { type ToolContext, type ToolOutcome, requireWorkspace } from './shared.js';
+import { type ToolContext, type ToolOutcome, decidedBlock, requireWorkspace } from './shared.js';
 import { fclChecklist, fclDiscrepancies, fclRisks } from './fcl.js';
 
 export async function runChecklist(ctx: ToolContext, input: unknown = {}): Promise<ToolOutcome> {
@@ -36,10 +36,15 @@ export async function runDiscrepancies(ctx: ToolContext, input: unknown = {}): P
   const ws = await getWorkspaceById(requireWorkspace(ctx));
   if (!ws) return { result: 'Постачання не знайдено.', summary: 'Розбіжності: помилка', citations: [] };
   if (ws.kind === 'fcl') return fclDiscrepancies(ws, input);
-  const { discrepancies: findings } = await shipmentVerdicts(ws);
+  const { discrepancies: all } = await shipmentVerdicts(ws);
+  const findings = all.filter((f) => !f.triage);
+  const decided = decidedBlock(all.map((f) => ({ text: `${fieldLabel(f.field)}: ${f.expected} ↔ ${f.actual}`, triage: f.triage })));
   if (findings.length === 0) {
     return {
-      result: 'Розбіжностей між контрактом / інвойсом / пакувальним листом не виявлено (за наявними даними).',
+      result:
+        (all.length === 0
+          ? 'Розбіжностей між контрактом / інвойсом / пакувальним листом не виявлено (за наявними даними).'
+          : 'Відкритих розбіжностей немає.') + (decided ? `\n\n${decided}` : ''),
       summary: 'Розбіжності: 0',
       citations: [],
     };
@@ -60,7 +65,8 @@ export async function runDiscrepancies(ctx: ToolContext, input: unknown = {}): P
         'вирішуєш ти, відкривши файли (read_file); «підозра» — тим паче. Рівень info — довідка, не ' +
         'проблема. Рівень (error/warning/info) НЕ підвищуй. Якщо прочитаний документ спростовує ' +
         'знахідку, скажи про це прямо.',
-    );
+    )
+    .concat(decided ? `\n\n${decided}` : '');
   // Surface the source documents as citation chips (dedup by file name).
   const seen = new Set<string>();
   const citations: Citation[] = [];
@@ -105,10 +111,12 @@ export async function runRisks(ctx: ToolContext, input: unknown = {}): Promise<T
   const ws = await getWorkspaceById(requireWorkspace(ctx));
   if (!ws) return { result: 'Постачання не знайдено.', summary: 'Ризики: помилка', citations: [] };
   if (ws.kind === 'fcl') return fclRisks(ws, input);
-  const { risks } = await shipmentVerdicts(ws);
+  const { risks: allRisks } = await shipmentVerdicts(ws);
+  const risks = allRisks.filter((r) => !r.triage);
+  const decided = decidedBlock(allRisks.map((r) => ({ text: r.title, triage: r.triage })));
   if (risks.length === 0) {
     return {
-      result: 'Наразі ризиків не виявлено (за наявними даними).',
+      result: (allRisks.length === 0 ? 'Наразі ризиків не виявлено (за наявними даними).' : 'Відкритих ризиків немає.') + (decided ? `\n\n${decided}` : ''),
       summary: 'Ризики: 0',
       citations: [],
     };
@@ -119,6 +127,7 @@ export async function runRisks(ctx: ToolContext, input: unknown = {}): Promise<T
     .concat(
       '\n\nЛегенда: ризики автоперевірки — КАНДИДАТИ. Проблемою називай лише те, що підтвердив у файлі ' +
         '(read_file) у цьому ході; info — довідка, не проблема.',
-    );
+    )
+    .concat(decided ? `\n\n${decided}` : '');
   return { result, summary: `Ризики: ${risks.length}`, citations: [] };
 }

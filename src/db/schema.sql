@@ -1233,3 +1233,21 @@ CREATE TABLE IF NOT EXISTS hs_requirements (
 -- Which upload auto-replaced this file: one upload can replace several earlier
 -- files, and «Це не нова версія» must bring all of them back.
 ALTER TABLE files ADD COLUMN IF NOT EXISTS superseded_by UUID REFERENCES files(id) ON DELETE SET NULL;
+
+-- Finding triage (spec 011): the user's decision on a discrepancy / risk —
+-- «Не проблема» (excluded, with a reason) or «Вирішено». Keyed by the finding's
+-- fingerprint (reconciliation/fingerprint.ts), shared by everyone who can open
+-- the shipment; changed evidence gives a new fingerprint, so the finding returns.
+CREATE TABLE IF NOT EXISTS finding_triage (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  fingerprint  TEXT NOT NULL,
+  status       TEXT NOT NULL CHECK (status IN ('not_problem', 'resolved')),
+  reason       TEXT CHECK (reason IN ('legs', 'version', 'lots', 'agreed', 'other')),
+  note         TEXT NOT NULL DEFAULT '',
+  title        TEXT NOT NULL DEFAULT '',   -- what the finding said, for the report
+  lot          TEXT,                       -- lot name in an FCL, else null
+  user_id      UUID REFERENCES users(id) ON DELETE SET NULL,
+  decided_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (workspace_id, fingerprint)
+);

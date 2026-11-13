@@ -1,3 +1,4 @@
+import type { FindingTriage } from './fingerprint.js';
 import type { Discrepancy } from './reconcile.js';
 import type { RegistryFinding } from '../customs/drugRegistry.js';
 
@@ -29,6 +30,10 @@ export interface Risk {
   title: string;
   detail: string;
   source_file_id: string | null;
+  /** Stable id of the finding (spec 011); set by the verdicts. */
+  fingerprint?: string;
+  /** The user's decision on it, when there is one. */
+  triage?: FindingTriage;
 }
 
 // Windows for "soon" warnings.

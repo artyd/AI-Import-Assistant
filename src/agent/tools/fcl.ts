@@ -7,7 +7,7 @@ import { shipmentChanged } from '../../shipments/state.js';
 import { fieldLabel } from '../../reconciliation/risks.js';
 import type { Discrepancy } from '../../reconciliation/discrepancies.js';
 import type { Citation } from '../../chat/conversations.js';
-import { type ToolContext, type ToolOutcome, requireWorkspace } from './shared.js';
+import { type ToolContext, type ToolOutcome, decidedBlock, requireWorkspace } from './shared.js';
 
 /**
  * Штурман's tools for an FCL (Збірник, spec 006 #07). The shipment verdict tools
@@ -82,9 +82,10 @@ function discrepancyLines(findings: (Discrepancy & { lot?: string })[]): { text:
 function lotLine(l: LotVerdict): string {
   const { checklist, discrepancies, risks } = l.verdicts;
   const done = checklist.filter((i) => i.status !== 'missing').length;
-  const red = discrepancies.filter((d) => d.kind === 'confirmed').length;
-  const yellow = discrepancies.length - red;
-  const err = risks.filter((r) => r.severity === 'error').length;
+  const openDisc = discrepancies.filter((d) => !d.triage);
+  const red = openDisc.filter((d) => d.kind === 'confirmed').length;
+  const yellow = openDisc.length - red;
+  const err = risks.filter((r) => r.severity === 'error' && !r.triage).length;
   return (
     `- ${l.lot.name} (постачальник ${l.lot.supplier_name || '—'}; отримувач ${l.consignee ?? '—'}): ` +
     `${STATUS_UA[l.verdicts.derivedStatus] ?? l.verdicts.derivedStatus}, комплектність ${done}/${checklist.length}, ` +
@@ -121,25 +122,32 @@ export async function fclChecklist(ws: WorkspaceRow, input: unknown): Promise<To
 export async function fclDiscrepancies(ws: WorkspaceRow, input: unknown): Promise<ToolOutcome> {
   const v = await loadFclVerdicts(ws);
   const ref = lotRef(input);
-  let findings: (Discrepancy & { lot?: string })[];
+  let all: (Discrepancy & { lot?: string })[];
   let scope: string;
   if (ref) {
     const lot = findLot(v, ref);
     if (!lot) return noLot(v, ref);
-    findings = lot.verdicts.discrepancies;
+    all = lot.verdicts.discrepancies;
     scope = lot.lot.name;
   } else {
-    findings = flattenFcl(v).discrepancies;
+    all = flattenFcl(v).discrepancies;
     scope = 'збірник';
   }
+  const findings = all.filter((f) => !f.triage);
+  const decided = decidedBlock(all.map((f) => ({ text: `${f.lot ? `${f.lot}: ` : ''}${fieldLabel(f.field)}: ${f.expected} ↔ ${f.actual}`, triage: f.triage })));
   if (findings.length === 0) {
-    return { result: `Розбіжностей (${scope}) не виявлено за наявними даними.`, summary: 'Розбіжності: 0', citations: [] };
+    return {
+      result: (all.length === 0 ? `Розбіжностей (${scope}) не виявлено за наявними даними.` : `Відкритих розбіжностей (${scope}) немає.`) + (decided ? `\n\n${decided}` : ''),
+      summary: 'Розбіжності: 0',
+      citations: [],
+    };
   }
   const { text, citations } = discrepancyLines(findings);
   return {
     result:
       `${text}\n\nЛегенда: «підтверджено» — обидва значення прочитано впевнено; «підозра» — перевір у документі ` +
-      '(read_file). Рівень передавай як є — НЕ підвищуй його.',
+      '(read_file). Рівень передавай як є — НЕ підвищуй його.' +
+      (decided ? `\n\n${decided}` : ''),
     summary: `Розбіжності (${scope}): ${findings.length}`,
     citations,
   };
@@ -148,17 +156,25 @@ export async function fclDiscrepancies(ws: WorkspaceRow, input: unknown): Promis
 export async function fclRisks(ws: WorkspaceRow, input: unknown): Promise<ToolOutcome> {
   const v = await loadFclVerdicts(ws);
   const ref = lotRef(input);
-  let risks;
+  let allRisks;
   if (ref) {
     const lot = findLot(v, ref);
     if (!lot) return noLot(v, ref);
-    risks = lot.verdicts.risks;
+    allRisks = lot.verdicts.risks;
   } else {
-    risks = flattenFcl(v).risks;
+    allRisks = flattenFcl(v).risks;
   }
-  if (risks.length === 0) return { result: 'Ризиків не виявлено (за наявними даними).', summary: 'Ризики: 0', citations: [] };
+  const risks = allRisks.filter((r) => !r.triage);
+  const decided = decidedBlock(allRisks.map((r) => ({ text: r.title, triage: r.triage })));
+  if (risks.length === 0) {
+    return {
+      result: (allRisks.length === 0 ? 'Ризиків не виявлено (за наявними даними).' : 'Відкритих ризиків немає.') + (decided ? `\n\n${decided}` : ''),
+      summary: 'Ризики: 0',
+      citations: [],
+    };
+  }
   return {
-    result: risks.map((r) => `- [${r.severity}] ${r.title}: ${r.detail}`).join('\n'),
+    result: risks.map((r) => `- [${r.severity}] ${r.title}: ${r.detail}`).join('\n') + (decided ? `\n\n${decided}` : ''),
     summary: `Ризики: ${risks.length}`,
     citations: [],
   };
@@ -204,8 +220,11 @@ export async function runGetFclOverview(ctx: ToolContext): Promise<ToolOutcome> 
   } else {
     parts.push('Маніфест: немає даних.');
   }
-  const { text, citations } = discrepancyLines(lvl.discrepancies);
-  parts.push(lvl.discrepancies.length ? `Розбіжності FCL:\n${text}` : 'Розбіжностей рівня FCL не виявлено.');
+  const openLevel = lvl.discrepancies.filter((d) => !d.triage);
+  const { text, citations } = discrepancyLines(openLevel);
+  parts.push(openLevel.length ? `Розбіжності FCL:\n${text}` : 'Розбіжностей рівня FCL не виявлено.');
+  const decidedLevel = decidedBlock(lvl.discrepancies.map((f) => ({ text: `${fieldLabel(f.field)}: ${f.expected} ↔ ${f.actual}`, triage: f.triage })));
+  if (decidedLevel) parts.push(decidedLevel);
   parts.push(`Партії:\n${v.lots.map(lotLine).join('\n') || '- немає'}`);
   if (lvl.unassigned > 0) parts.push(`Файлів без партії: ${lvl.unassigned}.`);
   return { result: parts.join('\n\n'), summary: `FCL: ${v.lots.length} партій`, citations };

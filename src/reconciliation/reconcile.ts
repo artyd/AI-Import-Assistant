@@ -27,6 +27,8 @@ import type {
  * confidence data becomes a YELLOW "please verify", never a silent skip.
  */
 
+import type { FindingTriage } from './fingerprint.js';
+
 export type Severity = 'error' | 'warning' | 'info';
 export type FlagKind = 'confirmed' | 'suspected';
 
@@ -46,6 +48,10 @@ export interface Discrepancy {
   // always populated here.
   kind: FlagKind;
   citations: DiscrepancyCitation[];
+  /** Stable id of the finding (spec 011); set by the verdicts. */
+  fingerprint?: string;
+  /** The user's decision on it («Не проблема» / «Вирішено»), when there is one. */
+  triage?: FindingTriage;
 }
 
 type Fields = Partial<ExtractedFields> & Record<string, unknown>;

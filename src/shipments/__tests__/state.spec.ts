@@ -63,6 +63,7 @@ describe('shipmentChanged — order of steps per change', () => {
     ['parties', ['intake', 'qdpro', 'verdicts']],
     ['files', ['intake', 'qdpro', 'verdicts']],
     ['instruction', ['intake', 'qdpro', 'verdicts']],
+    ['triage', ['intake', 'qdpro', 'verdicts']],
   ] as const)('%s → %j', async (change, steps) => {
     await shipmentChanged('ws1', change);
     expect(calls).toEqual(steps);
@@ -99,6 +100,7 @@ describe('shipmentChanged — an FCL (Збірник)', () => {
     ['documents', ['refile', 'fcl-autopilot', 'qdpro', 'fcl-verdicts']],
     ['files', ['fcl-autopilot', 'qdpro', 'fcl-verdicts']],
     ['context', ['qdpro', 'fcl-verdicts']],
+    ['triage', ['qdpro', 'fcl-verdicts']],
   ] as const)('%s → %j', async (change, steps) => {
     row = { ...complete, kind: 'fcl' };
     const res = await shipmentChanged('ws1', change);
@@ -127,12 +129,17 @@ describe('every verdict-input writer reports shipmentChanged', () => {
     /\breplaceEarlierVersions\(/,
     /\bupsertExtraction\(/,
     /INSERT INTO document_extractions\b/,
+    /INSERT INTO finding_triage\b/,
+    /DELETE FROM finding_triage\b/,
+    /\bupsertTriage\(/,
+    /\bdeleteTriage\(/,
   ];
   // Modules that define the writers, or own no shipment verdicts.
   const EXEMPT = new Set([
     'documents/classify.ts', // defines classifyAndFile / sortInbox; callers report
     'shipments/autoContext.ts', // defines writeManualContext; runs inside shipmentChanged
     'reconciliation/parties.ts', // defines upsertParties
+    'reconciliation/triage.ts', // defines upsertTriage / deleteTriage; the routes report
     'instruction/store.ts', // defines updateVersion
     'instruction/realign.ts', // parties realign — callers (mode change) report
     'shipments/fclState.ts', // FCL autopilot — runs inside shipmentChanged

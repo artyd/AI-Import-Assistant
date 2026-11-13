@@ -5,6 +5,7 @@ import type { WorkspaceStatus } from '../shipments/workspaceAccess.js';
 import type { ChecklistItem } from './checklist.js';
 import type { Discrepancy, DiscrepancyCitation, FlagKind } from './reconcile.js';
 import { fieldLabel, type Risk } from './risks.js';
+import { decorateFindings, type TriageRow } from './fingerprint.js';
 import { invoiceLines, reconcileManifest, type ManifestLine, type ManifestReconciliation } from './manifest.js';
 
 /**
@@ -58,6 +59,8 @@ export interface FclLevelInput {
   lots: FclLot[];
   /** Lines of the manifest file (parsed by the analysis sheet parser), when there is one. */
   manifest?: { file_id: string; file_name: string; lines: ManifestLine[] } | null;
+  /** The user's decisions on findings (spec 011). */
+  triage?: TriageRow[];
 }
 
 export interface ConsigneeCoverage {
@@ -519,6 +522,7 @@ export function computeFclLevel(input: FclLevelInput): FclLevelVerdicts {
 
   // ── Risks of the FCL level ─────────────────────────────────────────────────
   const risks: Risk[] = [];
+  decorateFindings(discrepancies, [], input.triage);
   const unassigned = files.filter((f) => f.lot_id === null && !/маніфест|транспорт|митниц/i.test(f.folder_name ?? '')).length;
   if (unassigned > 0) {
     risks.push({
@@ -541,7 +545,7 @@ export function computeFclLevel(input: FclLevelInput): FclLevelVerdicts {
       source_file_id: null,
     });
   }
-  for (const d of discrepancies.filter((x) => x.severity === 'error')) {
+  for (const d of discrepancies.filter((x) => x.severity === 'error' && !x.triage)) {
     risks.push({
       code: `fcl_discrepancy_${d.field}`,
       category: 'discrepancy',
@@ -554,7 +558,7 @@ export function computeFclLevel(input: FclLevelInput): FclLevelVerdicts {
 
   // ── 4. Status ──────────────────────────────────────────────────────────────
   const docsItems = checklist.filter((i) => i.stage === 'docs');
-  const hasErrors = discrepancies.some((d) => d.severity === 'error');
+  const hasErrors = discrepancies.some((d) => d.severity === 'error' && !d.triage);
   let levelStatus: WorkspaceStatus;
   if (lots.length === 0 && files.length === 0) levelStatus = 'draft';
   else if (docsItems.some((i) => i.status === 'missing') || hasErrors || unassigned > 0) levelStatus = 'docs_in_progress';
@@ -565,6 +569,7 @@ export function computeFclLevel(input: FclLevelInput): FclLevelVerdicts {
     ? worstStatus([levelStatus, 'docs_in_progress'])
     : worstStatus([levelStatus, ...lots.map((l) => l.derivedStatus)]);
 
+  decorateFindings([], risks, input.triage);
   return {
     checklist,
     discrepancies,
