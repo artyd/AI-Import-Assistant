@@ -57,6 +57,17 @@ export const askPrompts = {
     (f.values ? ` — ${f.values}` : "") +
     (f.files ? ` (${f.files})` : "") +
     ". Це справжня проблема? Перевір у файлах і скажи, що зробити.",
+  /** «Як вирішити?» — concrete steps; a supplier letter (UA + EN) when the supplier must act. */
+  solve: (f: { title: string; values?: string | null; files?: string | null; lot?: string | null }) => {
+    const ctx = [f.values, f.files, f.lot ? `партія «${f.lot}»` : null].filter((x): x is string => !!x);
+    return (
+      `Як вирішити: ${f.title}${ctx.length ? ` (${ctx.join(", ")})` : ""}? ` +
+      "Дай конкретні кроки; якщо має діяти постачальник — текст листа українською та англійською."
+    );
+  },
+  /** «Запросити» — a request letter to the supplier for a missing document. */
+  request: (label: string, s: AskScope) =>
+    `Склади лист-запит постачальнику на «${label}»${s.kind === "lot" ? ` (партія «${s.name}»)` : ""} (українською та англійською): що надіслати і навіщо.`,
   missing: (label: string, s: AskScope) =>
     `Бракує «${label}»${of(s)}. Чи він справді потрібен для цього постачання і в кого його запросити?`,
 };

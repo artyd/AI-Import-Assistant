@@ -114,7 +114,19 @@ export interface DiscrepancyCitation {
   value: string;
 }
 
+/** The user's decision on a finding (spec 011). Absent = open. */
+export interface FindingTriage {
+  status: "not_problem" | "resolved";
+  reason: string | null;
+  note: string;
+  user_name: string;
+  decided_at: string;
+}
+
 export interface Discrepancy {
+  /** Stable id of the finding across recomputes (spec 011). */
+  fingerprint?: string;
+  triage?: FindingTriage;
   field: string;
   expected: string;
   actual: string;
@@ -137,6 +149,8 @@ export interface FileExtraction {
 }
 
 export interface Risk {
+  fingerprint?: string;
+  triage?: FindingTriage;
   code: string;
   category: "expiry" | "missing_docs" | "discrepancy" | "deadline" | "registry" | "payment" | "dangerous_goods" | "document_quality";
   severity: "error" | "warning" | "info";

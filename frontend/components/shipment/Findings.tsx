@@ -11,6 +11,7 @@ import {
   truncate,
 } from "@/lib/shipment/findings";
 import { askPrompts } from "@/lib/chat/askBus";
+import { DecidedBlock, TriageBar, type TriageCtx } from "./Triage";
 
 /**
  * Discrepancies and risks as the user should read them: problems (error + warning)
@@ -33,20 +34,7 @@ function Notes({ count, children }: { count: number; children: ReactNode }) {
 /** A question about one finding to the chat (when the panel is wired to askBus). */
 type Ask = (text: string) => void;
 
-function AskBtn({ onClick }: { onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title="Запитати Штурмана в чаті: це справжня проблема?"
-      style={{ border: "none", background: "none", padding: 0, cursor: "pointer", fontSize: 12, fontWeight: 600, color: "var(--accent)", marginTop: 2 }}
-    >
-      Запитати
-    </button>
-  );
-}
-
-function FindingRow({ d, onAsk }: { d: Discrepancy & { lot?: string }; onAsk?: Ask }) {
+function FindingRow({ d, onAsk, triage }: { d: Discrepancy & { lot?: string }; onAsk?: Ask; triage?: TriageCtx }) {
   const v = findingView(d);
   const color = v.cls === "problem" ? (d.severity === "error" ? "var(--err)" : "var(--warn)") : CLS_COLOR[v.cls];
   return (
@@ -58,7 +46,16 @@ function FindingRow({ d, onAsk }: { d: Discrepancy & { lot?: string }; onAsk?: A
       </div>
       {v.values ? <div style={{ color: "var(--muted)", fontSize: 12, overflowWrap: "anywhere" }}>{v.values}</div> : null}
       {v.files ? <div style={{ color: "var(--muted)", fontSize: 11, marginTop: 1, overflowWrap: "anywhere" }}>↳ {v.files}</div> : null}
-      {onAsk && v.cls !== "note" ? <AskBtn onClick={() => onAsk(askPrompts.finding({ title: v.title, values: v.values, files: v.files, lot: v.lot }))} /> : null}
+      {v.cls !== "note" && (onAsk || triage) ? (
+        <TriageBar
+          ctx={triage}
+          fingerprint={d.fingerprint}
+          title={v.title}
+          lot={v.lot}
+          onAskReal={onAsk ? () => onAsk(askPrompts.finding({ title: v.title, values: v.values, files: v.files, lot: v.lot })) : undefined}
+          onSolve={onAsk ? () => onAsk(askPrompts.solve({ title: v.title, values: v.values, files: v.files, lot: v.lot ?? triage?.lot })) : undefined}
+        />
+      ) : null}
     </div>
   );
 }
@@ -68,11 +65,13 @@ export function DiscrepanciesBlock({
   title = "Розбіжності",
   emptyText = "Розбіжностей не виявлено.",
   onAsk,
+  triage,
 }: {
   items: (Discrepancy & { lot?: string })[];
   title?: string;
   emptyText?: string;
   onAsk?: Ask;
+  triage?: TriageCtx;
 }) {
   const s = summarizeFindings(items);
   const g = groupFindings(items);
@@ -85,21 +84,28 @@ export function DiscrepanciesBlock({
       </div>
       {s.problems === 0 ? <div style={{ color: "var(--muted)", fontSize: 13 }}>{emptyText}</div> : null}
       {g.problems.map((d, i) => (
-        <FindingRow key={`p${i}`} d={d} onAsk={onAsk} />
+        <FindingRow key={d.fingerprint ?? `p${i}`} d={d} onAsk={onAsk} triage={triage} />
       ))}
       {g.check.map((d, i) => (
-        <FindingRow key={`c${i}`} d={d} onAsk={onAsk} />
+        <FindingRow key={d.fingerprint ?? `c${i}`} d={d} onAsk={onAsk} triage={triage} />
       ))}
       <Notes count={g.notes.length}>
         {g.notes.map((d, i) => (
           <FindingRow key={`n${i}`} d={d} />
         ))}
       </Notes>
+      <DecidedBlock
+        ctx={triage}
+        items={g.decided.map((d, i) => {
+          const v = findingView(d);
+          return { key: d.fingerprint ?? `x${i}`, fingerprint: d.fingerprint, title: v.title, lot: v.lot ?? triage?.lot, triage: d.triage! };
+        })}
+      />
     </div>
   );
 }
 
-export function RisksBlock({ risks, title = "Ризики", onAsk }: { risks: Risk[]; title?: string; onAsk?: Ask }) {
+export function RisksBlock({ risks, title = "Ризики", onAsk, triage }: { risks: Risk[]; title?: string; onAsk?: Ask; triage?: TriageCtx }) {
   const g = groupFindings(risks);
   const problems = [...g.problems, ...g.check];
   return (
@@ -107,24 +113,36 @@ export function RisksBlock({ risks, title = "Ризики", onAsk }: { risks: Ri
       {title ? <div style={{ fontWeight: 600, fontSize: 13 }}>{title}</div> : null}
       {problems.length === 0 ? <div style={{ fontSize: 13, color: g.notes.length ? "var(--muted)" : "var(--ok)" }}>Ризиків не виявлено.</div> : null}
       {problems.map((r, i) => (
-        <RiskRow key={`${r.code}-${i}`} r={r} onAsk={onAsk} />
+        <RiskRow key={r.fingerprint ?? `${r.code}-${i}`} r={r} onAsk={onAsk} triage={triage} />
       ))}
       <Notes count={g.notes.length}>
         {g.notes.map((r, i) => (
           <RiskRow key={`${r.code}-n${i}`} r={r} />
         ))}
       </Notes>
+      <DecidedBlock
+        ctx={triage}
+        items={g.decided.map((r, i) => ({ key: r.fingerprint ?? `${r.code}-x${i}`, fingerprint: r.fingerprint, title: r.title, lot: triage?.lot, triage: r.triage! }))}
+      />
     </>
   );
 }
 
-function RiskRow({ r, onAsk }: { r: Risk; onAsk?: Ask }) {
+function RiskRow({ r, onAsk, triage }: { r: Risk; onAsk?: Ask; triage?: TriageCtx }) {
   const note = r.severity === "info";
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 2, borderLeft: `3px solid ${RISK_CLS[r.severity]}`, paddingLeft: 8 }}>
       <span style={{ fontSize: 13, fontWeight: note ? 500 : 600, color: note ? "var(--muted)" : RISK_CLS[r.severity] }}>{r.title}</span>
       {r.detail ? <span style={{ fontSize: 12, color: "var(--muted)", overflowWrap: "anywhere" }}>{truncate(r.detail, 240)}</span> : null}
-      {onAsk && !note ? <AskBtn onClick={() => onAsk(askPrompts.finding({ title: r.title, values: r.detail ? truncate(r.detail, 160) : null }))} /> : null}
+      {!note && (onAsk || triage) ? (
+        <TriageBar
+          ctx={triage}
+          fingerprint={r.fingerprint}
+          title={r.title}
+          onAskReal={onAsk ? () => onAsk(askPrompts.finding({ title: r.title, values: r.detail ? truncate(r.detail, 160) : null })) : undefined}
+          onSolve={onAsk ? () => onAsk(askPrompts.solve({ title: r.title, values: r.detail ? truncate(r.detail, 160) : null, lot: triage?.lot })) : undefined}
+        />
+      ) : null}
     </div>
   );
 }

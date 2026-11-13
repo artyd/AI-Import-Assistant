@@ -23,6 +23,8 @@ import { VerificationModal } from "./VerificationModal";
 import { IconDownload, IconSpinner } from "../ui/icons";
 import { PARTY_SLOTS, STATUS_OPTIONS, CONTRACT_TYPE_LABEL, ROLE_SYNONYMS } from "./labels";
 import { RisksBlock } from "./Findings";
+import type { TriageCtx } from "./Triage";
+import { openProblemsReport } from "@/lib/shipment/triage";
 import { requestErrorText, statusCaveat, summarizeFindings } from "@/lib/shipment/findings";
 import { type Result, ResultView, lbl, AskButtons, CompletenessHeader, Field, Section } from "./parts";
 import { askInChat, askPrompts } from "@/lib/chat/askBus";
@@ -119,6 +121,16 @@ export function ShipmentPanel({
   }, [serverParties, partiesLoaded]);
 
   const reloadRisks = () => run("risks", reloadShipmentRisks);
+  const refreshChecklist = useShipmentData((s) => s.refreshChecklist);
+  // Finding triage (spec 011): after a decision or undo reload risks and the checklist.
+  const triageCtx: TriageCtx = {
+    workspaceId,
+    onChanged: async () => {
+      await Promise.all([reloadShipmentRisks(), refreshChecklist()]);
+    },
+    notify: (body) => setResult({ kind: "error", body }),
+  };
+  const problemsReport = () => run("problemsReport", () => openProblemsReport(workspaceId));
 
   const run = useCallback(
     async (key: string, fn: () => Promise<void>) => {
@@ -386,6 +398,7 @@ export function ShipmentPanel({
             onExport={exportZip}
             exporting={busy === "export"}
             onAskMissing={(label) => ask(askPrompts.missing(label, scope))}
+            onRequestMissing={(label) => ask(askPrompts.request(label, scope))}
           />
         )}
 
@@ -433,7 +446,7 @@ export function ShipmentPanel({
           ) : risks === null ? (
             <div style={{ fontSize: 12, color: "var(--muted)" }}>Аналіз ризиків…</div>
           ) : (
-            <RisksBlock risks={risks} title="" onAsk={ask} />
+            <RisksBlock risks={risks} title="" onAsk={ask} triage={triageCtx} />
           )}
           <button className="btn" onClick={reloadRisks} disabled={busy === "risks"} style={{ height: 30 }}>
             {busy === "risks" ? <IconSpinner size={15} /> : null} Оновити ризики
@@ -716,6 +729,9 @@ export function ShipmentPanel({
               {busy === "reportHtml" ? <IconSpinner size={15} /> : null} HTML
             </button>
           </div>
+          <button className="btn" onClick={() => void problemsReport()} disabled={busy === "problemsReport"} title="Що відкрито, вирішено і виключено — окрема сторінка у новій вкладці">
+            {busy === "problemsReport" ? <IconSpinner size={15} /> : null} Звіт про проблеми
+          </button>
         </Section>
 
         {/* Management */}

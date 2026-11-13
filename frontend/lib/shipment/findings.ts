@@ -15,6 +15,8 @@ export type Tone = "ok" | "warn" | "err";
 interface Classifiable {
   severity: Severity;
   kind?: "confirmed" | "suspected";
+  /** The user's decision (spec 011): a triaged finding is not counted. */
+  triage?: unknown;
 }
 
 /** note = info; check = suspected error/warning; problem = confirmed error/warning. */
@@ -32,6 +34,8 @@ export interface FindingSummary {
   toCheck: number;
   /** Info notes — muted, never counted as problems. */
   notes: number;
+  /** Triaged («Не проблема» / «Вирішено») — left out of every other number. */
+  decided: number;
   /** errors + warnings + toCheck. */
   problems: number;
   /** Red only for a confirmed error; amber for any other problem; green otherwise. */
@@ -43,7 +47,12 @@ export function summarizeFindings(items: Classifiable[]): FindingSummary {
   let warnings = 0;
   let toCheck = 0;
   let notes = 0;
+  let decided = 0;
   for (const f of items) {
+    if (f.triage) {
+      decided++;
+      continue;
+    }
     const c = classifyFinding(f);
     if (c === "note") notes++;
     else if (c === "check") toCheck++;
@@ -51,20 +60,26 @@ export function summarizeFindings(items: Classifiable[]): FindingSummary {
     else warnings++;
   }
   const problems = errors + warnings + toCheck;
-  return { errors, warnings, toCheck, notes, problems, tone: errors > 0 ? "err" : problems > 0 ? "warn" : "ok" };
+  return { errors, warnings, toCheck, notes, decided, problems, tone: errors > 0 ? "err" : problems > 0 ? "warn" : "ok" };
 }
 
 export interface FindingGroups<T> {
   problems: T[];
   check: T[];
   notes: T[];
+  /** Triaged by the user — «Розібрано (N)». */
+  decided: T[];
 }
 
 /** Problems first (errors before warnings), then «перевірити», then notes. */
 export function groupFindings<T extends Classifiable>(items: T[]): FindingGroups<T> {
   const rank = (f: T) => (f.severity === "error" ? 0 : 1);
-  const out: FindingGroups<T> = { problems: [], check: [], notes: [] };
+  const out: FindingGroups<T> = { problems: [], check: [], notes: [], decided: [] };
   for (const f of items) {
+    if (f.triage) {
+      out.decided.push(f);
+      continue;
+    }
     const c = classifyFinding(f);
     (c === "note" ? out.notes : c === "check" ? out.check : out.problems).push(f);
   }

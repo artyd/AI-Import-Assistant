@@ -13,6 +13,8 @@ import { INCOTERMS_2020, TRANSPORT_MODES } from "@/lib/shipmentOptions";
 import { AskButtons, CompletenessHeader, Section, Field, lbl } from "../shipment/parts";
 import { CONTRACT_TYPE_LABEL, PARTY_SLOTS } from "../shipment/labels";
 import { IconSpinner } from "../ui/icons";
+import type { TriageCtx } from "../shipment/Triage";
+import { openProblemsReport } from "@/lib/shipment/triage";
 
 /**
  * «Комплектність» of a Збірник (spec 006 #09) with the scope switcher
@@ -161,6 +163,8 @@ function FclScope({
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
     }, "Не вдалося сформувати звіт.");
   const zip = () => run("zip", () => downloadBlob(`/api/workspaces/${fclId}/export`, `${number}.zip`), "Не вдалося експортувати.");
+  const problems = () => run("problems", () => openProblemsReport(fclId), "Не вдалося сформувати звіт про проблеми.");
+  const triage: TriageCtx = { workspaceId: fclId, onChanged: reload, notify };
 
   const levelFindings = overview.all_discrepancies.filter((d) => !d.lot);
   const lotLevelFindings = overview.all_discrepancies.filter((d) => !!d.lot);
@@ -224,6 +228,7 @@ function FclScope({
           title="Документи контейнера"
           items={fclDocs}
           onAskMissing={(label) => askFcl(askPrompts.missing(label, scope))}
+          onRequestMissing={(label) => askFcl(askPrompts.request(label, scope))}
         />
       ) : null}
 
@@ -236,7 +241,7 @@ function FclScope({
       />
 
       <Section title="Ризики">
-        <RisksBlock risks={overview.risks} title="" onAsk={askFcl} />
+        <RisksBlock risks={overview.risks} title="" onAsk={askFcl} triage={triage} />
       </Section>
 
       <DiscrepanciesBlock
@@ -244,12 +249,14 @@ function FclScope({
         items={levelFindings}
         emptyText="На рівні збірника розбіжностей не виявлено."
         onAsk={askFcl}
+        triage={triage}
       />
       <DiscrepanciesBlock
         title="Розбіжності по партіях"
         items={lotLevelFindings}
         emptyText="По партіях розбіжностей не виявлено."
         onAsk={askFcl}
+        triage={triage}
       />
 
       <Section title="Параметри FCL">
@@ -314,6 +321,9 @@ function FclScope({
           <button className="btn" disabled={busy === "zip"} onClick={() => void zip()}>
             Архів по партіях (.zip)
           </button>
+          <button className="btn" disabled={busy === "problems"} onClick={() => void problems()} title="Що відкрито, вирішено і виключено — у новій вкладці">
+            Звіт про проблеми
+          </button>
         </div>
         <div style={{ fontSize: 12, color: "var(--muted)" }}>Інструкція постачальнику — у кожній партії окремо.</div>
       </Section>
@@ -372,6 +382,7 @@ function LotScope({
   const auto = (k: string) => (l.context.auto_fields.includes(k) ? " · з документів" : "");
 
   const scope: AskScope = { kind: "lot", name: l.name };
+  const triage: TriageCtx = { workspaceId: fclId, lot: l.name, onChanged: reload, notify };
   return (
     <>
       <button type="button" className="btn" onClick={onBack} style={{ alignSelf: "flex-start", height: 28, fontSize: 12 }}>
@@ -387,6 +398,7 @@ function LotScope({
           title="Комплектність партії"
           items={detail.checklist}
           onAskMissing={(label) => askFcl(askPrompts.missing(label, scope))}
+          onRequestMissing={(label) => askFcl(askPrompts.request(label, scope))}
         />
       ) : (
         <div style={{ fontSize: 13, color: "var(--muted)" }}>Чек-лист порожній — заповніть параметри партії нижче.</div>
@@ -395,9 +407,9 @@ function LotScope({
       <AskSection scope={scope} />
 
       <Section title="Ризики партії">
-        <RisksBlock risks={detail.risks} title="" onAsk={askFcl} />
+        <RisksBlock risks={detail.risks} title="" onAsk={askFcl} triage={triage} />
       </Section>
-      <DiscrepanciesBlock items={detail.discrepancies} onAsk={askFcl} />
+      <DiscrepanciesBlock items={detail.discrepancies} onAsk={askFcl} triage={triage} />
 
       <Section title="Параметри партії">
         <label style={lbl}>Incoterms (вхідні){auto("incoterm_in")}</label>

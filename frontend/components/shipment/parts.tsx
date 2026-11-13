@@ -48,7 +48,7 @@ export const lbl: CSSProperties = { fontSize: 12, color: "var(--muted)" };
 const reqLabel = requirementLabel;
 
 /** «Запитати» — sends a question about this row to the chat (askBus). */
-export function AskLink({ onClick, title = "Запитати Штурмана в чаті" }: { onClick: () => void; title?: string }) {
+export function AskLink({ onClick, title = "Запитати Штурмана в чаті", label = "Запитати" }: { onClick: () => void; title?: string; label?: string }) {
   return (
     <button
       type="button"
@@ -65,7 +65,7 @@ export function AskLink({ onClick, title = "Запитати Штурмана в
         color: "var(--accent)",
       }}
     >
-      Запитати
+      {label}
     </button>
   );
 }
@@ -102,6 +102,7 @@ export function CompletenessHeader({
   onExport,
   exporting,
   onAskMissing,
+  onRequestMissing,
   title = "Комплектність пакета",
 }: {
   /** `label` (FCL items carry one) wins over the requirement key's label. */
@@ -110,6 +111,8 @@ export function CompletenessHeader({
   exporting?: boolean;
   /** A missing document → «чи потрібен і де взяти?» in the chat. */
   onAskMissing?: (label: string) => void;
+  /** A missing document → a request letter to the supplier in the chat. */
+  onRequestMissing?: (label: string) => void;
   title?: string;
 }) {
   const done = items.filter((i) => i.status !== "missing").length;
@@ -163,6 +166,9 @@ export function CompletenessHeader({
                 {ci.label ?? reqLabel(ci.requirement_key)}
               </span>
               {!ok && onAskMissing ? <AskLink onClick={() => onAskMissing(ci.label ?? reqLabel(ci.requirement_key))} title="Чи потрібен цей документ і де його взяти — у чаті" /> : null}
+              {!ok && onRequestMissing ? (
+                <AskLink label="Запросити" onClick={() => onRequestMissing(ci.label ?? reqLabel(ci.requirement_key))} title="Лист-запит постачальнику на цей документ — у чаті" />
+              ) : null}
             </div>
           );
         })}
