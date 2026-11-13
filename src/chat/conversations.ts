@@ -165,6 +165,24 @@ export async function appendMessage(
   return rows[0]!.id;
 }
 
+/**
+ * «Редагувати й надіслати знову»: removes the user's message `fromMessageId` and
+ * every later message of the conversation, so the edited question is answered
+ * afresh (the old question and its answer leave the history the agent replays).
+ * Scoped to the conversation the caller already verified; false when the message
+ * is not a user message of it (nothing is deleted then).
+ */
+export async function rewindConversation(conversationId: string, fromMessageId: string): Promise<boolean> {
+  const { rows } = await query<{ created_at: string }>(
+    `SELECT created_at FROM messages WHERE id = $1 AND conversation_id = $2 AND role = 'user'`,
+    [fromMessageId, conversationId],
+  );
+  const at = rows[0]?.created_at;
+  if (!at) return false;
+  await query('DELETE FROM messages WHERE conversation_id = $1 AND created_at >= $2', [conversationId, at]);
+  return true;
+}
+
 /** Deep copy with every NUL character removed from strings (keys and values). */
 export function stripNul(v: unknown): unknown {
   if (typeof v === 'string') return v.includes('\u0000') ? v.replace(/\u0000/g, '') : v;

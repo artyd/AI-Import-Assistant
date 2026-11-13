@@ -5,6 +5,7 @@ import { getOwnedCollection } from '../shipments/collectionAccess.js';
 import {
   ensureConversationScoped,
   appendMessage,
+  rewindConversation,
   storedAnswer,
   getConversationHistoryWithStats,
   listConversationsByCollection,
@@ -34,6 +35,9 @@ function consolidatedTools() {
 const chatSchema = z.object({
   message: z.string().min(1).max(20_000),
   conversationId: z.string().uuid().optional(),
+  // «Редагувати й надіслати знову»: the user message this one replaces (it and
+  // everything after it are removed from the conversation first).
+  replaceFrom: z.string().uuid().optional(),
 });
 
 /**
@@ -56,7 +60,7 @@ export async function chatConsolidatedRoutes(app: FastifyInstance): Promise<void
       const col = await getOwnedCollection(req.user!.sub, req.params.id);
       if (!col) return reply.code(404).send({ error: 'not_found' });
 
-      const { message, conversationId: incomingConvId } = parsed.data;
+      const { message, conversationId: incomingConvId, replaceFrom } = parsed.data;
 
       // From here on we stream — take over the raw response.
       const sse = new SseStream(req, reply);
@@ -68,8 +72,12 @@ export async function chatConsolidatedRoutes(app: FastifyInstance): Promise<void
           incomingConvId,
           message,
         );
+        if (replaceFrom && incomingConvId && !(await rewindConversation(conversationId, replaceFrom))) {
+          sse.send('error', { message: 'Повідомлення для редагування не знайдено — надішліть питання ще раз.' });
+          return;
+        }
         const { history, stats: historyStats } = await getConversationHistoryWithStats(conversationId);
-        await appendMessage(conversationId, 'user', message);
+        const userMessageId = await appendMessage(conversationId, 'user', message);
 
         const [documentsDigest, lots, lessons] = await Promise.all([
           buildDocumentsDigest(col.id).catch(() => ''),
@@ -117,6 +125,7 @@ export async function chatConsolidatedRoutes(app: FastifyInstance): Promise<void
         } else {
           sse.send('done', {
             message: result.text,
+            userMessageId,
             citations: result.citations,
             conversationId,
             messageId,

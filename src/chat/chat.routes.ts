@@ -6,6 +6,7 @@ import { getOwnedWorkspace } from '../shipments/workspaceAccess.js';
 import {
   ensureConversation,
   appendMessage,
+  rewindConversation,
   storedAnswer,
   getConversationHistoryWithStats,
 } from './conversations.js';
@@ -25,6 +26,9 @@ import { withLessons } from '../feedback/lesson.js';
 const chatSchema = z.object({
   message: z.string().min(1).max(20_000),
   conversationId: z.string().uuid().optional(),
+  // «Редагувати й надіслати знову»: the user message this one replaces (it and
+  // everything after it are removed from the conversation first).
+  replaceFrom: z.string().uuid().optional(),
 });
 
 export async function chatRoutes(app: FastifyInstance): Promise<void> {
@@ -43,7 +47,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       const ws = await getOwnedWorkspace(req.user!.sub, req.params.id);
       if (!ws) return reply.code(404).send({ error: 'not_found' });
 
-      const { message, conversationId: incomingConvId } = parsed.data;
+      const { message, conversationId: incomingConvId, replaceFrom } = parsed.data;
 
       // From here on we stream — take over the raw response.
       const sse = new SseStream(req, reply);
@@ -51,8 +55,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
 
       try {
         const conversationId = await ensureConversation(ws.id, incomingConvId, message);
+        if (replaceFrom && incomingConvId && !(await rewindConversation(conversationId, replaceFrom))) {
+          sse.send('error', { message: 'Повідомлення для редагування не знайдено — надішліть питання ще раз.' });
+          return;
+        }
         const { history, stats: historyStats } = await getConversationHistoryWithStats(conversationId);
-        await appendMessage(conversationId, 'user', message);
+        const userMessageId = await appendMessage(conversationId, 'user', message);
         const documentsDigest = await buildDocumentsDigest(ws.id).catch(() => '');
         const { rows: parties } = await query<{ role: string; company_name: string }>(
           'SELECT role, company_name FROM parties WHERE workspace_id = $1 ORDER BY created_at',
@@ -108,6 +116,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         } else {
           sse.send('done', {
             message: result.text,
+            userMessageId,
             citations: result.citations,
             conversationId,
             messageId,

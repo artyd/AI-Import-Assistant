@@ -1,6 +1,6 @@
 import { getWorkspaceById } from '../../shipments/workspaceAccess.js';
 import { computeRegistryChecks } from '../../customs/drugRegistry.js';
-import { fieldLabel } from '../../reconciliation/risks.js';
+import { fieldLabel, label } from '../../reconciliation/risks.js';
 import { shipmentVerdicts } from '../../reconciliation/verdicts.js';
 import { refreshWorkspaceState } from '../../shipments/status.js';
 import type { Citation } from '../../chat/conversations.js';
@@ -19,7 +19,8 @@ export async function runChecklist(ctx: ToolContext, input: unknown = {}): Promi
       citations: [],
     };
   }
-  const lines = checklist.map((i) => `- ${i.requirement_key}: ${statusUa(i.status)}${i.basis ? ` (підстава: ${i.basis})` : ''}`);
+  // Human names only: a raw key («intermediary_agreement») ended up verbatim in answers.
+  const lines = checklist.map((i) => `- ${label(i.requirement_key)}: ${statusUa(i.status)}${i.basis ? ` (підстава: ${i.basis})` : ''}`);
   return {
     result: `Статус постачання: ${status}\n${lines.join('\n')}`,
     summary: `Чек-лист: ${checklist.length} пунктів`,

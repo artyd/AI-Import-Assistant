@@ -472,8 +472,8 @@ not_found` on miss. For a Збірник (FCL) the workbook also carries the she
 ## Chat (SSE)
 
 ### `POST /api/workspaces/:id/chat`  (auth, per-user rate-limited)
-Request: `{ "message": string, "conversationId"?: string(uuid) }`
-Omitting `conversationId` starts a new conversation.
+Request: `{ "message": string, "conversationId"?: string(uuid), "replaceFrom"?: string(uuid) }`
+Omitting `conversationId` starts a new conversation. `replaceFrom` («Редагувати й надіслати знову», with `conversationId`) is the id of an earlier **user** message of this conversation: it and every later message are deleted first, so the edited question is answered afresh. An id that is not a user message of the conversation → an `error` event, nothing deleted.
 
 Response: `Content-Type: text/event-stream`. The single agent ("Штурман") runs a
 tool-use loop over the tools it chooses at runtime — retrieval (`find_files`, `search_documents`,
@@ -487,7 +487,7 @@ tool-use loop over the tools it chooses at runtime — retrieval (`find_files`, 
 | `token` | `{ "text": string }` | append incremental assistant text |
 | `tool_call` | `{ "tool": string, "input": object }` | "working" chip, e.g. `Reading: invoice.pdf`, `Searching…` |
 | `tool_result` | `{ "tool": string, "summary": string }` | agent-log panel line (short summary, not raw data) |
-| `done` | `{ "message": string, "citations": [ { "file": string, "page": number|null } ], "conversationId": string, "messageId": string, "usage"?: ChatUsage }` | final message + clickable inline source chips; `usage` feeds the context / chat-window meters |
+| `done` | `{ "message": string, "userMessageId": string, "citations": [ { "file": string, "page": number|null } ], "conversationId": string, "messageId": string, "usage"?: ChatUsage }` | final message + clickable inline source chips; `usage` feeds the context / chat-window meters; `userMessageId` is the stored question (for «Редагувати») |
 | `error` | `{ "message": string }` | show error, stop the stream |
 
 `ChatUsage` (additive; also stored per assistant message and returned as `usage` in
@@ -526,8 +526,8 @@ The `supply` chat is **unchanged** — same workspace-scoped agent, same full to
 set, same grounding prompt.
 
 ### `POST /api/chats`  (auth, per-user rate-limited) — normal (global) chat
-Request: `{ "message": string, "conversationId"?: string(uuid) }`
-Omitting `conversationId` starts a new global conversation for the user.
+Request: `{ "message": string, "conversationId"?: string(uuid), "replaceFrom"?: string(uuid) }`
+Omitting `conversationId` starts a new global conversation for the user. `replaceFrom` — as above.
 Response: `text/event-stream` — same events as above. No `tool_call` /
 `tool_result` events are emitted (no tools); `citations` is empty.
 
