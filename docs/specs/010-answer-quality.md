@@ -1,6 +1,6 @@
 # 010 — Short, exact, correct answers (Штурман answer quality)
 
-Status: in progress (2026-11-12)
+Status: parts A–E merged and deployed (2026-11-12/13); live eval on prod pending
 
 ## Goal
 
@@ -37,3 +37,13 @@ never force `tool_choice`; frozen wire contract; `shipmentChanged` on writes.
 - Backend `npm run typecheck && npm test && npm run build` green; `npm run eval:golden` not worse.
 - Eval on prod after deploy: correctness ≥ baseline, median answer length clearly
   shorter, zero unsupported figures on the approved cases.
+
+## Status 2026-11-13
+
+- A–E merged and deployed. Part E grew into a system-wide false-alarm audit:
+  `docs/audits/2026-11-13-false-alarms.md` (errors 25 → 6 over 19 production
+  workspaces).
+- Answer rules tightened after live answers: open the files of every finding
+  before «що не так», no internal keys, a repeated «навіщо?» is not an objection.
+- Eval: normal chat and follow-up turns supported (`followUps`); new case
+  «tulathromycin-repeat-why». The prod eval run is still to do.

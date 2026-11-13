@@ -53,3 +53,11 @@ Spec: `docs/specs/009-mvp-launch-readiness.md`. Production: https://ai-import-as
 1. Owner sends the operator details for the legal pages (`frontend/lib/legal/operator.ts`). This is the only Must item still open.
 
 Recommended soon after launch: the daily backup cron (03:15) and the offsite rclone copy (`BACKUP_RCLONE_REMOTE`): today the only backup sits on the server's own disk. Optional: `docker compose up -d postgres` once so `pg_stat_statements` loads.
+
+## Update 2026-11-13
+
+- Trust in the findings: a false-alarm audit removed most wrong «errors»
+  (`docs/audits/2026-11-13-false-alarms.md`); deployed (f77f181).
+- CI: 4 calendar Playwright tests fail since 2026-11-13 for date reasons (they fail
+  on the code before the changes too); to fix so CI is green again.
+- Still the only open Must: operator details for the legal pages.
