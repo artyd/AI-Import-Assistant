@@ -75,10 +75,27 @@ async function login() {
   token = (await r.json()).token;
 }
 
-/** One chat turn over SSE-over-POST → { text, tools, citations }. */
+/**
+ * One case → { text, tools, citations } of the LAST answer. `followUps` (optional)
+ * are asked in the same conversation after `question` — e.g. the user repeating
+ * «навіщо?», which must not make Штурман reverse a sourced answer. `chatKind:
+ * 'normal'` uses the global chat (no workspace).
+ */
 async function ask(c) {
-  const path = c.chatKind === 'consolidated' ? `/api/collections/${c.workspaceId}/chat` : `/api/workspaces/${c.workspaceId}/chat`;
-  const res = await api('POST', path, { message: c.question });
+  let res = await askOne(c, c.question, undefined);
+  for (const q of c.followUps ?? []) res = await askOne(c, q, res.conversationId);
+  return res;
+}
+
+/** One chat turn over SSE-over-POST → { text, tools, citations, conversationId }. */
+async function askOne(c, message, conversationId) {
+  const path =
+    c.chatKind === 'normal'
+      ? '/api/chats'
+      : c.chatKind === 'consolidated'
+        ? `/api/collections/${c.workspaceId}/chat`
+        : `/api/workspaces/${c.workspaceId}/chat`;
+  const res = await api('POST', path, { message, ...(conversationId ? { conversationId } : {}) });
   if (!res.ok || !res.body) throw new Error(`chat ${res.status}`);
   const reader = res.body.getReader();
   const dec = new TextDecoder();
@@ -86,6 +103,7 @@ async function ask(c) {
   let text = '';
   const tools = [];
   let citations = [];
+  let convId = conversationId;
   for (;;) {
     const { value, done } = await reader.read();
     if (done) break;
@@ -107,10 +125,11 @@ async function ask(c) {
       else if (event === 'done') {
         text = d.message ?? text;
         citations = d.citations ?? [];
+        convId = d.conversationId ?? convId;
       } else if (event === 'error') throw new Error(d.message ?? 'chat error');
     }
   }
-  return { text, tools, citations };
+  return { text, tools, citations, conversationId: convId };
 }
 
 export { score };
