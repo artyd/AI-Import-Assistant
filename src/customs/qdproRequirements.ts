@@ -30,7 +30,19 @@ export const HS_REQUIREMENT_KEYS: readonly HsRequirementKey[] = [
 export interface HsRequirement {
   key: HsRequirementKey;
   evidence: string;
+  /**
+   * The measure binds only some goods of the code — it offers a «no such goods»
+   * statement (5069), is a risk-profile check (техрегламент 5123), or is limited
+   * to a use («що використовуються у ветеринарній медицині»). Never a «missing»
+   * document by itself.
+   */
+  conditional?: string;
+  /** Parser revision that produced the entry; older cache rows are re-fetched. */
+  rev?: number;
 }
+
+/** Bump when the parser changes what counts as a requirement. */
+export const QDPRO_PARSER_REV = 2;
 
 interface Measure {
   key: HsRequirementKey;
@@ -58,7 +70,28 @@ const MEASURES: Measure[] = [
 // "не підлягає / не потребує / не застосовується …", "звільнено", "відсутні".
 // JS `\b` is ASCII-only, so the word edge before «не» is spelled out.
 const NEGATION_RX =
-  /(^|[^а-яіїєґa-z])не\s+(підляга|потребу|застосов|вимага|потрібн|передбачен|здійсню|поширю)|звільнен|відсутн/i;
+  /(^|[^а-яіїєґa-z])не\s+(підляга|потребу|застосов|вимага|потрібн|передбачен|здійсню|поширю|вказано|зазначено)|звільнен|відсутн|^(немає|ні|—|-)\.?$/i;
+
+// A numbered measure heading of the goodinfo page: «13. Ветеринарно-санітарний
+// контроль», «- **12. Наркотичні засоби…**».
+const HEADING_RX = /^(?:[-*]\s*)?(?:\*\*)?\s*\d{1,2}\.\s+\S/;
+// A block that only mentions a measure word in passing (laboratory sampling:
+// «субстанції фармацевтичні та ветеринарні»).
+const NOT_A_MEASURE_RX = /відбор\S*\s+проб|нормативи\s+відбору/i;
+
+/** Why a measure of this block binds only some goods, or null when it binds all. */
+function conditionOf(key: HsRequirementKey, block: string): string | null {
+  if (key === 'precursor_permit' && /5069|про\s+відсутність/i.test(block)) {
+    return 'дозвіл лише для речовин із переліку ПКМУ № 770; для інших — заява декларанта 5069 в МД';
+  }
+  if (key === 'conformity_document' && /5123|нехарчов|профіл\S*\s+ризику/i.test(block)) {
+    return 'ринковий нагляд за техрегламентами: перевірка за профілем ризику, не обовʼязковий документ';
+  }
+  if (key === 'veterinary_certificate' && /(у|для)\s+ветеринарн\S*\s+медицин|для\s+ветеринарі|тваринництв/i.test(block)) {
+    return 'лише для товару ветеринарного / тваринницького призначення';
+  }
+  return null;
+}
 
 const EVIDENCE_MAX = 200;
 
@@ -72,6 +105,20 @@ export function qdproMeasures(importSection: string): HsRequirement[] {
     .split(/\r?\n/)
     .map((l) => l.replace(/\s+/g, ' ').trim())
     .filter((l) => l.length > 0);
+  // Each line's block: from its numbered heading to the next one (a page
+  // without numbered headings is one block).
+  const blockStart: number[] = [];
+  let start = 0;
+  lines.forEach((l, i) => {
+    if (HEADING_RX.test(l)) start = i;
+    blockStart.push(start);
+  });
+  const blockText = (i: number): string => {
+    const from = blockStart[i]!;
+    let to = from + 1;
+    while (to < lines.length && blockStart[to] === from) to++;
+    return lines.slice(from, to).join('\n');
+  };
   const out: HsRequirement[] = [];
   const seen = new Set<HsRequirementKey>();
   lines.forEach((line, i) => {
@@ -80,17 +127,25 @@ export function qdproMeasures(importSection: string): HsRequirement[] {
       if (m.except?.test(line)) continue;
       const next = lines[i + 1] ?? '';
       if (NEGATION_RX.test(line) || NEGATION_RX.test(next)) continue;
+      // A word inside another measure's block (the sampling note) is no measure.
+      if (NOT_A_MEASURE_RX.test(lines[blockStart[i]!]!)) continue;
       seen.add(m.key);
-      out.push({ key: m.key, evidence: line.length > EVIDENCE_MAX ? `${line.slice(0, EVIDENCE_MAX - 1)}…` : line });
+      const condition = conditionOf(m.key, blockText(i));
+      out.push({
+        key: m.key,
+        evidence: line.length > EVIDENCE_MAX ? `${line.slice(0, EVIDENCE_MAX - 1)}…` : line,
+        ...(condition ? { conditional: condition } : {}),
+        rev: QDPRO_PARSER_REV,
+      });
     }
   });
   // Stable order, independent of where each measure sits on the page.
   return out.sort((a, b) => HS_REQUIREMENT_KEYS.indexOf(a.key) - HS_REQUIREMENT_KEYS.indexOf(b.key));
 }
 
-/** The requirement keys the IMPORT regime of a qdpro page states. */
+/** The requirement keys the IMPORT regime of a qdpro page states for EVERY good of the code. */
 export function requirementsFromQdpro(importSection: string): HsRequirementKey[] {
-  return qdproMeasures(importSection).map((m) => m.key);
+  return qdproMeasures(importSection).filter((m) => !m.conditional).map((m) => m.key);
 }
 
 /**

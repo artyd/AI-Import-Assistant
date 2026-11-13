@@ -1,5 +1,7 @@
 import { query } from '../db/pool.js';
 import { isRegulatoryRegistration } from '../reconciliation/reconcile.js';
+import { isImportDeclaration } from '../reconciliation/fcl.js';
+import { parseFlexibleDate } from '../lib/dates.js';
 
 /**
  * Drug-registry cross-check (Phase 6 — official-source verification, run OFFLINE
@@ -44,10 +46,15 @@ function daysUntil(dateStr: string, now: number): number | null {
 }
 
 /** Fuzzy company-name key: lowercase, drop legal suffixes + punctuation. */
+// Spelled-out Ukrainian / Russian legal forms first, then the short ones; word
+// edges are spelled out because JS `\b` never fires next to Cyrillic.
+const LEGAL_FORM_RX =
+  /товариство\s+з\s+обмеженою\s+відповідальністю|(приватне|публічне)?\s*акціонерне\s+товариство|общество\s+с\s+ограниченной\s+ответственностью|(?<![\p{L}\d])(ltd|llc|inc|gmbh|co|corp|company|pvt|private|limited|plc|тов|ооо|пп|лтд|пат|прат|ат|тзов)(?![\p{L}\d])/giu;
+
 function normalizeName(name: string): string {
   return name
     .toLowerCase()
-    .replace(/\b(ltd|llc|inc|gmbh|co|corp|company|pvt|private|limited|тов|ооо|пп|лтд|пат|прат)\b/g, '')
+    .replace(LEGAL_FORM_RX, '')
     .replace(/[^a-z0-9а-яіїєґ]/gi, '')
     .trim();
 }
@@ -157,7 +164,14 @@ export async function registryChecksForDocs(
     .filter((v): v is string => typeof v === 'string' && v.trim().length > 0);
   const allNames = collectNames(docs);
 
-  const now = Date.now();
+  // Validity counts on the day the goods were declared (Ukrainian МД in the
+  // package), not today: a registration that lapsed after clearance is history.
+  const declDates = docs
+    .filter((d) => isImportDeclaration({ file_id: '', file_name: d.file_name, file_type: '', folder_name: null, lot_id: null, fields: d.fields }))
+    .map((d) => (typeof d.fields.document_date === 'string' ? parseFlexibleDate(d.fields.document_date) : null))
+    .filter((t): t is number => t !== null);
+  const now = declDates.length ? Math.max(...declDates) : Date.now();
+  const declared = declDates.length > 0;
   const out: RegistryFinding[] = [];
 
   for (const reg of regNumbers) {
@@ -183,10 +197,12 @@ export async function registryChecksForDocs(
           code: 'registry_expired',
           severity: 'error',
           title: `Реєстрація ${reg} прострочена`,
-          detail: `За реєстром дійсна до ${rec.valid_to} (минуло ${-d} дн.).`,
+          detail: declared
+            ? `За реєстром дійсна до ${rec.valid_to} — раніше за дату МД.`
+            : `За реєстром дійсна до ${rec.valid_to} (минуло ${-d} дн.).`,
           reg_number: reg,
         });
-      } else if (d !== null && d <= EXPIRY_SOON_DAYS) {
+      } else if (d !== null && d <= EXPIRY_SOON_DAYS && !declared) {
         out.push({
           code: 'registry_expiring',
           severity: 'warning',

@@ -1,5 +1,6 @@
 import { baseNameKey, versionHints } from '../documents/fileHints.js';
-import { incotermCode } from '../reconciliation/reconcile.js';
+import { incotermCode, isLikelyDraft } from '../reconciliation/reconcile.js';
+import { sameCompany } from '../shipments/contextDerive.js';
 
 /**
  * «ФАКТИ ПОСТАВКИ» — a cross-document fact sheet of the shipment, built only from
@@ -20,6 +21,8 @@ export interface FactDoc {
   createdAt?: string | null;
   /** FCL: the lot the file sits in. */
   lotId?: string | null;
+  /** Start of the document's Markdown (optional): lets «COPY» / «DRAFT» stamps be seen. */
+  head?: string | null;
 }
 
 export interface FactContext {
@@ -39,9 +42,13 @@ interface Candidate {
   /** Comparison key — equal keys are the same value. */
   key: string;
   source: string;
+  /** Numeric value (kind «num»). */
+  n?: number;
+  /** The document the value comes from (leg checks). */
+  doc?: FactDoc;
 }
 
-export interface Fact {
+export interface Fact{
   label: string;
   chosen: Candidate;
   conflicts: Candidate[];
@@ -81,20 +88,39 @@ const WEAK: { hint: string; tag: string }[] = [
 
 /** Lower = weaker-source penalty; 0 for an original / unmarked file. */
 function weakness(doc: FactDoc): { penalty: number; tags: string[] } {
-  const hints = versionHints(doc.name);
+  const hints = versionHints(doc.name, doc.head ?? '');
   const tags = WEAK.filter((w) => hints.includes(w.hint)).map((w) => w.tag);
   return { penalty: tags.length, tags };
 }
 
-/** Of several versions of the same document (same base name) only the newest is a source. */
+const isRevised = (doc: FactDoc): boolean => versionHints(doc.name, doc.head ?? '').includes('виправлена версія (revised)');
+
+/** Two parties may belong to one deal leg: equal, or one of them is not stated. */
+const partyCompatible = (x0: unknown, y0: unknown): boolean => {
+  const x = str(x0);
+  const y = str(y0);
+  return !x || !y || sameCompany(x, y);
+};
+
+/**
+ * Of several versions of the same document (same base name) only the newest is a
+ * source. «Invoice.pdf» and «Invoice (1).pdf» with a different seller / buyer are
+ * two different documents (two legs), not versions.
+ */
 export function currentVersions(docs: FactDoc[]): FactDoc[] {
-  const best = new Map<string, FactDoc>();
+  const groups = new Map<string, { best: FactDoc }[]>();
   for (const d of docs) {
     const k = `${baseNameKey(d.name)}|${str(d.fields.doc_type) ?? ''}`;
-    const cur = best.get(k);
-    if (!cur || (d.version ?? 1) > (cur.version ?? 1)) best.set(k, d);
+    const list = groups.get(k) ?? [];
+    const slot = list.find(
+      (e) => partyCompatible(e.best.fields.seller, d.fields.seller) && partyCompatible(e.best.fields.buyer, d.fields.buyer),
+    );
+    if (!slot) list.push({ best: d });
+    else if ((d.version ?? 1) > (slot.best.version ?? 1)) slot.best = d;
+    groups.set(k, list);
   }
-  return docs.filter((d) => [...best.values()].includes(d));
+  const keep = new Set<FactDoc>([...groups.values()].flatMap((l) => l.map((e) => e.best)));
+  return docs.filter((d) => keep.has(d));
 }
 
 const typeOf = (d: FactDoc): string => str(d.fields.doc_type) ?? 'other';
@@ -107,6 +133,7 @@ function rankDocs(docs: FactDoc[], prefer: string[]): FactDoc[] {
   return [...docs].sort(
     (a, b) =>
       weakness(a).penalty - weakness(b).penalty ||
+      Number(isRevised(b)) - Number(isRevised(a)) ||
       idx(a) - idx(b) ||
       (b.version ?? 1) - (a.version ?? 1) ||
       (b.createdAt ?? '').localeCompare(a.createdAt ?? ''),
@@ -145,21 +172,95 @@ function candidate(doc: FactDoc, def: Def): Candidate | null {
   if (def.kind === 'num') {
     const n = num(raw);
     if (n === null) return null;
-    return { value: `${n}${def.unit ? ` ${def.unit}` : ''}`, key: String(Math.round(n * 1000) / 1000), source: sourceOf(doc, def.field) };
+    return { value: `${n}${def.unit ? ` ${def.unit}` : ''}`, key: String(Math.round(n * 1000) / 1000), source: sourceOf(doc, def.field), n, doc };
   }
   const s = str(raw);
   if (!s) return null;
-  const key = def.kind === 'incoterm' ? (incotermCode(s) ?? s.toLowerCase()) : s.toLowerCase().replace(/[\s.,"«»'’]+/g, ' ').trim();
-  return { value: clip(s), key, source: sourceOf(doc, def.field) };
+  const key =
+    def.kind === 'incoterm'
+      ? (incotermCode(s) ?? s.toLowerCase())
+      : def.field === 'country_of_origin'
+        ? countryKey(s)
+        : s.toLowerCase().replace(/[\s.,"«»'’]+/g, ' ').trim();
+  return { value: clip(s), key, source: sourceOf(doc, def.field), doc };
+}
+
+// ── comparison helpers ──────────────────────────────────────────────────────
+
+const COUNTRY_CODES: [RegExp, string][] = [
+  [/^(cn|chn|china|p\.?\s?r\.?\s?c\.?|prc|people'?s republic of china|p\.?r\.? china|кнр|китай|китайська народна республіка|китайская народная республика)$/i, 'CN'],
+  [/^(in|ind|india|індія|индия|республіка індія)$/i, 'IN'],
+  [/^(ua|ukr|ukraine|україна|украина)$/i, 'UA'],
+  [/^(de|deu|germany|німеччина|германия|федеративна республіка німеччина)$/i, 'DE'],
+  [/^(us|usa|united states( of america)?|сша|сполучені штати( америки)?)$/i, 'US'],
+  [/^(gb|uk|united kingdom|great britain|великобританія|велика британія)$/i, 'GB'],
+  [/^(pl|pol|poland|польща|польша)$/i, 'PL'],
+  [/^(it|ita|italy|італія|италия)$/i, 'IT'],
+  [/^(fr|fra|france|франція|франция)$/i, 'FR'],
+  [/^(es|esp|spain|іспанія|испания)$/i, 'ES'],
+  [/^(tr|tur|turkey|türkiye|turkiye|туреччина|турция)$/i, 'TR'],
+  [/^(kr|kor|south korea|republic of korea|південна корея)$/i, 'KR'],
+  [/^(jp|jpn|japan|японія|япония)$/i, 'JP'],
+  [/^(nl|nld|netherlands|the netherlands|нідерланди|нидерланды)$/i, 'NL'],
+  [/^(be|bel|belgium|бельгія|бельгия)$/i, 'BE'],
+  [/^(ch|che|switzerland|швейцарія|швейцария)$/i, 'CH'],
+];
+
+/** «China» / «P.R. China» / «КНР» / «CN» → «cn»; unknown countries keep their normalised text. */
+function countryKey(s: string): string {
+  const t = s
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/^(made in|country of origin:?|origin:?)\s+/i, '')
+    .replace(/[.,;]+$/, '');
+  for (const [rx, code] of COUNTRY_CODES) if (rx.test(t)) return code.toLowerCase();
+  return t.toLowerCase().replace(/[\s.,"«»'’]+/g, ' ').trim();
+}
+
+/** Same deal leg: seller and buyer pairs do not contradict each other (the compared field is skipped). */
+function sameLeg(da: FactDoc | undefined, db: FactDoc | undefined, field: string): boolean {
+  if (!da || !db) return true;
+  const sellerOk = field === 'seller' || partyCompatible(da.fields.seller, db.fields.seller);
+  const buyerOk = field === 'buyer' || partyCompatible(da.fields.buyer, db.fields.buyer);
+  return sellerOk && buyerOk;
+}
+
+const COMPANY_FIELDS = new Set(['seller', 'buyer', 'consignee_name']);
+const WEIGHT_TYPES = new Set(['invoice', 'packing_list', 'transport', 'customs_declaration']);
+const REVISED_STRIP = /\b(revised|rev|исправленный|исправлена|виправлений|виправлена)\b/g;
+const originalKey = (name: string): string => baseNameKey(name).replace(REVISED_STRIP, ' ').replace(/\s+/g, ' ').trim();
+
+/** Documents allowed to supply a weight / package count: no drafts, copies or superseded originals. */
+function weightSources(docs: FactDoc[]): FactDoc[] {
+  const revisedKeys = new Set(docs.filter(isRevised).map((d) => `${originalKey(d.name)}|${typeOf(d)}`));
+  return docs.filter((d) => {
+    if (!WEIGHT_TYPES.has(typeOf(d))) return false;
+    if (isLikelyDraft(d.name)) return false;
+    const tags = weakness(d).tags;
+    if (tags.includes('копія') || tags.includes('чернетка') || tags.includes('шаблон')) return false;
+    if (!isRevised(d) && revisedKeys.has(`${originalKey(d.name)}|${typeOf(d)}`)) return false;
+    return true;
+  });
+}
+
+/** Do two candidates carry the same value? Companies by name, numbers within 0.5 % (weights also 1 kg). */
+function sameValue(def: Def, x: Candidate, y: Candidate): boolean {
+  if (x.key === y.key) return true;
+  if (def.kind === 'num' && x.n !== undefined && y.n !== undefined) {
+    const diff = Math.abs(x.n - y.n);
+    return diff <= 0.005 * Math.max(Math.abs(x.n), Math.abs(y.n)) || (def.unit === 'кг' && diff <= 1);
+  }
+  if (COMPANY_FIELDS.has(def.field)) return sameCompany(x.value, y.value);
+  return false;
 }
 
 /** First candidate in authority order is chosen; other distinct values are conflicts. */
-function pickFact(label: string, cands: Candidate[]): Fact | null {
+function pickFact(label: string, cands: Candidate[], same: (p: Candidate, q: Candidate) => boolean = (p, q) => p.key === q.key): Fact | null {
   const first = cands[0];
   if (!first) return null;
   const conflicts: Candidate[] = [];
   for (const c of cands.slice(1)) {
-    if (c.key !== first.key && !conflicts.some((x) => x.key === c.key)) conflicts.push(c);
+    if (!same(c, first) && !conflicts.some((x) => same(x, c))) conflicts.push(c);
   }
   return { label, chosen: first, conflicts };
 }
@@ -276,11 +377,17 @@ export function buildFactSheet(allDocs: FactDoc[], ctx: FactContext = {}): FactS
   const docs = currentVersions(allDocs);
   const facts: Fact[] = [];
 
+  const weightDocs = weightSources(docs);
   for (const def of DEFS) {
-    const cands = rankDocs(docs, def.prefer)
+    let cands = rankDocs(def.kind === 'num' ? weightDocs : docs, def.prefer)
       .map((d) => candidate(d, def))
       .filter((c): c is Candidate => !!c);
-    const f = pickFact(def.label, cands);
+    // Seller / buyer: another deal leg (supplier → intermediary vs intermediary → consignee) is not a conflict.
+    if (def.field === 'seller' || def.field === 'buyer') {
+      const lead = cands[0];
+      cands = cands.filter((c, i) => i === 0 || sameLeg(lead?.doc, c.doc, def.field));
+    }
+    const f = pickFact(def.label, cands, (p, q) => sameValue(def, p, q));
     if (f) facts.push(f);
   }
   const inter = pickFact('посередник', intermediaryOf(rankDocs(docs, ['contract', 'invoice'])));
@@ -294,6 +401,9 @@ export function buildFactSheet(allDocs: FactDoc[], ctx: FactContext = {}): FactS
   const incoCands = rankDocs(docs, incoDef.prefer)
     .map((d) => candidate(d, incoDef))
     .filter((c): c is Candidate => !!c);
+  // Only within the deal leg of the leading document (the card's own value has no document and stays).
+  const incoLead = incoCands[0];
+  const incoLeg = incoCands.filter((c, i) => i === 0 || sameLeg(incoLead?.doc, c.doc, 'incoterm'));
   const incoterms: string[] = [];
   if (inDecl && outDecl) {
     incoterms.push(`Incoterms: вхідні ${inDecl}, вихідні ${outDecl} (картка поставки; трьохсторонній)`);
@@ -302,8 +412,8 @@ export function buildFactSheet(allDocs: FactDoc[], ctx: FactContext = {}): FactS
     if (docVals.length) incoterms.push(`Incoterms у документах: ${docVals.map((c) => `${c.value} (${c.source})`).join('; ')}`);
   } else {
     const decl = inDecl ?? outDecl;
-    if (decl) incoCands.push({ value: decl, key: incotermCode(decl) ?? decl.toLowerCase(), source: 'картка поставки' });
-    const f = pickFact('Incoterms', incoCands);
+    if (decl) incoLeg.push({ value: decl, key: incotermCode(decl) ?? decl.toLowerCase(), source: 'картка поставки' });
+    const f = pickFact('Incoterms', incoLeg);
     if (f) facts.push(f);
   }
 

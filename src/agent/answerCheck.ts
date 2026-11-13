@@ -135,14 +135,26 @@ function re(src: string): RegExp {
   return new RegExp(src, 'iu');
 }
 
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+const MON_ALT = MONTHS.join('|');
+
 function dateMatcher(d: string, m: string, y: string): Matcher {
   const dd = `0?${Number(d)}`;
   const mm = `0?${Number(m)}`;
   const s = `[./\\-]`;
+  // English month names: «14-Mar-2027», «14 March 2027», «Mar 14, 2027».
+  const mon = MONTHS[Number(m) - 1];
+  const en = mon
+    ? `|${dd}(?:st|nd|rd|th)?[ ./\\-]{1,2}${mon}[a-z]*\\.?[ ./\\-,]{1,3}${y}|(?<![a-z])${mon}[a-z]*\\.?[ ./\\-]{1,2}${dd}(?:st|nd|rd|th)?,? ?${y}`
+    : '';
   return {
-    strong: re(`(?<!\\d)(?:${dd}${s}${mm}${s}${y}|${y}${s}${mm}${s}${dd})(?!\\d)`),
+    strong: re(`(?<!\\d)(?:${dd}${s}${mm}${s}${y}|${y}${s}${mm}${s}${dd}${en})(?!\\d)`),
   };
 }
+
+const EN_MONTH_DATE = new RegExp(
+  `^(?:(\\d{1,2})(?:st|nd|rd|th)?[ ./-]+(${MON_ALT})[a-z]*\\.?[ ./,-]+(\\d{4})|(${MON_ALT})[a-z]*\\.?[ ./-]+(\\d{1,2})(?:st|nd|rd|th)?,?\\s*(\\d{4}))$`,
+);
 
 export function buildMatcher(value: string): Matcher | null {
   const v = normalizeText(value).trim();
@@ -152,6 +164,12 @@ export function buildMatcher(value: string): Matcher | null {
   if (m) return dateMatcher(m[1]!, m[2]!, m[3]!);
   m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(v);
   if (m) return dateMatcher(m[3]!, m[2]!, m[1]!);
+  m = EN_MONTH_DATE.exec(v);
+  if (m) {
+    const day = m[1] ?? m[5]!;
+    const mon = (m[2] ?? m[4])!;
+    return dateMatcher(day, String(MONTHS.indexOf(mon) + 1), (m[3] ?? m[6])!);
+  }
 
   // number + unit («25 кг», «12 345,67 USD», «5%»)
   const nu = /^(\d[\d\s.,']*?)\s*([\p{L}%€$₴][\p{L}\d%€$₴³²]*)\.?$/u.exec(v);
@@ -161,7 +179,21 @@ export function buildMatcher(value: string): Matcher | null {
       const num = numberPattern(n);
       const unit = unitAlternatives(nu[2]!);
       return {
-        strong: re(`${LEFT}${num}\\s*(?:${unit})(?![\\p{L}])`),
+        // the unit may come after the number («48 500 USD») or before it («USD 48,500.00»)
+        strong: re(`${LEFT}${num}\\s*(?:${unit})(?![\\p{L}])|(?<![\\p{L}\\p{N}])(?:${unit})\\s*${num}${RIGHT_NUM}`),
+        weak: re(`${LEFT}${num}${RIGHT_NUM}`),
+      };
+    }
+  }
+  // unit / currency before the number («USD 48,500.00», «$ 1 200»)
+  const un = /^([\p{L}%€$₴][\p{L}%€$₴]*)\.?\s*(\d[\d\s.,']*)$/u.exec(v);
+  if (un && UNIT_GROUPS.some((g) => g.includes(un[1]!))) {
+    const n = parseNumber(un[2]!.trim());
+    if (n) {
+      const num = numberPattern(n);
+      const unit = unitAlternatives(un[1]!);
+      return {
+        strong: re(`${LEFT}${num}\\s*(?:${unit})(?![\\p{L}])|(?<![\\p{L}\\p{N}])(?:${unit})\\s*${num}${RIGHT_NUM}`),
         weak: re(`${LEFT}${num}${RIGHT_NUM}`),
       };
     }
@@ -224,8 +256,11 @@ const PAGE_REF = /(?:стор(?:інк\w*)?|арк|с|pp?|pages?)\.?\s*\d+(?:\s*
 const ADVISORY = /кандидат|варіант|можлив|ймовірн|припуска|орієнтов|candidate/iu;
 const NUM = `\\d+(?:[ \\u00a0]\\d{3})*(?:[.,]\\d+)?`;
 
+const FILE_NAME = /\S+\.(?:pdf|jpe?g|png|docx?|xlsx?|xls|csv)(?![\p{L}\d])/giu;
+
 function cleanLine(line: string): string {
   return line
+    .replace(FILE_NAME, ' ') // file names are not figures («IMG_20250315_101112.jpg», «UA-PF-17.pdf»)
     .replace(/[*`_]+/g, '')
     .replace(/^\s*(?:[-•]\s*)?\d{1,2}[.)]\s+/, '') // «1.» «2)»
     .replace(new RegExp(`^\\s*\\d{1,2}(?:\\.\\d{1,2}){1,3}\\s+(?!(?:${UNIT_WORDS})(?![\\p{L}]))`, 'iu'), '') // «1.2 Розділ»
@@ -258,6 +293,10 @@ export function extractFigures(text: string): Figure[] {
 
     take(/(?<![\p{L}\d])[A-Z]{3}[UJZ]\s?\d{6}\s?\d(?!\d)/gu, 'container');
     take(/(?<![\d.\-/])(?:\d{1,2}[./]\d{1,2}[./]\d{4}|\d{4}-\d{2}-\d{2})(?![\d])/g, 'date');
+    take(
+      /(?<![\d\p{L}])(?:\d{1,2}(?:st|nd|rd|th)?[ -](?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?,?[ -]\d{4}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.? \d{1,2}(?:st|nd|rd|th)?, ?\d{4})(?![\d])/giu,
+      'date',
+    );
     take(/№\s*([\p{L}\d][\p{L}\d\-/.]*\d[\p{L}\d\-/]*|\d[\d\-/]*)/gu, 'docnumber', 1);
     take(/(?<![\p{L}\d\-/])(?=[\p{Lu}\d]*\d)(?=[\p{Lu}\d]*\p{Lu})[\p{Lu}\d]+(?:[-/][\p{Lu}\d]+)+(?![\p{L}\d])/gu, 'docnumber');
     take(new RegExp(`(?<![\\p{L}\\d.,])(${NUM}\\s?(?:${UNIT_WORDS})(?![\\p{L}]))`, 'giu'), 'quantity', 1);

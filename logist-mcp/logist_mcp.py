@@ -697,16 +697,49 @@ def _rate_after(text: str, label: str, window: int = 60) -> str:
     return f"{m.group(1).replace(',', '.')}%" if m else ""
 
 
+# A numbered measure heading of the goodinfo ІМПОРТ tab («13. Ветеринарно-санітарний контроль»).
+_MEASURE_HEAD_RE = re.compile(r"^\s*\d{1,2}\.\s+\S", re.M)
+# Laboratory-sampling note («субстанції фармацевтичні та ветеринарні») — no measure.
+_SAMPLING_RE = re.compile(r"відбор\w*\s+проб|нормативи\s+відбору", re.I)
+# Vet control limited to veterinary / livestock use (hormones, vitamins, antibiotics).
+_VET_USE_RE = re.compile(r"(у|для)\s+ветеринарн\w*\s+медицин|для\s+ветеринарі|тваринництв", re.I)
+# The precursor measure offers the declarant's «no precursors» statement (5069):
+# a permit binds only substances on the list, not every good of the code.
+_NO_PRECURSOR_RE = re.compile(r"5069|про\s+відсутн", re.I)
+
+
+def _measure_blocks(text: str) -> list[str]:
+    """The ІМПОРТ text split into its numbered measures (one block when unnumbered),
+    without the sampling note."""
+    starts = [m.start() for m in _MEASURE_HEAD_RE.finditer(text)]
+    if not starts:
+        blocks = [text]
+    else:
+        blocks = [text[:starts[0]]] + [text[a:b] for a, b in zip(starts, starts[1:] + [len(text)])]
+    out = []
+    for b in blocks:
+        head = b.strip().splitlines()[0] if b.strip() else ""
+        if _SAMPLING_RE.search(head):
+            continue
+        # Unnumbered text: drop just the sampling lines.
+        out.append("\n".join(l for l in b.splitlines() if not re.search(r"субстанці\w*\s+фармацевтичн\w*\s+та\s+ветеринарн", l, re.I)))
+    return out
+
+
 def _import_flags(text: str) -> dict:
-    """Deterministic restriction flags for the ІМПОРТ regime (keyword presence)."""
-    low = text.lower()
+    """Deterministic restriction flags for the ІМПОРТ regime. A flag means the
+    measure binds EVERY good of the code: conditional measures (precursors with
+    the 5069 alternative, vet control only for veterinary use) and passing
+    mentions (the sampling note) do not raise it."""
+    blocks = [b.lower() for b in _measure_blocks(text)]
+    low = "\n".join(blocks)
     return {
         "ban_rf": "заборон" in low and ("росій" in low or "426" in text),
-        "license": "ліценз" in low,
-        "vet_control": "ветеринар" in low,
-        "phyto": "фітосанітар" in low,
-        "dual_use": "подвійн" in low and "використанн" in low,
-        "narcotic": "наркотич" in low or "прекурсор" in low,
+        "license": any("ліцензуванн" in b and "не вказано" not in b and "експорт" not in b for b in blocks),
+        "vet_control": any("ветеринар" in b and not _VET_USE_RE.search(b) and "не вказано" not in b for b in blocks),
+        "phyto": any("фітосанітар" in b and "не вказано" not in b for b in blocks),
+        "dual_use": any("подвійн" in b and "використанн" in b and "не вказано" not in b for b in blocks),
+        "narcotic": any(("наркотич" in b or "прекурсор" in b) and not _NO_PRECURSOR_RE.search(b) and "не вказано" not in b for b in blocks),
     }
 
 

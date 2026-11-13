@@ -7,7 +7,7 @@
     },
     "code": {
       "__regex": true,
-      "source": "^2939[34]",
+      "source": "^293941",
       "flags": ""
     },
     "table": 1,
@@ -21,7 +21,7 @@
     },
     "code": {
       "__regex": true,
-      "source": "^29394",
+      "source": "^293942",
       "flags": ""
     },
     "table": 1,
@@ -119,7 +119,7 @@
     },
     "code": {
       "__regex": true,
-      "source": "^293219",
+      "source": "(?!)",
       "flags": ""
     },
     "table": 1,
@@ -231,7 +231,7 @@
     },
     "code": {
       "__regex": true,
-      "source": "^293219",
+      "source": "(?!)",
       "flags": ""
     },
     "table": 2,
@@ -273,7 +273,7 @@
     },
     "code": {
       "__regex": true,
-      "source": "^293919",
+      "source": "(?!)",
       "flags": ""
     },
     "table": 0,
@@ -287,7 +287,7 @@
     },
     "code": {
       "__regex": true,
-      "source": "^293399",
+      "source": "(?!)",
       "flags": ""
     },
     "table": 0,
@@ -301,7 +301,7 @@
     },
     "code": {
       "__regex": true,
-      "source": "^293399",
+      "source": "(?!)",
       "flags": ""
     },
     "table": 0,

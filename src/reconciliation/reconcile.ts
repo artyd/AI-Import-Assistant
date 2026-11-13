@@ -89,12 +89,56 @@ export function isLikelyDraft(fileName: string | null): boolean {
   return !!fileName && DRAFT_EXT_RX.test(fileName.trim());
 }
 
+/** A package label, marking template or photo — not a document of the whole shipment. */
+const LABEL_NAME_RX = /label|етикет|этикет|маркуван|маркиров|唛头|sticker|наклейк|photo|фото|(^|[\\/_\s-])img[_-]?\d/i;
+
+/** The file NAME says draft («DRAFT COO-2.pdf», «shipping docs draft(1).pdf», «чернетка»). */
+const DRAFT_NAME_RX = /draft|чернет|черновик|проект/i;
+/** An editable office file or a file named as a draft — not the issued document. */
+export function isDraftDoc(fileName: string | null): boolean {
+  return isLikelyDraft(fileName) || DRAFT_NAME_RX.test(fileName ?? '');
+}
+
 /** Stable preference order among same-type docs: issued (PDF/scan) before drafts, then input order. */
 function preferIssued<T extends { file_name: string | null }>(list: T[]): T[] {
   return list
     .map((d, i) => ({ d, i }))
-    .sort((a, b) => Number(isLikelyDraft(a.d.file_name)) - Number(isLikelyDraft(b.d.file_name)) || a.i - b.i)
+    .sort((a, b) => Number(isDraftDoc(a.d.file_name)) - Number(isDraftDoc(b.d.file_name)) || a.i - b.i)
     .map((x) => x.d);
+}
+
+// «revised INVOICE PACKING LIST.pdf» replaces «INVOICE PACKING LIST.pdf».
+const REVISION_RX = /(?<![\p{L}\d])(revised|revision|rev|corrected|amended|updated|исправл\p{L}*|испр|виправл\p{L}*|оновл\p{L}*)(?![\p{L}\d])/giu;
+
+/** File name without upload numbering, copy suffixes, revision words and extension. */
+function baseName(fileName: string): string {
+  return fileName
+    .toLowerCase()
+    .replace(/\.[a-z0-9]{2,5}$/i, '')
+    .replace(/^\d{1,4}[_\s-]+/, '')
+    .replace(/\(\d+\)/g, '')
+    .replace(REVISION_RX, '')
+    .replace(/[^\p{L}\d]+/gu, '');
+}
+
+/**
+ * Documents an explicitly revised file of the same type and name replaces
+ * (live test «Сборник 18»: «INVOICE PACKING LIST.pdf» 4080 kg vs «revised INVOICE
+ * PACKING LIST.pdf» 4040 kg was flagged although the revision fixed it).
+ */
+export function supersededDocs(docs: ReconcileDoc[]): Set<ReconcileDoc> {
+  const out = new Set<ReconcileDoc>();
+  const revised = docs.filter((d) => d.file_name && new RegExp(REVISION_RX.source, 'iu').test(d.file_name));
+  for (const r of revised) {
+    const key = baseName(r.file_name!);
+    if (!key) continue;
+    for (const d of docs) {
+      if (d === r || d.doc_type !== r.doc_type || !d.file_name) continue;
+      if (new RegExp(REVISION_RX.source, 'iu').test(d.file_name)) continue;
+      if (baseName(d.file_name) === key) out.add(d);
+    }
+  }
+  return out;
 }
 
 function pick(docs: ReconcileDoc[], type: string): DocRef | null {
@@ -141,7 +185,16 @@ export interface ReconcileOptions {
   incotermOut?: string | null;
   /** The intermediary's name from the parties card — orients the invoice legs. */
   intermediaryName?: string | null;
+  /**
+   * The documents are ONE shipment (not one lot of a Збірник): papers of several
+   * suppliers then mean a consolidation uploaded as a shipment, and comparing
+   * their weights / sums / parties with each other is meaningless.
+   */
+  singleShipment?: boolean;
 }
+
+/** Which side of an intermediated deal a document belongs to. */
+export type DealLeg = 'in' | 'out';
 
 /**
  * Deterministic cross-document reconciliation over already-extracted fields.
@@ -154,11 +207,34 @@ export interface ReconcileOptions {
  * between legs as expected markup, and verifies physical goods + intermediary
  * orientation across the legs. See `reconcileTrilateral`.
  */
-export function reconcile(docs: ReconcileDoc[], opts: ReconcileOptions = {}): Discrepancy[] {
+export function reconcile(allDocs: ReconcileDoc[], opts: ReconcileOptions = {}): Discrepancy[] {
+  // A revised document replaces the one it corrects — only the live set is compared.
+  const superseded = supersededDocs(allDocs);
+  const docs = allDocs.filter((d) => !superseded.has(d));
   const trilateral = opts.contractMode === 'trilateral';
-  const packing = pick(docs, 'packing_list');
-  const contract = pick(docs, 'contract');
-  const coo = pick(docs, 'certificate_of_origin');
+  const dealLeg = dealLegs(docs, opts.intermediaryName ?? null);
+
+  // Papers of several suppliers in ONE shipment: a consolidation uploaded as a
+  // shipment. Cross-document comparisons would pit one supplier's goods against
+  // another's (live test «Сборник 18»: 13 findings, all false) — say so once.
+  if (opts.singleShipment) {
+    const suppliers = supplierNames(docs, opts.intermediaryName ?? null);
+    if (suppliers.length >= 2) {
+      return [
+        {
+          field: 'documents',
+          expected: 'одне постачання — документи одного постачальника',
+          actual:
+            `документи ${suppliers.length} постачальників (${suppliers.join('; ')}) — це збірний вантаж; ` +
+            'ваги, суми й сторони між різними постачальниками не звірялися. Оформіть його як Збірник (FCL): ' +
+            'тоді кожну партію буде звірено окремо',
+          severity: 'warning',
+          kind: 'suspected',
+          citations: [],
+        },
+      ];
+    }
+  }
 
   // Invoice selection. Bilateral: the single invoice. Trilateral: the OUTBOUND
   // leg (Prime→AGroup95) is what the contract / value / Incoterms are checked
@@ -168,7 +244,26 @@ export function reconcile(docs: ReconcileDoc[], opts: ReconcileOptions = {}): Di
   const legOf = (i: DocRef) => classifyInvoiceLeg(i, opts.intermediaryName ?? null);
   const outbound = trilateral ? invoiceRefs.find((i) => legOf(i) === 'outbound') ?? null : null;
   const inbound = trilateral ? invoiceRefs.find((i) => legOf(i) === 'inbound') ?? null : null;
-  const invoice = trilateral ? outbound ?? pick(docs, 'invoice') : pick(docs, 'invoice');
+  const primaryInvoice = trilateral ? outbound ?? pick(docs, 'invoice') : pick(docs, 'invoice');
+
+  // The contract is compared with the invoice of the SAME deal leg: a supplier
+  // contract (Supplier→Prime) against Prime's resale invoice (Prime→consignee) is
+  // two different deals, not a mismatch (live test «Сборник 18»: 34 400 vs
+  // 65 000 USD, FCA vs CPT, seller/buyer «mismatches»).
+  const contracts = preferIssued(docs.filter((d) => d.doc_type === 'contract')).map(toRef);
+  let invoice = primaryInvoice;
+  let contract = contractFor(primaryInvoice, contracts, dealLeg);
+  if (!contract && trilateral && inbound && inbound !== primaryInvoice) {
+    const c = contractFor(inbound, contracts, dealLeg);
+    if (c) {
+      invoice = inbound;
+      contract = c;
+    }
+  }
+  // Packing list of the invoice's own leg (a supplier PL may list goods the
+  // intermediary resold to two consignees).
+  const packing = packingFor(invoice, docs, dealLeg);
+  const coo = pick(docs, 'certificate_of_origin');
 
   const out: Discrepancy[] = [];
 
@@ -180,8 +275,8 @@ export function reconcile(docs: ReconcileDoc[], opts: ReconcileOptions = {}): Di
   //    that states them (invoices, packing lists, AWB/CMR/T1, МД, COO) — the
   //    transport and customs documents are where a rounded 31.85→32 kg or a
   //    T1 "net = gross" slip shows up. Legacy total stays invoice↔packing. ───
-  checkPhysicalConsistency(docs, 'net_weight_kg', out, trilateral);
-  checkPhysicalConsistency(docs, 'gross_weight_kg', out, trilateral);
+  checkPhysicalConsistency(docs, 'net_weight_kg', out, trilateral, dealLeg);
+  checkPhysicalConsistency(docs, 'gross_weight_kg', out, trilateral, dealLeg);
   if (
     !hasNum(invoice, 'net_weight_kg') && !hasNum(packing, 'net_weight_kg') &&
     !hasNum(invoice, 'gross_weight_kg') && !hasNum(packing, 'gross_weight_kg')
@@ -190,7 +285,7 @@ export function reconcile(docs: ReconcileDoc[], opts: ReconcileOptions = {}): Di
   }
 
   // ── Packages count: exact, across every document that states it. ─────────
-  checkPhysicalConsistency(docs, 'packages_count', out, trilateral);
+  checkPhysicalConsistency(docs, 'packages_count', out, trilateral, dealLeg);
 
   // ── Currency: invoice vs contract, explicit. ───────────────────────────────
   {
@@ -221,24 +316,27 @@ export function reconcile(docs: ReconcileDoc[], opts: ReconcileOptions = {}): Di
     const base = Math.abs(vC);
     const rel = base > 0 ? Math.abs(vInv - vC) / base : vInv === vC ? 0 : 1;
     if (sameCurrency && rel > VALUE_TOLERANCE) {
+      // An editable contract/specification (.docx) may be a superseded draft.
+      const draftContract = isDraftDoc(contract.file_name);
       out.push({
         field: 'total_value',
-        expected: `contract: ${vC} ${show(cC)}`,
+        expected: `contract${draftContract ? ' (редагований файл — можлива чернетка)' : ''}: ${vC} ${show(cC)}`,
         actual: `invoice: ${vInv} ${show(cInv)}`,
-        severity: 'error',
-        kind: kindFor(invoice, contract, 'total_value'),
+        severity: draftContract ? 'warning' : 'error',
+        kind: draftContract ? 'suspected' : kindFor(invoice, contract, 'total_value'),
         citations: [cite(contract, `${vC} ${show(cC)}`), cite(invoice, `${vInv} ${show(cInv)}`)],
       });
     }
   }
 
-  // ── HS code presence on the invoice. ───────────────────────────────────────
+  // ── HS code presence on the invoice. A supplier invoice without a code is
+  //    normal (the declarant classifies the goods) — a note, not a problem. ──
   if (invoice && !strOf(invoice, 'hs_code')) {
     out.push({
       field: 'hs_code',
       expected: 'наявний',
-      actual: 'відсутній в інвойсі',
-      severity: 'warning',
+      actual: 'відсутній в інвойсі (код визначає декларант — не помилка документа)',
+      severity: 'info',
       kind: 'suspected',
       citations: [cite(invoice, '—')],
     });
@@ -315,18 +413,20 @@ export function reconcile(docs: ReconcileDoc[], opts: ReconcileOptions = {}): Di
     // Trilateral legitimately has TWO invoices (inbound + outbound) — warn only
     // on 3+; bilateral warns on 2+ as before.
     const threshold = t === 'invoice' && trilateral ? 2 : 1;
-    if (n > threshold) {
-      const used = t === 'invoice' ? invoice : t === 'contract' ? contract : packing;
+    const used = t === 'invoice' ? invoice : t === 'contract' ? contract : packing;
+    // Nothing of this type was compared (e.g. every contract is of the other deal leg) — said below.
+    if (n > threshold && used) {
       const others = docs
-        .filter((d) => d.doc_type === t && d.file_id !== used?.file_id)
+        .filter((d) => d.doc_type === t && d.file_id !== used.file_id)
         .map((d) => d.file_name ?? '—');
       out.push({
         field: 'documents',
         expected: 'один документ цього типу',
         actual:
-          `${t}: знайдено ${n} — звірено «${used?.file_name ?? '—'}»` +
+          `${t}: знайдено ${n} — звірено «${used.file_name ?? '—'}»` +
           (others.length ? `; інші не звірено: ${others.join(', ')}` : ''),
-        severity: 'warning',
+        // Copies, annexes and several legs are normal: a note on what was compared, not a problem.
+        severity: 'info',
         kind: 'suspected',
         citations: docs.filter((d) => d.doc_type === t).map((d) => cite(toRef(d), d.fields.invoice_number ?? d.fields.contract_number ?? d.file_name)),
       });
@@ -336,7 +436,9 @@ export function reconcile(docs: ReconcileDoc[], opts: ReconcileOptions = {}): Di
     out.push({
       field: 'documents',
       expected: 'контракт для звірки ціни/валюти/Incoterms',
-      actual: 'Контракт відсутній — ціну/валюту/Incoterms не звірено',
+      actual: contracts.length
+        ? 'Контракти в пакеті — іншого плеча угоди (напр. постачальник→посередник); з цим інвойсом ціну/валюту/Incoterms не звірено'
+        : 'Контракт відсутній — ціну/валюту/Incoterms не звірено',
       severity: 'info',
       kind: 'suspected',
       citations: [],
@@ -421,10 +523,25 @@ function normalizeHs(hs: string): string {
   return hs.replace(/\D/g, '').replace(/^0+/, '');
 }
 
+// Legal forms and the country a name is often suffixed with («…, India» /
+// «…, Індія» / «…, P.R. China») — not part of the company's identity. Word
+// edges are spelled out: JS `\b` is ASCII-only and never fires next to Cyrillic.
+const NAME_NOISE_RX = new RegExp(
+  '(?<![\\p{L}\\d])(' +
+    [
+      'ltd', 'limited', 'llc', 'inc', 'gmbh', 'co', 'corp', 'company', 'pvt', 'private', 'plc', 'sa', 'ag', 'spa', 'bv',
+      'тов', 'ооо', 'пп', 'лтд', 'прат', 'пат', 'ат', 'тзов',
+      'india', 'індія', 'индия', 'china', 'китай', 'кнр', 'prc', 'p\\.?\\s*r\\.?\\s*china', 'ukraine', 'україна', 'украина',
+      'germany', 'німеччина', 'германия', 'united kingdom', 'uk', 'велика британія',
+    ].join('|') +
+    ')(?![\\p{L}\\d])',
+  'giu',
+);
+
 function normalizeName(name: string): string {
   return name
     .toLowerCase()
-    .replace(/\b(ltd|limited|llc|inc|gmbh|co|corp|company|pvt|private|тов|ооо|пп|лтд)\b/g, '')
+    .replace(NAME_NOISE_RX, '')
     .replace(/[^a-z0-9а-яіїєґ]/gi, '')
     .trim();
 }
@@ -494,6 +611,137 @@ function sameName(a: string | null, b: string | null): boolean {
   if (!ka || !kb) return false;
   if (ka === kb) return true;
   return Math.min(ka.length, kb.length) >= 5 && (ka.includes(kb) || kb.includes(ka));
+}
+
+// ── deal legs ───────────────────────────────────────────────────────────────
+
+function isIntermediaryName(name: string | null, intermediary: string | null): boolean {
+  if (!name) return false;
+  return (!!intermediary && sameName(name, intermediary)) || nameMatches(name, INTERMEDIARY_RX);
+}
+
+const buyerSide = (d: ReconcileDoc): string | null => strOf(toRef(d), 'buyer') ?? strOf(toRef(d), 'consignee_name');
+const sellerSide = (d: ReconcileDoc): string | null => strOf(toRef(d), 'seller') ?? strOf(toRef(d), 'consignor_name');
+
+/**
+ * The leg of an intermediated deal each document belongs to, or null when the
+ * documents name no intermediary at all (a plain bilateral package — legacy
+ * behaviour). 'in' = bought by the intermediary (Supplier→Prime: supplier
+ * contract, PL, CO, house bill to Prime); 'out' = sold on or delivered to the
+ * consignee (Prime→consignee invoice, the bill / CMR / МД of the consignee).
+ * A document with no party on it stays null (a neutral witness).
+ */
+export function dealLegs(
+  docs: ReconcileDoc[],
+  intermediary: string | null,
+): ((d: ReconcileDoc) => DealLeg | null) | null {
+  const raw = (d: ReconcileDoc): DealLeg | null => {
+    if (isIntermediaryName(buyerSide(d), intermediary)) return 'in';
+    if (isIntermediaryName(sellerSide(d), intermediary)) return 'out';
+    return null;
+  };
+  if (!docs.some((d) => raw(d) !== null)) return null;
+  return (d) => raw(d) ?? (buyerSide(d) ? 'out' : null);
+}
+
+/** The contract of the invoice's own leg (legacy: the first issued contract). */
+function contractFor(
+  invoice: DocRef | null,
+  contracts: DocRef[],
+  dealLeg: ((d: ReconcileDoc) => DealLeg | null) | null,
+): DocRef | null {
+  if (!invoice) return null;
+  const leg = dealLeg ? dealLeg(invoice) : null;
+  if (!dealLeg || leg === null) return contracts[0] ?? null;
+  const same = contracts.filter((c) => dealLeg(c) === leg);
+  return same.find((c) => sameName(strOf(c, 'seller'), strOf(invoice, 'seller'))) ?? same[0] ?? null;
+}
+
+/** The packing list of the invoice's own leg (legacy: the first issued one). */
+function packingFor(
+  invoice: DocRef | null,
+  docs: ReconcileDoc[],
+  dealLeg: ((d: ReconcileDoc) => DealLeg | null) | null,
+): DocRef | null {
+  const leg = invoice && dealLeg ? dealLeg(invoice) : null;
+  if (!dealLeg || leg === null) return pick(docs, 'packing_list');
+  const mine = docs.filter((d) => dealLeg(d) === leg || dealLeg(d) === null);
+  return pick(mine, 'packing_list');
+}
+
+/**
+ * Distinct sellers of issued supply contracts, the intermediary excluded
+ * (a manufacturer's packing list next to a trader's contract is ONE deal, so
+ * only contracts count).
+ */
+export function supplierNames(docs: ReconcileDoc[], intermediary: string | null): string[] {
+  const names: string[] = [];
+  for (const d of docs) {
+    if (d.doc_type !== 'contract') continue;
+    if (isDraftDoc(d.file_name)) continue;
+    const s = strOf(toRef(d), 'seller');
+    if (!s || isIntermediaryName(s, intermediary)) continue;
+    if (!names.some((n) => sameName(n, s) || sharesDistinctToken(n, s))) names.push(s);
+  }
+  return names;
+}
+
+const GENERIC_TOKENS = new Set([
+  'co', 'ltd', 'limited', 'llc', 'inc', 'corp', 'company', 'group', 'china', 'chem', 'chemical', 'chemicals',
+  'pharmaceutical', 'pharma', 'industry', 'industrial', 'biotech', 'biotechnology', 'trading', 'international',
+  'technology', 'science', 'sci', 'tech', 'the', 'and', 'of', 'import', 'export', 'bio', 'engineering',
+]);
+/** "Xi'an TaiCheng Chem Co., Ltd" ~ "XI'AN TAICHENG CHEM CO.,LTD": a shared distinctive word. */
+function sharesDistinctToken(a: string, b: string): boolean {
+  const tok = (s: string) =>
+    new Set(s.toLowerCase().split(/[^\p{L}\d]+/u).filter((t) => t.length >= 4 && !GENERIC_TOKENS.has(t)));
+  const ta = tok(a);
+  return [...tok(b)].some((t) => ta.has(t));
+}
+
+/** Some single invoice / packing list lists two or more different goods. */
+function isMultiProduct(docs: ReconcileDoc[]): boolean {
+  return docs.some((d) => {
+    if (d.doc_type !== 'invoice' && d.doc_type !== 'packing_list') return false;
+    const items = Array.isArray(d.fields.line_items) ? (d.fields.line_items as ExtractedLineItem[]) : [];
+    const keys = new Set(items.map((it) => (it.description ?? '').toLowerCase().replace(/[^\p{L}\d]/gu, '').slice(0, 12)).filter(Boolean));
+    return keys.size >= 2;
+  });
+}
+
+/**
+ * How a physical-figure disagreement relates to the deal legs:
+ *   'split' — every leg agrees with itself, the inbound leg is LARGER and lists
+ *             more goods than the outbound one (the intermediary resold part of it);
+ *   'legs'  — every leg agrees with itself, the legs differ otherwise;
+ *   null    — a leg disagrees with itself, or a neutral document fits no leg: a real finding.
+ */
+function legSplit(
+  groups: Map<number, DocRef[]>,
+  legByRef: Map<DocRef, DealLeg | null>,
+  docs: ReconcileDoc[],
+  dealLeg: (d: ReconcileDoc) => DealLeg | null,
+): 'split' | 'legs' | null {
+  const valuesOf = (leg: DealLeg): Set<number> =>
+    new Set([...groups.entries()].filter(([, refs]) => refs.some((r) => legByRef.get(r) === leg)).map(([v]) => v));
+  const vin = valuesOf('in');
+  const vout = valuesOf('out');
+  if (vin.size !== 1 || vout.size !== 1) return null;
+  const [a] = [...vin];
+  const [b] = [...vout];
+  if (a === b) return null;
+  // Neutral documents must side with one of the legs.
+  for (const [v, refs] of groups) {
+    if (refs.some((r) => legByRef.get(r) === null) && v !== a && v !== b) return null;
+  }
+  const goods = (leg: DealLeg): number =>
+    Math.max(
+      0,
+      ...docs
+        .filter((d) => (d.doc_type === 'invoice' || d.doc_type === 'packing_list') && dealLeg(d) === leg)
+        .map((d) => aggregateLines(Array.isArray(d.fields.line_items) ? (d.fields.line_items as ExtractedLineItem[]) : []).length),
+    );
+  return a! > b! && goods('in') > goods('out') && goods('out') > 0 ? 'split' : 'legs';
 }
 
 /**
@@ -657,21 +905,28 @@ function checkPhysicalConsistency(
   field: 'net_weight_kg' | 'gross_weight_kg' | 'packages_count',
   out: Discrepancy[],
   trilateral = false,
+  dealLeg: ((d: ReconcileDoc) => DealLeg | null) | null = null,
 ): void {
-  // Editable drafts (.doc/.xlsx) are skipped when an issued document of the same
-  // type exists — a superseded draft's weights are not a mismatch.
-  const issuedTypes = new Set(docs.filter((d) => !isLikelyDraft(d.file_name)).map((d) => d.doc_type));
+  // Drafts (.doc/.xlsx, «DRAFT …») are skipped when an issued document of the
+  // same type exists — a superseded draft's weights are not a mismatch.
+  const issuedTypes = new Set(docs.filter((d) => !isDraftDoc(d.file_name)).map((d) => d.doc_type));
   const groups = new Map<number, DocRef[]>();
+  const legByRef = new Map<DocRef, DealLeg | null>();
   for (const d of docs) {
     if (!d.doc_type || !PHYSICAL_DOC_TYPES.has(d.doc_type)) continue;
-    if (isLikelyDraft(d.file_name) && issuedTypes.has(d.doc_type)) continue;
+    if (isDraftDoc(d.file_name) && issuedTypes.has(d.doc_type)) continue;
+    // A drum label or a photo states ONE package (25 kg), not the shipment —
+    // «Draft Label.pdf» filed as a packing list gave «450 vs 25 kg» («Индия 12»).
+    if (LABEL_NAME_RX.test(d.file_name ?? '')) continue;
     const ref = toRef(d);
     const v = numOf(ref, field);
     if (v === null || v <= 0) continue;
     const key = Math.round(v * 1000) / 1000;
     groups.set(key, [...(groups.get(key) ?? []), ref]);
+    legByRef.set(ref, dealLeg ? dealLeg(d) : null);
   }
   if (groups.size < 2) return;
+  const split = dealLeg ? legSplit(groups, legByRef, docs, dealLeg) === 'split' : false;
   const values = [...groups.keys()].sort((a, b) => a - b);
   const min = values[0]!;
   const max = values[values.length - 1]!;
@@ -695,16 +950,24 @@ function checkPhysicalConsistency(
   const partial = !trilateral && (issued('invoice') > 1 || issued('packing_list') > 1);
   // A sub-half-kilo spread inside the tolerance is a rounding artifact (31.85 → 32).
   const rounding = field !== 'packages_count' && !big && max - min <= 0.5;
-  const severity = partial ? 'warning' : big ? 'error' : rounding ? 'info' : 'warning';
+  // Each leg of an intermediated deal agrees with itself and the legs differ:
+  // the supplier shipped more to the intermediary than this consignee bought
+  // (cargo split between consignees) → a note; otherwise a check-this.
+  // A plain gap between the legs (same goods, different figures) stays a finding.
+  const crossLeg = split
+    ? ' — плечі угоди різні за обсягом: постачальник відвантажив посереднику більше, ніж перепродано цьому одержувачу (вантаж розподілено), це не помилка'
+    : '';
+  const severity = split ? 'info' : partial ? 'warning' : big ? 'error' : rounding ? 'info' : 'warning';
   out.push({
     field,
     expected: `${PHYSICAL_LABEL[field]}: ${major![0]} (${list(major![1])})`,
     actual:
       rest.map(([v, refs]) => `${v} (${list(refs)})`).join(' · ') +
-      (partial ? ' — кілька інвойсів/пакувальних листів (часткові поставки?), значення можуть бути частинами' : '') +
-      (rounding && !partial ? ' — схоже на округлення' : ''),
+      crossLeg +
+      (partial && !split ? ' — кілька інвойсів/пакувальних листів (часткові поставки?), значення можуть бути частинами' : '') +
+      (rounding && !partial && !split ? ' — схоже на округлення' : ''),
     severity,
-    kind: big && !lowConf && !partial ? 'confirmed' : 'suspected',
+    kind: big && !lowConf && !partial && !split ? 'confirmed' : 'suspected',
     citations: ordered.flatMap(([v, refs]) => refs.map((r) => cite(r, v))),
   });
 }
@@ -724,6 +987,9 @@ function docsWithField(docs: ReconcileDoc[], field: string): { ref: DocRef; val:
 function checkManufacturerConsistency(docs: ReconcileDoc[], out: Discrepancy[]): void {
   const entries = docsWithField(docs.filter(isProductDoc), 'manufacturer');
   if (entries.length < 2) return;
+  // Several goods (a PL with aspartic acid AND glucosamine, a contract naming two
+  // makers) legitimately have several manufacturers — there is no single one to agree on.
+  if (isMultiProduct(docs) || entries.some((e) => /;/.test(e.val))) return;
   let mismatch = false;
   for (const a of entries) {
     for (const b of entries) {

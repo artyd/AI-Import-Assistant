@@ -28,7 +28,7 @@
   ],
 
   "expected_discrepancies": [
-    { "field": "hs_code", "kind": "suspected", "severity": "warning", "note": "HS code is absent from the invoice (it is stated only in the customs declaration). Deterministic yellow verify-flag — not a real error." },
+    { "field": "hs_code", "kind": "suspected", "severity": "info", "note": "HS code is absent from the invoice (it is stated only in the customs declaration). A note — the declarant classifies the goods; not a real error." },
     { "field": "documents", "kind": "suspected", "severity": "info", "note": "Only the invoice+packing file is in this set, no contract. Since 2026-09-24 the price/currency/Incoterms are checked against the CONTRACT (not a PO), so a missing contract is an honest info-level 'not reconciled' note — expected." }
   ]
 }

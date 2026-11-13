@@ -149,10 +149,11 @@ describe('dangerous goods', () => {
 });
 
 describe('certificates', () => {
-  it('unsigned / unstamped / blank fields → warning naming the file and what is missing', () => {
+  it('unsigned / unstamped / blank fields → a note naming the file and what is missing (CoA: info)', () => {
     const r = documentRisks([doc('coa', 'quality_certificate', { signed: false, stamped: true })]);
     expect(r).toHaveLength(1);
-    expect(r[0]).toMatchObject({ code: 'certificate_incomplete', category: 'document_quality', severity: 'warning' });
+    // A CoA is often issued electronically without a signature — a note, not a problem.
+    expect(r[0]).toMatchObject({ code: 'certificate_incomplete', category: 'document_quality', severity: 'info' });
     expect(r[0]!.detail).toBe('«coa.pdf» — без підпису.');
   });
 

@@ -9,6 +9,7 @@ import {
   normIban,
   normUn,
 } from '../reconciliation/documentChecks.js';
+import { isLikelyDraft } from '../reconciliation/reconcile.js';
 
 /**
  * A compact, always-present digest of a shipment's already-extracted documents,
@@ -28,17 +29,41 @@ const FACTS_MAX = 3200;
 const str = (v: unknown): string | null =>
   typeof v === 'string' && v.trim() ? v.trim() : typeof v === 'number' ? String(v) : null;
 
+const DRAFT_NAME_RX = /draft|чернет|черновик|проект/i;
+const SDS_NAME_RX = /(^|[^a-z])m?sds([^a-z]|$)|safety[\s_-]*data/i;
+// «X_Страница_1.jpg», «X_page-0002.png», «X_Page_3.pdf»: one scanned page of a bigger document.
+const PER_PAGE_RX = /[_\s-](?:страница|сторінка|page)[_\s-]*0*\d+/i;
+const FILLED_RX = /заповнен|заполнен|filled/i;
+const TRANSPORT_FIELD_RX = /container|контейнер|seal|пломб|desp?atch|vessel|судно|b\/l|bill of lading|коносамент/i;
+const SIGNED_TYPES = new Set(['invoice', 'packing_list', 'contract', 'certificate_of_origin']);
+const EMPTY_TYPES = new Set(['invoice', 'packing_list', 'contract', 'certificate_of_origin', 'quality_certificate']);
+
 /**
  * The document's warning flags in words, e.g. «порожні поля Consignee, Batch No.;
  * без підпису; без печатки; небезпечний вантаж UN 1940 клас 8». Empty when none
- * (old extractions without the integrity fields have none).
+ * (old extractions without the integrity fields have none). Follows the same
+ * exemptions as the verdict checks: no integrity flags on drafts, safety data
+ * sheets and per-page scans; signature / stamp only on invoice, packing list,
+ * contract and certificates (a CoA is not flagged for them).
  */
-export function documentFlags(f: Record<string, unknown>): string[] {
+export function documentFlags(f: Record<string, unknown>, fileName?: string | null): string[] {
   const flags: string[] = [];
-  const empty = emptyFieldsOf(f);
-  if (empty.length) flags.push(`порожні поля ${empty.slice(0, 6).join(', ')}${empty.length > 6 ? ' …' : ''}`);
-  if (f.signed === false) flags.push('без підпису');
-  if (f.stamped === false) flags.push('без печатки');
+  const nm = fileName ?? '';
+  const docType = str(f.doc_type);
+  const isVet = !!f.vet_certificate;
+  const exempt = isLikelyDraft(nm) || DRAFT_NAME_RX.test(nm) || SDS_NAME_RX.test(nm);
+  const perPage = PER_PAGE_RX.test(nm);
+  const integrity = !exempt && !perPage;
+  const isCoa = docType === 'quality_certificate';
+
+  if (integrity && (EMPTY_TYPES.has(docType ?? '') || isVet)) {
+    const empty = emptyFieldsOf(f).filter((e) => !FILLED_RX.test(e) && !(isCoa && TRANSPORT_FIELD_RX.test(e)));
+    if (empty.length) flags.push(`порожні поля ${empty.slice(0, 6).join(', ')}${empty.length > 6 ? ' …' : ''}`);
+  }
+  if (integrity && !isCoa && (SIGNED_TYPES.has(docType ?? '') || isVet)) {
+    if (f.signed === false) flags.push('без підпису');
+    if (f.stamped === false) flags.push('без печатки');
+  }
   const dg = dangerousGoodsOf(f);
   if (dg && declaresDanger(dg)) {
     flags.push(
@@ -49,10 +74,13 @@ export function documentFlags(f: Record<string, unknown>): string[] {
   }
   const buyer = str(f.buyer);
   const seller = str(f.seller);
-  const toBuyer = bankAccountsOf(f).find(
-    (a) => a.beneficiary && sameCompany(a.beneficiary, buyer) && !sameCompany(a.beneficiary, seller),
-  );
-  if (toBuyer) flags.push(`реквізити на ім’я покупця «${toBuyer.beneficiary}»`);
+  // A contract lists both parties' requisites; only a payment document's bank block matters.
+  if (integrity && docType !== 'contract') {
+    const toBuyer = bankAccountsOf(f).find(
+      (a) => a.beneficiary && sameCompany(a.beneficiary, buyer) && !sameCompany(a.beneficiary, seller),
+    );
+    if (toBuyer) flags.push(`реквізити на ім’я покупця «${toBuyer.beneficiary}»`);
+  }
   return flags;
 }
 
@@ -69,6 +97,7 @@ interface DigestRow {
   version?: number | null;
   created_at?: string | Date | null;
   lot_id?: string | null;
+  head?: string | null;
 }
 
 export async function buildDocumentsDigest(workspaceId: string): Promise<string> {
@@ -76,6 +105,7 @@ export async function buildDocumentsDigest(workspaceId: string): Promise<string>
   // packing list's line_items can be hundreds of rows), on every chat turn.
   const { rows } = await query<DigestRow>(
     `SELECT f.name AS name, f.version AS version, f.created_at AS created_at, fo.lot_id AS lot_id,
+            (SELECT left(m.pages->0->>'markdown', 1500) FROM file_markdown m WHERE m.file_id = f.id) AS head,
             jsonb_build_object(
               'net_weight_kg', de.extracted_fields->'net_weight_kg',
               'gross_weight_kg', de.extracted_fields->'gross_weight_kg',
@@ -179,7 +209,7 @@ export async function buildDocumentsDigest(workspaceId: string): Promise<string>
     if (bank) parts.push(bank);
     const items = typeof f.line_items_count === 'number' ? f.line_items_count : 0;
     if (items) parts.push(`${items} позицій`);
-    const flags = documentFlags(f);
+    const flags = documentFlags(f, r.name);
     const head = `- ${r.name}${docType ? ` (${docType})` : ''}`;
     const warn = flags.length ? `; увага: ${flags.join('; ')}` : '';
     return {
@@ -198,6 +228,7 @@ export async function buildDocumentsDigest(workspaceId: string): Promise<string>
       version: r.version ?? null,
       createdAt: r.created_at ? new Date(r.created_at).toISOString() : null,
       lotId: r.lot_id ?? null,
+      head: r.head ?? null,
     })),
     { incotermIn: meta?.incoterm_in ?? null, incotermOut: meta?.incoterm_out ?? null },
     FACTS_MAX,

@@ -118,6 +118,15 @@ describe('computeFclLevel — Сборник 18 regressions', () => {
     expect(w.discrepancies.find((d) => d.field === 'hbl_versions_gross_weight_kg')?.kind).toBe('suspected');
   });
 
+  it('a house bill re-issued to another consignee (cargo split) is one note, not weight/places warnings', () => {
+    const toPrime = file('c1', 'HBL-C TELEX.pdf', { doc_type: 'transport', transport_doc_kind: 'hbl', transport_doc_number: 'BW26010230C', consignee_name: 'PRIME FORCE UK BUSINESS LIMITED', gross_weight_kg: 10720, packages_count: 420 });
+    const toZirka = file('c2', 'HBL-C TELEX аспаргинка.pdf', { doc_type: 'transport', transport_doc_kind: 'hbl', transport_doc_number: 'BW26010230C', consignee_name: 'PJSC «CHERVONA ZIRKA»', gross_weight_kg: 10150, packages_count: 400 });
+    const v = computeFclLevel({ ...base18, files: [toPrime, toZirka, hA1] });
+    const versions = v.discrepancies.filter((d) => d.field.startsWith('hbl_versions'));
+    expect(versions).toHaveLength(1);
+    expect(versions[0]).toMatchObject({ field: 'hbl_versions_consignee_name', severity: 'info' });
+  });
+
   it('one edited copy does not decide the sums: majority figures, findings only suspected', () => {
     const hC = (id: string, name: string, g: number) =>
       file(id, name, { doc_type: 'transport', transport_doc_kind: 'hbl', transport_doc_number: 'BW26010230C', consignor_name: 'Shandong Betaine Co Ltd', gross_weight_kg: g, packages_count: 4 });

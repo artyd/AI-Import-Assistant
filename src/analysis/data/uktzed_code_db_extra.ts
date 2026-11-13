@@ -39,4 +39,6 @@ export const UKTZED_CODE_DB_EXTRA: UktzedEntry[] = [
   { keys: ['ibuprofen', 'ібупрофен', 'ибупрофен'], code: '2916390000', name: 'Ібупрофен' },
   { keys: ['metformin', 'метформін', 'метформин'], code: '2925290000', name: 'Метформін' },
   { keys: ['omeprazole', 'омепразол'], code: '2933990000', name: 'Омепразол' },
+  // Повідон-йод — окрема речовина (комплекс ПВП з йодом), не ПВП 3905909000.
+  { keys: ['повідон-йод', 'повидон-йод', 'povidone iodine', 'povidone-iodine', 'pvp-i'], code: '3905999000', name: 'Повідон-йод' },
 ];

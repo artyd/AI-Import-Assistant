@@ -58,8 +58,32 @@ const PRICE_TOLERANCE = 0.005;
 const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null);
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
+// A line without a unit may count drums or pallets — never assume kilograms
+// (40 drums read as 40 kg against 1000 kg in the manifest was a red error).
 function isKg(unit: string | null): boolean {
-  return !unit || /^(kg|kgs|кг|kilo)/i.test(unit.trim());
+  return !!unit && /^(kg|kgs|кг|kilo)/i.test(unit.trim());
+}
+
+const DRAFT_RX = /draft|чернет|черновик|проект|\.(docx?|xlsx?|csv|txt|md)$/i;
+// «INV-123_Страница_1.jpg»: one page of a scanned invoice whose full copy is in the package.
+const PAGE_RX = /[_\s-](?:страница|сторінка|page)[_\s-]*0*\d+/i;
+
+/**
+ * One file per invoice: drafts and page scans out, then one per invoice number
+ * and seller (a copy, a «(1)» re-upload and the original state the same lines).
+ */
+function liveInvoices(invoices: InvoiceFile[]): InvoiceFile[] {
+  const issued = invoices.filter((f) => !DRAFT_RX.test(f.file_name) && !PAGE_RX.test(f.file_name));
+  const pool = issued.length > 0 ? issued : invoices;
+  const seen = new Set<string>();
+  return pool.filter((f) => {
+    const no = str(f.fields?.invoice_number);
+    if (!no) return true;
+    const key = `${no.toUpperCase().replace(/\s+/g, '')}|${(str(f.fields?.seller) ?? '').toLowerCase().replace(/[^a-z0-9а-яіїєґ]/gi, '')}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 /**
@@ -76,7 +100,7 @@ export function invoiceLines(files: InvoiceFile[], lotNames: Record<string, stri
   }
   for (const [lotId, invoices] of byLot) {
     const supplierInvoices = invoices.filter((f) => !isInternalCompany(str(f.fields?.seller)));
-    const chosen = supplierInvoices.length > 0 ? supplierInvoices : invoices;
+    const chosen = liveInvoices(supplierInvoices.length > 0 ? supplierInvoices : invoices);
     for (const f of chosen) {
       const items = Array.isArray(f.fields?.line_items) ? (f.fields!.line_items as Record<string, unknown>[]) : [];
       const base = { lot_id: lotId, lot_name: lotNames[lotId] ?? lotId, file_id: f.file_id, file_name: f.file_name };

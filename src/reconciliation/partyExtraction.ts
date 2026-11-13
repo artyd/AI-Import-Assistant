@@ -79,6 +79,19 @@ export interface Leg {
 
 // Documents whose seller/buyer describe a sale (a leg of the deal).
 const LEG_DOC_TYPES = new Set(['contract', 'invoice']);
+// Documents whose seller/buyer may name a deal party (transport papers name the
+// forwarder as shipper, so they are left out).
+const PARTY_DOC_TYPES = new Set(['contract', 'invoice', 'packing_list', 'certificate_of_origin', 'customs_declaration']);
+
+// Forwarders, carriers and brokers are never a side of the sale («iCargo
+// Internationale Logistik» became the intermediary, «ДСВ ЛОГІСТИКА» the supplier).
+const LOGISTICS_RX =
+  /logisti|логіст|логист|freight|forwarding|shipping|cargo|експедиц|экспедиц|перевізник|перевозчик|customs\s*broker|брокер|(^|[^a-zа-я])(dsv|dhl|kuehne|schenker|raben|ceva|maersk|msc|cma\s*cgm|fedex|ups|tnt|meest|нова\s*пошта)([^a-zа-я]|$)/i;
+export function isLogisticsCompany(name: string | null): boolean {
+  return !!name && LOGISTICS_RX.test(name);
+}
+// Our group companies (the usual intermediary / importer) — a chain through them is the deal.
+const OUR_COMPANY_RX = /prime\s*force|прайм\s*форс|agroup|а\s*груп/i;
 
 function norm(name: string): string {
   return name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
@@ -173,11 +186,16 @@ export async function analyzeParties(
     const origin = str(f.country_of_origin);
     // Scalar fields — the primary, most reliable signal.
     add(manufacturers, str(f.manufacturer), origin, src);
-    add(sellers, str(f.seller), null, src);
-    add(buyers, str(f.buyer), null, src);
-    const seller = str(f.seller);
-    const buyer = str(f.buyer);
-    if (seller && buyer && LEG_DOC_TYPES.has(str(f.doc_type) ?? '') && !sameEntity(seller, buyer)) {
+    const docType = str(f.doc_type) ?? '';
+    // A bill for services (freight, brokerage, storage) is not a sale of the goods.
+    const service = !!str(f.service_kind);
+    const seller = service || isLogisticsCompany(str(f.seller)) ? null : str(f.seller);
+    const buyer = service || isLogisticsCompany(str(f.buyer)) ? null : str(f.buyer);
+    if (PARTY_DOC_TYPES.has(docType)) {
+      add(sellers, seller, null, src);
+      add(buyers, buyer, null, src);
+    }
+    if (seller && buyer && LEG_DOC_TYPES.has(docType) && !sameEntity(seller, buyer)) {
       legs.push({ seller, buyer, source: src });
     }
     // Structured parties[] — only entries whose role we can classify; unknown
@@ -185,7 +203,8 @@ export async function analyzeParties(
     const parties = Array.isArray(f.parties) ? (f.parties as Record<string, unknown>[]) : [];
     for (const p of parties) {
       const cls = classifyPartyRole(str(p.role));
-      if (!cls) continue;
+      if (!cls || service || isLogisticsCompany(str(p.name))) continue;
+      if (cls !== 'manufacturer' && !PARTY_DOC_TYPES.has(docType)) continue;
       const bucket = cls === 'manufacturer' ? manufacturers : cls === 'seller' ? sellers : buyers;
       add(bucket, str(p.name), str(p.country), src);
     }
@@ -214,7 +233,9 @@ export function findResaleChain(
       const bucket = (name: string, sources: string[]): Bucket => ({ name, country: null, sources: new Set(sources) });
       const supplierSrc = legs.filter((l) => sameEntity(l.seller, up.seller) && sameEntity(l.buyer, up.buyer)).map((l) => l.source);
       const recipientSrc = legs.filter((l) => sameEntity(l.seller, down.seller) && sameEntity(l.buyer, down.buyer)).map((l) => l.source);
-      const weight = supplierSrc.length + recipientSrc.length;
+      // A chain through our own intermediary is the deal; another one is likely
+      // an unrelated document in the package.
+      const weight = supplierSrc.length + recipientSrc.length + (OUR_COMPANY_RX.test(down.seller) ? 1000 : 0);
       if (!best || weight > best.weight) {
         best = {
           supplier: bucket(up.seller, supplierSrc),

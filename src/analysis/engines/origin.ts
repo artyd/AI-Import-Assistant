@@ -194,7 +194,7 @@ export function inferOriginCandidateKeys(item: OriginItem): OriginKey[] {
   const has = (re: RegExp) => re.test(text);
 
   if (has(/рослин|растител|plant|botanic|botanical|herb|herbal|extract|екстракт|камед|gum\b|смол|resin|олія|масло|essential oil|leaf|root|flower|seed|wood|дерев|целюл|cellulose|starch|крохмал|pectin|пектин|alginate|альгін|каучук натураль/)) add('plant');
-  if (has(/тварин|животн|animal|bovine|porcine|fish|marine|gelatin|желатин|lanolin|wool|silk|casein|albumin|collagen|казеїн|альбумін|колаген|молоч|dairy|honey|мед|перли|pearls/)) add('animal');
+  if (has(/тварин|животн|animal|bovine|porcine|fish|marine|gelatin|желатин|lanolin|wool|silk|casein|albumin|collagen|казеїн|альбумін|колаген|молоч|dairy|honey|(?<![\p{L}])мед(?![\p{L}])|перли|pearls/u)) add('animal');
   if (has(/ferment|фермент|fermentation|enzyme|ензим|біотех|biotech|biosynthesis|штам|strain|microbial|мікроб|бактер|yeast|дріждж|antibiotic|антибіотик|vitamin|вітамін/)) add('fermentation');
   if (has(/mineral|мінерал|минерал|inorganic|неорган|salt|сіль|соль|oxide|оксид|hydroxide|гідроксид|гидроксид|acid|кислота|луг|ore|руда|metal|метал|cement|glass|ceramic|керамік/)) add('mineral');
   if (has(/synthetic|synthesis|синтет|синтез|semi\s*synthetic|напівсинт|полусинт|chemical modified|хімічн|химическ|polymer|полімер|plastic|пластмас|petro|нафто|petroleum|silicone|силікон|rubber synthetic/)) add('synthetic');
@@ -275,9 +275,12 @@ export function categoryChecks(category?: string | null): { eu: OriginCheck[]; u
     eu.push(c('Подвійне призначення: export control', 'red', 'Перевірити dual-use (Reg. 2021/821), Annex I та end-use/end-user перед транзитом.'));
     ua.push(c('Подвійне призначення: Держекспортконтроль', 'red', 'Можливий дозвіл ДСЕК; підтвердити кінцеве використання й кінцевого споживача.'));
   }
-  if (/афі|\bapi\b|фармац|активн\w* субстан|діюч\w* речовин/.test(cat)) {
-    eu.push(c('АФІ: GMP/письмове підтвердження', 'yellow', 'Підготувати GMP (EU/PIC-S/WHO), CoA, DMF/CEP за потреби.'));
-    ua.push(c('АФІ: Держлікслужба', 'red', 'Ліцензія імпортера + разовий дозвіл на ввезення (ЛЗ-2), реєстраційний контекст.'));
+  // АФІ — лише коли категорія явно каже «АФІ»/API/діюча речовина. Слово «фармацевтична»
+  // (ексципієнт, вазелінова олива, ментол, KI) АФІ не робить. Ліцензія/ЛЗ-2 — УМОВНА
+  // вимога (якщо ввозиться як АФІ для виробництва ліків), тому yellow, не red.
+  if (/(?<![\p{L}])афі(?![\p{L}])|\bapi\b|активн\w* субстан|діюч\w* речовин/iu.test(cat)) {
+    eu.push(c('АФІ: GMP/письмове підтвердження', 'yellow', 'Якщо ввозиться як АФІ: GMP (EU/PIC-S/WHO), CoA, DMF/CEP за потреби.'));
+    ua.push(c('АФІ: Держлікслужба (якщо ввозиться як АФІ)', 'yellow', 'Якщо товар декларується як АФІ для виробництва ліків — ліцензія імпортера + разовий дозвіл на ввезення (ЛЗ-2); для іншого призначення (ексципієнт, харчова, косметична, технічна) не застосовується.'));
   }
   if (/корм|feed|ветерин/.test(cat)) {
     ua.push(c('Кормове/вет: ДПСС', 'yellow', 'Держпродспоживслужба: реєстрація кормової добавки, вет-контроль за потреби.'));
@@ -305,11 +308,37 @@ export function originKeyFromType(t?: string | null): OriginKey | null {
 
 export interface OriginPin { key: OriginKey; confidence: 'high' | 'medium' | 'low' }
 
+/**
+ * Хімічно перероблена речовина (гл. 28/29/30/35/38/39 або метод виробництва —
+ * гідроліз/синтез/модифікація) НЕ є рослинною сировиною: фітосанітарний сертифікат
+ * для неї не вимагається, навіть якщо вихідна основа рослинна (МКЦ, ментол).
+ */
+function isProcessedSubstance(item: OriginItem): boolean {
+  const ch = normalizeHsCode(item.uctzedCode).slice(0, 2);
+  if (['28', '29', '30', '35', '38', '39'].includes(ch)) return true;
+  const text = [item.originType, item.productionMethod].filter(Boolean).join(' ').toLowerCase();
+  return /гідроліз|гідрогенізац|синтез|синтет|хімічн|модифік|полімериз/.test(text);
+}
+
+function softenPlantChecks(p: Omit<OriginProfile, 'recommended'>): Omit<OriginProfile, 'recommended'> {
+  const soft = (list: OriginCheck[]): OriginCheck[] =>
+    list.map((ch) =>
+      ch.status === 'red'
+        ? { item: `${ch.item} (лише для сировини)`, status: 'yellow', note: `Лише якщо ввозиться як рослинна сировина/екстракт; для хімічно переробленої речовини не вимагається. ${ch.note}` }
+        : ch,
+    );
+  return { ...p, euChecks: soft(p.euChecks), uaChecks: soft(p.uaChecks), transitChecks: soft(p.transitChecks) };
+}
+
 export function buildOriginOptions(item: OriginItem, pinned?: OriginPin | null): OriginProfile[] {
   const keys = inferOriginCandidateKeys(item);
   // Якщо база впевнено визначила походження — гарантуємо його присутність першим.
   if (pinned && !keys.includes(pinned.key)) keys.unshift(pinned.key);
-  const options = keys.map((k) => ({ ...originProfileByKey(k) }));
+  const processed = isProcessedSubstance(item);
+  const options = keys.map((k) => {
+    const prof = { ...originProfileByKey(k) };
+    return k === 'plant' && processed ? softenPlantChecks(prof) : prof;
+  });
   const recKey = pinned?.key ?? chooseRecommended(item, options);
   return options.map((o) => ({
     ...o,

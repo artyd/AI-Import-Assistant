@@ -5,6 +5,7 @@ import {
   hsCodesOf,
   importSectionOf,
   qdproMeasures,
+  QDPRO_PARSER_REV,
   type CachedHsRequirements,
   type HsRequirement,
 } from './qdproRequirements.js';
@@ -40,9 +41,13 @@ export async function loadCachedRequirements(codes: string[]): Promise<CachedHsR
     'SELECT hs_code, requirements FROM hs_requirements WHERE hs_code = ANY($1::text[]) ORDER BY hs_code',
     [codes],
   );
+  // Entries of an older parser revision are ignored (they may carry a sampling
+  // note or a conditional measure as a hard requirement) until re-fetched.
   return rows.map((r) => ({
     hs_code: r.hs_code,
-    requirements: Array.isArray(r.requirements) ? r.requirements.filter(isRequirement) : [],
+    requirements: Array.isArray(r.requirements)
+      ? r.requirements.filter(isRequirement).filter((q) => q.rev === QDPRO_PARSER_REV)
+      : [],
   }));
 }
 
@@ -105,8 +110,10 @@ export async function refreshShipmentHsRequirements(workspaceId: string, waitMs:
       if (codes.length === 0) return;
       const { rows: fresh } = await query<{ hs_code: string }>(
         `SELECT hs_code FROM hs_requirements
-         WHERE hs_code = ANY($1::text[]) AND fetched_at > now() - make_interval(days => $2)`,
-        [codes, FRESH_DAYS],
+         WHERE hs_code = ANY($1::text[]) AND fetched_at > now() - make_interval(days => $2)
+           -- an older parser revision is stale whatever its age
+           AND (jsonb_array_length(requirements) = 0 OR requirements->0->>'rev' = $3::text)`,
+        [codes, FRESH_DAYS, String(QDPRO_PARSER_REV)],
       );
       const have = new Set(fresh.map((r) => r.hs_code));
       const now = Date.now();

@@ -126,3 +126,27 @@ describe('checkFigures', () => {
     expect(checkFigures(figures, [doc('pl', 'Qty | 25 |')])).toEqual([]);
   });
 });
+
+describe('answer check: false-alarm guards', () => {
+  const raws = (t: string): string[] => extractFigures(t).map((f) => f.raw);
+
+  it('file names are not figures', () => {
+    expect(raws('Файли IMG_20250315_101112.jpg та UA-PF-17.pdf, scan_2025-03-15.png')).toEqual([]);
+  });
+
+  it('English month dates match numeric and English notation', () => {
+    expect(findValue('14.03.2027', [doc('inv', 'Date: 14-Mar-2027')]).status).toBe('found');
+    expect(findValue('14.03.2027', [doc('inv', 'Date: Mar 14, 2027')]).status).toBe('found');
+    expect(findValue('2027-03-14', [doc('inv', 'Issued 14 March 2027')]).status).toBe('found');
+    expect(findValue('14-Mar-2027', [doc('inv', 'Date: 14/03/2027')]).status).toBe('found');
+    expect(findValue('Mar 14, 2027', [doc('inv', 'Date: 14.03.2027')]).status).toBe('found');
+    expect(findValue('15.03.2027', [doc('inv', 'Date: 14-Mar-2027')]).status).toBe('not_found');
+    expect(raws('Дата інвойсу 14-Mar-2027.')).toEqual(['14-Mar-2027']);
+  });
+
+  it('a currency before the number is a strong match', () => {
+    expect(findValue('48 500,00 USD', [doc('inv', 'Total: USD 48,500.00')]).status).toBe('found');
+    expect(findValue('USD 48,500.00', [doc('inv', 'Total 48 500,00 USD')]).status).toBe('found');
+    expect(findValue('48 500,00 USD', [doc('inv', 'Total: 48,500.00')]).status).toBe('number_only');
+  });
+});

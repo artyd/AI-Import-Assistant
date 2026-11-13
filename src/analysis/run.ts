@@ -2,6 +2,7 @@ import { analyzeDeterministic } from './pipeline/deterministic.js';
 import { parseWorkbook, parseCSV } from './sheets/parse.js';
 import type { SheetInput } from './sheets/selectActualSheet.js';
 import { normalize } from './engines/classify.js';
+import { calibrateRisk } from './engines/risk.js';
 import { enrichWithAi, type AiEnrichInputItem } from './ai.js';
 // Type-only (erased at build) so the enrichment module — which pulls in config —
 // is loaded lazily, only when the integration is actually on (see below).
@@ -228,6 +229,7 @@ export async function runAnalysis(
     ];
 
     // Deterministic needsReview (from payment.ts) OR AI needsReview OR AI degraded.
+    const cal = calibrateRisk(ai?.risk ?? null, ai?.riskNote ?? '', l.resolved.precursor != null);
     const needsReview = l.calc.needsReview || (ai?.needsReview ?? enrichment.degraded);
 
     return {
@@ -247,8 +249,8 @@ export async function runAnalysis(
       dutyRate: l.calc.dutyRatePercent?.value ?? null,
       category,
       origin,
-      risk: ai?.risk ?? null,
-      riskNote: ai?.riskNote ?? '',
+      risk: cal.risk,
+      riskNote: cal.riskNote,
       cif: l.calc.customsValue.value,
       duty: l.calc.duty?.value ?? null,
       vat: l.calc.vat?.value ?? null,

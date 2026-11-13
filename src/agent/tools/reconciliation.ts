@@ -54,10 +54,11 @@ export async function runDiscrepancies(ctx: ToolContext, input: unknown = {}): P
     })
     .join('\n')
     .concat(
-      '\n\nЛегенда: «підтверджено» — обидва значення прочитано впевнено; «підозра» — перевір ' +
-        'у документі (read_file), перш ніж називати критичним. Рівень (error/warning/info) ' +
-        'передавай як є — НЕ підвищуй його. Якщо прочитаний документ спростовує знахідку, ' +
-        'скажи про це прямо.',
+      '\n\nЛегенда: це КАНДИДАТИ автоперевірки, не висновок. «підтверджено» — обидва значення ' +
+        'прочитано впевнено, але чи це помилка (а не різні плечі угоди, партії чи версії документа) — ' +
+        'вирішуєш ти, відкривши файли (read_file); «підозра» — тим паче. Рівень info — довідка, не ' +
+        'проблема. Рівень (error/warning/info) НЕ підвищуй. Якщо прочитаний документ спростовує ' +
+        'знахідку, скажи про це прямо.',
     );
   // Surface the source documents as citation chips (dedup by file name).
   const seen = new Set<string>();
@@ -113,6 +114,10 @@ export async function runRisks(ctx: ToolContext, input: unknown = {}): Promise<T
   }
   const result = risks
     .map((r) => `- [${r.severity}] ${r.title}: ${r.detail}`)
-    .join('\n');
+    .join('\n')
+    .concat(
+      '\n\nЛегенда: ризики автоперевірки — КАНДИДАТИ. Проблемою називай лише те, що підтвердив у файлі ' +
+        '(read_file) у цьому ході; info — довідка, не проблема.',
+    );
   return { result, summary: `Ризики: ${risks.length}`, citations: [] };
 }

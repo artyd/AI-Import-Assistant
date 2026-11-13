@@ -57,7 +57,7 @@ describe('refreshShipmentHsRequirements', () => {
     expect(lookup.mock.calls).toEqual([['2922410000']]);
     expect(upserts).toHaveLength(1);
     expect(upserts[0]?.[0]).toBe('2922410000');
-    expect(JSON.parse(String(upserts[0]?.[1]))).toEqual([{ key: 'veterinary_certificate', evidence: 'Ветеринарно-санітарний контроль' }]);
+    expect(JSON.parse(String(upserts[0]?.[1]))).toEqual([{ key: 'veterinary_certificate', evidence: 'Ветеринарно-санітарний контроль', rev: 2 }]);
   });
 
   it('a failing qdpro is swallowed and nothing is cached', async () => {

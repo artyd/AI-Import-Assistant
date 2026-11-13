@@ -2,7 +2,7 @@ import { query } from '../db/pool.js';
 import type { WorkspaceRow, WorkspaceStatus } from '../shipments/workspaceAccess.js';
 import { latestApproved, type InstructionVersion } from '../instruction/store.js';
 import { registryChecksForDocs, type RegistryFinding } from '../customs/drugRegistry.js';
-import { FEED_SQL_RX, VET_SQL_RX } from './feed.js';
+import { FEED_SQL_RX, VET_SQL_RX, isFeedEvidence } from './feed.js';
 import { loadCachedRequirements } from '../customs/hsRequirementsCache.js';
 import {
   HS_REQUIREMENT_KEYS,
@@ -14,9 +14,21 @@ import {
 } from '../customs/qdproRequirements.js';
 import { requiredDocumentTypes, resolveItems, type ChecklistItem, type LatestFileRow } from './checklist.js';
 import { findDiscrepancies, type Discrepancy } from './discrepancies.js';
-import type { ReconcileDoc } from './reconcile.js';
+import { isLikelyDraft, type ReconcileDoc } from './reconcile.js';
 import { assessRisks, type Risk } from './risks.js';
 import { documentRisks } from './documentChecks.js';
+import { isImportDeclaration } from './fcl.js';
+
+/**
+ * A customs declaration that is plainly NOT the Ukrainian import МД: a Chinese
+ * export declaration (报关单 / CHN…), an EU export MRN (26DE…), a file named
+ * «export». Unknown stays an МД (the old behaviour).
+ */
+export function isForeignDeclaration(f: Pick<ShipmentFile, 'file_id' | 'file_name' | 'folder_name' | 'fields'>): boolean {
+  if (isImportDeclaration({ file_id: f.file_id, file_name: f.file_name, file_type: '', folder_name: f.folder_name, lot_id: null, fields: f.fields })) return false;
+  const no = text(f.fields?.transport_doc_number) ?? text(f.fields?.registration_number) ?? '';
+  return /export|експорт|экспорт|报关|出口|\bCHN\d/i.test(`${f.file_name} ${no}`) || /^\d{2}(?!UA)[A-Z]{2}[A-Z0-9]{10,}$/i.test(no.replace(/\s+/g, ''));
+}
 
 /**
  * Shipment verdicts: completeness (checklist), discrepancies, risks and the
@@ -76,6 +88,17 @@ function docType(f: ShipmentFile): string | null {
   return f.fields ? text(f.fields.doc_type) : null;
 }
 
+/**
+ * УКТ ЗЕД codes that describe THIS shipment's goods: unrelated files (`other`,
+ * e.g. another product's registration) and drafts don't bring their codes'
+ * import requirements in.
+ */
+export function shipmentHsCodes(files: Pick<ShipmentFile, 'file_name' | 'fields'>[]): string[] {
+  return files
+    .filter((f) => (docType(f as ShipmentFile) ?? 'other') !== 'other' && !DRAFT_NAME_RX.test(f.file_name) && !isLikelyDraft(f.file_name))
+    .flatMap((f) => hsCodesOf(f.fields));
+}
+
 export async function loadShipmentSnapshot(ws: WorkspaceRow): Promise<ShipmentSnapshot> {
   const [required, { rows: files }, { rows: inter }, approvedInstruction] = await Promise.all([
     requiredDocumentTypes(ws),
@@ -121,7 +144,7 @@ export async function loadShipmentSnapshot(ws: WorkspaceRow): Promise<ShipmentSn
   // Official per-code requirements, from the cache only (no network here).
   let hsRequirements: CachedHsRequirements[] = [];
   try {
-    hsRequirements = await loadCachedRequirements([...new Set(files.flatMap((f) => hsCodesOf(f.fields)))]);
+    hsRequirements = await loadCachedRequirements([...new Set(shipmentHsCodes(files))]);
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error(`HS requirements load failed for workspace ${ws.id}:`, (err as Error).message);
@@ -168,7 +191,9 @@ const FEED_CATEGORY_RX = /feed|корм/i;
  * (signature and stamp still need a human eye), else 'missing'.
  */
 export function veterinaryItem(s: Pick<ShipmentSnapshot, 'ws' | 'files'>): ChecklistItem | null {
-  const feed = s.files.some((f) => f.feed_goods) || FEED_CATEGORY_RX.test(s.ws.product_category ?? '');
+  const feed =
+    s.files.some((f) => f.feed_goods && isFeedEvidence(docType(f), f.file_name)) ||
+    FEED_CATEGORY_RX.test(s.ws.product_category ?? '');
   if (!feed) return null;
   const cert = s.files.find((f) => f.vet_certificate && !DRAFT_NAME_RX.test(f.file_name));
   const basis = 'товар кормового призначення';
@@ -189,11 +214,15 @@ const LISTING_DOC_TYPES = new Set(['invoice', 'packing_list', 'contract', 'custo
  */
 export function hsRequirementItems(s: Pick<ShipmentSnapshot, 'files' | 'hsRequirements'>): ChecklistItem[] {
   if (!s.hsRequirements || s.hsRequirements.length === 0) return [];
-  const codes = new Set(s.files.flatMap((f) => hsCodesOf(f.fields)));
+  const codes = new Set(shipmentHsCodes(s.files));
   const byKey = new Map<HsRequirementKey, string[]>();
   for (const c of s.hsRequirements) {
     if (!codes.has(c.hs_code)) continue;
     for (const r of c.requirements) {
+      // A conditional measure (precursor permit only for listed substances, a
+      // risk-profile techregulation check, vet control only for veterinary use)
+      // is not a document every shipment of the code must carry.
+      if (r.conditional) continue;
       const list = byKey.get(r.key) ?? [];
       if (!list.includes(c.hs_code)) list.push(c.hs_code);
       byKey.set(r.key, list);
@@ -260,6 +289,8 @@ export function computeVerdicts(s: ShipmentSnapshot, now: number = Date.now()): 
       expiry_date: text(f.fields!.expiry_date),
       shipment_date: text(f.fields!.shipment_date),
       delivery_deadline: text(f.fields!.delivery_deadline),
+      document_date: text(f.fields!.document_date),
+      ua_import: docType(f) === 'customs_declaration' ? !isForeignDeclaration(f) : undefined,
     })),
     missing: checklist
       .filter((i) => i.status === 'missing')

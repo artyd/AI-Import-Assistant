@@ -6,10 +6,10 @@ import { analyzeParties } from '../reconciliation/partyExtraction.js';
 import { loadDeriveDocs } from '../reconciliation/incoterms.js';
 import { upsertParties } from '../reconciliation/parties.js';
 import { requiredDocumentTypes, persistChecklist, type ChecklistItem } from '../reconciliation/checklist.js';
-import { computeVerdicts, type ShipmentFile, type ShipmentVerdicts } from '../reconciliation/verdicts.js';
+import { computeVerdicts, shipmentHsCodes, type ShipmentFile, type ShipmentVerdicts } from '../reconciliation/verdicts.js';
 import { registryChecksForDocs, type RegistryFinding } from '../customs/drugRegistry.js';
 import { loadCachedRequirements } from '../customs/hsRequirementsCache.js';
-import { hsCodesOf, type CachedHsRequirements } from '../customs/qdproRequirements.js';
+import type { CachedHsRequirements } from '../customs/qdproRequirements.js';
 import { computeFclLevel, findManifestFile, matchHblsToLots, type FclLevelVerdicts, type FclLot } from '../reconciliation/fcl.js';
 import type { ManifestLine } from '../reconciliation/manifest.js';
 import { readStoredFile } from '../lib/storage.js';
@@ -115,7 +115,7 @@ export async function loadFclVerdicts(ws: WorkspaceRow, now: number = Date.now()
   // verdicts use the codes of its own files.
   let hsRequirements: CachedHsRequirements[] = [];
   try {
-    hsRequirements = await loadCachedRequirements([...new Set(files.flatMap((f) => hsCodesOf(f.fields)))]);
+    hsRequirements = await loadCachedRequirements([...new Set(shipmentHsCodes(files))]);
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error(`HS requirements load failed for FCL ${ws.id}:`, (err as Error).message);

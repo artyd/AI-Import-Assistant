@@ -394,6 +394,24 @@ export function computeFclLevel(input: FclLevelInput): FclLevelVerdicts {
 
   // Copies of one house bill that disagree (a re-issued or edited copy).
   for (const g of hblGroups) {
+    // A copy re-issued to ANOTHER consignee (the intermediary resold part of the
+    // cargo: «Сборник 18», BW26010230C to PRIME FORCE 420 pcs / to Червона Зірка
+    // 400 pcs) legitimately carries that consignee's part — one note, not three warnings.
+    const consignees = g.files.map((f) => f.fields?.consignee_name).filter((v): v is string => typeof v === 'string' && v.trim() !== '');
+    if (consignees.some((c) => !sameCompany(c, consignees[0]!))) {
+      const distinct = [...new Map(consignees.map((c) => [c.trim().toUpperCase(), c.trim()])).values()];
+      discrepancies.push({
+        field: 'hbl_versions_consignee_name',
+        expected: `${g.key}: ${String(g.canonical.fields?.consignee_name ?? '—')}`,
+        actual:
+          `коносамент переоформлено на іншого одержувача (${distinct.join(' / ')}); вага й місця в примірниках — ` +
+          'частина вантажу кожного одержувача, це не помилка. Для МД беріть примірник свого одержувача',
+        severity: 'info',
+        kind: 'suspected',
+        citations: g.files.map((f) => cite(f, 'transport', `${String(f.fields?.consignee_name ?? '—')}: ${String(f.fields?.gross_weight_kg ?? '—')} кг, ${String(f.fields?.packages_count ?? '—')} місць`)),
+      });
+      continue;
+    }
     for (const field of ['gross_weight_kg', 'packages_count', 'consignee_name'] as const) {
       const values = g.files.map((f) => f.fields?.[field]).filter((v) => v !== null && v !== undefined && v !== '');
       const distinct = [...new Set(values.map((v) => String(v).trim().toUpperCase()))];

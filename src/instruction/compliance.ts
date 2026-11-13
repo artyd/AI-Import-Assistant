@@ -1,5 +1,5 @@
 import type { Discrepancy } from '../reconciliation/reconcile.js';
-import { incotermCode } from '../reconciliation/reconcile.js';
+import { incotermCode, isDraftDoc } from '../reconciliation/reconcile.js';
 import { sameCompany } from '../shipments/contextDerive.js';
 import type { InstructionDraft } from './types.js';
 
@@ -32,6 +32,22 @@ const PRESENCE: Record<string, { types?: string[]; name?: RegExp }> = {
   gmp: { name: /\bgmp\b/i },
 };
 
+// One city, many spellings (Ukrainian / Russian / transliterations / airports).
+const CITY_ALIASES: string[][] = [
+  ['kyiv', 'kiev', 'київ', 'киев', 'boryspil', 'borispol', 'бориспіль', 'kbp'],
+  ['odesa', 'odessa', 'одеса', 'одесса'],
+  ['lviv', 'lvov', 'львів', 'львов'],
+  ['kharkiv', 'kharkov', 'харків', 'харьков'],
+  ['dnipro', 'dnepr', 'дніпро', 'днепр'],
+  ['bila tserkva', 'bila tzerkva', 'belaya tserkov', 'біла церква', 'белая церковь'],
+];
+function sameCity(stated: string, want: string): boolean {
+  const s = stated.toLowerCase();
+  if (s.includes(want)) return true;
+  const group = CITY_ALIASES.find((g) => g.some((a) => want.includes(a)));
+  return !!group && group.some((a) => s.includes(a));
+}
+
 const cite = (d: ComplianceDoc, value: string) => ({
   file_id: d.file_id,
   file_name: d.file_name,
@@ -54,6 +70,8 @@ export function checkInstructionCompliance(draft: InstructionDraft, docs: Compli
     for (const d of docs) {
       if (!['transport', 'certificate_of_origin', 'packing_list'].includes(d.doc_type ?? '')) continue;
       if (str(d.fields.transport_mode) === 'courier') continue;
+      // A draft bill / CO may still carry the old consignee; the issued one decides.
+      if (isDraftDoc(d.file_name)) continue;
       const parties = Array.isArray(d.fields.parties) ? (d.fields.parties as { name?: string; role?: string }[]) : [];
       const consignee = parties.find((p) => p.role && CONSIGNEE_ROLE.test(p.role) && p.name);
       if (consignee?.name && !sameCompany(consignee.name, want)) wrong.push({ d, name: consignee.name });
@@ -98,7 +116,7 @@ export function checkInstructionCompliance(draft: InstructionDraft, docs: Compli
       .filter((d) => ['invoice', 'packing_list', 'transport'].includes(d.doc_type ?? '') && str(d.fields.transport_mode) !== 'courier')
       .map((d) => ({ d, v: str(d.fields.final_destination) }))
       .filter((x): x is { d: ComplianceDoc; v: string } => !!x.v);
-    const off = stated.filter((x) => !x.v.toLowerCase().includes(wantDest));
+    const off = stated.filter((x) => !sameCity(x.v, wantDest));
     if (stated.length && off.length === stated.length) {
       out.push({
         field: 'instruction',
@@ -119,7 +137,8 @@ export function checkInstructionCompliance(draft: InstructionDraft, docs: Compli
     const present = docs.some(
       (d) =>
         (rule.types && rule.types.includes(d.doc_type ?? '')) ||
-        (rule.name && rule.name.test(`${d.file_name ?? ''} ${str(d.fields.extraction_note) ?? ''}`)) ||
+        // «Paracetamol_SDS.pdf»: `\b` does not fire next to «_», so separators become spaces.
+        (rule.name && rule.name.test(`${d.file_name ?? ''} ${str(d.fields.extraction_note) ?? ''}`.replace(/[_.\-]+/g, ' '))) ||
         (item.key === 'insurance' && str(d.fields.service_kind) === 'insurance'),
     );
     if (!present) missing.push(item.labelUk || item.label);

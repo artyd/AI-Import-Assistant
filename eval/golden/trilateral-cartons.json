@@ -62,8 +62,8 @@
     {
       "field": "hs_code",
       "kind": "suspected",
-      "severity": "warning",
-      "note": "HS code absent from the invoice"
+      "severity": "info",
+      "note": "HS code absent from the invoice — a note, the declarant classifies"
     },
     {
       "field": "markup",

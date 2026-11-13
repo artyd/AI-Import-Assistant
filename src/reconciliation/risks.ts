@@ -47,6 +47,7 @@ export { parseFlexibleDate } from '../lib/dates.js';
 import { parseFlexibleDate } from '../lib/dates.js';
 
 const DOC_LABELS: Record<string, string> = {
+  other: 'Документ',
   invoice: 'Інвойс',
   packing_list: 'Пакувальний лист',
   contract: 'Контракт',
@@ -120,6 +121,33 @@ export interface RiskExtraction {
   expiry_date: string | null;
   shipment_date: string | null;
   delivery_deadline: string | null;
+  /** Issue date — for a customs declaration, the day the goods were declared. */
+  document_date?: string | null;
+  /**
+   * For a customs declaration: false when it is NOT the Ukrainian import МД (a
+   * Chinese / EU export declaration also lands in `customs_declaration`).
+   */
+  ua_import?: boolean;
+}
+
+/** The Ukrainian import МД — the goods are declared (export papers don't count). */
+const isUaImport = (r: RiskExtraction): boolean => r.doc_type === 'customs_declaration' && r.ua_import !== false;
+
+// A draft («Health certificate draft.doc») is not the certificate the goods travel with.
+const DRAFT_NAME_RX = /draft|чернет|черновик|проект/i;
+
+/**
+ * The day certificate validity is judged on. Once the goods are declared (a
+ * customs declaration is in the package) that is the declaration day — a
+ * certificate that expired months AFTER clearance is history, not a risk (live
+ * test «Сборник 18»: a cleared shipment flagged «прострочено, минуло 103 дн.»).
+ * null = declared, but the declaration date is unreadable: no expiry verdict.
+ */
+function validityReference(extractions: RiskExtraction[], now: number): number | null {
+  const decl = extractions.filter(isUaImport);
+  if (decl.length === 0) return now;
+  const dates = decl.map((r) => (r.document_date ? parseFlexibleDate(r.document_date) : null)).filter((t): t is number => t !== null);
+  return dates.length ? Math.max(...dates) : null;
 }
 
 export interface RiskInput {
@@ -139,20 +167,33 @@ export function assessRisks({ extractions, missing, discrepancies, registry, fla
   const risks: Risk[] = [...flags];
   // A customs declaration in the package means the goods have been declared —
   // a passed delivery date is history then, not a pending risk.
-  const declared = extractions.some((r) => r.doc_type === 'customs_declaration');
+  const declared = extractions.some(isUaImport);
 
-  // 1. Expiry / validity of certificates & licences.
+  // 1. Expiry / validity of certificates & licences — on the declaration day once
+  //    the goods are declared, today otherwise; drafts are not the certificate.
+  const ref = validityReference(extractions, now);
   let earliestDeadline: { days: number; name: string } | null = null;
   for (const r of extractions) {
-    if (r.expiry_date) {
-      const d = daysUntil(r.expiry_date, now);
+    if (r.expiry_date && ref !== null && !DRAFT_NAME_RX.test(r.file_name)) {
+      const d = daysUntil(r.expiry_date, ref);
       if (d !== null) {
-        if (d < 0) {
+        if (d < 0 && declared) {
           risks.push({
             code: 'cert_expired',
             category: 'expiry',
             severity: 'error',
-            title: `${label(r.doc_type ?? 'документ')} прострочено`,
+            title: `${label(r.doc_type ?? 'other')} був прострочений на дату митного оформлення`,
+            detail: `«${r.file_name}» — дата закінчення ${r.expiry_date}, раніше за дату МД.`,
+            source_file_id: r.file_id,
+          });
+        } else if (declared) {
+          // Valid on the declaration day: nothing to act on.
+        } else if (d < 0) {
+          risks.push({
+            code: 'cert_expired',
+            category: 'expiry',
+            severity: 'error',
+            title: `${label(r.doc_type ?? 'other')} прострочено`,
             detail: `«${r.file_name}» — дата закінчення ${r.expiry_date} (минуло ${-d} дн.).`,
             source_file_id: r.file_id,
           });
@@ -161,7 +202,7 @@ export function assessRisks({ extractions, missing, discrepancies, registry, fla
             code: 'cert_expiring',
             category: 'expiry',
             severity: 'warning',
-            title: `${label(r.doc_type ?? 'документ')} скоро завершиться`,
+            title: `${label(r.doc_type ?? 'other')} скоро завершиться`,
             detail: `«${r.file_name}» — дійсний ще ${d} дн. (до ${r.expiry_date}).`,
             source_file_id: r.file_id,
           });

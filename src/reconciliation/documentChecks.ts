@@ -56,9 +56,13 @@ export function dangerousGoodsOf(f: Fields | null | undefined): ExtractedDangero
   };
 }
 
+// The extractor sometimes lists a field and then says it is filled after all
+// («Consignee (ні, заповнено)») — such an entry is not a blank field.
+const NOT_EMPTY_RX = /заповнен|filled|не порожн|\(ні[,)\s]/i;
+
 export function emptyFieldsOf(f: Fields | null | undefined): string[] {
   const raw = f?.empty_fields;
-  return Array.isArray(raw) ? raw.map(str).filter((s): s is string => !!s) : [];
+  return Array.isArray(raw) ? raw.map(str).filter((s): s is string => !!s && !NOT_EMPTY_RX.test(s)) : [];
 }
 
 /** IBAN / account number without spaces, uppercased. */
@@ -224,6 +228,9 @@ const NUMBER_FIELD_RX = /\b(no|nr|num|number)\b|№|#|номер/i;
 const CONSIGNEE_FIELD_RX = /consignee|вантажоодерж|грузополуч|получател/i;
 const BATCH_FIELD_RX = /batch|\blot\b|парті|парти|сері/i;
 const DATE_FIELD_RX = /date|дата/i;
+const OPTIONAL_FIELD_RX =
+  /(^|[^a-z])(l\/?c|letter of credit|vessel|flight|voyage|other ref|buyer'?s? ref|ref\.?|reference|order|p\.?o\.?|marks|notify|remarks?|pre-?carriage|place of receipt)([^a-z]|$)|акредитив|рейс|судн/i;
+const TRANSPORT_FIELD_RX = /container|seal|despatch|dispatch|vessel|b\/l|bill of lading|контейнер|пломб|відвантаж|отгруз/i;
 
 /** Ends the text with one full stop ("Batch No." must not become "Batch No.."). */
 function sentence(s: string): string {
@@ -237,7 +244,9 @@ function joinNames(list: ReconcileDoc[]): string {
 /** Payment risk: a bank block made out to the buyer. */
 function buyerBankRisks(docs: ReconcileDoc[]): Risk[] {
   const out: Risk[] = [];
-  for (const d of docs.filter(isPaymentDoc)) {
+  // A contract lists BOTH parties' bank details in its requisites section; that
+  // is not a payment instruction (live test «Сборник 18»: «Контракт.pdf»).
+  for (const d of docs.filter((x) => isPaymentDoc(x) && !hasType(x, 'contract'))) {
     const block = bankAccountsOf(d.fields).find((a) => isBuyerBlock(a, d));
     if (!block) continue;
     out.push({
@@ -325,7 +334,9 @@ function certificateRisks(docs: FlagDoc[]): Risk[] {
     const gaps: string[] = [];
     if (d.fields.signed === false) gaps.push('без підпису');
     if (d.fields.stamped === false) gaps.push('без печатки');
-    const empty = emptyFieldsOf(d.fields);
+    // A certificate of analysis need not name the container, seal or dispatch date.
+    const quality = d.doc_type === 'quality_certificate';
+    const empty = emptyFieldsOf(d.fields).filter((f) => !(quality && TRANSPORT_FIELD_RX.test(f)));
     if (empty.length) gaps.push(`порожні поля: ${empty.join(', ')}`);
     if (gaps.length === 0) continue;
     const kind = d.vet_certificate && d.doc_type !== 'quality_certificate' && d.doc_type !== 'certificate_of_origin'
@@ -334,7 +345,9 @@ function certificateRisks(docs: FlagDoc[]): Risk[] {
     out.push({
       code: 'certificate_incomplete',
       category: 'document_quality',
-      severity: 'warning',
+      // A CoA is often issued electronically without a signature or stamp — a
+      // note; certificates of origin and veterinary certificates stay a warning.
+      severity: quality ? 'info' : 'warning',
       title: `${kind} оформлено не повністю`,
       detail: sentence(`«${name(d)}» — ${gaps.join('; ')}`),
       source_file_id: d.file_id,
@@ -348,7 +361,9 @@ function emptyFieldRisks(docs: ReconcileDoc[]): Risk[] {
   const out: Risk[] = [];
   for (const d of docs) {
     if (!['invoice', 'packing_list', 'contract'].includes(d.doc_type ?? '') || isDraft(d)) continue;
-    const empty = emptyFieldsOf(d.fields);
+    // Optional boxes of an invoice template (letter of credit, vessel / flight,
+    // other / buyer's reference, order, marks) are blank on most valid invoices.
+    const empty = emptyFieldsOf(d.fields).filter((f) => !OPTIONAL_FIELD_RX.test(f));
     // Batch / date first: «Batch No.» is a batch field, not the document number.
     const minor = empty.filter((f) => BATCH_FIELD_RX.test(f) || DATE_FIELD_RX.test(f));
     const major = empty.filter((f) => !minor.includes(f) && (NUMBER_FIELD_RX.test(f) || CONSIGNEE_FIELD_RX.test(f)));

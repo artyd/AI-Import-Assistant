@@ -35,9 +35,9 @@ describe('categoryChecks', () => {
     expect(ch.eu.some((x) => /export control/i.test(x.item) && x.status === 'red')).toBe(true);
     expect(ch.ua.some((x) => /Держекспортконтроль/.test(x.item))).toBe(true);
   });
-  it('АФІ → Держлікслужба (red) в UA', () => {
+  it('АФІ → Держлікслужба (умовна, yellow) в UA', () => {
     const ch = categoryChecks('АФІ (активна фармацевтична субстанція)');
-    expect(ch.ua.some((x) => /Держлікслужба/.test(x.item) && x.status === 'red')).toBe(true);
+    expect(ch.ua.some((x) => /Держлікслужба/.test(x.item) && x.status === 'yellow')).toBe(true);
   });
   it('нейтральна категорія → без спец-перевірок', () => {
     const ch = categoryChecks('Промислова хімія');

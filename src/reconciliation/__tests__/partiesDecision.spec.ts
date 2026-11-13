@@ -61,3 +61,21 @@ describe('decideParties — 2 vs 3 sides from the commercial legs', () => {
     expect(r.suggestions[0]).toMatchObject({ role: 'sender', uncertain_role: true });
   });
 });
+
+describe('parties: forwarders are not deal sides; our intermediary wins', () => {
+  it('a forwarder name is logistics; a chain through Prime Force beats an unrelated one', async () => {
+    const { isLogisticsCompany, findResaleChain } = await import('../partyExtraction.js');
+    expect(isLogisticsCompany('iCargo Internationale Logistik und Handels GmbH')).toBe(true);
+    expect(isLogisticsCompany('ТОВАРИСТВО З ОБМЕЖЕНОЮ ВІДПОВІДАЛЬНІСТЮ "ДСВ ЛОГІСТИКА"')).toBe(true);
+    expect(isLogisticsCompany("Xi'an TaiCheng Chem Co., Ltd")).toBe(false);
+    const legs = [
+      { seller: 'Other Maker', buyer: 'Some Trader GmbH', source: 'a1' },
+      { seller: 'Other Maker', buyer: 'Some Trader GmbH', source: 'a2' },
+      { seller: 'Some Trader GmbH', buyer: 'Unrelated Buyer', source: 'a3' },
+      { seller: 'Some Trader GmbH', buyer: 'Unrelated Buyer', source: 'a4' },
+      { seller: "Xi'an TaiCheng Chem", buyer: 'PRIME FORCE UK BUSINESS LIMITED', source: 'b1' },
+      { seller: 'PRIME FORCE UK BUSINESS LIMITED', buyer: 'NOVALAIT LLC', source: 'b2' },
+    ];
+    expect(findResaleChain(legs)?.intermediary.name).toBe('PRIME FORCE UK BUSINESS LIMITED');
+  });
+});
