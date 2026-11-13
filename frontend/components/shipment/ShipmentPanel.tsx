@@ -4,8 +4,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, ApiError, downloadBlob } from "@/lib/api";
 import type {
-  ChecklistItem,
-  Discrepancy,
   Party,
   PartyRole,
   PartySuggestion,
@@ -23,8 +21,11 @@ import {
 import { Combobox } from "../ui/Combobox";
 import { VerificationModal } from "./VerificationModal";
 import { IconDownload, IconSpinner } from "../ui/icons";
-import { PARTY_SLOTS, STATUS_OPTIONS, RISK_CLS, CONTRACT_TYPE_LABEL, ROLE_SYNONYMS } from "./labels";
-import { type Result, ResultView, lbl, CompletenessHeader, Field, Section } from "./parts";
+import { PARTY_SLOTS, STATUS_OPTIONS, CONTRACT_TYPE_LABEL, ROLE_SYNONYMS } from "./labels";
+import { RisksBlock } from "./Findings";
+import { requestErrorText, statusCaveat, summarizeFindings } from "@/lib/shipment/findings";
+import { type Result, ResultView, lbl, AskButtons, CompletenessHeader, Field, Section } from "./parts";
+import { askInChat, askPrompts } from "@/lib/chat/askBus";
 import { useShipmentData } from "@/lib/shipment/shipmentData";
 
 const countryOptions = COUNTRIES.map((c: Country) => ({ value: c.uk, label: c.uk }));
@@ -51,6 +52,8 @@ export function ShipmentPanel({
   const [parties, setParties] = useState<Party[]>([]);
   // Server data of the shipment (shared store; the page invalidates it).
   const risks = useShipmentData((s) => s.risks);
+  const risksFailed = useShipmentData((s) => s.risksFailed);
+  const checklistFailed = useShipmentData((s) => s.checklistFailed);
   const serverParties = useShipmentData((s) => s.parties);
   const revision = useShipmentData((s) => s.revision);
   const reloadShipmentRisks = useShipmentData((s) => s.reloadRisks);
@@ -123,7 +126,7 @@ export function ShipmentPanel({
       try {
         await fn();
       } catch (err) {
-        const msg = err instanceof ApiError ? err.code : "Помилка запиту";
+        const msg = requestErrorText(err instanceof ApiError ? err.code : undefined);
         setResult({ kind: "error", body: msg });
       } finally {
         setBusy(null);
@@ -307,22 +310,9 @@ export function ShipmentPanel({
       router.push("/workspaces");
     });
 
-  const loadChecklist = () =>
-    run("checklist", async () => {
-      const r = await api<{ items: ChecklistItem[]; status: string }>(
-        `/api/workspaces/${workspaceId}/checklist`
-      );
-      setResult({ kind: "checklist", items: r.items, status: r.status });
-      onPatch({ status: r.status as WorkspaceStatus });
-    });
-
-  const loadDiscrepancies = () =>
-    run("discrepancies", async () => {
-      const r = await api<{ discrepancies: Discrepancy[] }>(
-        `/api/workspaces/${workspaceId}/discrepancies`
-      );
-      setResult({ kind: "discrepancies", items: r.discrepancies });
-    });
+  // Sidebar questions go to the chat: Штурман answers there with its tools and the files.
+  const ask = (text: string) => askInChat(text, "supply");
+  const scope = { kind: "shipment" } as const;
 
   // One-page management report: built server-side (facts + cached AI summary),
   // downloaded as PDF, or opened as HTML in a new tab.
@@ -372,17 +362,36 @@ export function ShipmentPanel({
   const clearSlotParty = (role: PartyRole) =>
     setParties((cur) => cur.filter((p) => p.role !== role));
 
+  const caveat = risks ? statusCaveat(workspace.status, summarizeFindings(risks)) : null;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
       <div style={{ overflowY: "auto", padding: "14px 16px", display: "flex", flexDirection: "column", gap: 18 }}>
         {/* Completeness — mock's progress header */}
+        {/* Feedback of the last action (save, autofill, error) — here, not under the fold. */}
+        {result ? (
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-start", background: "var(--hover)", borderRadius: 8, padding: "8px 10px" }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <ResultView result={result} />
+            </div>
+            <button type="button" className="btn" style={{ height: 24, padding: "0 8px", fontSize: 12 }} onClick={() => setResult(null)} aria-label="Закрити">
+              ✕
+            </button>
+          </div>
+        ) : null}
+
         {checklist && checklist.length > 0 && (
           <CompletenessHeader
             items={checklist}
             onExport={exportZip}
             exporting={busy === "export"}
+            onAskMissing={(label) => ask(askPrompts.missing(label, scope))}
           />
         )}
+
+        {checklistFailed && !checklist ? (
+          <div style={{ fontSize: 13, color: "var(--warn)" }}>Не вдалося завантажити комплектність — перевірте з’єднання і відкрийте панель знову.</div>
+        ) : null}
 
         {/* Status */}
         <Section title="Статус">
@@ -401,6 +410,34 @@ export function ShipmentPanel({
           <div style={{ fontSize: 12, color: "var(--muted)" }}>
             Заповненість даних: {workspace.intake_complete ? "повна" : "неповна"}
           </div>
+          {caveat ? <div style={{ fontSize: 12, color: "var(--warn)" }}>{caveat}</div> : null}
+        </Section>
+
+        {/* Ask Штурман — each button becomes a message in the chat. */}
+        <Section title="Запитати Штурмана">
+          <AskButtons
+            primary={{ label: "Що не так з документами?", onClick: () => ask(askPrompts.check(scope)) }}
+            items={[
+              { label: "Комплектність", onClick: () => ask(askPrompts.completeness(scope)) },
+              { label: "Розбіжності", onClick: () => ask(askPrompts.discrepancies(scope)) },
+              { label: "Ризики", onClick: () => ask(askPrompts.risks(scope)) },
+              { label: "Що робити далі?", onClick: () => ask(askPrompts.next(scope)) },
+            ]}
+          />
+        </Section>
+
+        {/* Risks — proactive current + upcoming problems (verdicts before settings). */}
+        <Section title="Ризики">
+          {risks === null && risksFailed ? (
+            <div style={{ fontSize: 13, color: "var(--warn)" }}>Не вдалося завантажити ризики — натисніть «Оновити ризики».</div>
+          ) : risks === null ? (
+            <div style={{ fontSize: 12, color: "var(--muted)" }}>Аналіз ризиків…</div>
+          ) : (
+            <RisksBlock risks={risks} title="" onAsk={ask} />
+          )}
+          <button className="btn" onClick={reloadRisks} disabled={busy === "risks"} style={{ height: 30 }}>
+            {busy === "risks" ? <IconSpinner size={15} /> : null} Оновити ризики
+          </button>
         </Section>
 
         {/* Intake */}
@@ -657,33 +694,12 @@ export function ShipmentPanel({
           </button>
         </Section>
 
-        {/* Risks — proactive current + upcoming problems */}
-        <Section title="Ризики">
-          {risks === null ? (
-            <div style={{ fontSize: 12, color: "var(--muted)" }}>Аналіз ризиків…</div>
-          ) : risks.length === 0 ? (
-            <div style={{ fontSize: 13, color: "var(--ok)" }}>Ризиків не виявлено.</div>
-          ) : (
-            risks.map((r, i) => (
-              <div key={i} style={{ display: "flex", flexDirection: "column", gap: 2, borderLeft: `3px solid ${RISK_CLS[r.severity]}`, paddingLeft: 8 }}>
-                <span style={{ fontSize: 13, fontWeight: 600, color: RISK_CLS[r.severity] }}>{r.title}</span>
-                <span style={{ fontSize: 12, color: "var(--muted)" }}>{r.detail}</span>
-              </div>
-            ))
-          )}
-          <button className="btn" onClick={reloadRisks} disabled={busy === "risks"} style={{ height: 30 }}>
-            {busy === "risks" ? <IconSpinner size={15} /> : null} Оновити ризики
-          </button>
-        </Section>
-
         {/* Actions */}
         <Section title="Дії">
           <button className="btn btn-primary" onClick={() => setVerifyOpen(true)}>
             Перевірити поля документів
           </button>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-            <button className="btn" onClick={loadChecklist} disabled={busy === "checklist"}>Комплектність</button>
-            <button className="btn" onClick={loadDiscrepancies} disabled={busy === "discrepancies"}>Розбіжності</button>
             <button className="btn" onClick={() => router.push(`/workspaces/${workspaceId}/instruction`)} title="Конструктор інструкції постачальнику">Інструкція</button>
             <button className="btn" onClick={exportZip} disabled={busy === "export"}>Архів (.zip)</button>
           </div>
@@ -717,7 +733,6 @@ export function ShipmentPanel({
           </button>
         </Section>
 
-        {result && <ResultView result={result} />}
       </div>
       {verifyOpen && (
         <VerificationModal

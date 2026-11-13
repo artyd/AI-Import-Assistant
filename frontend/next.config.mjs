@@ -21,7 +21,9 @@ const csp = [
   `connect-src 'self' https://nominatim.openstreetmap.org${isDev ? " ws: wss:" : ""}`,
   "object-src 'self' blob:",
   "frame-src 'self' blob:",
-  "frame-ancestors 'none'",
+  // Prod: never framed (clickjacking). Dev: allowed, so an IDE / Zveno preview
+  // pane can show the running app.
+  ...(isDev ? [] : ["frame-ancestors 'none'"]),
   "base-uri 'self'",
   "form-action 'self'",
 ].join("; ");
@@ -30,7 +32,7 @@ const securityHeaders = [
   { key: "Content-Security-Policy", value: csp },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "same-origin" },
-  { key: "X-Frame-Options", value: "DENY" },
+  ...(isDev ? [] : [{ key: "X-Frame-Options", value: "DENY" }]),
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
   // Browsers ignore HSTS on plain-http responses, so this is safe in dev; in prod
   // (HTTPS only, host Caddy) it stops downgrade-to-http on later visits.

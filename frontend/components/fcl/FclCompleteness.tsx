@@ -5,10 +5,13 @@ import { useRouter } from "next/navigation";
 import { api, downloadBlob } from "@/lib/api";
 import type { FclOverview, LotDetail } from "@/lib/types";
 import { useLotDetail } from "@/lib/fcl/useFcl";
-import { LOT_STATUS_LABEL, MATCH_LABEL, resolveScope } from "@/lib/fcl/fcl";
+import { LIGHT_COLOR, LOT_STATUS_LABEL, MATCH_LABEL, fclCounts, lotRows, resolveScope } from "@/lib/fcl/fcl";
+import { askInChat, askPrompts, type AskScope } from "@/lib/chat/askBus";
+import { statusCaveat, summarizeFindings } from "@/lib/shipment/findings";
+import { DiscrepanciesBlock, RisksBlock } from "../shipment/Findings";
 import { INCOTERMS_2020, TRANSPORT_MODES } from "@/lib/shipmentOptions";
-import { ResultView, Section, Field, lbl } from "../shipment/parts";
-import { CHECK_CLS, CHECK_LABEL, CONTRACT_TYPE_LABEL, PARTY_SLOTS, RISK_CLS } from "../shipment/labels";
+import { AskButtons, CompletenessHeader, Section, Field, lbl } from "../shipment/parts";
+import { CONTRACT_TYPE_LABEL, PARTY_SLOTS } from "../shipment/labels";
 import { IconSpinner } from "../ui/icons";
 
 /**
@@ -20,6 +23,7 @@ export function FclCompleteness({
   fclId,
   number,
   overview,
+  loading = false,
   version,
   reload,
   scope,
@@ -29,6 +33,7 @@ export function FclCompleteness({
   fclId: string;
   number: string;
   overview: FclOverview | null;
+  loading?: boolean;
   version: number;
   reload: () => Promise<void>;
   scope: string;
@@ -37,12 +42,16 @@ export function FclCompleteness({
 }) {
   const lots = overview?.lots ?? [];
   const current = resolveScope(scope, lots);
-  const detail = useLotDetail(fclId, current === "fcl" ? null : current, version);
+  const { detail, failed: detailFailed } = useLotDetail(fclId, current === "fcl" ? null : current, version);
 
   if (!overview) {
-    return (
+    return loading ? (
       <div style={{ padding: 18, color: "var(--muted)", fontSize: 13 }}>
         <IconSpinner size={14} /> Завантажую…
+      </div>
+    ) : (
+      <div style={{ padding: 18, color: "var(--warn)", fontSize: 13 }}>
+        Не вдалося завантажити перевірку збірника — це не означає, що все гаразд. Спробуйте відкрити панель знову.
       </div>
     );
   }
@@ -58,9 +67,11 @@ export function FclCompleteness({
         ))}
       </select>
       {current === "fcl" ? (
-        <FclScope fclId={fclId} number={number} overview={overview} reload={reload} notify={notify} />
+        <FclScope fclId={fclId} number={number} overview={overview} reload={reload} notify={notify} onScope={onScope} />
       ) : detail ? (
-        <LotScope fclId={fclId} detail={detail} reload={reload} notify={notify} />
+        <LotScope fclId={fclId} detail={detail} reload={reload} notify={notify} onBack={() => onScope("fcl")} />
+      ) : detailFailed ? (
+        <div style={{ color: "var(--warn)", fontSize: 13 }}>Не вдалося завантажити партію — це не означає, що все гаразд.</div>
       ) : (
         <div style={{ color: "var(--muted)", fontSize: 13 }}>
           <IconSpinner size={14} /> Завантажую партію…
@@ -70,8 +81,35 @@ export function FclCompleteness({
   );
 }
 
-function Status({ label }: { label: string }) {
-  return <div style={{ fontSize: 13, fontWeight: 600 }}>Статус: {label}</div>;
+/** Sidebar questions of a Збірник go to its (consolidated) chat. */
+const askFcl = (text: string) => askInChat(text, "consolidated");
+
+function AskSection({ scope, extra }: { scope: AskScope; extra?: { label: string; onClick: () => void }[] }) {
+  return (
+    <Section title="Запитати Штурмана">
+      <AskButtons
+        primary={{
+          label: scope.kind === "lot" ? "Що не так з партією?" : "Що не так зі збірником?",
+          onClick: () => askFcl(askPrompts.check(scope)),
+        }}
+        items={[
+          { label: "Комплектність", onClick: () => askFcl(askPrompts.completeness(scope)) },
+          { label: "Розбіжності", onClick: () => askFcl(askPrompts.discrepancies(scope)) },
+          { label: "Ризики", onClick: () => askFcl(askPrompts.risks(scope)) },
+          ...(extra ?? [{ label: "Що робити далі?", onClick: () => askFcl(askPrompts.next(scope)) }]),
+        ]}
+      />
+    </Section>
+  );
+}
+
+function Status({ label, caveat }: { label: string; caveat?: string | null }) {
+  return (
+    <div>
+      <div style={{ fontSize: 13, fontWeight: 600 }}>Статус: {label}</div>
+      {caveat ? <div style={{ fontSize: 12, color: "var(--warn)", marginTop: 2 }}>{caveat}</div> : null}
+    </div>
+  );
 }
 
 function FclScope({
@@ -80,12 +118,14 @@ function FclScope({
   overview,
   reload,
   notify,
+  onScope,
 }: {
   fclId: string;
   number: string;
   overview: FclOverview;
   reload: () => Promise<void>;
   notify: (text: string) => void;
+  onScope: (s: string) => void;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   const f = overview.fcl;
@@ -122,11 +162,95 @@ function FclScope({
     }, "Не вдалося сформувати звіт.");
   const zip = () => run("zip", () => downloadBlob(`/api/workspaces/${fclId}/export`, `${number}.zip`), "Не вдалося експортувати.");
 
-  const docs = overview.checklist.filter((i) => i.stage === "docs");
-  const customs = overview.checklist.filter((i) => i.stage === "customs");
+  const levelFindings = overview.all_discrepancies.filter((d) => !d.lot);
+  const lotLevelFindings = overview.all_discrepancies.filter((d) => !!d.lot);
+  const counts = fclCounts(overview);
+  const caveat = statusCaveat(f.derived_status, { errors: counts.all.errors + counts.risksError, warnings: counts.all.warnings + counts.risksWarning, toCheck: counts.all.toCheck });
+  const scope: AskScope = { kind: "fcl" };
+  const rows = lotRows(overview);
+  // Container documents first, then the customs ones (МД per consignee).
+  const fclDocs = [
+    ...overview.checklist.filter((i) => i.stage === "docs"),
+    ...overview.checklist.filter((i) => i.stage === "customs"),
+  ];
   return (
     <>
-      <Status label={LOT_STATUS_LABEL[f.derived_status]} />
+      <Status label={LOT_STATUS_LABEL[f.derived_status]} caveat={caveat} />
+
+      <Section title={`Партії (${rows.length})`}>
+        {rows.length === 0 ? (
+          <div style={{ color: "var(--muted)", fontSize: 13 }}>
+            Партій ще немає — вони створюються, коли прочитано інвойс, контракт або PL постачальника.
+          </div>
+        ) : (
+          rows.map((r) => (
+            <button
+              key={r.id}
+              type="button"
+              onClick={() => onScope(r.id)}
+              title="Відкрити партію"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                width: "100%",
+                textAlign: "left",
+                background: "none",
+                border: "1px solid var(--border)",
+                borderRadius: 8,
+                padding: "7px 9px",
+                cursor: "pointer",
+                color: "var(--text)",
+              }}
+            >
+              <span style={{ flex: "none", width: 9, height: 9, borderRadius: "50%", background: LIGHT_COLOR[r.light] }} />
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ display: "block", fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {r.name}
+                </span>
+                <span style={{ display: "block", fontSize: 11, color: "var(--muted)" }}>
+                  документи {r.docs} · {r.summary}
+                  {r.consignee ? ` · → ${r.consignee}` : ""}
+                </span>
+              </span>
+              <span style={{ flex: "none", color: "var(--muted)", fontSize: 13 }}>›</span>
+            </button>
+          ))
+        )}
+      </Section>
+
+      {fclDocs.length > 0 ? (
+        <CompletenessHeader
+          title="Документи контейнера"
+          items={fclDocs}
+          onAskMissing={(label) => askFcl(askPrompts.missing(label, scope))}
+        />
+      ) : null}
+
+      <AskSection
+        scope={scope}
+        extra={[
+          ...(overview.manifest ? [{ label: "Маніфест ↔ інвойси", onClick: () => askFcl(askPrompts.manifest()) }] : []),
+          { label: "Що робити далі?", onClick: () => askFcl(askPrompts.next(scope)) },
+        ]}
+      />
+
+      <Section title="Ризики">
+        <RisksBlock risks={overview.risks} title="" onAsk={askFcl} />
+      </Section>
+
+      <DiscrepanciesBlock
+        title="Розбіжності збірника"
+        items={levelFindings}
+        emptyText="На рівні збірника розбіжностей не виявлено."
+        onAsk={askFcl}
+      />
+      <DiscrepanciesBlock
+        title="Розбіжності по партіях"
+        items={lotLevelFindings}
+        emptyText="По партіях розбіжностей не виявлено."
+        onAsk={askFcl}
+      />
 
       <Section title="Параметри FCL">
         <label style={lbl}>Вид транспорту</label>
@@ -146,18 +270,6 @@ function FclScope({
           <option value="yes">так</option>
           <option value="no">ні</option>
         </select>
-      </Section>
-
-      <Section title="Документи FCL">
-        {[...docs, ...customs].map((i) => (
-          <div key={i.requirement_key} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 13 }}>
-            <span>
-              {i.label}
-              {i.stage === "customs" ? <span style={{ color: "var(--muted)" }}> · для митниці</span> : null}
-            </span>
-            <span style={{ color: CHECK_CLS[i.status], fontWeight: 600, flex: "none" }}>{CHECK_LABEL[i.status]}</span>
-          </div>
-        ))}
       </Section>
 
       <Section title="Отримувачі">
@@ -191,21 +303,6 @@ function FclScope({
         </Section>
       ) : null}
 
-      <ResultView result={{ kind: "discrepancies", items: overview.all_discrepancies.map((d) => ({ ...d, expected: d.lot ? `${d.lot}: ${d.expected}` : d.expected })) }} />
-
-      <Section title="Ризики">
-        {overview.risks.length === 0 ? (
-          <div style={{ color: "var(--muted)", fontSize: 13 }}>Ризиків не виявлено.</div>
-        ) : (
-          overview.risks.map((r) => (
-            <div key={r.code} style={{ fontSize: 13, borderLeft: `3px solid ${RISK_CLS[r.severity]}`, paddingLeft: 8 }}>
-              <b>{r.title}</b>
-              {r.detail ? <div style={{ color: "var(--muted)", fontSize: 12 }}>{r.detail}</div> : null}
-            </div>
-          ))
-        )}
-      </Section>
-
       <Section title="Дії">
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button className="btn" disabled={busy === "report"} onClick={() => void report("pdf")}>
@@ -232,11 +329,13 @@ function LotScope({
   detail,
   reload,
   notify,
+  onBack,
 }: {
   fclId: string;
   detail: LotDetail;
   reload: () => Promise<void>;
   notify: (text: string) => void;
+  onBack: () => void;
 }) {
   const router = useRouter();
   const l = detail.lot;
@@ -267,14 +366,38 @@ function LotScope({
       setSaving(false);
     }
   };
+  const lotSummary = summarizeFindings(detail.discrepancies);
+  const lotRisks = summarizeFindings(detail.risks);
+  const lotCaveat = statusCaveat(l.derived_status, { errors: lotSummary.errors + lotRisks.errors, warnings: lotSummary.warnings + lotRisks.warnings, toCheck: lotSummary.toCheck });
   const auto = (k: string) => (l.context.auto_fields.includes(k) ? " · з документів" : "");
 
+  const scope: AskScope = { kind: "lot", name: l.name };
   return (
     <>
-      <Status label={LOT_STATUS_LABEL[l.derived_status]} />
+      <button type="button" className="btn" onClick={onBack} style={{ alignSelf: "flex-start", height: 28, fontSize: 12 }}>
+        ← Весь збірник
+      </button>
+      <Status label={LOT_STATUS_LABEL[l.derived_status]} caveat={lotCaveat} />
       <div style={{ fontSize: 12, color: "var(--muted)" }}>
         Постачальник: {l.supplier_name || "—"} · {l.file_count} файл. · партія {l.source === "auto" ? "створена автоматично" : "створена вручну"}
       </div>
+
+      {detail.checklist.length > 0 ? (
+        <CompletenessHeader
+          title="Комплектність партії"
+          items={detail.checklist}
+          onAskMissing={(label) => askFcl(askPrompts.missing(label, scope))}
+        />
+      ) : (
+        <div style={{ fontSize: 13, color: "var(--muted)" }}>Чек-лист порожній — заповніть параметри партії нижче.</div>
+      )}
+
+      <AskSection scope={scope} />
+
+      <Section title="Ризики партії">
+        <RisksBlock risks={detail.risks} title="" onAsk={askFcl} />
+      </Section>
+      <DiscrepanciesBlock items={detail.discrepancies} onAsk={askFcl} />
 
       <Section title="Параметри партії">
         <label style={lbl}>Incoterms (вхідні){auto("incoterm_in")}</label>
@@ -312,22 +435,6 @@ function LotScope({
             </div>
           );
         })}
-      </Section>
-
-      <ResultView result={{ kind: "checklist", items: detail.checklist, status: l.derived_status }} />
-      <ResultView result={{ kind: "discrepancies", items: detail.discrepancies }} />
-
-      <Section title="Ризики партії">
-        {detail.risks.length === 0 ? (
-          <div style={{ color: "var(--muted)", fontSize: 13 }}>Ризиків не виявлено.</div>
-        ) : (
-          detail.risks.map((r) => (
-            <div key={r.code} style={{ fontSize: 13, borderLeft: `3px solid ${RISK_CLS[r.severity]}`, paddingLeft: 8 }}>
-              <b>{r.title}</b>
-              {r.detail ? <div style={{ color: "var(--muted)", fontSize: 12 }}>{r.detail}</div> : null}
-            </div>
-          ))
-        )}
       </Section>
 
       <Section title="Дії">

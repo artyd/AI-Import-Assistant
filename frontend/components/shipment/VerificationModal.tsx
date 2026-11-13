@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import type { FileExtraction } from "@/lib/types";
+import { requestErrorText } from "@/lib/shipment/findings";
 import { IconSpinner } from "../ui/icons";
 
 /**
@@ -90,7 +91,7 @@ export function VerificationModal({
       setSavedIds((s) => new Set(s).add(it.file_id));
       onSaved?.();
     } catch (err) {
-      setError(err instanceof ApiError ? err.code : "Не вдалося зберегти.");
+      setError(err instanceof ApiError ? requestErrorText(err.code) : "Не вдалося зберегти.");
     } finally {
       setSavingId(null);
     }

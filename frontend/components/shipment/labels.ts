@@ -105,4 +105,8 @@ export const FIELD_LABEL: Record<string, string> = {
   manifest_price: "Ціна в маніфесті",
   manifest_line: "Позиція маніфесту без інвойсу",
   manifest_extra: "Товар поза маніфестом",
+  hbl_versions_gross_weight_kg: "Вага брутто в копіях HBL",
+  hbl_versions_packages_count: "Кількість місць у копіях HBL",
+  hbl_versions_consignee_name: "Одержувач у копіях HBL",
+  consignee_name: "Одержувач",
 };

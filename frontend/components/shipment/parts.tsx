@@ -4,7 +4,9 @@ import { STATUS_LABEL } from "../layout/TopBar";
 import type { ChecklistItem, Discrepancy } from "@/lib/types";
 import { IconSpinner } from "../ui/icons";
 import { LnCheck, LnExport } from "../ui/LineIcons";
-import { CHECK_CLS, CHECK_LABEL, FIELD_LABEL, REQ_LABEL } from "./labels";
+import { CHECK_CLS, CHECK_LABEL } from "./labels";
+import { requirementLabel } from "@/lib/shipment/findings";
+import { DiscrepanciesBlock } from "./Findings";
 
 export type Result =
   | { kind: "checklist"; items: ChecklistItem[]; status: string }
@@ -13,6 +15,7 @@ export type Result =
   | { kind: "error"; body: string };
 
 export function ResultView({ result }: { result: Result }) {
+  if (result.kind === "discrepancies") return <DiscrepanciesBlock items={result.items} />;
   return (
     <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
       {result.kind === "checklist" && (
@@ -30,39 +33,6 @@ export function ResultView({ result }: { result: Result }) {
           )}
         </>
       )}
-      {result.kind === "discrepancies" && (
-        <>
-          <SectionTitle>Розбіжності</SectionTitle>
-          {result.items.length === 0 ? (
-            <Muted>Розбіжностей не виявлено.</Muted>
-          ) : (
-            result.items.map((d, i) => {
-              const confirmed = d.kind !== "suspected";
-              const color =
-                d.severity === "error" ? "var(--err)" : d.severity === "warning" ? "var(--warn)" : "var(--muted)";
-              return (
-                <div key={i} style={{ fontSize: 13, borderLeft: `3px solid ${color}`, paddingLeft: 8 }}>
-                  <span style={{ fontWeight: 600, color }}>
-                    {confirmed ? "🔴" : "🟡"} {FIELD_LABEL[d.field] ?? d.field}
-                  </span>
-                  <div style={{ color: "var(--muted)", fontSize: 12 }}>{d.expected} → {d.actual}</div>
-                  {d.citations && d.citations.length > 0 && (
-                    <div style={{ color: "var(--muted)", fontSize: 11, marginTop: 2 }}>
-                      {d.citations.map((c, j) => (
-                        <div key={j}>
-                          ↳ {c.doc_type}
-                          {c.file_name ? ` · «${c.file_name}»` : ""}: {c.value}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })
-          )}
-          <Muted>🔴 — підтверджена розбіжність (з джерелами) · 🟡 — потребує перевірки</Muted>
-        </>
-      )}
       {result.kind === "text" && (
         <>
           <SectionTitle>{result.title}</SectionTitle>
@@ -75,18 +45,72 @@ export function ResultView({ result }: { result: Result }) {
 }
 
 export const lbl: CSSProperties = { fontSize: 12, color: "var(--muted)" };
-function reqLabel(key: string): string {
-  return REQ_LABEL[key] ?? key.replace(/_/g, " ");
+const reqLabel = requirementLabel;
+
+/** «Запитати» — sends a question about this row to the chat (askBus). */
+export function AskLink({ onClick, title = "Запитати Штурмана в чаті" }: { onClick: () => void; title?: string }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      style={{
+        flex: "none",
+        border: "none",
+        background: "none",
+        padding: 0,
+        cursor: "pointer",
+        fontSize: 12,
+        fontWeight: 600,
+        color: "var(--accent)",
+      }}
+    >
+      Запитати
+    </button>
+  );
+}
+
+/** A row of chat questions («Що не так?», «Комплектність», …) — each becomes a chat message. */
+export function AskButtons({
+  primary,
+  items,
+}: {
+  primary?: { label: string; onClick: () => void };
+  items: { label: string; onClick: () => void }[];
+}) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {primary ? (
+        <button className="btn btn-primary" onClick={primary.onClick} title="Питання піде в чат — Штурман відповість там">
+          {primary.label}
+        </button>
+      ) : null}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        {items.map((b) => (
+          <button key={b.label} className="btn" onClick={b.onClick} title="Питання піде в чат — Штурман відповість там">
+            {b.label}
+          </button>
+        ))}
+      </div>
+      <div style={{ fontSize: 11, color: "var(--muted)" }}>Питання надсилається в чат — відповідь там, з файлами.</div>
+    </div>
+  );
 }
 
 export function CompletenessHeader({
   items,
   onExport,
   exporting,
+  onAskMissing,
+  title = "Комплектність пакета",
 }: {
-  items: ChecklistItem[];
-  onExport: () => void;
-  exporting: boolean;
+  /** `label` (FCL items carry one) wins over the requirement key's label. */
+  items: (ChecklistItem & { label?: string })[];
+  onExport?: () => void;
+  exporting?: boolean;
+  /** A missing document → «чи потрібен і де взяти?» in the chat. */
+  onAskMissing?: (label: string) => void;
+  title?: string;
 }) {
   const done = items.filter((i) => i.status !== "missing").length;
   const total = items.length;
@@ -95,7 +119,7 @@ export function CompletenessHeader({
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-        <span style={{ fontWeight: 600, fontSize: 13, color: "var(--text)" }}>Комплектність пакета</span>
+        <span style={{ fontWeight: 600, fontSize: 13, color: "var(--text)" }}>{title}</span>
         <span style={{ fontSize: 12, fontWeight: 600, color, fontVariantNumeric: "tabular-nums" }}>
           {done}/{total}
         </span>
@@ -135,21 +159,24 @@ export function CompletenessHeader({
                   }}
                 />
               )}
-              <span style={{ flex: 1, minWidth: 0, color: ok ? "var(--text)" : "var(--muted)", textTransform: "capitalize" }}>
-                {reqLabel(ci.requirement_key)}
+              <span style={{ flex: 1, minWidth: 0, color: ok ? "var(--text)" : "var(--muted)" }}>
+                {ci.label ?? reqLabel(ci.requirement_key)}
               </span>
+              {!ok && onAskMissing ? <AskLink onClick={() => onAskMissing(ci.label ?? reqLabel(ci.requirement_key))} title="Чи потрібен цей документ і де його взяти — у чаті" /> : null}
             </div>
           );
         })}
       </div>
-      <button
-        onClick={onExport}
-        disabled={exporting}
-        className="btn btn-primary"
-        style={{ width: "100%", marginTop: 18, height: 40 }}
-      >
-        {exporting ? <IconSpinner size={15} /> : <LnExport size={15} />} Експорт пакета
-      </button>
+      {onExport ? (
+        <button
+          onClick={onExport}
+          disabled={exporting}
+          className="btn btn-primary"
+          style={{ width: "100%", marginTop: 18, height: 40 }}
+        >
+          {exporting ? <IconSpinner size={15} /> : <LnExport size={15} />} Експорт пакета
+        </button>
+      ) : null}
     </div>
   );
 }

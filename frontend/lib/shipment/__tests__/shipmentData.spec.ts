@@ -6,6 +6,7 @@ let gate: (() => void) | null = null;
 vi.mock("@/lib/api", () => ({
   api: vi.fn(async (path: string) => {
     calls.push(path);
+    if (path.includes("/broken/") && !path.endsWith("/parties")) throw new Error("boom");
     if (path.includes("slow") && path.endsWith("/checklist")) await new Promise<void>((r) => (gate = r));
     if (path.endsWith("/checklist")) return { items: [{ requirement_key: path, status: "missing", source_file_id: null }] };
     if (path.endsWith("/risks")) return { risks: [] };
@@ -17,7 +18,7 @@ const { useShipmentData } = await import("../shipmentData");
 
 beforeEach(() => {
   calls.length = 0;
-  useShipmentData.setState({ workspaceId: null, revision: 0, checklist: null, risks: null, parties: null });
+  useShipmentData.setState({ workspaceId: null, revision: 0, checklist: null, risks: null, parties: null, checklistFailed: false, risksFailed: false });
 });
 
 describe("shipment data store", () => {
@@ -43,5 +44,15 @@ describe("shipment data store", () => {
     gate?.();
     await slow;
     expect(useShipmentData.getState().checklist?.[0]?.requirement_key).toBe("/api/workspaces/w2/checklist");
+  });
+
+  it("a failed load is flagged, not left looking like «still loading» or «all fine»", async () => {
+    await useShipmentData.getState().load("broken");
+    const st = useShipmentData.getState();
+    expect(st.risks).toBeNull();
+    expect(st.risksFailed).toBe(true);
+    expect(st.checklistFailed).toBe(true);
+    await useShipmentData.getState().load("w2");
+    expect(useShipmentData.getState().risksFailed).toBe(false);
   });
 });

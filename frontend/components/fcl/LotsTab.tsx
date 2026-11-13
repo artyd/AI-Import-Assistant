@@ -4,7 +4,13 @@ import { useState } from "react";
 import { api } from "@/lib/api";
 import type { FclOverview, LotSummary } from "@/lib/types";
 import { IconSpinner } from "../ui/icons";
-import { LIGHT_COLOR, LOT_STATUS_LABEL, fclCounts, lotLight, unassignedLabel } from "@/lib/fcl/fcl";
+import { LIGHT_COLOR, LOT_STATUS_LABEL, fclCounts, lotFindings, lotLight, unassignedLabel } from "@/lib/fcl/fcl";
+import { type FindingSummary, summaryText } from "@/lib/shipment/findings";
+
+const TONE_COLOR = { ok: undefined, warn: "var(--warn)", err: "var(--err)" } as const;
+/** «2 проблеми · 1 перевірити · 5 приміток», or «без проблем» — notes are never problems. */
+const findingsText = (s: FindingSummary) =>
+  s.problems === 0 ? ["без проблем", summaryText(s)].filter(Boolean).join(" · ") : summaryText(s);
 
 /**
  * «Партії» tab of a Збірник (spec 006 #09): the FCL header (container, risks,
@@ -87,8 +93,9 @@ export function LotsTab({
         </div>
         <div style={{ fontSize: 12, color: "var(--muted)", display: "flex", gap: 10, flexWrap: "wrap" }}>
           <span>{LOT_STATUS_LABEL[overview.fcl.derived_status]}</span>
-          <span style={{ color: c.risksError ? "var(--err)" : undefined }}>● ризики {c.risksError + c.risksWarning}</span>
-          <span style={{ color: c.confirmed ? "var(--err)" : undefined }}>● розбіжності 🔴{c.confirmed} 🟡{c.suspected}</span>
+          <span style={{ color: c.risksError ? "var(--err)" : c.risksWarning ? "var(--warn)" : undefined }}>● ризики {c.risksError + c.risksWarning}</span>
+          <span style={{ color: TONE_COLOR[c.level.tone] }} title="Розбіжності на рівні збірника">● збірник: {findingsText(c.level)}</span>
+          <span style={{ color: TONE_COLOR[c.lots.tone] }} title="Розбіжності в партіях">● партії: {findingsText(c.lots)}</span>
         </div>
       </div>
 
@@ -100,7 +107,8 @@ export function LotsTab({
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {overview.lots.map((l) => {
-            const light = lotLight(l);
+            const fs = lotFindings(l.name, overview.all_discrepancies);
+            const light = lotLight(l, fs);
             return (
               <div
                 key={l.id}
@@ -119,7 +127,7 @@ export function LotsTab({
                 </div>
                 <div style={{ fontSize: 12, color: "var(--muted)", display: "flex", gap: 10, flexWrap: "wrap" }}>
                   <span>документи {l.completeness.done}/{l.completeness.total}</span>
-                  <span>🔴{l.discrepancies.confirmed} 🟡{l.discrepancies.suspected}</span>
+                  <span style={{ color: TONE_COLOR[fs.tone] }}>{findingsText(fs)}</span>
                   <span>ризики {l.risks.error + l.risks.warning}</span>
                   <span>{l.file_count} файл.</span>
                   <span>{LOT_STATUS_LABEL[l.derived_status]}</span>

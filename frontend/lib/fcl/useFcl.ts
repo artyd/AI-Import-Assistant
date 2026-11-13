@@ -12,6 +12,7 @@ import type { FclOverview, LotDetail } from "@/lib/types";
 export function useFclOverview(fclId: string | null) {
   const [overview, setOverview] = useState<FclOverview | null>(null);
   const [loading, setLoading] = useState(false);
+  const [failed, setFailed] = useState(false);
   const [version, setVersion] = useState(0);
   const seq = useRef(0);
 
@@ -22,11 +23,15 @@ export function useFclOverview(fclId: string | null) {
     try {
       const o = await api<FclOverview>(`/api/workspaces/${fclId}/fcl`);
       if (mine === seq.current) {
+        setFailed(false);
         setOverview(o);
         setVersion((v) => v + 1);
       }
     } catch {
-      if (mine === seq.current) setOverview(null);
+      if (mine === seq.current) {
+        setOverview(null);
+        setFailed(true);
+      }
     } finally {
       if (mine === seq.current) setLoading(false);
     }
@@ -37,13 +42,15 @@ export function useFclOverview(fclId: string | null) {
     void reload();
   }, [reload]);
 
-  return { overview, loading, reload, version };
+  return { overview, loading, failed, reload, version };
 }
 
 /** One lot judged like a shipment (GET /api/workspaces/:id/lots/:lotId). */
 export function useLotDetail(fclId: string | null, lotId: string | null, version: number) {
   const [detail, setDetail] = useState<LotDetail | null>(null);
+  const [failed, setFailed] = useState(false);
   useEffect(() => {
+    setFailed(false);
     if (!fclId || !lotId) {
       setDetail(null);
       return;
@@ -51,10 +58,14 @@ export function useLotDetail(fclId: string | null, lotId: string | null, version
     let cancelled = false;
     api<LotDetail>(`/api/workspaces/${fclId}/lots/${lotId}`)
       .then((d) => !cancelled && setDetail(d))
-      .catch(() => !cancelled && setDetail(null));
+      .catch(() => {
+        if (cancelled) return;
+        setDetail(null);
+        setFailed(true);
+      });
     return () => {
       cancelled = true;
     };
   }, [fclId, lotId, version]);
-  return detail;
+  return { detail, failed };
 }

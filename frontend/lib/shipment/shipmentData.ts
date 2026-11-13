@@ -15,6 +15,9 @@ interface ShipmentDataState {
   risks: Risk[] | null;
   /** Server copy; null while loading. */
   parties: Party[] | null;
+  /** The last load failed: the panel must say so instead of looking empty or «all fine». */
+  checklistFailed: boolean;
+  risksFailed: boolean;
 
   /** Load everything for a shipment (call when it opens). */
   load: (workspaceId: string) => Promise<void>;
@@ -32,12 +35,12 @@ export const useShipmentData = create<ShipmentDataState>()((set, get) => {
 
   const fetchChecklist = (id: string) =>
     api<{ items: ChecklistItem[] }>(`/api/workspaces/${id}/checklist`)
-      .then((r) => stillOpen(id) && set({ checklist: r.items }))
-      .catch(() => stillOpen(id) && set({ checklist: null }));
+      .then((r) => stillOpen(id) && set({ checklist: r.items, checklistFailed: false }))
+      .catch(() => stillOpen(id) && set({ checklist: null, checklistFailed: true }));
   const fetchRisks = (id: string) =>
     api<{ risks: Risk[] }>(`/api/workspaces/${id}/risks`)
-      .then((r) => stillOpen(id) && set({ risks: r.risks }))
-      .catch(() => stillOpen(id) && set({ risks: null }));
+      .then((r) => stillOpen(id) && set({ risks: r.risks, risksFailed: false }))
+      .catch(() => stillOpen(id) && set({ risks: null, risksFailed: true }));
   const fetchParties = (id: string) =>
     api<{ parties: Party[] }>(`/api/workspaces/${id}/parties`)
       .then((r) => stillOpen(id) && set({ parties: r.parties }))
@@ -54,10 +57,12 @@ export const useShipmentData = create<ShipmentDataState>()((set, get) => {
     checklist: null,
     risks: null,
     parties: null,
+    checklistFailed: false,
+    risksFailed: false,
 
     load: async (workspaceId) => {
       if (get().workspaceId !== workspaceId) {
-        set({ workspaceId, checklist: null, risks: null, parties: null, revision: get().revision + 1 });
+        set({ workspaceId, checklist: null, risks: null, parties: null, checklistFailed: false, risksFailed: false, revision: get().revision + 1 });
       }
       await loadAll(workspaceId);
     },
@@ -75,7 +80,7 @@ export const useShipmentData = create<ShipmentDataState>()((set, get) => {
       const id = get().workspaceId;
       if (!id) return;
       const r = await api<{ risks: Risk[] }>(`/api/workspaces/${id}/risks`);
-      if (stillOpen(id)) set({ risks: r.risks });
+      if (stillOpen(id)) set({ risks: r.risks, risksFailed: false });
     },
   };
 });

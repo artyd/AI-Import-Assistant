@@ -44,6 +44,7 @@ import { MapView } from "@/components/hub/MapView";
 import { CalendarView } from "@/components/calendar/CalendarView";
 import { CommandPalette, type PaletteAction } from "@/components/layout/CommandPalette";
 import { IconSpinner } from "@/components/ui/icons";
+import { onAsk } from "@/lib/chat/askBus";
 import { useShipmentData } from "@/lib/shipment/shipmentData";
 import {
   LnExport,
@@ -166,6 +167,20 @@ export default function WorkspacePage() {
   const chatKind = useAppStore((s) => s.chatKind);
   const setChatKind = useAppStore((s) => s.setChatKind);
   const view = useAppStore((s) => s.view);
+  // «Запитати Штурмана» from the right sidebar: switch the chat to the sidebar's
+  // kind (shipment / Збірник) and hand the question to <Chat> as a message.
+  const [sidebarAsk, setSidebarAsk] = useState<{ id: number; text: string } | null>(null);
+  useEffect(
+    () =>
+      onAsk((d) => {
+        setChatKind(d.kind);
+        setSidebarAsk({ id: Date.now(), text: d.text });
+      }),
+    [setChatKind],
+  );
+  const consumeSidebarAsk = useCallback((askId: number) => {
+    setSidebarAsk((cur) => (cur && cur.id === askId ? null : cur));
+  }, []);
   const setView = useAppStore((s) => s.setView);
   const collections = useAppStore((s) => s.collections);
   const setCollections = useAppStore((s) => s.setCollections);
@@ -1095,6 +1110,8 @@ export default function WorkspacePage() {
                     initialMessages={initialMessages}
                     onConversationStarted={onConversationStarted}
                     onLog={onLog}
+                    ask={sidebarAsk}
+                    onAskConsumed={consumeSidebarAsk}
                     onTurnComplete={onFclTurnComplete}
                     onAnalyzeManifest={analyzeManifest}
                     folders={colFolders}
@@ -1165,6 +1182,8 @@ export default function WorkspacePage() {
               initialMessages={initialMessages}
               onConversationStarted={onConversationStarted}
               onLog={onLog}
+              ask={chatKind === "supply" ? sidebarAsk : null}
+              onAskConsumed={consumeSidebarAsk}
               placeholder={
                 chatKind === "normal"
                   ? "Запитайте про ЗЕД, митницю, документи або коди УКТ ЗЕД…"
@@ -1278,6 +1297,7 @@ export default function WorkspacePage() {
               fclId={activeCollectionId}
               number={collections.find((c) => c.id === activeCollectionId)?.number ?? "zbirnyk"}
               overview={fcl.overview}
+              loading={fcl.loading}
               version={fcl.version}
               reload={fcl.reload}
               scope={fclScope}

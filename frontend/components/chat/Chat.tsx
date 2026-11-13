@@ -80,6 +80,9 @@ interface Props {
   onOpenSource?: (file: string, page: number | null) => void;
   /** «Скласти лист постачальнику» under an answer that lists problems with actions. */
   onDraftLetter?: (answer: string) => void;
+  /** A question from the right sidebar («Запитати Штурмана») — sent as a message once the chat is free. */
+  ask?: { id: number; text: string } | null;
+  onAskConsumed?: (id: number) => void;
 }
 
 type ChatItem = ({ kind: "message"; trace?: TurnTrace } & Message) | ClassifyCard | QuestionCard;
@@ -125,6 +128,8 @@ export function Chat({
   surveyPrefilled,
   onOpenSource,
   onDraftLetter,
+  ask,
+  onAskConsumed,
 }: Props) {
   // File intake is only wired when the host supplies the workspace file handlers.
   const fileIntake = !!(onUploadAndClassify && onMoveFile && folders);
@@ -604,6 +609,16 @@ export function Chat({
   // (AnswerFeedback awaits the feedback POST), so this turn already applies it.
   const sendRef = useRef(send);
   sendRef.current = send;
+  // A sidebar question: sent as a message of its own as soon as the chat is free
+  // (a turn in flight keeps it pending). It goes straight to the agent — files or
+  // a quote the user has staged in the composer stay where they are.
+  const runRef = useRef(runMessage);
+  runRef.current = runMessage;
+  useEffect(() => {
+    if (!ask || streaming) return;
+    onAskConsumed?.(ask.id);
+    void runRef.current(ask.text);
+  }, [ask, streaming, onAskConsumed]);
   const askCorrection = useCallback((comment: string) => {
     sendRef.current(correctionMessage(comment));
   }, []);
