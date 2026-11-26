@@ -149,25 +149,25 @@ interface ParentItems {
 /** Invoice vs its contract or annex: goods, prices, quantities left, buyer, currency, terms. */
 export function compareInvoice(inv: InvoiceData, parent: ParentItems, otherInvoices: InvoiceData[]): Finding[] {
   const out: Finding[] = [];
-  const ref = `договору ${parent.number}`;
+  const ref = parent.number; // «Контракт 31072026/PNS» / «Додаток № 21 до контракту …»
   if (parent.buyer.nameEn && norm(inv.toName) !== norm(parent.buyer.nameEn))
-    out.push({ level: 'warning', area: 'contract', message: `Одержувач «${inv.toName}» відрізняється від покупця ${ref} «${parent.buyer.nameEn}»` });
-  if (inv.currency !== parent.currency) out.push({ level: 'error', area: 'contract', message: `Валюта ${inv.currency}, а в ${ref} — ${parent.currency}` });
+    out.push({ level: 'warning', area: 'contract', message: `${ref}: покупець «${parent.buyer.nameEn}», а в інвойсі одержувач «${inv.toName}»` });
+  if (inv.currency !== parent.currency) out.push({ level: 'error', area: 'contract', message: `${ref}: валюта ${parent.currency}, а в інвойсі — ${inv.currency}` });
   if (inv.incoterm !== parent.incoterm || norm(inv.incoPlaceEn) !== norm(parent.incoPlaceEn))
-    out.push({ level: 'warning', area: 'contract', message: `Умови ${inv.incoterm} ${inv.incoPlaceEn} відрізняються від ${ref}: ${parent.incoterm} ${parent.incoPlaceEn}` });
+    out.push({ level: 'warning', area: 'contract', message: `${ref}: умови ${parent.incoterm} ${parent.incoPlaceEn}, а в інвойсі — ${inv.incoterm} ${inv.incoPlaceEn}` });
   for (const it of inv.items) {
     if (!it.nameEn.trim()) continue;
     const p = parent.items.find((x) => norm(x.nameEn) === norm(it.nameEn));
     if (!p) {
-      out.push({ level: 'error', area: 'contract', message: `«${it.nameEn}» немає в специфікації ${ref}` });
+      out.push({ level: 'error', area: 'contract', message: `${ref}: товару «${it.nameEn}» немає в специфікації` });
       continue;
     }
-    if (round(p.price, 4) !== round(it.price, 4)) out.push({ level: 'error', area: 'contract', message: `«${it.nameEn}»: ціна ${it.price}, а в ${ref} — ${p.price}` });
+    if (round(p.price, 4) !== round(it.price, 4)) out.push({ level: 'error', area: 'contract', message: `${ref}: ціна «${it.nameEn}» ${p.price}, а в інвойсі — ${it.price}` });
     const used = otherInvoices.flatMap((o) => o.items).filter((x) => norm(x.nameEn) === norm(it.nameEn)).reduce((s, x) => s + x.qty, 0);
     const left = round(p.qty - used, 3);
     if (it.qty > left + 1e-9)
-      out.push({ level: 'error', area: 'contract', message: `«${it.nameEn}»: ${it.qty} перевищує залишок за ${ref} (${left} з ${p.qty}${used ? `, ${round(used, 3)} вже в інших інвойсах` : ''})` });
-    else out.push({ level: 'ok', area: 'contract', message: `«${it.nameEn}»: ціна і кількість у межах ${ref} (залишок після цього інвойсу ${round(left - it.qty, 3)})` });
+      out.push({ level: 'error', area: 'contract', message: `${ref}: «${it.nameEn}» в інвойсі ${it.qty} — перевищує залишок ${left} з ${p.qty}${used ? ` (${round(used, 3)} вже в інших інвойсах)` : ''}` });
+    else out.push({ level: 'ok', area: 'contract', message: `${ref}: «${it.nameEn}» — ціна й кількість у межах (після цього інвойсу залишиться ${round(left - it.qty, 3)})` });
   }
   return out;
 }
@@ -181,11 +181,11 @@ async function loadDoc(id: string): Promise<{ kind: DocKind; data: DocData; numb
 function parentItems(kind: DocKind, d: DocData): ParentItems | null {
   if (kind === 'contract') {
     const c = d as ContractData;
-    return { number: c.number, buyer: c.buyer, seller: c.seller, currency: c.currency, incoterm: c.incoterm, incoPlaceEn: c.incoPlaceEn, items: c.items };
+    return { number: `Контракт ${c.number}`, buyer: c.buyer, seller: c.seller, currency: c.currency, incoterm: c.incoterm, incoPlaceEn: c.incoPlaceEn, items: c.items };
   }
   if (kind === 'appendix') {
     const a = d as AppendixData;
-    return { number: `Додатку № ${a.number} до ${a.contractNumber}`, buyer: a.buyer, seller: a.seller, currency: a.currency, incoterm: a.incoterm, incoPlaceEn: a.incoPlaceEn, items: a.items };
+    return { number: `Додаток № ${a.number} до контракту ${a.contractNumber}`, buyer: a.buyer, seller: a.seller, currency: a.currency, incoterm: a.incoterm, incoPlaceEn: a.incoPlaceEn, items: a.items };
   }
   return null;
 }

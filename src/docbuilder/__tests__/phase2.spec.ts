@@ -116,7 +116,7 @@ describe('every bundled template fills with its sample data', () => {
 
 describe('invoice vs its contract', () => {
   const parent = {
-    number: '01/PSB',
+    number: 'Контракт 01/PSB',
     buyer: parseData('contract', { buyer: { nameEn: '"B" LLC' } }).buyer,
     seller: parseData('contract', {}).seller,
     currency: 'USD',
@@ -132,8 +132,8 @@ describe('invoice vs its contract', () => {
     const other = parseData('invoice', { items: [{ nameEn: 'Boric acid', qty: 500, price: 4.36 }] });
     const bad = { ...inv, items: [{ ...inv.items[0]!, price: 4.5 }, { ...inv.items[0]!, nameEn: 'Talc' }] };
     const msgs = compareInvoice(bad, parent, [other]).filter((f) => f.level === 'error').map((f) => f.message).join(' | ');
-    expect(msgs).toContain('ціна 4.5');
+    expect(msgs).toContain('Контракт 01/PSB: ціна «Boric acid» 4.36, а в інвойсі — 4.5');
     expect(msgs).toContain('перевищує залишок');
-    expect(msgs).toContain('«Talc» немає в специфікації');
+    expect(msgs).toContain('товару «Talc» немає в специфікації');
   });
 });
