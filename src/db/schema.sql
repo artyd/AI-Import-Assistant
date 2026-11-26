@@ -1251,3 +1251,39 @@ CREATE TABLE IF NOT EXISTS finding_triage (
   decided_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (workspace_id, fingerprint)
 );
+
+-- Document builder (spec 012): the team's directory of companies and goods for
+-- trade documents, and the documents built from it. A document keeps snapshots
+-- of its parties and goods in `data`, so editing the directory never rewrites a
+-- document that was already sent. Team-shared, like org_directory.
+CREATE TABLE IF NOT EXISTS doc_parties (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  role        TEXT NOT NULL CHECK (role IN ('seller', 'buyer', 'consignor', 'other')),
+  name        TEXT NOT NULL,
+  data        JSONB NOT NULL,
+  created_by  UUID REFERENCES users(id) ON DELETE SET NULL,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_doc_parties_role ON doc_parties(role, lower(name));
+
+CREATE TABLE IF NOT EXISTS doc_products (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name        TEXT NOT NULL,
+  data        JSONB NOT NULL,
+  created_by  UUID REFERENCES users(id) ON DELETE SET NULL,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_doc_products_name ON doc_products(lower(name));
+
+CREATE TABLE IF NOT EXISTS doc_documents (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  kind         TEXT NOT NULL CHECK (kind IN ('contract', 'invoice')),
+  number       TEXT NOT NULL DEFAULT '',
+  title        TEXT NOT NULL DEFAULT '',
+  data         JSONB NOT NULL,
+  contract_id  UUID REFERENCES doc_documents(id) ON DELETE SET NULL,  -- invoice → its contract
+  created_by   UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_doc_documents_kind ON doc_documents(kind, updated_at DESC);

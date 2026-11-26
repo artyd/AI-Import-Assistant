@@ -22,3 +22,17 @@ for (const file of readdirSync(analysisDataSrc)) {
 }
 // eslint-disable-next-line no-console
 console.log(`Copied ${jsonCount} analysis data JSON files -> ${analysisDataDst}`);
+
+// Document builder: the Word templates are read at runtime relative to the
+// compiled module (new URL('./templates/x.docx', import.meta.url)).
+const tplSrc = 'src/docbuilder/templates';
+const tplDst = 'dist/docbuilder/templates';
+mkdirSync(tplDst, { recursive: true });
+let tplCount = 0;
+for (const file of readdirSync(tplSrc)) {
+  if (!file.endsWith('.docx')) continue;
+  copyFileSync(`${tplSrc}/${file}`, `${tplDst}/${file}`);
+  tplCount++;
+}
+// eslint-disable-next-line no-console
+console.log(`Copied ${tplCount} document templates -> ${tplDst}`);

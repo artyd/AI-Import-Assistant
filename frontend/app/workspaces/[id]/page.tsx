@@ -42,6 +42,7 @@ import { useFclOverview } from "@/lib/fcl/useFcl";
 import { NewsView } from "@/components/news/NewsView";
 import { MapView } from "@/components/hub/MapView";
 import { CalendarView } from "@/components/calendar/CalendarView";
+import { DocBuilderView } from "@/components/docbuilder/DocBuilderView";
 import { CommandPalette, type PaletteAction } from "@/components/layout/CommandPalette";
 import { IconSpinner } from "@/components/ui/icons";
 import { onAsk } from "@/lib/chat/askBus";
@@ -962,7 +963,9 @@ export default function WorkspacePage() {
                   ? "Логістичний хаб"
                   : view === "calendar"
                     ? "Календар логістів"
-                    : conversations.find((c) => c.id === conversationId)?.title?.trim() ||
+                    : view === "docs"
+                      ? "Конструктор документів"
+                      : conversations.find((c) => c.id === conversationId)?.title?.trim() ||
                     "Новий чат"
             }
           />
@@ -974,6 +977,8 @@ export default function WorkspacePage() {
             <MapView workspaceId={id} />
           ) : view === "calendar" ? (
             <CalendarView />
+          ) : view === "docs" ? (
+            <DocBuilderView />
           ) : chatKind === "consolidated" ? (
             /* Збірний: тулбар (таблиця/експорт/новий аналіз) + опційна картка/ввід,
                а знизу — чат обговорення, прив'язаний до збірника (відповідь аналізу

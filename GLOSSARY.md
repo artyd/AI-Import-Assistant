@@ -330,3 +330,15 @@ _Avoid_: Alert, reminder
 The open endpoint through which external Claude clients use Штурман's read-only
 reference, sheet and hub tools.
 _Avoid_: MCP (bare), API
+
+**Document builder** (Конструктор документів):
+The «Документи» section, where a logist assembles a bilingual contract with its
+specification, or an invoice with its packing list, from the directory and
+downloads it as Word. The output is filled into the team's own templates (spec 012).
+_Avoid_: Generator, document editor
+
+**Directory** (Довідник):
+The team's companies (seller, buyers, consignors) and goods that the document
+builder picks from. A document keeps a snapshot of what it took, so a later edit
+of the directory never changes a sent document.
+_Avoid_: Catalogue (for companies), contacts

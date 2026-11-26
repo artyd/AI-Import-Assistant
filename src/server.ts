@@ -37,6 +37,7 @@ import { mcpRoutes } from './mcp/mcp.routes.js';
 import { supplyRoutes } from './supply/supply.routes.js';
 import { feedbackRoutes } from './feedback/feedback.routes.js';
 import { triageRoutes } from './reconciliation/triage.routes.js';
+import { docBuilderRoutes } from './docbuilder/docbuilder.routes.js';
 import { healthRoutes } from './health/health.routes.js';
 import { registerOpsAlertHooks } from './lib/alertHooks.js';
 import { installProcessAlerts } from './lib/alerts.js';
@@ -144,6 +145,7 @@ async function buildServer() {
   await app.register(supplyRoutes);
   await app.register(feedbackRoutes);
   await app.register(triageRoutes);
+  await app.register(docBuilderRoutes);
 
   return app;
 }

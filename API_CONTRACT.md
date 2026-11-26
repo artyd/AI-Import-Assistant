@@ -1196,6 +1196,34 @@ The chat agent reads the register with the read-only `supply_register` tool.
 
 ---
 
+## Document builder (spec 012)
+
+Team-wide (not shipment-scoped). Every route needs `Authorization: Bearer <JWT>`.
+Shapes: `Party`, `Product`, `ContractData` and `InvoiceData` in `src/docbuilder/schema.ts`
+(every field is optional on input, and zod fills the defaults). A document keeps snapshots of
+its parties and goods.
+
+### Directory
+- `GET /api/docbuilder/parties` → `{ parties: [Party & { id, role: seller|buyer|consignor|other, note }] }`
+- `POST /api/docbuilder/parties` `Party & { role, note? }` → `201 { party }` (needs `nameEn` or `nameUk`)
+- `PUT /api/docbuilder/parties/:id` (full replace) → `{ party }` · `DELETE …/:id` → `204`
+- `GET|POST /api/docbuilder/products`, `PUT|DELETE /api/docbuilder/products/:id`: same pattern, `{ products }` / `{ product }`
+
+### Documents
+- `GET /api/docbuilder/documents?kind=contract|invoice` → `{ documents: [{ id, kind, number, title, contractId, date, currency, total, updatedAt }] }` (newest first, ≤ 500)
+- `GET /api/docbuilder/documents/:id` → `{ document: { id, kind, number, title, data, contractId, createdAt, updatedAt } }`
+- `POST /api/docbuilder/documents` `{ kind, data, contractId? }` → `201 { document }`
+- `PUT /api/docbuilder/documents/:id` `{ data }` → `{ document }` (the kind cannot change)
+- `DELETE /api/docbuilder/documents/:id` → `204` (an invoice's `contractId` becomes null)
+- `POST /api/docbuilder/documents/:id/invoice` (contract only) → `201 { document }`: a new invoice + packing list draft from the contract
+- `GET /api/docbuilder/documents/:id/docx` → the saved document as `.docx`
+
+### Render (unsaved data; rate limit 120/min)
+- `POST /api/docbuilder/render` `{ kind, data, format: "html"|"docx" }`
+  - `html` → `{ html, total }`: the filled document's body as HTML (live preview, no header/footer)
+  - `docx` → `application/vnd.openxmlformats-officedocument.wordprocessingml.document`, `Content-Disposition` with an ASCII `filename` and a UTF-8 `filename*` («Контракт 31072026-PNS.docx»)
+- `400 { error: "invalid_request", issues }` on bad data.
+
 ## Health
 
 ### `GET /health`  (no auth) → `{ "status": "ok" }`
