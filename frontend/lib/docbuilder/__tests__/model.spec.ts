@@ -52,7 +52,7 @@ describe("totals and checks", () => {
   it("flags a packing list whose net weight does not match the invoice", () => {
     const inv = {
       ...emptyInvoice(null, "2026-08-17"),
-      items: [{ nameEn: "Boric acid", reg: "", manufacturer: "", countryEn: "", qty: 1000, price: 4.36 }],
+      items: [{ nameEn: "Boric acid", reg: "", manufacturer: "", countryEn: "", unit: "kg" as const, qty: 1000, price: 4.36 }],
       batches: [
         { nameEn: "Boric acid", reg: "", batch: "A", net: 600, gross: 650, packages: "", packagesCount: 24 },
         { nameEn: "Boric acid", reg: "", batch: "B", net: 300, gross: 330, packages: "", packagesCount: 12 },
@@ -73,5 +73,34 @@ describe("totals and checks", () => {
 
   it("formats today as ISO", () => {
     expect(todayIso(new Date(2026, 0, 5))).toBe("2026-01-05");
+  });
+});
+
+describe("phase 2 helpers", () => {
+  it("tonnes count as kg in the packing check, pieces are skipped", async () => {
+    const { packingMismatches, emptyInvoice } = await import("../model");
+    const inv = {
+      ...emptyInvoice(null, "2026-08-17"),
+      items: [
+        { nameEn: "Stearic acid", reg: "", manufacturer: "", countryEn: "", unit: "t" as const, qty: 2, price: 1000 },
+        { nameEn: "Capsules", reg: "", manufacturer: "", countryEn: "", unit: "pcs" as const, qty: 5000, price: 0.01 },
+      ],
+      batches: [{ nameEn: "Stearic acid", reg: "", batch: "A", net: 2000, gross: 2050, packages: "", packagesCount: 80 }],
+    };
+    expect(packingMismatches(inv)).toEqual([]);
+  });
+
+  it("totals of a Ukrainian invoice include VAT", async () => {
+    const { uaTotals, docTotal, emptyUaInvoice, uaInvoiceGaps } = await import("../model");
+    expect(uaTotals({ items: [{ qty: 100, price: 120 }], vatRate: 20 })).toEqual({ net: 12000, vat: 2400, total: 14400 });
+    const d = { ...emptyUaInvoice(null, "2026-02-10"), items: [{ name: "Кислота", unit: "кг" as const, qty: 10, price: 50 }] };
+    expect(docTotal("ua_invoice", d)).toBe(600);
+    expect(uaInvoiceGaps(d)).toContain("постачальник");
+  });
+
+  it("history lines read in Ukrainian", async () => {
+    const { eventLabel } = await import("../model");
+    expect(eventLabel({ action: "status:sent", note: "", at: "", user: "" })).toBe("позначено «Відправлено»");
+    expect(eventLabel({ action: "created", note: "з контракту 1/PSB", at: "", user: "" })).toBe("створено — з контракту 1/PSB");
   });
 });

@@ -15,6 +15,7 @@ import { buildSystemPrompt } from '../agent/systemPrompt.js';
 import { buildDocumentsDigest } from '../agent/documentsDigest.js';
 import { runAgentTurn } from '../agent/loop.js';
 import { toolDefinitions, logistTools } from '../agent/tools.js';
+import { docBuilderToolDefinitions } from '../agent/tools/docbuilder.js';
 import { hubToolDefinitions } from '../agent/tools/hub.js';
 import { sheetTools } from '../agent/tools/sheet.js';
 import { supplyToolDefinitions } from '../agent/tools/supply.js';
@@ -89,7 +90,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           sse,
           signal: sse.signal,
           // Shipment tools + the customs/logistics reference tools (when enabled).
-          tools: [...toolDefinitions, ...logistTools(), ...hubToolDefinitions, ...sheetTools(), ...supplyToolDefinitions],
+          tools: [...toolDefinitions, ...logistTools(), ...hubToolDefinitions, ...sheetTools(), ...supplyToolDefinitions, ...docBuilderToolDefinitions],
         });
 
         // Persist the turn (partial text too, on error) with its replay blocks so

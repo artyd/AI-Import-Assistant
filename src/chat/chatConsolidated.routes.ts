@@ -15,6 +15,7 @@ import { SseStream } from '../lib/sse.js';
 import { buildConsolidatedSystemPrompt } from '../agent/systemPrompt.js';
 import { runAgentTurn } from '../agent/loop.js';
 import { toolDefinitions, fclToolDefinitions, logistTools } from '../agent/tools.js';
+import { docBuilderToolDefinitions } from '../agent/tools/docbuilder.js';
 import { hubToolDefinitions } from '../agent/tools/hub.js';
 import { sheetTools } from '../agent/tools/sheet.js';
 import { supplyToolDefinitions } from '../agent/tools/supply.js';
@@ -29,7 +30,7 @@ import { withLessons } from '../feedback/lesson.js';
 // (scoped to the FCL, with an optional lot), the FCL tools and the manifest
 // analysis, plus the customs/logistics reference tools — one agent, more tools.
 function consolidatedTools() {
-  return [...toolDefinitions, ...fclToolDefinitions, ...logistTools(), ...hubToolDefinitions, ...sheetTools(), ...supplyToolDefinitions];
+  return [...toolDefinitions, ...fclToolDefinitions, ...logistTools(), ...hubToolDefinitions, ...sheetTools(), ...supplyToolDefinitions, ...docBuilderToolDefinitions];
 }
 
 const chatSchema = z.object({

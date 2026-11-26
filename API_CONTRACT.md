@@ -1198,31 +1198,55 @@ The chat agent reads the register with the read-only `supply_register` tool.
 
 ## Document builder (spec 012)
 
-Team-wide (not shipment-scoped). Every route needs `Authorization: Bearer <JWT>`.
-Shapes: `Party`, `Product`, `ContractData` and `InvoiceData` in `src/docbuilder/schema.ts`
-(every field is optional on input, and zod fills the defaults). A document keeps snapshots of
-its parties and goods.
+Team-wide, not scoped to a shipment. Every route needs `Authorization: Bearer <JWT>`. The data shapes are
+`Party`, `Product`, `ContractData`, `AppendixData`, `InvoiceData` and `UaInvoiceData` in
+`src/docbuilder/schema.ts`. Every field is optional on input, and zod fills the defaults. A document keeps
+snapshots of its parties and goods.
+
+The document kinds are `contract` (contract with its specification), `appendix` (a numbered annex to a
+contract), `invoice` (invoice with its packing list) and `ua_invoice` (видаткова накладна or рахунок на
+оплату, in UAH with VAT). A line's `unit` is one of `kg | t | pcs | l | m2`. The `paymentType` is one of
+`deferred | prepay_full | prepay_part | lc`.
 
 ### Directory
-- `GET /api/docbuilder/parties` → `{ parties: [Party & { id, role: seller|buyer|consignee|consignor|other, note }] }`
-- `POST /api/docbuilder/parties` `Party & { role, note? }` → `201 { party }` (needs `nameEn` or `nameUk`)
+- `GET /api/docbuilder/parties` → `{ parties: [Party & { id, role: seller|buyer|consignee|consignor|other, note, invoiceTemplateId }] }`
+- `POST /api/docbuilder/parties` `Party & { role, note?, invoiceTemplateId? }` → `201 { party }` (needs `nameEn` or `nameUk`)
 - `PUT /api/docbuilder/parties/:id` (full replace) → `{ party }` · `DELETE …/:id` → `204`
-- `GET|POST /api/docbuilder/products`, `PUT|DELETE /api/docbuilder/products/:id`: same pattern, `{ products }` / `{ product }`
+- `GET|POST /api/docbuilder/products` and `PUT|DELETE /api/docbuilder/products/:id` follow the same pattern and return `{ products }` / `{ product }`
+- `POST /api/docbuilder/extract` (multipart `file`: PDF, Word, Excel or an image; rate limit 20 per 10 min) → `{ companies: [Party & { role }], products: [Product], note }`. These are candidates read by Claude. Nothing is saved.
 
 ### Documents
-- `GET /api/docbuilder/documents?kind=contract|invoice` → `{ documents: [{ id, kind, number, title, contractId, date, currency, total, updatedAt }] }` (newest first, ≤ 500)
-- `GET /api/docbuilder/documents/:id` → `{ document: { id, kind, number, title, data, contractId, createdAt, updatedAt } }`
-- `POST /api/docbuilder/documents` `{ kind, data, contractId? }` → `201 { document }`
-- `PUT /api/docbuilder/documents/:id` `{ data }` → `{ document }` (the kind cannot change)
-- `DELETE /api/docbuilder/documents/:id` → `204` (an invoice's `contractId` becomes null)
-- `POST /api/docbuilder/documents/:id/invoice` (contract only) → `201 { document }`: a new invoice + packing list draft from the contract
-- `GET /api/docbuilder/documents/:id/docx` → the saved document as `.docx`
+- `GET /api/docbuilder/documents?kind=` → `{ documents: [{ id, kind, number, title, contractId, status, version, parentId, date, currency, total, updatedAt }] }`, newest first, at most 500
+- `GET /api/docbuilder/documents/:id` → `{ document: { id, kind, number, title, data, contractId, status, version, parentId, workspaceId, createdAt, updatedAt } }`
+- `POST /api/docbuilder/documents` `{ kind, data, contractId?, workspaceId? }` → `201 { document }`. A `workspaceId` must belong to the user, otherwise 404.
+- `PUT /api/docbuilder/documents/:id` `{ data }` → `{ document }`. A document that is not a draft returns `409 { error: "locked" }`.
+- `DELETE /api/docbuilder/documents/:id` → `204`
+- `POST /api/docbuilder/documents/:id/status` `{ status: draft|checked|sent }` → `{ document }`. The allowed moves are draft → checked or sent, and checked → draft or sent. A sent document never changes (`409 bad_transition`).
+- `POST /api/docbuilder/documents/:id/version` → `201 { document }`: a new draft with `version + 1` and `parentId` set to the old document. The old document stays as it was.
+- `GET /api/docbuilder/documents/:id/events` → `{ events: [{ action, note, at, user }] }`. The `action` is one of `created | edited | version | to_shipment | status:<s>`.
+- `POST /api/docbuilder/documents/:id/invoice` (contract or annex) → `201 { document }`: an invoice draft with the next number suggested and the seller's invoice template
+- `POST /api/docbuilder/documents/:id/appendix` (contract) → `201 { document }`: the next annex, with parties and terms copied from the contract and an empty specification
+- `GET /api/docbuilder/documents/:id/docx` and `GET /api/docbuilder/documents/:id/pdf` → the saved document as a file. The PDF is made by headless LibreOffice.
+- `GET /api/docbuilder/documents/:id/bundle.zip?pdf=1` → a ZIP with the document and everything linked to it: a contract with its annexes and invoices, or an invoice with its contract
+- `POST /api/docbuilder/documents/:id/to-shipment` `{ workspaceId }` → `{ fileId, duplicateOf, workspaceId }`. The .docx goes into the shipment's files like an upload. The workspace must be owned by the user, otherwise 404.
+- `GET /api/docbuilder/from-shipment/:workspaceId` → `{ contract, invoice, sources }`: drafts built from the shipment's extracted contract and invoice fields. Only stated values are used.
+
+### Checks and numbers
+- `POST /api/docbuilder/check` `{ kind, data, id?, contractId? }` (rate limit 30/min) → `{ findings: [{ level: error|warning|ok, area: requisites|hs|registry|contract|number, message }] }`. It checks the IBAN (mod 97), SWIFT format and ЄДРПОУ control digit, УКТ ЗЕД codes against qdpro, Ukrainian registrations against the Держреєстр mirror, duplicate numbers, and an invoice against its contract or annex (goods, price, quantity left, buyer, currency, terms).
+- `GET /api/docbuilder/next-number?kind=&contractId=` → `{ number }`: the latest number + 1 with its padding kept, or the next annex number of a contract
 
 ### Render (unsaved data; rate limit 120/min)
-- `POST /api/docbuilder/render` `{ kind, data, format: "html"|"docx" }`
-  - `html` → `{ html, total }`: the filled document's body as HTML (live preview, no header/footer)
-  - `docx` → `application/vnd.openxmlformats-officedocument.wordprocessingml.document`, `Content-Disposition` with an ASCII `filename` and a UTF-8 `filename*` («Контракт 31072026-PNS.docx»)
-- `400 { error: "invalid_request", issues }` on bad data.
+- `POST /api/docbuilder/render` `{ kind, data, format: "html"|"docx"|"pdf" }`
+  - `html` → `{ html, total }`: the filled document's body as HTML, without header and footer
+  - `docx` / `pdf` → the file, with a `Content-Disposition` carrying an ASCII `filename` and a UTF-8 `filename*`
+- `400 { error: "invalid_request", issues }` on bad data. `422 { error: "template_error", message, details }` when a custom template does not fill.
+
+### Templates
+- `GET /api/docbuilder/templates` → `{ templates: [{ id, kind, name, createdAt }] }`
+- `GET /api/docbuilder/templates/tags?kind=` → `{ tags: [{ tag, example }] }`: the fields a template of that kind can use
+- `GET /api/docbuilder/templates/default/:kind` → the bundled .docx, as a starting point
+- `POST /api/docbuilder/templates` (multipart `kind`, `name`, `file` .docx) → `201 { template }`. The template is test-filled with sample data before it is stored; a template that fails returns `422 template_error` with the reasons.
+- `GET /api/docbuilder/templates/:id/file` → .docx · `DELETE /api/docbuilder/templates/:id` → `204`
 
 ## Health
 

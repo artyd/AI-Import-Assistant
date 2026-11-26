@@ -342,3 +342,7 @@ The team's companies (seller, buyers, consignors) and goods that the document
 builder picks from. A document keeps a snapshot of what it took, so a later edit
 of the directory never changes a sent document.
 _Avoid_: Catalogue (for companies), contacts
+
+**Annex** (Додаток до контракту):
+A numbered specification under an existing contract for one delivery ("ANNEX No. 21 dated ... TO THE CONTRACT No. ..."). Built in the document builder from its contract; an invoice may refer to an annex instead of the contract.
+_Avoid_: Appendix (in UI text), supplement

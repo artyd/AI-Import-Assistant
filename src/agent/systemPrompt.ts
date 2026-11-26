@@ -79,7 +79,7 @@ function hubToolsPromptBlock(scope: 'supply' | 'normal'): string[] {
     'ЛОГІСТИЧНИЙ ХАБ: track_shipment (додати номер контейнера / B/L / AWB / курʼєра / ТТН НП і отримати статус,',
     'ETA), list_tracked_shipments, get_port_status, get_carrier_status (лінія: Суец чи обхід, надбавки),',
     'where_are_shipments (позиція: AIS / розрахунок / подія перевізника), suggest_routes, list_routes,',
-    'supply_register (реєстр «Поставки», лише читання).',
+    'supply_register (реєстр «Поставки», лише читання); trade_documents_list / trade_document_draft — «Документи».',
     ...(scope === 'supply'
       ? ['find_tracking_numbers — номери з документів, що ще не відстежуються; додавай лише після згоди користувача.']
       : []),

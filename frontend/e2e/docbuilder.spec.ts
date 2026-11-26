@@ -8,7 +8,7 @@ import { mockWorkspace, WSID } from "./mocks";
  * Desktop only (the mobile layout is frozen for now).
  */
 
-type Doc = { id: string; kind: "contract" | "invoice"; number: string; title: string; data: Record<string, any>; contractId: string | null; createdAt: string; updatedAt: string };
+type Doc = { id: string; kind: "contract" | "appendix" | "invoice" | "ua_invoice"; number: string; title: string; data: Record<string, any>; contractId: string | null; status: string; version: number; createdAt: string; updatedAt: string };
 
 function fakeBackend() {
   let seq = 0;
@@ -34,9 +34,10 @@ function fakeBackend() {
   const docs: Doc[] = [];
   const puts: Record<string, any>[] = [];
   const renders: { kind: string; format: string; data: any }[] = [];
+  const checks: any[] = [];
   const total = (d: any) => (d.items ?? []).reduce((s: number, i: any) => s + i.qty * i.price, 0);
-  const title = (kind: string, d: any) => [d.number || "без номера", kind === "contract" ? d.buyer?.nameEn : d.toName].filter(Boolean).join(" · ");
-  return { parties, products, docs, puts, renders, id, now, total, title };
+  const title = (kind: string, d: any) => [d.number || "без номера", kind === "contract" ? d.buyer?.nameEn : kind === "ua_invoice" ? d.buyer?.nameUk : d.toName].filter(Boolean).join(" · ");
+  return { parties, products, docs, puts, renders, checks, id, now, total, title };
 }
 
 async function setup(page: Page) {
@@ -64,9 +65,23 @@ async function setup(page: Page) {
         return (await json({ product: p }, 201), true);
       }
     }
+    if (coll === "templates") return (await json({ templates: [] }), true);
+    if (coll === "next-number") return (await json({ number: "TB-0001" }), true);
+    if (coll === "check") {
+      const b = body();
+      fb.checks.push(b);
+      return (await json({ findings: [{ level: "error", area: "requisites", message: "Покупець: IBAN UA00 — помилка в номері" }, { level: "ok", area: "number", message: "Номер унікальний" }] }), true);
+    }
+    if (coll === "extract") {
+      return (await json({ companies: [{ role: "buyer", nameEn: '"FROM DOC" LLC', nameUk: "ТОВ «З ДОКУМЕНТА»", countryEn: "Ukraine", countryUk: "Україна", signatoryEn: "", signatoryUk: "", basisEn: "", basisUk: "", addressEn: "Kyiv", addressUk: "", requisitesEn: "IBAN UA21", requisitesUk: "", code: "" }], products: [], note: null }), true);
+    }
     if (coll === "render") {
       const b = body();
       fb.renders.push(b);
+      if (b.format === "pdf") {
+        await route.fulfill({ status: 200, contentType: "application/pdf", headers: { "content-disposition": `attachment; filename="Contract.pdf"; filename*=UTF-8''${encodeURIComponent("Контракт.pdf")}` }, body: "%PDF-fake" });
+        return true;
+      }
       if (b.format === "docx") {
         await route.fulfill({
           status: 200,
@@ -83,13 +98,13 @@ async function setup(page: Page) {
       if (!docId && method === "GET")
         return (
           await json({
-            documents: fb.docs.map((d) => ({ id: d.id, kind: d.kind, number: d.number, title: d.title, contractId: d.contractId, date: d.data.date, currency: d.data.currency, total: fb.total(d.data), updatedAt: d.updatedAt })),
+            documents: fb.docs.map((d) => ({ id: d.id, kind: d.kind, number: d.number, title: d.title, contractId: d.contractId, status: d.status, version: d.version, parentId: null, date: d.data.date, currency: d.data.currency, total: fb.total(d.data), updatedAt: d.updatedAt })),
           }),
           true
         );
       if (!docId && method === "POST") {
         const b = body();
-        const d: Doc = { id: fb.id("d"), kind: b.kind, number: b.data.number, title: fb.title(b.kind, b.data), data: b.data, contractId: b.contractId ?? null, createdAt: fb.now, updatedAt: fb.now };
+        const d: Doc = { id: fb.id("d"), kind: b.kind, number: b.data.number, title: fb.title(b.kind, b.data), data: b.data, contractId: b.contractId ?? null, status: "draft", version: 1, createdAt: fb.now, updatedAt: fb.now };
         fb.docs.unshift(d);
         return (await json({ document: d }, 201), true);
       }
@@ -98,20 +113,35 @@ async function setup(page: Page) {
       if (sub === "invoice" && method === "POST") {
         const c = d.data;
         const inv: Doc = {
-          id: fb.id("d"), kind: "invoice", number: "", title: fb.title("invoice", { toName: c.buyer.nameEn }), contractId: d.id, createdAt: fb.now, updatedAt: fb.now,
+          id: fb.id("d"), kind: "invoice", number: "", title: fb.title("invoice", { toName: c.buyer.nameEn }), contractId: d.id, status: "draft", version: 1, createdAt: fb.now, updatedAt: fb.now,
           data: {
             number: "", date: "2026-11-26", contractRef: `${c.number} dated May 22, 2026`, toName: c.buyer.nameEn, toAddress: c.buyer.addressEn,
             consignorName: c.seller.nameEn, consignorAddress: c.seller.addressEn, currency: c.currency, incoterm: c.incoterm, incoPlaceEn: c.incoPlaceEn, incoYear: c.incoYear,
             originEn: "", pallets: "", stamp: true,
-            items: c.items.map((i: any) => ({ nameEn: i.nameEn, reg: i.reg, manufacturer: i.manufacturer, countryEn: i.countryEn, qty: i.qty, price: i.price })),
+            items: c.items.map((i: any) => ({ nameEn: i.nameEn, reg: i.reg, manufacturer: i.manufacturer, countryEn: i.countryEn, unit: i.unit ?? "kg", qty: i.qty, price: i.price })),
             batches: c.items.map((i: any) => ({ nameEn: i.nameEn, reg: i.reg, batch: "", net: i.qty, gross: 0, packages: "", packagesCount: 0 })),
           },
         };
         fb.docs.unshift(inv);
         return (await json({ document: inv }, 201), true);
       }
+      if (sub === "appendix" && method === "POST") {
+        const c = d.data;
+        const a: Doc = {
+          id: fb.id("d"), kind: "appendix", number: "1", title: `№1 до ${c.number} · ${c.buyer.nameEn}`, contractId: d.id, status: "draft", version: 1, createdAt: fb.now, updatedAt: fb.now,
+          data: { ...c, number: "1", contractNumber: c.number, contractDate: c.date, items: [] },
+        };
+        fb.docs.unshift(a);
+        return (await json({ document: a }, 201), true);
+      }
+      if (sub === "status" && method === "POST") {
+        d.status = body().status;
+        return (await json({ document: d }), true);
+      }
+      if (sub === "events") return (await json({ events: [{ action: "created", note: "", at: fb.now, user: "Тест" }] }), true);
       if (method === "GET") return (await json({ document: d }), true);
       if (method === "PUT") {
+        if (d.status !== "draft") return (await json({ error: "locked" }, 409), true);
         const b = body();
         fb.puts.push(b.data);
         Object.assign(d, { data: b.data, number: b.data.number, title: fb.title(d.kind, b.data) });
@@ -250,10 +280,78 @@ test.describe("Конструктор документів", () => {
     await expect(page.getByTestId("dir-group-consignee")).toContainText('"WAREHOUSE" LLC');
   });
 
+  test("annex to a contract, then an invoice to the annex", async ({ page }) => {
+    const fb = await setup(page);
+    await page.getByTestId("docb-new-contract").click();
+    await page.getByTestId("party-buyer-pick").selectOption("p-buyer");
+    await expect.poll(() => fb.puts.at(-1)?.buyer?.nameEn).toBe('"TEST BUYER" LLC');
+    await page.getByTestId("docb-make-appendix").click();
+    await expect(page.getByTestId("docb-title")).toContainText("Додаток №1 до");
+    await expect(page.getByTestId("appendix-contract-number")).toHaveValue(/\/PTB$/);
+    await page.getByTestId("add-from-catalog").click();
+    await page.getByTestId("catalog-item").first().click();
+    await page.getByTestId("item-unit").selectOption("pcs");
+    await page.getByTestId("item-qty").fill("5000");
+    await expect.poll(() => fb.puts.at(-1)?.items?.[0]?.unit).toBe("pcs");
+    await page.getByTestId("docb-make-invoice").click();
+    await expect(page.getByTestId("docb-title")).toContainText("Інвойс");
+  });
+
+  test("checked → locked; check panel; PDF download; history", async ({ page }) => {
+    const fb = await setup(page);
+    await page.getByTestId("docb-new-contract").click();
+    await page.getByTestId("docb-check").click();
+    await expect(page.getByTestId("docb-findings")).toContainText("помилка в номері");
+    await expect(page.getByTestId("docb-finding-error")).toHaveCount(1);
+    expect(fb.checks.at(-1)?.kind).toBe("contract");
+
+    const dl = page.waitForEvent("download");
+    await page.getByTestId("docb-download-more").click();
+    await page.getByTestId("docb-download-pdf").click();
+    expect((await dl).suggestedFilename()).toBe("Контракт.pdf");
+
+    await page.getByTestId("docb-mark-checked").click();
+    await expect(page.getByTestId("docb-status")).toContainText("ПЕРЕВІРЕНО");
+    await expect(page.getByTestId("docb-locked")).toBeVisible();
+    await expect(page.getByTestId("contract-number")).toBeDisabled();
+    await page.getByTestId("docb-mark-draft").click();
+    await expect(page.getByTestId("contract-number")).toBeEnabled();
+
+    await page.getByTestId("docb-more").click();
+    await page.getByTestId("docb-history").click();
+    await expect(page.getByTestId("docb-events")).toContainText("створено");
+  });
+
+  test("Ukrainian видаткова накладна: number, rows, VAT", async ({ page }) => {
+    const fb = await setup(page);
+    await page.getByTestId("docb-new-ua").click();
+    await expect(page.getByTestId("docb-title")).toContainText("Накладна");
+    await expect(page.getByTestId("ua-number")).toHaveValue("TB-0001");
+    await page.getByTestId("ua-add-item").click();
+    await page.getByTestId("ua-item-name").fill("Вазелін білий");
+    await page.getByTestId("ua-item-qty").fill("100");
+    await page.getByTestId("ua-item-price").fill("120");
+    await expect(page.getByTestId("ua-total")).toContainText("14 400,00");
+    await expect.poll(() => fb.puts.at(-1)?.items?.[0]?.name).toBe("Вазелін білий");
+  });
+
+  test("directory: add companies from an uploaded document", async ({ page }) => {
+    const fb = await setup(page);
+    await page.getByTestId("docb-open-directory").click();
+    await page.getByTestId("dir-import-open").click();
+    await page.getByTestId("dir-import-file").setInputFiles({ name: "contract.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4") });
+    await expect(page.getByTestId("dir-import-company")).toHaveCount(1);
+    await page.getByTestId("dir-import-save").click();
+    await expect.poll(() => fb.parties.at(-1)?.nameEn).toBe('"FROM DOC" LLC');
+    await page.getByTestId("dir-tab-templates").click();
+    await expect(page.getByTestId("dir-templates")).toContainText("Стандартний");
+  });
+
   test("delete asks for a second click", async ({ page }) => {
     const fb = await setup(page);
     await page.getByTestId("docb-new-contract").click();
     await expect(page.getByTestId("docb-title")).toBeVisible();
+    await page.getByTestId("docb-more").click();
     await page.getByTestId("docb-delete").click();
     await page.getByTestId("docb-delete-confirm").click();
     await expect(page.getByTestId("docb-doc-row")).toHaveCount(0);

@@ -18,7 +18,7 @@ ENV NODE_ENV=production
 # (puppeteer-core, CHROMIUM_PATH); fonts-dejavu covers Cyrillic if the web font can't load.
 ENV CHROMIUM_PATH=/usr/bin/chromium PUPPETEER_SKIP_DOWNLOAD=1
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends libreoffice-writer-nogui chromium fonts-dejavu-core \
+  && apt-get install -y --no-install-recommends libreoffice-writer-nogui chromium fonts-dejavu-core fonts-liberation \
   && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev && npm cache clean --force

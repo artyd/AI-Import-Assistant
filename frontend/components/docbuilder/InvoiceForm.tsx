@@ -2,8 +2,9 @@
 
 // Інвойс + Пакувальний лист: one document, two pages (INVOICE / PACKING LIST)
 // on the seller's letterhead.
-import type { Batch, DirectoryParty, DirectoryProduct, InvoiceData, InvoiceItem, Party, PartyRole, Product } from "@/lib/docbuilder/model";
-import { INCOTERMS, batchTotals, emptyParty, fmtMoney, fmtNum, itemsTotal, lineTotal } from "@/lib/docbuilder/model";
+import type { Batch, DirectoryParty, DirectoryProduct, InvoiceData, InvoiceItem, Party, PartyRole, Product, TemplateInfo, Unit } from "@/lib/docbuilder/model";
+import { INCOTERMS, UNIT_OPTIONS, batchTotals, emptyParty, fmtMoney, fmtNum, itemsTotal, lineTotal, unitLabel } from "@/lib/docbuilder/model";
+import { TemplateSelect } from "./sections";
 import { useState } from "react";
 import { Area, Check, Field, Grid, NumField, Pair, Section, Select, smallBtn } from "./fields";
 import { ItemPicker } from "./ItemPicker";
@@ -15,6 +16,8 @@ interface Props {
   products: DirectoryProduct[];
   onSaveProduct: (p: Product) => Promise<void>;
   onSaveParty: (p: Party, role: PartyRole) => Promise<void>;
+  templates: TemplateInfo[];
+  onSuggestNumber: () => void;
 }
 
 const emptyBatch = (it?: InvoiceItem): Batch => ({
@@ -74,7 +77,7 @@ function SaveToDirectory({ name, address, role, parties, onSave, testId }: { nam
   );
 }
 
-export function InvoiceForm({ data, onChange, parties, products, onSaveProduct, onSaveParty }: Props) {
+export function InvoiceForm({ data, onChange, parties, products, onSaveProduct, onSaveParty, templates, onSuggestNumber }: Props) {
   const set = <K extends keyof InvoiceData>(k: K, v: InvoiceData[K]) => onChange({ ...data, [k]: v });
   const setItem = (i: number, patch: Partial<InvoiceItem>) => set("items", data.items.map((it, j) => (j === i ? { ...it, ...patch } : it)));
   const setBatch = (i: number, patch: Partial<Batch>) => set("batches", data.batches.map((b, j) => (j === i ? { ...b, ...patch } : b)));
@@ -86,7 +89,12 @@ export function InvoiceForm({ data, onChange, parties, products, onSaveProduct, 
     <div>
       <Section title="Основне" testId="invoice-main">
         <Grid cols="1fr 0.8fr 0.6fr">
-          <Field label="Номер інвойсу" value={data.number} onChange={(v) => set("number", v)} testId="invoice-number" />
+          <div style={{ display: "flex", gap: 6, alignItems: "end" }}>
+            <Field label="Номер інвойсу" value={data.number} onChange={(v) => set("number", v)} testId="invoice-number" />
+            <button type="button" style={{ ...smallBtn, height: 34 }} onClick={onSuggestNumber} title="Наступний номер після останнього інвойсу" data-testid="invoice-next-number">
+              +1
+            </button>
+          </div>
           <Field label="Дата" type="date" value={data.date} onChange={(v) => set("date", v)} />
           <Select
             label="Валюта"
@@ -154,6 +162,7 @@ export function InvoiceForm({ data, onChange, parties, products, onSaveProduct, 
           <Field label="Pallets (пакувальний лист)" value={data.pallets} onChange={(v) => set("pallets", v)} placeholder="2 pallets" />
         </Grid>
         <Check label="Печатка продавця на обох сторінках" checked={data.stamp} onChange={(v) => set("stamp", v)} testId="invoice-stamp" />
+        <TemplateSelect kind="invoice" value={data.templateId} templates={templates} onChange={(v) => set("templateId", v)} />
       </Section>
 
       <Section
@@ -180,10 +189,11 @@ export function InvoiceForm({ data, onChange, parties, products, onSaveProduct, 
               <Field label="Name of the Goods" value={it.nameEn} onChange={(v) => setItem(i, { nameEn: v })} />
               <Field label="Українська реєстрація" value={it.reg} onChange={(v) => setItem(i, { reg: v })} />
             </Grid>
-            <Grid cols="1.4fr 0.8fr 0.8fr">
+            <Grid cols="1.4fr 0.5fr 0.8fr 0.8fr">
               <Field label="Name of the Manufacturer" value={it.manufacturer} onChange={(v) => setItem(i, { manufacturer: v })} />
-              <NumField label="Quantity, kg" value={it.qty} onChange={(v) => setItem(i, { qty: v })} />
-              <NumField label={`Price per kg, ${data.currency}`} value={it.price} onChange={(v) => setItem(i, { price: v })} />
+              <Select label="Одиниця" value={it.unit ?? "kg"} options={UNIT_OPTIONS} onChange={(v: Unit) => setItem(i, { unit: v })} />
+              <NumField label={`Quantity, ${unitLabel(it.unit ?? "kg")}`} value={it.qty} onChange={(v) => setItem(i, { qty: v })} />
+              <NumField label={`Price, ${data.currency}`} value={it.price} onChange={(v) => setItem(i, { price: v })} />
             </Grid>
           </div>
         ))}
@@ -192,10 +202,10 @@ export function InvoiceForm({ data, onChange, parties, products, onSaveProduct, 
           onPick={(p) =>
             set("items", [
               ...data.items,
-              { nameEn: p.nameEn, reg: p.reg, manufacturer: p.countryEn ? `${p.manufacturer}, ${p.countryEn}` : p.manufacturer, countryEn: p.countryEn, qty: 0, price: 0 },
+              { nameEn: p.nameEn, reg: p.reg, manufacturer: p.countryEn ? `${p.manufacturer}, ${p.countryEn}` : p.manufacturer, countryEn: p.countryEn, unit: p.unit ?? "kg", qty: 0, price: 0 },
             ])
           }
-          onBlank={() => set("items", [...data.items, { nameEn: "", reg: "", manufacturer: "", countryEn: "", qty: 0, price: 0 }])}
+          onBlank={() => set("items", [...data.items, { nameEn: "", reg: "", manufacturer: "", countryEn: "", unit: "kg", qty: 0, price: 0 }])}
         />
         {data.items.some((it) => it.nameEn.trim() && !products.some((p) => p.nameEn === it.nameEn)) ? (
           <div style={{ fontSize: 12, color: "var(--muted)" }}>
@@ -205,7 +215,7 @@ export function InvoiceForm({ data, onChange, parties, products, onSaveProduct, 
               style={{ ...smallBtn, height: 24, color: "var(--accent)" }}
               onClick={async () => {
                 for (const it of data.items.filter((x) => x.nameEn.trim() && !products.some((p) => p.nameEn === x.nameEn))) {
-                  await onSaveProduct({ nameEn: it.nameEn, nameUk: "", hs: "", reg: it.reg, manufacturer: it.manufacturer, countryEn: it.countryEn, countryUk: "" });
+                  await onSaveProduct({ nameEn: it.nameEn, nameUk: "", hs: "", reg: it.reg, manufacturer: it.manufacturer, countryEn: it.countryEn, countryUk: "", unit: it.unit ?? "kg" });
                 }
               }}
             >

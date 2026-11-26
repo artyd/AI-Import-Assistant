@@ -1281,7 +1281,7 @@ CREATE INDEX IF NOT EXISTS idx_doc_products_name ON doc_products(lower(name));
 
 CREATE TABLE IF NOT EXISTS doc_documents (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  kind         TEXT NOT NULL CHECK (kind IN ('contract', 'invoice')),
+  kind         TEXT NOT NULL CHECK (kind IN ('contract', 'appendix', 'invoice', 'ua_invoice')),
   number       TEXT NOT NULL DEFAULT '',
   title        TEXT NOT NULL DEFAULT '',
   data         JSONB NOT NULL,
@@ -1291,3 +1291,36 @@ CREATE TABLE IF NOT EXISTS doc_documents (
   updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_doc_documents_kind ON doc_documents(kind, updated_at DESC);
+
+-- Spec 012 phase 2: annexes and Ukrainian invoices, the draft → checked → sent
+-- workflow with versions, the change history and custom templates.
+ALTER TABLE doc_documents DROP CONSTRAINT IF EXISTS doc_documents_kind_check;
+ALTER TABLE doc_documents ADD CONSTRAINT doc_documents_kind_check
+  CHECK (kind IN ('contract', 'appendix', 'invoice', 'ua_invoice'));
+ALTER TABLE doc_documents ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'draft';
+ALTER TABLE doc_documents DROP CONSTRAINT IF EXISTS doc_documents_status_check;
+ALTER TABLE doc_documents ADD CONSTRAINT doc_documents_status_check CHECK (status IN ('draft', 'checked', 'sent'));
+ALTER TABLE doc_documents ADD COLUMN IF NOT EXISTS version INT NOT NULL DEFAULT 1;
+ALTER TABLE doc_documents ADD COLUMN IF NOT EXISTS parent_id UUID REFERENCES doc_documents(id) ON DELETE SET NULL; -- previous version
+ALTER TABLE doc_documents ADD COLUMN IF NOT EXISTS workspace_id UUID REFERENCES workspaces(id) ON DELETE SET NULL; -- «Зберегти в постачання»
+CREATE INDEX IF NOT EXISTS idx_doc_documents_contract ON doc_documents(contract_id);
+
+CREATE TABLE IF NOT EXISTS doc_document_events (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  document_id  UUID NOT NULL REFERENCES doc_documents(id) ON DELETE CASCADE,
+  user_id      UUID REFERENCES users(id) ON DELETE SET NULL,
+  action       TEXT NOT NULL,          -- created | edited | status:<s> | version | downloaded | to_shipment
+  note         TEXT NOT NULL DEFAULT '',
+  at           TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_doc_document_events_doc ON doc_document_events(document_id, at DESC);
+
+-- A team template: the user's own .docx with the same {tags} as the bundled one.
+CREATE TABLE IF NOT EXISTS doc_templates (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  kind        TEXT NOT NULL CHECK (kind IN ('contract', 'appendix', 'invoice', 'ua_invoice')),
+  name        TEXT NOT NULL,
+  file        BYTEA NOT NULL,
+  created_by  UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);

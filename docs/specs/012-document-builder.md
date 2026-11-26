@@ -1,6 +1,6 @@
 # 012 — Document builder: contracts and invoices to Word
 
-Status: built (2026-11-26). Not deployed yet. The directory has to be filled on prod.
+Status: phase 1 deployed 2026-11-26 and the prod directory is filled; phase 2 (below) built 2026-11-26.
 
 ## Goal
 
@@ -65,14 +65,56 @@ real ones, not redrawn.
 - No real counterparties in git: tests use fictional companies, and the directory
   is filled on prod (UI or API).
 
+## Phase 2 (2026-11-26): all three tiers from the review
+
+**Tier 1, the MVP core**
+1. **Annex to a contract** (`appendix`): «＋ Додаток» on a contract numbers itself (the highest annex
+   number of that contract + 1) and copies the parties and terms. The specification starts empty. It
+   prints «ANNEX No. N dated … TO THE CONTRACT No. … dated …» with five bilingual clauses (total, delivery,
+   payment with the seller's bank details, consignor, «integral part»). An invoice to an annex refers to
+   it as «APPENDIX No. N … TO THE CONTRACT …», which is what the MONPHARM invoice uses.
+2. **Units**: kg, t, pcs, l, m² per line. One unit for the whole table goes into the headers («Q-TY, KG»,
+   «PRICE PER PCS, USD»); mixed units go into each quantity cell («5 000 pcs»). The packing-list net check
+   converts tonnes and skips pieces.
+3. **«Перевірити»**: IBAN mod 97, SWIFT format, ЄДРПОУ control digit, УКТ ЗЕД codes (10 digits plus a
+   qdpro lookup), Ukrainian registrations against the Держреєстр mirror (expired, expiring within 90
+   days, not found), and duplicate numbers. Errors, warnings and passes are listed and never block.
+4. **Invoice vs its contract or annex**: unknown goods, a different price, a quantity over what is left
+   after the other invoices, a different buyer, currency or terms.
+5. **Numbers**: «+1» suggests the next number after the latest one, keeping its series and padding
+   (`2627X/0044` → `0045`). A new invoice starts with that number. A duplicate is an error in the check.
+
+**Tier 2, time savers**
+6. **«Додати з документа»**: an old contract or invoice (PDF, Word, Excel, photo) is converted to Markdown
+   like an ingest, then `EXTRACTION_MODEL` copies the companies and goods it states through a tool call.
+   The user ticks what to keep and sets each role. Saved entries get a note «перевірте реквізити».
+7. **Shipment bridge**: «З постачання» builds a contract or invoice draft from the shipment's extracted
+   fields. A party that matches a directory company is used as the snapshot. «Зберегти в постачання» puts
+   the .docx into the shipment's files exactly like an upload, so the worker reads, files and reconciles it.
+8. **Workflow**: draft → checked → sent. A non-draft document is locked: the form is disabled and the PUT
+   returns 409. «Нова версія» copies a sent document into version + 1. Every action goes into
+   `doc_document_events`, with edits collapsed to one entry per user per 10 minutes.
+9. **Payment wordings** for clause 4.1 / annex clause 3: deferred N days after delivery, 100%
+   prepayment, X% prepayment plus the rest after delivery, or a letter of credit.
+10. **Downloads**: Word, PDF (headless LibreOffice; `fonts-liberation` keeps the Times layout), and a ZIP of
+    the document with everything linked to it, in Word only or Word + PDF.
+
+**Tier 3**
+11. **Custom templates** (`doc_templates`): download the standard .docx, edit the wording or letterhead in
+    Word keeping the `{tags}`, and upload it back. It is test-filled before it is stored, and the list of
+    tags comes with examples. A document picks a template, and a seller's directory card names its
+    invoice letterhead, which is used for invoices made from its contracts.
+12. **Ukrainian видаткова накладна / рахунок на оплату** (`ua_invoice`): UAH, VAT 20 / 7 / 0 %, the amount
+    in words with feminine hryvnias, basis contract, signatures. A domestic **договір поставки** needs the
+    team's own text and is meant to come in as a custom template.
+13. **Штурман tools**: `trade_documents_list` and `trade_document_draft` (an invoice or annex draft from a
+    saved contract, only on a direct request). They are available in all three chat kinds.
+
 ## Not in scope (next)
 
-- An agent tool «склади контракт/інвойс» (Штурман fills the builder from a
-  shipment's documents).
-- Saving the generated .docx into a shipment's files (would go through
-  `shipmentChanged`).
-- PDF export (needs LibreOffice on the server), templates uploaded by users,
-  more document types (CMR, specification-only appendix, supplier POs).
+- PDF of a custom template laid out differently from Word (LibreOffice renders it).
+- E-signature / sending by email from the builder.
+- A domestic договір поставки template (needs the team's text; upload it as a custom template).
 
 ## Code
 

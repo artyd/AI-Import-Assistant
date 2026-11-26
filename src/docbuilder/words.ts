@@ -3,7 +3,7 @@
  * шістдесят п'ять доларів США 00 центів)» and «USD 865.00 (eight hundred
  * sixty-five US dollars and zero cents)». Pure; integers up to 999 999 999 999.
  */
-export type Currency = 'USD' | 'EUR';
+export type Currency = 'USD' | 'EUR' | 'UAH';
 
 // ---------- Ukrainian ----------
 const UK_ONES_M = ['', 'один', 'два', 'три', 'чотири', "п'ять", 'шість', 'сім', 'вісім', "дев'ять"];
@@ -47,8 +47,11 @@ const UK_SCALES: { forms: [string, string, string]; feminine: boolean }[] = [
   { forms: ['мільярд', 'мільярди', 'мільярдів'], feminine: false },
 ];
 
-/** Integer → Ukrainian words in the masculine gender («двадцять п'ять тисяч десять»). */
-export function ukNumber(n: number): string {
+/**
+ * Integer → Ukrainian words («двадцять п'ять тисяч десять»). `feminine` agrees
+ * the last triad with a feminine noun («одна гривня», «дві гривні»).
+ */
+export function ukNumber(n: number, feminine = false): string {
   if (!Number.isInteger(n) || n < 0) throw new Error(`ukNumber: invalid ${n}`);
   if (n === 0) return 'нуль';
   const words: string[] = [];
@@ -60,7 +63,7 @@ export function ukNumber(n: number): string {
     const s = UK_SCALES[scale];
     if (!s) throw new Error('ukNumber: too large');
     if (triad) {
-      const w = ukTriad(triad, s.feminine);
+      const w = ukTriad(triad, scale === 0 ? feminine : s.feminine);
       if (scale > 0) w.push(s.forms[ukPlural(triad)]);
       chunks.unshift(w);
     }
@@ -71,9 +74,10 @@ export function ukNumber(n: number): string {
   return words.join(' ');
 }
 
-const UK_CUR: Record<Currency, { major: [string, string, string]; minor: [string, string, string]; nameGen: string; name: string }> = {
-  USD: { major: ['долар США', 'долари США', 'доларів США'], minor: ['цент', 'центи', 'центів'], nameGen: 'доларів США', name: 'долари США' },
-  EUR: { major: ['євро', 'євро', 'євро'], minor: ['цент', 'центи', 'центів'], nameGen: 'євро', name: 'євро' },
+const UK_CUR: Record<Currency, { major: [string, string, string]; minor: [string, string, string]; nameGen: string; name: string; feminine: boolean }> = {
+  USD: { major: ['долар США', 'долари США', 'доларів США'], minor: ['цент', 'центи', 'центів'], nameGen: 'доларів США', name: 'долари США', feminine: false },
+  EUR: { major: ['євро', 'євро', 'євро'], minor: ['цент', 'центи', 'центів'], nameGen: 'євро', name: 'євро', feminine: false },
+  UAH: { major: ['гривня', 'гривні', 'гривень'], minor: ['копійка', 'копійки', 'копійок'], nameGen: 'грн', name: 'гривня', feminine: true },
 };
 
 function split(amount: number): { major: number; minor: number } {
@@ -86,7 +90,7 @@ function split(amount: number): { major: number; minor: number } {
 export function amountWordsUk(amount: number, cur: Currency): string {
   const { major, minor } = split(amount);
   const c = UK_CUR[cur];
-  return `${ukNumber(major)} ${c.major[ukPlural(major)]} ${String(minor).padStart(2, '0')} ${c.minor[ukPlural(minor)]}`;
+  return `${ukNumber(major, c.feminine)} ${c.major[ukPlural(major)]} ${String(minor).padStart(2, '0')} ${c.minor[ukPlural(minor)]}`;
 }
 
 /** «доларів США» after a decimal amount («865,00 доларів США»). */
@@ -141,6 +145,7 @@ export function enNumber(n: number): string {
 const EN_CUR: Record<Currency, { one: string; many: string; minorOne: string; minorMany: string }> = {
   USD: { one: 'US dollar', many: 'US dollars', minorOne: 'cent', minorMany: 'cents' },
   EUR: { one: 'euro', many: 'euros', minorOne: 'cent', minorMany: 'cents' },
+  UAH: { one: 'hryvnia', many: 'hryvnias', minorOne: 'kopiyka', minorMany: 'kopiykas' },
 };
 
 /** «twenty-five thousand ten US dollars and zero cents». */

@@ -17,6 +17,7 @@ import { logistTools } from '../agent/tools.js';
 import { hubToolDefinitions } from '../agent/tools/hub.js';
 import { sheetTools } from '../agent/tools/sheet.js';
 import { supplyToolDefinitions } from '../agent/tools/supply.js';
+import { docBuilderToolDefinitions } from '../agent/tools/docbuilder.js';
 import { chatRateLimitConfig } from './chatRateLimit.js';
 import { alertChatFailure } from '../lib/alertHooks.js';
 import { lessonsBlockFor } from '../feedback/store.js';
@@ -82,6 +83,7 @@ export async function chatNormalRoutes(app: FastifyInstance): Promise<void> {
           ...hubToolDefinitions.filter((t) => 'name' in t && t.name !== 'find_tracking_numbers'),
           ...sheetTools(),
           ...supplyToolDefinitions,
+          ...docBuilderToolDefinitions,
         ],
       });
 
