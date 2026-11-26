@@ -40,6 +40,12 @@ function fakeBackend() {
   return { parties, products, docs, puts, renders, checks, id, now, total, title };
 }
 
+/** «＋ Новий документ ▾» → a kind. */
+async function newDoc(page: Page, id: string) {
+  await page.getByTestId("docb-new-menu").click();
+  await page.getByTestId(id).click();
+}
+
 async function setup(page: Page) {
   const fb = fakeBackend();
   await mockWorkspace(page, async (route, pathname, method) => {
@@ -166,7 +172,7 @@ test.describe("Конструктор документів", () => {
 
   test("contract: buyer from the directory → auto number, goods from the catalogue, live preview, autosave, Word", async ({ page }) => {
     const fb = await setup(page);
-    await page.getByTestId("docb-new-contract").click();
+    await newDoc(page, "docb-new-contract");
     await expect(page.getByTestId("docb-title")).toContainText("Контракт");
 
     // The seller comes prefilled from the directory; pick the buyer.
@@ -206,7 +212,7 @@ test.describe("Конструктор документів", () => {
 
   test("invoice from a contract carries the goods; the packing list checks net weight", async ({ page }) => {
     const fb = await setup(page);
-    await page.getByTestId("docb-new-contract").click();
+    await newDoc(page, "docb-new-contract");
     await page.getByTestId("party-buyer-pick").selectOption("p-buyer");
     await page.getByTestId("add-from-catalog").click();
     await page.getByTestId("catalog-item").first().click();
@@ -252,14 +258,14 @@ test.describe("Конструктор документів", () => {
     await page.getByTestId("dir-tab-products").click();
     await expect(page.getByTestId("dir-product-row")).toHaveCount(1);
 
-    await page.getByTestId("docb-new-contract").click();
+    await newDoc(page, "docb-new-contract");
     await page.getByTestId("party-buyer-pick").selectOption({ label: '"NEW CLIENT" LLC' });
     await expect.poll(() => fb.puts.at(-1)?.buyer?.nameEn).toBe('"NEW CLIENT" LLC');
   });
 
   test("a new company typed in the document goes to the directory with its role", async ({ page }) => {
     const fb = await setup(page);
-    await page.getByTestId("docb-new-contract").click();
+    await newDoc(page, "docb-new-contract");
     await page.getByTestId("party-buyer-pick").selectOption("__new");
     await page.getByTestId("party-buyer").getByLabel("Назва (EN)").fill('"FRESH BUYER" LLC');
     await page.getByTestId("party-buyer").getByRole("button", { name: "＋ У довідник" }).click();
@@ -282,7 +288,7 @@ test.describe("Конструктор документів", () => {
 
   test("annex to a contract, then an invoice to the annex", async ({ page }) => {
     const fb = await setup(page);
-    await page.getByTestId("docb-new-contract").click();
+    await newDoc(page, "docb-new-contract");
     await page.getByTestId("party-buyer-pick").selectOption("p-buyer");
     await expect.poll(() => fb.puts.at(-1)?.buyer?.nameEn).toBe('"TEST BUYER" LLC');
     await page.getByTestId("docb-make-appendix").click();
@@ -299,7 +305,7 @@ test.describe("Конструктор документів", () => {
 
   test("checked → locked; check panel; PDF download; history", async ({ page }) => {
     const fb = await setup(page);
-    await page.getByTestId("docb-new-contract").click();
+    await newDoc(page, "docb-new-contract");
     await page.getByTestId("docb-check").click();
     await expect(page.getByTestId("docb-findings")).toContainText("помилка в номері");
     await expect(page.getByTestId("docb-finding-error")).toHaveCount(1);
@@ -324,7 +330,7 @@ test.describe("Конструктор документів", () => {
 
   test("Ukrainian видаткова накладна: number, rows, VAT", async ({ page }) => {
     const fb = await setup(page);
-    await page.getByTestId("docb-new-ua").click();
+    await newDoc(page, "docb-new-ua");
     await expect(page.getByTestId("docb-title")).toContainText("Накладна");
     await expect(page.getByTestId("ua-number")).toHaveValue("TB-0001");
     await page.getByTestId("ua-add-item").click();
@@ -349,7 +355,7 @@ test.describe("Конструктор документів", () => {
 
   test("delete asks for a second click", async ({ page }) => {
     const fb = await setup(page);
-    await page.getByTestId("docb-new-contract").click();
+    await newDoc(page, "docb-new-contract");
     await expect(page.getByTestId("docb-title")).toBeVisible();
     await page.getByTestId("docb-more").click();
     await page.getByTestId("docb-delete").click();

@@ -47,18 +47,9 @@ import { InvoiceForm } from "./InvoiceForm";
 import { UaInvoiceForm } from "./UaInvoiceForm";
 import { DirectoryPanel } from "./DirectoryPanel";
 import { smallBtn } from "./fields";
+import { KIND_COLOR, KindFilterMenu, NewDocMenu, type KindFilter } from "./TypeMenus";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
-type Filter = "all" | DocKind;
-
-const FILTERS: { value: Filter; label: string }[] = [
-  { value: "all", label: "Усі" },
-  { value: "contract", label: "Контракти" },
-  { value: "appendix", label: "Додатки" },
-  { value: "invoice", label: "Інвойси" },
-  { value: "ua_invoice", label: "Накладні" },
-];
-
 const STATUS_COLOR: Record<DocStatus, string> = { draft: "var(--muted)", checked: "var(--info)", sent: "var(--ok)" };
 
 function fmtDate(iso: string): string {
@@ -224,7 +215,7 @@ export function DocBuilderView() {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [q, setQ] = useState("");
-  const [filter, setFilter] = useState<Filter>("all");
+  const [filter, setFilter] = useState<KindFilter>("all");
   const [busy, setBusy] = useState<string | null>(null);
   const [findings, setFindings] = useState<Finding[] | null>(null);
   const [events, setEvents] = useState<DocEvent[] | null>(null);
@@ -349,6 +340,12 @@ export function DocBuilderView() {
 
   const byId = useMemo(() => new Map(docs.map((d) => [d.id, d])), [docs]);
 
+  const counts = useMemo(() => {
+    const c: Record<KindFilter, number> = { all: docs.length, contract: 0, appendix: 0, invoice: 0, ua_invoice: 0 };
+    for (const d of docs) c[d.kind]++;
+    return c;
+  }, [docs]);
+
   const run = async (label: string, fn: () => Promise<void>) => {
     setBusy(label);
     setError(null);
@@ -416,10 +413,10 @@ export function DocBuilderView() {
     const active = current?.id === d.id && mode === "doc";
     const parent = d.contractId ? byId.get(d.contractId) : undefined;
     const badge: Record<DocKind, { text: string; color: string }> = {
-      contract: { text: "КОНТРАКТ", color: "var(--accent)" },
-      appendix: { text: "ДОДАТОК", color: "#8b5cf6" },
-      invoice: { text: "ІНВОЙС", color: "var(--ok)" },
-      ua_invoice: { text: "НАКЛАДНА", color: "var(--warn)" },
+      contract: { text: "КОНТРАКТ", color: KIND_COLOR.contract },
+      appendix: { text: "ДОДАТОК", color: KIND_COLOR.appendix },
+      invoice: { text: "ІНВОЙС", color: KIND_COLOR.invoice },
+      ua_invoice: { text: "НАКЛАДНА", color: KIND_COLOR.ua_invoice },
     };
     const b = badge[d.kind];
     return (
@@ -451,34 +448,13 @@ export function DocBuilderView() {
       {/* ---------- list ---------- */}
       <aside style={{ width: 272, flex: "none", borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column", minHeight: 0, background: "var(--panel)" }}>
         <div style={{ padding: "14px 12px 8px", display: "grid", gap: 8 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-            <button type="button" className="btn btn-primary" style={{ height: 34, fontSize: 13 }} onClick={() => create("contract")} data-testid="docb-new-contract">
-              ＋ Контракт
-            </button>
-            <button type="button" className="btn" style={{ height: 34, fontSize: 13 }} onClick={() => create("invoice")} data-testid="docb-new-invoice">
-              ＋ Інвойс
-            </button>
-            <button type="button" className="btn" style={{ height: 34, fontSize: 13 }} onClick={() => create("ua_invoice")} data-testid="docb-new-ua">
-              ＋ Накладна
-            </button>
-            <button type="button" className="btn" style={{ height: 34, fontSize: 13 }} onClick={() => setPicker(picker === "from" ? null : "from")} data-testid="docb-from-shipment">
-              З постачання
-            </button>
-          </div>
+          <NewDocMenu
+            onCreate={(k) => void create(k)}
+            onFromShipment={() => setPicker("from")}
+            onAppendix={current?.kind === "contract" ? () => void run("appendix", () => openNew(api.appendixFrom(current.id))) : null}
+          />
           <input className="input" style={{ height: 32, fontSize: 13, padding: "0 10px" }} placeholder="Пошук за номером чи компанією" value={q} onChange={(e) => setQ(e.target.value)} />
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-            {FILTERS.map((f) => (
-              <button
-                key={f.value}
-                type="button"
-                onClick={() => setFilter(f.value)}
-                data-testid={`docb-filter-${f.value}`}
-                style={{ ...smallBtn, height: 24, fontSize: 11.5, padding: "0 8px", borderColor: filter === f.value ? "var(--accent)" : "var(--border)", background: filter === f.value ? "var(--active)" : "var(--surface)" }}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
+          <KindFilterMenu value={filter} onChange={setFilter} counts={counts} />
         </div>
         <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "0 6px 8px" }}>
           {filtered.length === 0 ? <p style={{ fontSize: 12.5, color: "var(--muted)", padding: "8px 8px" }}>{docs.length ? "Нічого не знайдено." : "Ще немає документів. Створіть перший контракт."}</p> : filtered.map(listRow)}
