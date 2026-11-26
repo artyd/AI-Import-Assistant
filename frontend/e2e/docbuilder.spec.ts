@@ -158,6 +158,9 @@ test.describe("Конструктор документів", () => {
     expect(fb.puts.at(-1)?.buyer?.nameEn).toBe('"TEST BUYER" LLC');
     expect(fb.puts.at(-1)?.seller?.nameEn).toBe("ACME TRADING LIMITED");
 
+    // The «check every field» warning always sits under the form.
+    await expect(page.getByTestId("docb-check-notice")).toContainText("перевірте всі поля");
+
     // Everything required is filled → no gaps banner.
     await expect(page.getByTestId("docb-gaps")).toHaveCount(0);
 

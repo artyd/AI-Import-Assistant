@@ -351,7 +351,7 @@ export function DocBuilderView() {
                   Видалити
                 </button>
               )}
-              <button type="button" className="btn btn-primary" style={{ height: 34, fontSize: 13 }} onClick={download} disabled={downloading} data-testid="docb-download">
+              <button type="button" className="btn btn-primary" style={{ height: 34, fontSize: 13 }} onClick={download} disabled={downloading} data-testid="docb-download" title="Перед завантаженням обовʼязково перевірте всі поля">
                 {downloading ? "Формую…" : "Завантажити Word"}
               </button>
             </div>
@@ -373,6 +373,7 @@ export function DocBuilderView() {
               ) : (
                 <InvoiceForm data={data as InvoiceData} onChange={edit} parties={parties} products={products} onSaveProduct={saveProduct} />
               )}
+              <CheckNotice />
             </div>
           </>
         ) : (
@@ -409,6 +410,34 @@ export function DocBuilderView() {
         </section>
       ) : null}
       <style>{PAPER_CSS}</style>
+    </div>
+  );
+}
+
+/**
+ * Always under the form: the directory is typed in by people (and partly taken
+ * from old documents), so the logist checks every field before downloading.
+ */
+function CheckNotice() {
+  return (
+    <div
+      role="note"
+      data-testid="docb-check-notice"
+      style={{
+        marginTop: 4,
+        padding: "12px 14px",
+        borderRadius: "var(--radius)",
+        border: "1px solid color-mix(in srgb, var(--err) 35%, transparent)",
+        background: "color-mix(in srgb, var(--err) 8%, transparent)",
+        fontSize: 13,
+        lineHeight: 1.5,
+      }}
+    >
+      <b style={{ color: "var(--err)" }}>⚠ Обовʼязково перевірте всі поля перед завантаженням.</b>
+      <div style={{ color: "var(--text)", marginTop: 2 }}>
+        Реквізити, банк, підписанти, назви товарів, коди УКТ ЗЕД, кількості й ціни підставляються з довідника — він може бути неповним
+        або застарілим. Звірте документ у перегляді праворуч, а після завантаження — у Word.
+      </div>
     </div>
   );
 }
