@@ -174,7 +174,7 @@ export function DirectoryPanel({ parties, products, onSaveParty, onDeleteParty, 
             return (
               <div key={role} style={{ marginBottom: 14 }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.5, margin: "4px 2px 6px" }}>{ROLE_LABEL[role]}</div>
-                <div style={{ display: "grid", gap: 6 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 6 }}>
                   {list.map((p) => (
                     <div key={p.id} data-testid="dir-party-row" style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10 }}>
                       <div style={{ minWidth: 0, flex: 1 }}>
@@ -202,13 +202,13 @@ export function DirectoryPanel({ parties, products, onSaveParty, onDeleteParty, 
       ) : null}
 
       {tab === "products" ? (
-        <div style={{ display: "grid", gap: 6 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 6 }}>
           {products.length === 0 && !product ? <p style={{ fontSize: 13, color: "var(--muted)" }}>Каталог товарів порожній.</p> : null}
           {products.map((p) => (
             <div key={p.id} data-testid="dir-product-row" style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10 }}>
               <div style={{ minWidth: 0, flex: 1 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 600 }}>{p.nameEn || p.nameUk}</div>
-                <div style={{ fontSize: 12, color: "var(--muted)" }}>{[p.nameUk && p.nameEn ? p.nameUk : "", p.manufacturer, p.countryUk || p.countryEn, p.hs ? `HS ${p.hs}` : "", p.reg].filter(Boolean).join(" · ")}</div>
+                <div style={{ fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{[p.nameUk && p.nameEn ? p.nameUk : "", p.manufacturer, p.countryUk || p.countryEn, p.hs ? `HS ${p.hs}` : "", p.reg].filter(Boolean).join(" · ")}</div>
               </div>
               <button type="button" style={smallBtn} onClick={() => setProduct(p)}>
                 Редагувати
