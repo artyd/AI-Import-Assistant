@@ -8,6 +8,7 @@ import { TemplateSelect } from "./sections";
 import { useState } from "react";
 import { Area, Check, Field, Grid, NumField, Pair, Section, Select, smallBtn } from "./fields";
 import { ItemPicker } from "./ItemPicker";
+import { Select as UiSelect } from "@/components/ui/Select";
 
 interface Props {
   data: InvoiceData;
@@ -32,7 +33,7 @@ const emptyBatch = (it?: InvoiceItem): Batch => ({
 
 function PartyPick({ label, parties, onPick, onNew, testId }: { label: string; parties: DirectoryParty[]; onPick: (p: DirectoryParty) => void; onNew: () => void; testId?: string }) {
   return (
-    <select
+    <UiSelect
       className="input"
       style={{ height: 30, fontSize: 12.5, padding: "0 8px", maxWidth: 260 }}
       value=""
@@ -50,7 +51,7 @@ function PartyPick({ label, parties, onPick, onNew, testId }: { label: string; p
           {p.nameEn || p.nameUk}
         </option>
       ))}
-    </select>
+    </UiSelect>
   );
 }
 

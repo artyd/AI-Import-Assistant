@@ -14,6 +14,7 @@ import {
   validateTriage,
   type TriageReason,
 } from "@/lib/shipment/triage";
+import { Select } from "@/components/ui/Select";
 
 /**
  * Triage controls of a finding (spec 011): «Не проблема» (reason + note), «Вирішено»,
@@ -130,14 +131,14 @@ export function TriageBar({
       {mode ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6, padding: 8, background: "var(--hover)", borderRadius: 8 }}>
           {mode === "np" ? (
-            <select className="input" value={reason} onChange={(e) => setReason(e.target.value as TriageReason | "")} aria-label="Причина" style={{ height: 30, fontSize: 12 }}>
+            <Select className="input" value={reason} onChange={(e) => setReason(e.target.value as TriageReason | "")} aria-label="Причина" style={{ height: 30, fontSize: 12 }}>
               <option value="">Причина…</option>
               {TRIAGE_REASONS.map((r) => (
                 <option key={r} value={r}>
                   {REASON_LABEL[r]}
                 </option>
               ))}
-            </select>
+            </Select>
           ) : null}
           <textarea
             className="input"

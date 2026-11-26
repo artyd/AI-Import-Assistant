@@ -33,6 +33,7 @@ import {
 } from "@/lib/instruction";
 import { emptySession, isLocked, saveRequest, sessionReducer } from "@/lib/instructionSession";
 import s from "./instruction.module.css";
+import { Select } from "@/components/ui/Select";
 
 type Preview = { en: string; uk: string; subject: string; missing: { path: string; label: string }[] };
 type ChatMsg = { role: "user" | "assistant"; text: string; tools: string[] };
@@ -275,13 +276,13 @@ export default function InstructionPage() {
         </div>
         <div className={s.sp} />
         {versions.length > 0 && (
-          <select className={s.in} style={{ width: "auto", padding: "6px 10px" }} value={current?.version ?? ""} onChange={(e) => openVersion(Number(e.target.value))}>
+          <Select className={s.in} style={{ width: "auto", padding: "6px 10px" }} value={current?.version ?? ""} onChange={(e) => openVersion(Number(e.target.value))}>
             {versions.map((v) => (
               <option key={v.version} value={v.version}>
                 v{v.version} · {v.status === "approved" ? "затверджено" : v.status === "sent" ? "надіслано" : "чернетка"}
               </option>
             ))}
-          </select>
+          </Select>
         )}
         {statusBadge}
         {dirty && <span className={s.tokens} style={{ color: "var(--warn)" }}>незбережено</span>}
@@ -335,7 +336,7 @@ export default function InstructionPage() {
           <div className={s.sec}>
             <h2><span className={s.n}>1</span>Від імені{secState(["from.name"])}</h2>
             <div className={s.sel}>
-              <select
+              <Select
                 className={`${s.in} ${isMissing("from.name") ? s.missing : ""}`}
                 value={draft.from.directoryId ?? ""}
                 onChange={(e) => {
@@ -351,7 +352,7 @@ export default function InstructionPage() {
                 {own.map((o) => (
                   <option key={o.id} value={o.id}>{o.name}{o.address ? ` · ${o.address}` : ""}</option>
                 ))}
-              </select>
+              </Select>
             </div>
             <div className={s.row} style={{ marginTop: 12 }}>
               {field("Компанія (шапка)", "from.name")}
@@ -390,9 +391,9 @@ export default function InstructionPage() {
               {field("Кількість", "product.quantity")}
               <div className={s.f}>
                 <label>Одиниця</label>
-                <select className={s.in} value={draft.product.unit} onChange={(e) => setF("product.unit", e.target.value)}>
+                <Select className={s.in} value={draft.product.unit} onChange={(e) => setF("product.unit", e.target.value)}>
                   {[...new Set(["kg", "g", "t", "l", "pcs", draft.product.unit].filter(Boolean))].map((u) => <option key={u}>{u}</option>)}
-                </select>
+                </Select>
               </div>
             </div>
             <div className={s.row}>
@@ -411,13 +412,13 @@ export default function InstructionPage() {
             <h2><span className={s.n}>4</span>Відправник (Consignor){secState(["consignor.name"])}</h2>
             {suppliers.length > 0 && (
               <div className={s.sel} style={{ marginBottom: 12 }}>
-                <select className={s.in} value="" onChange={(e) => {
+                <Select className={s.in} value="" onChange={(e) => {
                   const r = suppliers.find((x) => x.id === e.target.value);
                   if (r) edit((d) => ({ ...d, consignor: { name: r.name, address: r.address, country: r.country }, supplierEmail: r.email || d.supplierEmail, sources: { ...d.sources, "consignor.name": "template", "consignor.address": "template" } }));
                 }}>
                   <option value="">— підставити з шаблону постачальника —</option>
                   {suppliers.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-                </select>
+                </Select>
               </div>
             )}
             {field("Назва", "consignor.name")}
@@ -451,13 +452,13 @@ export default function InstructionPage() {
             )}
             {consignees.length > 0 && (
               <div className={s.sel} style={{ marginBottom: 12 }}>
-                <select className={s.in} value="" onChange={(e) => {
+                <Select className={s.in} value="" onChange={(e) => {
                   const r = consignees.find((x) => x.id === e.target.value);
                   if (r) edit((d) => ({ ...d, consignee: { name: r.name, address: r.address, country: r.country }, sources: { ...d.sources, "consignee.name": "template", "consignee.address": "template" } }));
                 }}>
                   <option value="">— підставити з шаблону —</option>
                   {consignees.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-                </select>
+                </Select>
               </div>
             )}
             {field("Назва", "consignee.name")}
@@ -484,10 +485,10 @@ export default function InstructionPage() {
             <div className={s.row}>
               <div className={s.f}>
                 <label>Incoterms {src("terms.incoterm")}</label>
-                <select className={`${s.in} ${isMissing("terms.incoterm") ? s.missing : ""}`} value={draft.terms.incoterm} onChange={(e) => setF("terms.incoterm", e.target.value)}>
+                <Select className={`${s.in} ${isMissing("terms.incoterm") ? s.missing : ""}`} value={draft.terms.incoterm} onChange={(e) => setF("terms.incoterm", e.target.value)}>
                   <option value="">—</option>
                   {INCOTERMS.map((i) => <option key={i}>{i}</option>)}
-                </select>
+                </Select>
               </div>
               {field("Місце відвантаження", "terms.place")}
             </div>
@@ -536,13 +537,13 @@ export default function InstructionPage() {
             <h2><span className={s.n}>10</span>Оригінали курʼєром{secState(["originals.contact", "originals.phone", "originals.address"])}</h2>
             {contacts.length > 0 && (
               <div className={s.sel} style={{ marginBottom: 12 }}>
-                <select className={s.in} value="" onChange={(e) => {
+                <Select className={s.in} value="" onChange={(e) => {
                   const r = contacts.find((x) => x.id === e.target.value);
                   if (r) edit((d) => ({ ...d, originals: { contact: r.signer || r.name, phone: r.phone, address: r.address }, sources: { ...d.sources, "originals.contact": "template", "originals.phone": "template", "originals.address": "template" } }));
                 }}>
                   <option value="">— підставити з шаблону контакту —</option>
                   {contacts.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-                </select>
+                </Select>
               </div>
             )}
             <div className={s.row}>

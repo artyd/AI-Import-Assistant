@@ -235,6 +235,7 @@ test.describe("Logist calendar (team sheet)", () => {
     await page.addInitScript(() => localStorage.setItem("aia_calendar_view", "month"));
     await openCalendar(page);
     const events = page.getByTestId("calendar-event");
+    await expect(events.first()).toBeVisible();
     const all = await events.count();
     expect(all).toBeGreaterThan(2);
     await page.getByLabel("Логіст").selectOption("Яна");

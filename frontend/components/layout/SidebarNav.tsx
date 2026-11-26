@@ -17,6 +17,7 @@ import {
   LnPlug,
   LnTrash,
 } from "../ui/LineIcons";
+import { Select } from "@/components/ui/Select";
 
 interface Props {
   workspaces: Workspace[];
@@ -352,7 +353,7 @@ export function SidebarNav(props: Props) {
           </label>
           <div style={{ display: "flex", gap: 6 }}>
             <div style={{ position: "relative", flex: 1, minWidth: 0 }}>
-              <select
+              <Select
                 value={chatKind === "supply" ? current.id : activeCollectionId ?? ""}
                 onChange={(e) => {
                   const v = e.target.value;
@@ -367,7 +368,7 @@ export function SidebarNav(props: Props) {
                 style={{
                   width: "100%",
                   height: 40,
-                  padding: "0 32px 0 12px",
+                  padding: "0 10px 0 12px",
                   background: "var(--surface)",
                   border: "1px solid var(--border2)",
                   borderRadius: 10,
@@ -399,20 +400,7 @@ export function SidebarNav(props: Props) {
                     </option>
                   ))
                 )}
-              </select>
-              <span
-                style={{
-                  position: "absolute",
-                  right: 11,
-                  top: "50%",
-                  transform: "translateY(-50%)",
-                  pointerEvents: "none",
-                  color: "var(--muted)",
-                  display: "flex",
-                }}
-              >
-                <LnChevronDown size={16} />
-              </span>
+              </Select>
             </div>
             {(chatKind === "consolidated" || chatKind === "supply") && (
               <button

@@ -15,6 +15,7 @@ import { PinModal } from "./PinModal";
 import { ShipmentDrawer } from "./ShipmentDrawer";
 import { LegalLinks } from "@/components/legal/LegalLinks";
 import { IArch, ICal, IDl, IExit, IHist, IList, ILock, IPlus, ISearch, ISet, IUnlock, IX } from "./SupplyIcons";
+import { Select } from "@/components/ui/Select";
 
 export type View = "list" | "cal" | "arch" | "hist" | "dict";
 export type ToastFn = (text: string, undo?: () => Promise<void> | void) => void;
@@ -410,11 +411,11 @@ function Toolbar({
       </div>
       <span className="sp-gap" style={{ flex: 1 }} />
       {sort && (
-        <select className="sort" aria-label="Сортування" value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
+        <Select className="sort" aria-label="Сортування" value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
           <option value="date">За датою</option>
           <option value="name">За назвою</option>
           <option value="updated">Нещодавно змінені</option>
-        </select>
+        </Select>
       )}
     </div>
   );

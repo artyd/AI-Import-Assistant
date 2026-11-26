@@ -4,6 +4,7 @@ import type { ChatKind } from "@/lib/types";
 import { IconFile, IconAttach, IconSend } from "../ui/icons";
 import { LnChevronDown } from "../ui/LineIcons";
 import { fileKey } from "@/lib/files/policy";
+import { Select } from "@/components/ui/Select";
 
 // The composer's kind switcher + entity selector (see prototype `typeTabs` /
 // `selectorLabel`/`selectorOptions`). The selector is hidden for the `normal`
@@ -116,14 +117,14 @@ export const Composer = memo(function Composer({
               {selector.label}:
             </span>
             <div style={{ position: "relative", minWidth: 0 }}>
-              <select
+              <Select
                 value={selector.value}
                 onChange={(e) => selector.onChange(e.target.value)}
                 data-testid="composer-entity-select"
                 style={{
                   maxWidth: 230,
                   height: 28,
-                  padding: "0 26px 0 10px",
+                  padding: "0 8px 0 10px",
                   background: "var(--card)",
                   border: "1px solid var(--border)",
                   borderRadius: 8,
@@ -142,20 +143,7 @@ export const Composer = memo(function Composer({
                     {o.label}
                   </option>
                 ))}
-              </select>
-              <span
-                style={{
-                  position: "absolute",
-                  right: 8,
-                  top: "50%",
-                  transform: "translateY(-50%)",
-                  pointerEvents: "none",
-                  color: "var(--muted)",
-                  display: "flex",
-                }}
-              >
-                <LnChevronDown size={14} />
-              </span>
+              </Select>
             </div>
           </div>
         )}

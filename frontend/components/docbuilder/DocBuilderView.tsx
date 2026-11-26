@@ -48,6 +48,7 @@ import { UaInvoiceForm } from "./UaInvoiceForm";
 import { DirectoryPanel } from "./DirectoryPanel";
 import { smallBtn } from "./fields";
 import { KIND_COLOR, KindFilterMenu, NewDocMenu, type KindFilter } from "./TypeMenus";
+import { Select } from "@/components/ui/Select";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 const STATUS_COLOR: Record<DocStatus, string> = { draft: "var(--muted)", checked: "var(--info)", sent: "var(--ok)" };
@@ -176,13 +177,13 @@ function ShipmentPicker({
       </div>
       <div style={{ display: "flex", gap: 8 }}>
         {actions.length > 1 ? (
-          <select className="input" style={{ height: 32, fontSize: 13 }} value={action} onChange={(e) => setAction(e.target.value)} data-testid="docb-shipment-action">
+          <Select className="input" style={{ height: 32, fontSize: 13 }} value={action} onChange={(e) => setAction(e.target.value)} data-testid="docb-shipment-action">
             {actions.map((a) => (
               <option key={a.value} value={a.value}>
                 {a.label}
               </option>
             ))}
-          </select>
+          </Select>
         ) : null}
         <input className="input" style={{ flex: 1, height: 32, fontSize: 13, padding: "0 10px" }} placeholder="Пошук за номером чи постачальником" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>

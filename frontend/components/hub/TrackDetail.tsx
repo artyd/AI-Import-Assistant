@@ -27,6 +27,7 @@ import {
 } from "@/lib/hub";
 import { ManualEventForm, ManualTrackForm } from "./ManualTrackForm";
 import { pill, type WorkspaceRef } from "./TracksPanel";
+import { Select } from "@/components/ui/Select";
 
 export function TrackDetail({
   track,
@@ -301,7 +302,7 @@ export function TrackDetail({
         {/* Link to shipment */}
         <section>
           <div style={{ ...label, marginBottom: 6 }}>Постачання</div>
-          <select
+          <Select
             value={track.workspaceId ?? ""}
             onChange={(e) => void act("link", () => hubApi.patch(track.id, { workspaceId: e.target.value || null }))}
             disabled={busy !== null}
@@ -315,7 +316,7 @@ export function TrackDetail({
                 {w.supplier ? ` · ${w.supplier}` : ""}
               </option>
             ))}
-          </select>
+          </Select>
           {!track.workspaceId && matches.length > 0 && (
             <div style={{ marginTop: 6, display: "grid", gap: 4 }} data-testid="hub-workspace-matches">
               {matches.map((w) => (

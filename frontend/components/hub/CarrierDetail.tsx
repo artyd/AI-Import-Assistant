@@ -23,6 +23,7 @@ import {
 } from "@/lib/hub";
 import { pill } from "./TracksPanel";
 import { reliabilityText } from "./LinesPanel";
+import { Select } from "@/components/ui/Select";
 
 export function CarrierDetail({
   id,
@@ -111,22 +112,22 @@ export function CarrierDetail({
         <section>
           <div style={labelStyle}>Оновити для команди</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 6 }}>
-            <select aria-label="Україна" value={ua} onChange={(e) => setUa(e.target.value as UaStatus | "")} style={input}>
+            <Select aria-label="Україна" value={ua} onChange={(e) => setUa(e.target.value as UaStatus | "")} style={input}>
               <option value="">Україна: без змін</option>
               {(Object.keys(UA_STATUS_LABEL) as UaStatus[]).map((k) => (
                 <option key={k} value={k}>
                   {UA_STATUS_LABEL[k]}
                 </option>
               ))}
-            </select>
-            <select aria-label="Маршрут Азія–Європа" value={rs} onChange={(e) => setRs(e.target.value as RedSea | "")} style={input}>
+            </Select>
+            <Select aria-label="Маршрут Азія–Європа" value={rs} onChange={(e) => setRs(e.target.value as RedSea | "")} style={input}>
               <option value="">Маршрут: без змін</option>
               {(Object.keys(RED_SEA_LABEL) as RedSea[]).map((k) => (
                 <option key={k} value={k}>
                   {RED_SEA_LABEL[k]}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
           <input aria-label="Надбавка за воєнний ризик" value={wr} onChange={(e) => setWr(e.target.value)} placeholder="Надбавка: напр. «WRS $150/TEU на Одесу»" style={{ ...input, width: "100%", marginTop: 6 }} />
           <input aria-label="Коментар" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Коментар / джерело (менеджер лінії, лист…)" style={{ ...input, width: "100%", marginTop: 6 }} />
@@ -172,11 +173,11 @@ export function CarrierDetail({
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
                 <input aria-label="Транзит від" inputMode="numeric" value={svc.min} onChange={(e) => setSvc({ ...svc, min: e.target.value.replace(/\D/g, "") })} placeholder="Днів від" style={input} />
                 <input aria-label="Транзит до" inputMode="numeric" value={svc.max} onChange={(e) => setSvc({ ...svc, max: e.target.value.replace(/\D/g, "") })} placeholder="до" style={input} />
-                <select aria-label="Маршрут сервісу" value={svc.via} onChange={(e) => setSvc({ ...svc, via: e.target.value as "" | "suez" | "cape" })} style={input}>
+                <Select aria-label="Маршрут сервісу" value={svc.via} onChange={(e) => setSvc({ ...svc, via: e.target.value as "" | "suez" | "cape" })} style={input}>
                   <option value="">—</option>
                   <option value="suez">Суец</option>
                   <option value="cape">Африка</option>
-                </select>
+                </Select>
               </div>
               <input aria-label="Частота" value={svc.frequency} onChange={(e) => setSvc({ ...svc, frequency: e.target.value })} placeholder="Частота: щотижня / раз на 2 тижні" style={input} />
               <button

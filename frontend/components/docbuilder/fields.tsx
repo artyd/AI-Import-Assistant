@@ -5,6 +5,8 @@
 // classes, like the rest of the app.
 import { useState, type ReactNode } from "react";
 import { LnChevronDown, LnChevronRight } from "../ui/LineIcons";
+import { Select as UiSelect } from "@/components/ui/Select";
+import { DateInput } from "@/components/ui/DateInput";
 
 export const labelStyle: React.CSSProperties = {
   display: "block",
@@ -40,6 +42,9 @@ export function Field({
   return (
     <label style={{ display: "block", minWidth: 0, width }}>
       <span style={labelStyle}>{label}</span>
+      {type === "date" ? (
+        <DateInput type="date" className="input" style={inputStyle} value={String(value)} onChange={(e) => onChange(e.target.value)} data-testid={testId} />
+      ) : (
       <input
         className="input"
         style={inputStyle}
@@ -51,6 +56,7 @@ export function Field({
         step={type === "number" ? "any" : undefined}
         min={type === "number" ? 0 : undefined}
       />
+      )}
       {hint ? <span style={{ display: "block", fontSize: 11, color: "var(--faint)", marginTop: 3 }}>{hint}</span> : null}
     </label>
   );
@@ -157,13 +163,13 @@ export function Select<T extends string>({
   return (
     <label style={{ display: "block", minWidth: 0 }}>
       <span style={labelStyle}>{label}</span>
-      <select className="input" style={inputStyle} value={value} onChange={(e) => onChange(e.target.value as T)} data-testid={testId}>
+      <UiSelect className="input" style={inputStyle} value={value} onChange={(e) => onChange(e.target.value as T)} data-testid={testId}>
         {options.map((o) => (
           <option key={o.value} value={o.value}>
             {o.label}
           </option>
         ))}
-      </select>
+      </UiSelect>
     </label>
   );
 }

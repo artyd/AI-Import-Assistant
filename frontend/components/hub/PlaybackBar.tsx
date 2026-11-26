@@ -5,6 +5,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { DAY, lagDays, lastEventAt, type Replay } from "./playback";
+import { Select } from "@/components/ui/Select";
 
 const SPEEDS = [
   { v: 1, label: "1 дн/с" },
@@ -93,13 +94,13 @@ export function PlaybackBar({
           <span data-testid="hub-playback-date" style={{ fontVariantNumeric: "tabular-nums", fontWeight: 700 }}>
             {date}
           </span>
-          <select aria-label="Швидкість" value={speed} onChange={(e) => setSpeed(Number(e.target.value))} style={{ height: 28, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", font: "inherit", fontSize: 12 }}>
+          <Select aria-label="Швидкість" value={speed} onChange={(e) => setSpeed(Number(e.target.value))} style={{ height: 28, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", font: "inherit", fontSize: 12 }}>
             {SPEEDS.map((s) => (
               <option key={s.v} value={s.v}>
                 {s.label}
               </option>
             ))}
-          </select>
+          </Select>
           <button type="button" aria-label="Закрити відтворення" onClick={onClose} style={{ width: 28, height: 28, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--muted)", cursor: "pointer" }}>
             ×
           </button>

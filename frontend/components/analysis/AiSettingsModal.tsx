@@ -16,6 +16,7 @@ import { useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import type { AiConfig, AiProvider } from "@/lib/types";
 import { IconSpinner } from "../ui/icons";
+import { Select } from "@/components/ui/Select";
 
 const PROVIDERS: { value: AiProvider; label: string }[] = [
   { value: "openai", label: "OpenAI" },
@@ -166,7 +167,7 @@ export function AiSettingsModal({ onClose }: { onClose: () => void }) {
               <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "12px", background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10 }}>
                 <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                   <span style={{ fontSize: 12, color: "var(--muted)" }}>Провайдер</span>
-                  <select
+                  <Select
                     className="input"
                     value={provider}
                     onChange={(e) => setProvider(e.target.value as AiProvider)}
@@ -176,7 +177,7 @@ export function AiSettingsModal({ onClose }: { onClose: () => void }) {
                         {p.label}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </label>
 
                 <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>

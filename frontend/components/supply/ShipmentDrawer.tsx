@@ -6,6 +6,8 @@ import { MODES, categoryColor, categoryIcon, currentStep, daysBetween, deadline,
 import type { ShipmentDraft, SupplyGroup, SupplyHistoryEntry, SupplyMarks, SupplyMode, SupplySettings, SupplyShipment, SupplyStep } from "@/lib/supply/types";
 import { CategoryIcon, GroupIcon, ModeIcon, StarMark } from "./KindIcon";
 import { IArch, ICheck, IDown, IFlag, ILock, IPlus, ITrash, IUnlock, IUp, IX } from "./SupplyIcons";
+import { Select } from "@/components/ui/Select";
+import { DateInput } from "@/components/ui/DateInput";
 
 function modeLabel(m: SupplyMode | null): string {
   return m ? MODES.find((x) => x.key === m)?.label ?? "" : "невідомо";
@@ -129,17 +131,17 @@ export function ShipmentDrawer({
           </div>
           <div className="meta">
             {edit ? (
-              <select className="ed" style={{ width: "auto", padding: "4px 8px" }} value={draft.category} aria-label="Категорія" onChange={(e) => set("category", e.target.value)}>
+              <Select className="ed" style={{ width: "auto", padding: "4px 8px" }} value={draft.category} aria-label="Категорія" onChange={(e) => set("category", e.target.value)}>
                 {settings.categories.map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
+              </Select>
             ) : (
               <span className="chip" style={{ color: "var(--cc)" }}><CategoryIcon icon={categoryIcon(settings, draft.category)} size={14} /><span style={{ color: "var(--muted)" }}>{draft.category}</span></span>
             )}
             {s && edit ? (
-              <select className="ed" style={{ width: "auto", padding: "4px 8px" }} value={s.mode} aria-label="Транспорт"
+              <Select className="ed" style={{ width: "auto", padding: "4px 8px" }} value={s.mode} aria-label="Транспорт"
                 onChange={(e) => { const m = e.target.value as SupplyMode; void onMarks(s, { mode: m }, `Транспорт: ${MODES.find((x) => x.key === m)?.label ?? ""}`); }}>
                 {MODES.map((m) => <option key={m.key} value={m.key}>{m.key ? m.label : `Транспорт: ${modeLabel(transportMode({ mode: "", steps: s.steps }))}`}</option>)}
-              </select>
+              </Select>
             ) : (
               mode && <span className="chip"><ModeIcon mode={mode} size={14} />{modeLabel(mode)}</span>
             )}
@@ -214,8 +216,8 @@ export function ShipmentDrawer({
                           <input className="ed" value={st.note} placeholder="Коментар до етапу" aria-label="Коментар" style={{ fontSize: 12.5, padding: "5px 8px" }} onChange={(e) => patchStep(i, { note: e.target.value })} />
                         </div>
                         <div style={{ display: "grid", gap: 6, justifyItems: "end" }}>
-                          <label className="sp-date">план<input type="date" className="ed" value={st.plan} onChange={(e) => patchStep(i, { plan: e.target.value })} /></label>
-                          <label className="sp-date">факт<input type="date" className="ed" value={st.actual} onChange={(e) => patchStep(i, { actual: e.target.value })} /></label>
+                          <label className="sp-date">план<DateInput type="date" className="ed" value={st.plan} onChange={(e) => patchStep(i, { plan: e.target.value })} /></label>
+                          <label className="sp-date">факт<DateInput type="date" className="ed" value={st.actual} onChange={(e) => patchStep(i, { actual: e.target.value })} /></label>
                           <span style={{ display: "flex", gap: 4 }}>
                             <button className="x" style={{ width: 28, height: 28 }} disabled={i === 0} aria-label="Вище" onClick={() => { const a = [...draft.steps]; [a[i - 1], a[i]] = [a[i]!, a[i - 1]!]; setSteps(a); }}><IUp /></button>
                             <button className="x" style={{ width: 28, height: 28 }} disabled={i === draft.steps.length - 1} aria-label="Нижче" onClick={() => { const a = [...draft.steps]; [a[i + 1], a[i]] = [a[i]!, a[i + 1]!]; setSteps(a); }}><IDown /></button>
@@ -242,10 +244,10 @@ export function ShipmentDrawer({
                   onChange={(e) => setNewStage(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && newStage.trim()) { addStages([newStage.trim()]); setNewStage(""); } }} />
                 <button className="ghost" disabled={!newStage.trim()} onClick={() => { addStages([newStage.trim()]); setNewStage(""); }}><IPlus />Етап</button>
                 {settings.templates.length > 0 && (
-                  <select className="sort" value="" aria-label="Додати етапи з шаблону" onChange={(e) => { const t = settings.templates.find((x) => x.id === e.target.value); if (t) addStages(t.stages); }}>
+                  <Select className="sort" value="" aria-label="Додати етапи з шаблону" onChange={(e) => { const t = settings.templates.find((x) => x.id === e.target.value); if (t) addStages(t.stages); }}>
                     <option value="">+ з шаблону…</option>
                     {settings.templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                  </select>
+                  </Select>
                 )}
                 <datalist id="sp-stages">{settings.stages.map((x) => <option key={x} value={x} />)}</datalist>
               </div>

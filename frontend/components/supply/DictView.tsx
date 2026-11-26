@@ -5,6 +5,7 @@ import { CATEGORY_ICONS, categoryIcon, type CategoryIconKey } from "@/lib/supply
 import type { SupplySettings } from "@/lib/supply/types";
 import { CATEGORY_ICON_LABEL, CategoryIcon, GroupIcon } from "./KindIcon";
 import { IPlus, IX } from "./SupplyIcons";
+import { Select } from "@/components/ui/Select";
 
 /** Dictionaries: route templates, stage names, categories (+ icons), groups, extra fields. */
 export function DictView({ settings, editing, onSave }: { settings: SupplySettings; editing: boolean; onSave: (s: SupplySettings) => Promise<boolean> }) {
@@ -78,10 +79,10 @@ export function DictView({ settings, editing, onSave }: { settings: SupplySettin
             <div key={c} style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <span style={{ color: `var(--c-${i % 5 + 1})`, display: "grid", width: 22 }}><CategoryIcon icon={categoryIcon(draft, c)} /></span>
               <span style={{ flex: 1, fontWeight: 600 }}>{c}</span>
-              <select className="sort" aria-label={`Іконка категорії ${c}`} value={categoryIcon(draft, c)}
+              <Select className="sort" aria-label={`Іконка категорії ${c}`} value={categoryIcon(draft, c)}
                 onChange={(e) => set("categoryIcons", { ...draft.categoryIcons, [c]: e.target.value as CategoryIconKey })}>
                 {CATEGORY_ICONS.map((k) => <option key={k} value={k}>{CATEGORY_ICON_LABEL[k]}</option>)}
-              </select>
+              </Select>
             </div>
           ))}
           <h4>Групи поставок</h4>

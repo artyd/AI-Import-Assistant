@@ -15,6 +15,7 @@ import { CONTRACT_TYPE_LABEL, PARTY_SLOTS } from "../shipment/labels";
 import { IconSpinner } from "../ui/icons";
 import type { TriageCtx } from "../shipment/Triage";
 import { openProblemsReport } from "@/lib/shipment/triage";
+import { Select } from "@/components/ui/Select";
 
 /**
  * «Комплектність» of a Збірник (spec 006 #09) with the scope switcher
@@ -60,14 +61,14 @@ export function FclCompleteness({
 
   return (
     <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 16, overflowY: "auto", height: "100%" }}>
-      <select className="input" value={current} onChange={(e) => onScope(e.target.value)} aria-label="Область перевірки">
+      <Select className="input" value={current} onChange={(e) => onScope(e.target.value)} aria-label="Область перевірки">
         <option value="fcl">Весь FCL</option>
         {lots.map((l) => (
           <option key={l.id} value={l.id}>
             Партія — {l.name}
           </option>
         ))}
-      </select>
+      </Select>
       {current === "fcl" ? (
         <FclScope fclId={fclId} number={number} overview={overview} reload={reload} notify={notify} onScope={onScope} />
       ) : detail ? (
@@ -261,22 +262,22 @@ function FclScope({
 
       <Section title="Параметри FCL">
         <label style={lbl}>Вид транспорту</label>
-        <select className="input" value={f.transport_mode ?? ""} disabled={busy === "ctx"} onChange={(e) => void patchWs({ transport_mode: e.target.value || null })}>
+        <Select className="input" value={f.transport_mode ?? ""} disabled={busy === "ctx"} onChange={(e) => void patchWs({ transport_mode: e.target.value || null })}>
           <option value="">—</option>
           {TRANSPORT_MODES.map((o) => (
             <option key={o.value} value={o.value}>
               {o.label}
             </option>
           ))}
-        </select>
+        </Select>
         <label style={lbl}>
           Транзит через ЄС (T1 + CMR){f.eu_transit === null && f.eu_transit_derived !== null ? ` — з документів: ${f.eu_transit_derived ? "так" : "ні"}` : ""}
         </label>
-        <select className="input" value={f.eu_transit === null ? "" : f.eu_transit ? "yes" : "no"} disabled={busy === "ctx"} onChange={(e) => void setEuTransit(e.target.value)}>
+        <Select className="input" value={f.eu_transit === null ? "" : f.eu_transit ? "yes" : "no"} disabled={busy === "ctx"} onChange={(e) => void setEuTransit(e.target.value)}>
           <option value="">визначити з документів</option>
           <option value="yes">так</option>
           <option value="no">ні</option>
-        </select>
+        </Select>
       </Section>
 
       <Section title="Отримувачі">
@@ -413,20 +414,20 @@ function LotScope({
 
       <Section title="Параметри партії">
         <label style={lbl}>Incoterms (вхідні){auto("incoterm_in")}</label>
-        <select className="input" value={form.incoterm_in} onChange={(e) => setForm((f) => ({ ...f, incoterm_in: e.target.value }))}>
+        <Select className="input" value={form.incoterm_in} onChange={(e) => setForm((f) => ({ ...f, incoterm_in: e.target.value }))}>
           <option value="">—</option>
           {INCOTERMS_2020.map((o) => (
             <option key={o.value} value={o.value}>
               {o.value}
             </option>
           ))}
-        </select>
+        </Select>
         <label style={lbl}>Тип контракту{l.context.contract_type_source === "auto" ? " · з документів" : ""}</label>
-        <select className="input" value={form.contract_type} onChange={(e) => setForm((f) => ({ ...f, contract_type: e.target.value }))}>
+        <Select className="input" value={form.contract_type} onChange={(e) => setForm((f) => ({ ...f, contract_type: e.target.value }))}>
           <option value="">—</option>
           <option value="bilateral">{CONTRACT_TYPE_LABEL.bilateral}</option>
           <option value="trilateral">{CONTRACT_TYPE_LABEL.trilateral}</option>
-        </select>
+        </Select>
         <Field label="Категорія товару" value={form.product_category} onChange={(v) => setForm((f) => ({ ...f, product_category: v }))} />
         <Field label={`Країна походження${auto("origin_country")}`} value={form.origin_country} onChange={(v) => setForm((f) => ({ ...f, origin_country: v }))} />
         <Field label="Отримувач (порожньо — як у збірнику)" value={form.consignee} onChange={(v) => setForm((f) => ({ ...f, consignee: v }))} />

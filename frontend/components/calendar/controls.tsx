@@ -1,6 +1,7 @@
 "use client";
 import { type CalRow, fmtDay, type SyncInfo } from "@/lib/calendar";
 import { type Load } from "./load";
+import { Select } from "@/components/ui/Select";
 
 export function LoadBadge({ load, small }: { load: Load; small?: boolean }) {
   return (
@@ -113,7 +114,7 @@ export function FilterSelect({
   return (
     <label style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, color: "var(--muted)" }}>
       {label}
-      <select
+      <Select
         value={value}
         onChange={(e) => onChange(e.target.value)}
         aria-label={label}
@@ -135,7 +136,7 @@ export function FilterSelect({
             {format(o)}
           </option>
         ))}
-      </select>
+      </Select>
     </label>
   );
 }

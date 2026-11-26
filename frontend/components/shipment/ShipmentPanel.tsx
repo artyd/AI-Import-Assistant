@@ -29,6 +29,7 @@ import { requestErrorText, statusCaveat, summarizeFindings } from "@/lib/shipmen
 import { type Result, ResultView, lbl, AskButtons, CompletenessHeader, Field, Section } from "./parts";
 import { askInChat, askPrompts } from "@/lib/chat/askBus";
 import { useShipmentData } from "@/lib/shipment/shipmentData";
+import { Select } from "@/components/ui/Select";
 
 const countryOptions = COUNTRIES.map((c: Country) => ({ value: c.uk, label: c.uk }));
 const countrySearch = (q: string) => searchCountries(q).map((c) => ({ value: c.uk, label: c.uk }));
@@ -408,7 +409,7 @@ export function ShipmentPanel({
 
         {/* Status */}
         <Section title="Статус">
-          <select
+          <Select
             className="input"
             value={workspace.status}
             onChange={(e) => setStatus(e.target.value as WorkspaceStatus)}
@@ -419,7 +420,7 @@ export function ShipmentPanel({
                 {o.label}
               </option>
             ))}
-          </select>
+          </Select>
           <div style={{ fontSize: 12, color: "var(--muted)" }}>
             Заповненість даних: {workspace.intake_complete ? "повна" : "неповна"}
           </div>
@@ -456,7 +457,7 @@ export function ShipmentPanel({
         {/* Intake */}
         <Section title="Параметри постачання">
           <label style={lbl}>Тип контракту</label>
-          <select
+          <Select
             className="input"
             value={form.contract_type}
             onChange={(e) => setForm((f) => ({ ...f, contract_type: e.target.value }))}
@@ -464,7 +465,7 @@ export function ShipmentPanel({
             <option value="">Авто (визначити за документами)</option>
             <option value="bilateral">Двосторонній (2 сторони)</option>
             <option value="trilateral">Тристоронній (3 сторони)</option>
-          </select>
+          </Select>
           {/* Provenance / confidence for the current mode. A human choice
               (sidebar/survey) is a LOCK — auto-detection won't overwrite it;
               "Авто" shows the doc-derived confidence badge instead. */}
@@ -533,17 +534,17 @@ export function ShipmentPanel({
           <Field label="Категорія товару" value={form.product_category} onChange={(v) => setForm((f) => ({ ...f, product_category: v }))} />
 
           <label style={lbl}>Incoterms — вхідний (закупівля: постачальник → ми)</label>
-          <select className="input" value={form.incoterm_in} onChange={(e) => setIncotermIn(e.target.value)}>
+          <Select className="input" value={form.incoterm_in} onChange={(e) => setIncotermIn(e.target.value)}>
             <option value="">—</option>
             {INCOTERMS_2020.map((o) => (
               <option key={o.value} value={o.value}>
                 {o.label}
               </option>
             ))}
-          </select>
+          </Select>
 
           <label style={lbl}>Incoterms — вихідний (продаж: ми → покупець)</label>
-          <select
+          <Select
             className="input"
             value={form.incoterm_out}
             onChange={(e) => setForm((f) => ({ ...f, incoterm_out: e.target.value }))}
@@ -554,13 +555,13 @@ export function ShipmentPanel({
                 {o.label}
               </option>
             ))}
-          </select>
+          </Select>
           <div style={{ fontSize: 12, color: "var(--muted)" }}>
             «Автозаповнення з документів» нижче визначає обидва Incoterms за файлами.
           </div>
 
           <label style={lbl}>Транспорт</label>
-          <select
+          <Select
             className="input"
             value={form.transport_mode}
             onChange={(e) => setForm((f) => ({ ...f, transport_mode: e.target.value }))}
@@ -571,7 +572,7 @@ export function ShipmentPanel({
                 {o.label}
               </option>
             ))}
-          </select>
+          </Select>
           {form.incoterm_in && transportOptionsFor(form.incoterm_in).length < 8 && (
             <div style={{ fontSize: 12, color: "var(--muted)" }}>
               Цей Incoterm обмежує транспорт до морського / внутрішніх водних шляхів.
@@ -603,7 +604,7 @@ export function ShipmentPanel({
 
         {/* Responsible — enables daily reminders */}
         <Section title="Відповідальний">
-          <select
+          <Select
             className="input"
             value={workspace.responsible_user_id ?? ""}
             onChange={(e) => setResponsible(e.target.value || null)}
@@ -615,7 +616,7 @@ export function ShipmentPanel({
                 {u.name || u.email}
               </option>
             ))}
-          </select>
+          </Select>
           <div style={{ fontSize: 12, color: "var(--muted)" }}>
             Отримує щоденні нагадування про незавершені документи.
           </div>

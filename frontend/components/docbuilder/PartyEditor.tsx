@@ -7,6 +7,7 @@ import { useState } from "react";
 import type { DirectoryParty, Party, PartyRole } from "@/lib/docbuilder/model";
 import { emptyParty, snapshot } from "@/lib/docbuilder/model";
 import { Area, Field, Pair, smallBtn } from "./fields";
+import { Select } from "@/components/ui/Select";
 
 interface Props {
   title: string;
@@ -38,7 +39,7 @@ export function PartyEditor({ title, party, onChange, directory, roles, onSaveTo
     <div data-testid={testId} style={{ display: "grid", gap: 8 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <span style={{ fontSize: 12.5, fontWeight: 700, minWidth: 110 }}>{title}</span>
-        <select
+        <Select
           className="input"
           style={{ flex: 1, height: 34, fontSize: 13.5, padding: "0 8px", minWidth: 0 }}
           value=""
@@ -77,7 +78,7 @@ export function PartyEditor({ title, party, onChange, directory, roles, onSaveTo
               ))}
             </optgroup>
           ) : null}
-        </select>
+        </Select>
         <button type="button" style={smallBtn} onClick={() => setOpen((o) => !o)} data-testid={testId ? `${testId}-toggle` : undefined}>
           {open ? "Згорнути" : "Реквізити"}
         </button>

@@ -26,6 +26,8 @@ import {
   type Track,
 } from "@/lib/hub";
 import { pill, type WorkspaceRef } from "./TracksPanel";
+import { Select } from "@/components/ui/Select";
+import { DateInput } from "@/components/ui/DateInput";
 
 export type PickedPoint = { code?: string; name?: string; lat?: number; lng?: number };
 
@@ -364,7 +366,7 @@ export function RouteDetail({
         <section style={{ display: "grid", gap: 6 }}>
           <input aria-label="Назва маршруту" value={name} onChange={(e) => setName(e.target.value)} placeholder="Назва: напр. «Метопрен Нінбо → Київ»" style={inp} />
           <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 6 }}>
-            <select aria-label="Постачання" value={wsId} onChange={(e) => setWsId(e.target.value)} style={inp}>
+            <Select aria-label="Постачання" value={wsId} onChange={(e) => setWsId(e.target.value)} style={inp}>
               <option value="">Без привʼязки до постачання</option>
               {workspaces.map((w) => (
                 <option key={w.id} value={w.id}>
@@ -372,12 +374,12 @@ export function RouteDetail({
                   {w.supplier ? ` · ${w.supplier}` : ""}
                 </option>
               ))}
-            </select>
-            <select aria-label="Статус маршруту" value={status} onChange={(e) => setStatus(e.target.value as typeof status)} style={inp}>
+            </Select>
+            <Select aria-label="Статус маршруту" value={status} onChange={(e) => setStatus(e.target.value as typeof status)} style={inp}>
               <option value="draft">Чернетка</option>
               <option value="active">Активний</option>
               <option value="done">Завершено</option>
-            </select>
+            </Select>
           </div>
         </section>
 
@@ -388,12 +390,12 @@ export function RouteDetail({
             <input aria-label="Куди" list="hub-places" value={sTo} onChange={(e) => setSTo(e.target.value)} placeholder="Куди (Київ…)" style={inp} />
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-            <input aria-label="Готовність вантажу" type="date" value={sReady} onChange={(e) => setSReady(e.target.value)} style={inp} />
-            <select aria-label="Пріоритет" value={sPrio} onChange={(e) => setSPrio(e.target.value as typeof sPrio)} style={inp}>
+            <DateInput aria-label="Готовність вантажу" type="date" value={sReady} onChange={(e) => setSReady(e.target.value)} style={inp} />
+            <Select aria-label="Пріоритет" value={sPrio} onChange={(e) => setSPrio(e.target.value as typeof sPrio)} style={inp}>
               <option value="reliability">Надійність</option>
               <option value="speed">Швидкість</option>
               <option value="cost">Вартість</option>
-            </select>
+            </Select>
           </div>
           <input aria-label="Вантаж" value={sCargo} onChange={(e) => setSCargo(e.target.value)} placeholder="Вантаж (необовʼязково): субстанція, 2×40HC…" style={inp} />
           <button type="button" className="btn btn-primary" disabled={sBusy || sFrom.trim().length < 2 || sTo.trim().length < 2} onClick={() => void suggest()} style={{ height: 34 }}>
@@ -436,13 +438,13 @@ export function RouteDetail({
               <li key={i} style={{ border: "1px solid var(--border)", borderLeft: `4px solid ${ROUTE_MODE_COLOR[l.mode]}`, borderRadius: 10, padding: 9, display: "grid", gap: 6, background: "var(--surface)" }} data-testid="hub-route-leg">
                 <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                   <b style={{ fontSize: 12.5 }}>{i + 1}.</b>
-                  <select aria-label={`Тип плеча ${i + 1}`} value={l.mode} onChange={(e) => setLeg(i, { mode: e.target.value as RouteMode })} style={{ ...inp, flex: 1 }}>
+                  <Select aria-label={`Тип плеча ${i + 1}`} value={l.mode} onChange={(e) => setLeg(i, { mode: e.target.value as RouteMode })} style={{ ...inp, flex: 1 }}>
                     {MODES.map((m) => (
                       <option key={m} value={m}>
                         {ROUTE_MODE_ICON[m]} {ROUTE_MODE_LABEL[m]}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                   <button type="button" aria-label="Вгору" onClick={() => move(i, -1)} style={miniBtn}>
                     ↑
                   </button>
@@ -456,12 +458,12 @@ export function RouteDetail({
                 <PlaceField label={l.mode === "customs" ? "Пункт" : "Звідки"} value={l.from} placeName={placeName} ports={ports} onChange={(p) => setLeg(i, { from: p })} onPick={onPick} />
                 {l.mode !== "customs" && <PlaceField label="Куди" value={l.to ?? {}} placeName={placeName} ports={ports} onChange={(p) => setLeg(i, { to: p })} onPick={onPick} />}
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-                  <input aria-label={`Відправлення ${i + 1}`} type="date" value={dateOnly(l.plannedDeparture)} onChange={(e) => setLeg(i, { plannedDeparture: toIso(e.target.value) })} style={inp} title="Плановий відхід" />
-                  <input aria-label={`Прибуття ${i + 1}`} type="date" value={dateOnly(l.plannedArrival)} onChange={(e) => setLeg(i, { plannedArrival: toIso(e.target.value) })} style={inp} title="Планове прибуття (порожньо — оцінка хабу)" />
+                  <DateInput aria-label={`Відправлення ${i + 1}`} type="date" value={dateOnly(l.plannedDeparture)} onChange={(e) => setLeg(i, { plannedDeparture: toIso(e.target.value) })} style={inp} title="Плановий відхід" />
+                  <DateInput aria-label={`Прибуття ${i + 1}`} type="date" value={dateOnly(l.plannedArrival)} onChange={(e) => setLeg(i, { plannedArrival: toIso(e.target.value) })} style={inp} title="Планове прибуття (порожньо — оцінка хабу)" />
                 </div>
                 {(l.mode === "sea" || l.mode === "air") && (
                   <div style={{ display: "grid", gridTemplateColumns: l.mode === "sea" ? "1fr auto" : "1fr", gap: 6 }}>
-                    <select aria-label={`Перевізник ${i + 1}`} value={l.carrier ?? ""} onChange={(e) => setLeg(i, { carrier: e.target.value })} style={inp}>
+                    <Select aria-label={`Перевізник ${i + 1}`} value={l.carrier ?? ""} onChange={(e) => setLeg(i, { carrier: e.target.value })} style={inp}>
                       <option value="">Перевізник…</option>
                       {carriers
                         .filter((c) => c.mode === l.mode && !c.id.endsWith("generic"))
@@ -470,13 +472,13 @@ export function RouteDetail({
                             {c.name}
                           </option>
                         ))}
-                    </select>
+                    </Select>
                     {l.mode === "sea" && (
-                      <select aria-label={`Маршрут ${i + 1}`} value={l.via ?? ""} onChange={(e) => setLeg(i, { via: e.target.value as "" | "suez" | "cape" })} style={inp}>
+                      <Select aria-label={`Маршрут ${i + 1}`} value={l.via ?? ""} onChange={(e) => setLeg(i, { via: e.target.value as "" | "suez" | "cape" })} style={inp}>
                         <option value="">Найкоротший</option>
                         <option value="suez">Суец</option>
                         <option value="cape">Африка</option>
-                      </select>
+                      </Select>
                     )}
                   </div>
                 )}
@@ -489,11 +491,11 @@ export function RouteDetail({
                     placeholder="Вартість"
                     style={inp}
                   />
-                  <select aria-label={`Валюта ${i + 1}`} value={l.costCurrency ?? "USD"} onChange={(e) => setLeg(i, { costCurrency: e.target.value })} style={inp}>
+                  <Select aria-label={`Валюта ${i + 1}`} value={l.costCurrency ?? "USD"} onChange={(e) => setLeg(i, { costCurrency: e.target.value })} style={inp}>
                     {CURRENCIES.map((c) => (
                       <option key={c}>{c}</option>
                     ))}
-                  </select>
+                  </Select>
                 </div>
                 {l.mode === "sea" && (
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
@@ -502,7 +504,7 @@ export function RouteDetail({
                   </div>
                 )}
                 {l.mode !== "customs" && (
-                  <select aria-label={`Трек ${i + 1}`} value={l.trackedId ?? ""} onChange={(e) => setLeg(i, { trackedId: e.target.value || null })} style={inp}>
+                  <Select aria-label={`Трек ${i + 1}`} value={l.trackedId ?? ""} onChange={(e) => setLeg(i, { trackedId: e.target.value || null })} style={inp}>
                     <option value="">Трек-номер для факту (необовʼязково)</option>
                     {tracks.map((t) => (
                       <option key={t.id} value={t.id}>
@@ -510,7 +512,7 @@ export function RouteDetail({
                         {t.number} ({t.carrierName})
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 )}
               </li>
             ))}

@@ -8,6 +8,8 @@
 import { useState } from "react";
 import { ApiError } from "@/lib/api";
 import { hubApi, type ManualTrackInput, type Track, type TrackStatus } from "@/lib/hub";
+import { Select } from "@/components/ui/Select";
+import { DateInput } from "@/components/ui/DateInput";
 
 const STATUS_OPTIONS: Array<[Exclude<TrackStatus, "pending">, string]> = [
   ["info", "Заброньовано / ще не відправлено"],
@@ -77,13 +79,13 @@ export function ManualTrackForm({
     <form onSubmit={save} style={{ ...box, display: "grid", gap: 8 }} data-testid="hub-manual-form">
       <div style={{ fontSize: 13, fontWeight: 650 }}>Дані вантажу (вручну)</div>
       <Field label="Статус">
-        <select value={f.status} onChange={set("status")} style={input}>
+        <Select value={f.status} onChange={set("status")} style={input}>
           {STATUS_OPTIONS.map(([v, l]) => (
             <option key={v} value={v}>
               {l}
             </option>
           ))}
-        </select>
+        </Select>
       </Field>
       <Field label="Коментар до статусу">
         <input value={f.statusText} onChange={set("statusText")} maxLength={300} placeholder="напр. «Перевантаження в Пірею»" style={input} />
@@ -98,14 +100,14 @@ export function ManualTrackForm({
       </div>
       <div style={row}>
         <Field label="Вихід (ATD)">
-          <input type="date" value={f.departedAt} onChange={set("departedAt")} style={input} />
+          <DateInput type="date" value={f.departedAt} onChange={set("departedAt")} style={input} />
         </Field>
         <Field label="ETA">
-          <input type="date" value={f.eta} onChange={set("eta")} style={input} />
+          <DateInput type="date" value={f.eta} onChange={set("eta")} style={input} />
         </Field>
       </div>
       <Field label="Прибуло / доставлено">
-        <input type="date" value={f.arrivedAt} onChange={set("arrivedAt")} style={input} />
+        <DateInput type="date" value={f.arrivedAt} onChange={set("arrivedAt")} style={input} />
       </Field>
       <div style={row}>
         <Field label="Судно">
@@ -172,7 +174,7 @@ export function ManualEventForm({ trackId, onSaved }: { trackId: string; onSaved
     <form onSubmit={add} style={{ display: "grid", gap: 6, marginTop: 8 }} data-testid="hub-manual-event">
       <input value={description} onChange={(e) => setDescription(e.target.value)} maxLength={500} placeholder="Подія: напр. «Вивантажено з судна»" style={input} />
       <div style={row}>
-        <input type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} aria-label="Дата і час" style={input} />
+        <DateInput type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} aria-label="Дата і час" style={input} />
         <input value={location} onChange={(e) => setLocation(e.target.value)} maxLength={200} placeholder="Місце" style={input} />
       </div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>

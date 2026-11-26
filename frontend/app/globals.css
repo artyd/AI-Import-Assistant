@@ -702,3 +702,21 @@ details.tp-summary .tp-steps { padding: 4px 0 2px 2px; max-width: 560px; }
 .fb-q { font-size: 13.5px; line-height: 1.45; }
 .fb-input { width: 100%; min-height: 64px; resize: vertical; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font: inherit; font-size: 13.5px; }
 .fb-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+/* Styled dropdowns / date pickers (components/ui/Select, DateInput). The shown
+   value is drawn by CSS so it never joins the text of a wrapping <label>. */
+.ui-val::before { content: attr(data-text); }
+@keyframes ui-pop {
+  from { opacity: 0; transform: translateY(-3px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+.ui-select > [data-open],
+.ui-select > [data-focused],
+.ui-date > [data-open],
+.ui-date > [data-focused] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+@media (prefers-reduced-motion: reduce) {
+  [role="listbox"], [role="dialog"] { animation: none !important; }
+}

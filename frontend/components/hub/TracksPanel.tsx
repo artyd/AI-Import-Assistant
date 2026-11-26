@@ -25,6 +25,7 @@ import {
   type TrackingSuggestion,
 } from "@/lib/hub";
 import { CARGO_META, forwarderColor, type CargoType } from "@/lib/calendar";
+import { Select } from "@/components/ui/Select";
 
 export interface WorkspaceRef {
   id: string;
@@ -210,7 +211,7 @@ export function TracksPanel({
         )}
 
         {(needsCarrier || more) && (
-          <select value={carrier} onChange={(e) => setCarrier(e.target.value)} style={inputStyle} aria-label="Перевізник">
+          <Select value={carrier} onChange={(e) => setCarrier(e.target.value)} style={inputStyle} aria-label="Перевізник">
             <option value="">{best ? `Авто: ${best.carrierName}` : "Оберіть перевізника…"}</option>
             {(["sea", "air", "courier", "domestic"] as HubMode[]).map((m) => (
               <optgroup key={m} label={MODE_LABEL[m]}>
@@ -223,13 +224,13 @@ export function TracksPanel({
                   ))}
               </optgroup>
             ))}
-          </select>
+          </Select>
         )}
 
         {more && (
           <>
             <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Назва (необовʼязково)" style={inputStyle} aria-label="Назва" />
-            <select value={linkWs} onChange={(e) => setLinkWs(e.target.value)} style={inputStyle} aria-label="Постачання">
+            <Select value={linkWs} onChange={(e) => setLinkWs(e.target.value)} style={inputStyle} aria-label="Постачання">
               <option value="">Без привʼязки до постачання</option>
               {workspaces.map((w) => (
                 <option key={w.id} value={w.id}>
@@ -237,7 +238,7 @@ export function TracksPanel({
                   {w.supplier ? ` · ${w.supplier}` : ""}
                 </option>
               ))}
-            </select>
+            </Select>
           </>
         )}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -337,7 +338,7 @@ export function TracksPanel({
       {trackFilter && onTrackFilter && facets && (facets.forwarders.length > 0 || facets.types.length > 0) && (
         <div style={{ display: "flex", gap: 6, padding: "0 12px 6px", flexWrap: "wrap" }} data-testid="hub-track-filters">
           {facets.forwarders.length > 0 && (
-            <select
+            <Select
               aria-label="Хто везе"
               value={trackFilter.forwarder}
               onChange={(e) => onTrackFilter({ ...trackFilter, forwarder: e.target.value })}
@@ -349,10 +350,10 @@ export function TracksPanel({
                   {f}
                 </option>
               ))}
-            </select>
+            </Select>
           )}
           {facets.types.length > 0 && (
-            <select
+            <Select
               aria-label="Тип вантажу"
               value={trackFilter.type}
               onChange={(e) => onTrackFilter({ ...trackFilter, type: e.target.value })}
@@ -364,7 +365,7 @@ export function TracksPanel({
                   {CARGO_META[t as CargoType]?.icon ?? ""} {CARGO_META[t as CargoType]?.label ?? t}
                 </option>
               ))}
-            </select>
+            </Select>
           )}
         </div>
       )}

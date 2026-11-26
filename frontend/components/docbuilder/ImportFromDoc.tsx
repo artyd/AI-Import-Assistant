@@ -7,6 +7,7 @@ import { useRef, useState } from "react";
 import * as api from "@/lib/docbuilder/api";
 import type { DirectoryParty, DirectoryProduct, Party, PartyRole, Product } from "@/lib/docbuilder/model";
 import { smallBtn } from "./fields";
+import { Select } from "@/components/ui/Select";
 
 const ROLE_OPTIONS: { value: PartyRole; label: string }[] = [
   { value: "seller", label: "Продавець / постачальник" },
@@ -128,13 +129,13 @@ export function ImportFromDoc({ parties, products, onSaveParty, onSaveProduct, o
                   {[c.nameUk && c.nameEn ? c.nameUk : "", c.signatoryEn || c.signatoryUk, c.requisitesEn || c.addressEn].filter(Boolean).join("\n").slice(0, 400)}
                 </div>
               </div>
-              <select className="input" style={{ height: 32, fontSize: 13 }} value={c.role} onChange={(e) => setCompanies(companies.map((x, j) => (j === i ? { ...x, role: e.target.value as PartyRole } : x)))}>
+              <Select className="input" style={{ height: 32, fontSize: 13 }} value={c.role} onChange={(e) => setCompanies(companies.map((x, j) => (j === i ? { ...x, role: e.target.value as PartyRole } : x)))}>
                 {ROLE_OPTIONS.map((o) => (
                   <option key={o.value} value={o.value}>
                     {o.label}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
           ))}
           {goods.length ? <div style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase" }}>Товари · {goods.length}</div> : null}
