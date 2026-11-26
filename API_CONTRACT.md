@@ -1196,6 +1196,13 @@ The chat agent reads the register with the read-only `supply_register` tool.
 
 ---
 
+## Deleting a chat
+
+### `DELETE /api/conversations/:convId`  → `204`
+Deletes a chat of any kind (normal, supply or consolidated) together with its messages. The user must own
+the chat: a normal chat by its owner, and a supply or consolidated chat through its shipment or Збірник.
+A chat the user does not own returns `404`.
+
 ## Document builder (spec 012)
 
 Team-wide, not scoped to a shipment. Every route needs `Authorization: Bearer <JWT>`. The data shapes are

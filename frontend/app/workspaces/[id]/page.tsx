@@ -456,6 +456,20 @@ export default function WorkspacePage() {
     }
   }, [endpoints]);
 
+  const deleteConversation = useCallback(
+    async (convId: string) => {
+      try {
+        await api(`/api/conversations/${convId}`, { method: "DELETE" });
+        setConversations((list) => list.filter((c) => c.id !== convId));
+        if (convId === conversationId) newChatRef.current?.();
+      } catch {
+        notify("Не вдалося видалити чат.");
+      }
+    },
+    [conversationId, notify],
+  );
+  const newChatRef = useRef<(() => void) | null>(null);
+
   const loadConversation = useCallback(
     async (convId: string) => {
       if (!endpoints || convId === conversationId) return;
@@ -475,6 +489,7 @@ export default function WorkspacePage() {
     setInitialMessages([]);
     setChatSeq((n) => n + 1);
   }, []);
+  newChatRef.current = newChat;
 
   const onConversationStarted = useCallback(
     (cid: string) => {
@@ -934,6 +949,7 @@ export default function WorkspacePage() {
         onRenameActiveCollection={renameActiveCollection}
         onDeleteActiveCollection={deleteActiveCollection}
         onSelectConversation={loadConversation}
+        onDeleteConversation={deleteConversation}
       />
 
       <main style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, background: "var(--chat)" }}>

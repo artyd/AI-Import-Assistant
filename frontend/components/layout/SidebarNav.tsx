@@ -41,6 +41,7 @@ interface Props {
   onRenameActiveCollection: () => void;
   onDeleteActiveCollection: () => void;
   onSelectConversation: (id: string) => void;
+  onDeleteConversation?: (id: string) => Promise<void>;
 }
 
 const KINDS: [ChatKind, string][] = [
@@ -83,6 +84,7 @@ export function SidebarNav(props: Props) {
     onRenameActiveCollection,
     onDeleteActiveCollection,
     onSelectConversation,
+    onDeleteConversation,
   } = props;
   const [mcpOpen, setMcpOpen] = useState(false);
   const mcpModal = mcpOpen ? <McpConnectModal onClose={() => setMcpOpen(false)} /> : null;
@@ -503,42 +505,19 @@ export function SidebarNav(props: Props) {
             Немає чатів. «Новий чат» — почати.
           </div>
         ) : (
-          conversations.map((c) => {
-            const active = c.id === currentConversationId;
-            return (
-              <button
-                key={c.id}
-                onClick={() => {
-                  // From News/Map, opening a chat must switch back to the chat view.
-                  onSetView("chat");
-                  onSelectConversation(c.id);
-                }}
-                className="nav-row"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  width: "100%",
-                  background: active ? "var(--hover)" : "transparent",
-                  border: "none",
-                  padding: "9px 11px",
-                  borderRadius: 9,
-                  cursor: "pointer",
-                  textAlign: "left",
-                }}
-              >
-                <span style={{ flex: "none", color: "var(--muted)", display: "flex" }}>
-                  <LnChat size={15} />
-                </span>
-                <span
-                  className="ellipsis"
-                  style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: active ? 600 : 400, color: "var(--text)" }}
-                >
-                  {c.title?.trim() || "Розмова"}
-                </span>
-              </button>
-            );
-          })
+          conversations.map((c) => (
+            <ConversationRow
+              key={c.id}
+              title={c.title?.trim() || "Розмова"}
+              active={c.id === currentConversationId}
+              onOpen={() => {
+                // From News/Map, opening a chat must switch back to the chat view.
+                onSetView("chat");
+                onSelectConversation(c.id);
+              }}
+              onDelete={onDeleteConversation ? () => onDeleteConversation(c.id) : undefined}
+            />
+          ))
         )}
       </div>
     </aside>
@@ -564,5 +543,68 @@ function BrandMark({ size }: { size: number }) {
     >
       Ш
     </span>
+  );
+}
+
+/** One chat in the list: open on click; a bin on hover deletes it after a second click. */
+function ConversationRow({ title, active, onOpen, onDelete }: { title: string; active: boolean; onOpen: () => void; onDelete?: () => Promise<void> }) {
+  const [hover, setHover] = useState(false);
+  const [confirm, setConfirm] = useState(false);
+  const [busy, setBusy] = useState(false);
+  return (
+    <div
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => {
+        setHover(false);
+        setConfirm(false);
+      }}
+      data-testid="conversation-row"
+      style={{ display: "flex", alignItems: "center", borderRadius: 9, background: active ? "var(--hover)" : "transparent" }}
+    >
+      <button
+        onClick={onOpen}
+        className="nav-row"
+        style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 0, background: "transparent", border: "none", padding: "9px 11px", borderRadius: 9, cursor: "pointer", textAlign: "left" }}
+      >
+        <span style={{ flex: "none", color: "var(--muted)", display: "flex" }}>
+          <LnChat size={15} />
+        </span>
+        <span className="ellipsis" style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: active ? 600 : 400, color: "var(--text)" }}>
+          {title}
+        </span>
+      </button>
+      {onDelete && (hover || confirm) ? (
+        confirm ? (
+          <button
+            type="button"
+            disabled={busy}
+            data-testid="conversation-delete-confirm"
+            onClick={async () => {
+              setBusy(true);
+              try {
+                await onDelete();
+              } finally {
+                setBusy(false);
+                setConfirm(false);
+              }
+            }}
+            style={{ flex: "none", marginRight: 4, height: 24, padding: "0 8px", borderRadius: 7, border: "none", background: "var(--err)", color: "#fff", font: "inherit", fontSize: 11.5, fontWeight: 700, cursor: "pointer" }}
+          >
+            Видалити?
+          </button>
+        ) : (
+          <button
+            type="button"
+            title="Видалити чат"
+            aria-label={`Видалити чат ${title}`}
+            data-testid="conversation-delete"
+            onClick={() => setConfirm(true)}
+            style={{ flex: "none", marginRight: 4, width: 26, height: 26, borderRadius: 7, border: "none", background: "transparent", color: "var(--muted)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+          >
+            <LnTrash size={14} />
+          </button>
+        )
+      ) : null}
+    </div>
   );
 }
