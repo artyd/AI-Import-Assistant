@@ -2,16 +2,26 @@
 
 // Довідник: the team's companies (seller / buyers / consignors) and goods. Filled
 // once, then every contract and invoice picks from it.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { DirectoryParty, DirectoryProduct, PartyRole, Product } from "@/lib/docbuilder/model";
 import { emptyParty, emptyProduct } from "@/lib/docbuilder/model";
 import { Area, Field, Grid, Pair, Section, Select, smallBtn } from "./fields";
 
 const ROLE_LABEL: Record<PartyRole, string> = {
-  seller: "Продавці",
+  seller: "Продавці / постачальники",
   buyer: "Покупці",
+  consignee: "Вантажоодержувачі",
   consignor: "Відправники / виробники",
   other: "Інші",
+};
+
+/** What «＋ Додати» in each group creates. */
+const ROLE_ADD: Record<PartyRole, string> = {
+  seller: "＋ Постачальник",
+  buyer: "＋ Покупець",
+  consignee: "＋ Вантажоодержувач",
+  consignor: "＋ Відправник",
+  other: "＋ Компанія",
 };
 
 interface Props {
@@ -32,6 +42,13 @@ export function DirectoryPanel({ parties, products, onSaveParty, onDeleteParty, 
   const [product, setProduct] = useState<ProductDraft | null>(null);
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // The edit form sits on top of the list — bring it into view when it opens.
+  const formOpen = Boolean(party || product);
+  useEffect(() => {
+    if (formOpen) document.querySelector('[data-testid="dir-party-form"],[data-testid="dir-product-form"]')?.scrollIntoView({ block: "start", behavior: "smooth" });
+  }, [formOpen, party && "id" in party ? party.id : null, product && "id" in product ? product.id : null]);
+  const newParty = (role: PartyRole) => setParty({ ...emptyParty(), role, note: "" });
 
   const tabBtn = (active: boolean): React.CSSProperties => ({
     ...smallBtn,
@@ -73,10 +90,10 @@ export function DirectoryPanel({ parties, products, onSaveParty, onDeleteParty, 
           type="button"
           className="btn btn-primary"
           style={{ marginLeft: "auto", height: 32, fontSize: 13 }}
-          onClick={() => (tab === "parties" ? setParty({ ...emptyParty(), role: "buyer", note: "" }) : setProduct(emptyProduct()))}
+          onClick={() => (tab === "parties" ? newParty("buyer") : setProduct(emptyProduct()))}
           data-testid="dir-add"
         >
-          {tab === "parties" ? "＋ Компанія" : "＋ Товар"}
+          {tab === "parties" ? "＋ Нова компанія" : "＋ Новий товар"}
         </button>
       </div>
 
@@ -170,10 +187,19 @@ export function DirectoryPanel({ parties, products, onSaveParty, onDeleteParty, 
       {tab === "parties"
         ? (Object.keys(ROLE_LABEL) as PartyRole[]).map((role) => {
             const list = parties.filter((p) => p.role === role);
-            if (!list.length) return null;
             return (
-              <div key={role} style={{ marginBottom: 14 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.5, margin: "4px 2px 6px" }}>{ROLE_LABEL[role]}</div>
+              <div key={role} style={{ marginBottom: 14 }} data-testid={`dir-group-${role}`}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 2px 6px" }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                    {ROLE_LABEL[role]} · {list.length}
+                  </span>
+                  <button type="button" style={{ ...smallBtn, height: 24, fontSize: 12, color: "var(--accent)", marginLeft: "auto" }} onClick={() => newParty(role)} data-testid={`dir-add-${role}`}>
+                    {ROLE_ADD[role]}
+                  </button>
+                </div>
+                {list.length === 0 ? (
+                  <div style={{ fontSize: 12.5, color: "var(--faint)", padding: "8px 12px", border: "1px dashed var(--border)", borderRadius: 10 }}>Поки немає — додайте кнопкою праворуч.</div>
+                ) : null}
                 <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 6 }}>
                   {list.map((p) => (
                     <div key={p.id} data-testid="dir-party-row" style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10 }}>
@@ -185,6 +211,7 @@ export function DirectoryPanel({ parties, products, onSaveParty, onDeleteParty, 
                         <div style={{ fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                           {[p.nameUk && p.nameEn ? p.nameUk : "", p.signatoryUk || p.signatoryEn, p.addressEn.split("\n")[0]].filter(Boolean).join(" · ")}
                         </div>
+                        {p.note ? <div style={{ fontSize: 11.5, color: "var(--warn)", marginTop: 1 }}>{p.note}</div> : null}
                       </div>
                       <button type="button" style={smallBtn} onClick={() => setParty(p)}>
                         Редагувати

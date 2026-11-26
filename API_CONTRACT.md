@@ -1204,7 +1204,7 @@ Shapes: `Party`, `Product`, `ContractData` and `InvoiceData` in `src/docbuilder/
 its parties and goods.
 
 ### Directory
-- `GET /api/docbuilder/parties` → `{ parties: [Party & { id, role: seller|buyer|consignor|other, note }] }`
+- `GET /api/docbuilder/parties` → `{ parties: [Party & { id, role: seller|buyer|consignee|consignor|other, note }] }`
 - `POST /api/docbuilder/parties` `Party & { role, note? }` → `201 { party }` (needs `nameEn` or `nameUk`)
 - `PUT /api/docbuilder/parties/:id` (full replace) → `{ party }` · `DELETE …/:id` → `204`
 - `GET|POST /api/docbuilder/products`, `PUT|DELETE /api/docbuilder/products/:id`: same pattern, `{ products }` / `{ product }`

@@ -227,6 +227,29 @@ test.describe("Конструктор документів", () => {
     await expect.poll(() => fb.puts.at(-1)?.buyer?.nameEn).toBe('"NEW CLIENT" LLC');
   });
 
+  test("a new company typed in the document goes to the directory with its role", async ({ page }) => {
+    const fb = await setup(page);
+    await page.getByTestId("docb-new-contract").click();
+    await page.getByTestId("party-buyer-pick").selectOption("__new");
+    await page.getByTestId("party-buyer").getByLabel("Назва (EN)").fill('"FRESH BUYER" LLC');
+    await page.getByTestId("party-buyer").getByRole("button", { name: "＋ У довідник" }).click();
+    await expect(page.getByTestId("party-buyer").getByRole("button", { name: "✓ У довіднику" })).toBeVisible();
+    expect(fb.parties.at(-1)).toMatchObject({ nameEn: '"FRESH BUYER" LLC', role: "buyer" });
+
+    // Another consignee, typed by hand → saved as «Вантажоодержувач».
+    await page.getByTestId("consignee-same").uncheck();
+    await page.getByTestId("party-consignee-pick").selectOption("__new");
+    await page.getByTestId("party-consignee").getByLabel("Назва (EN)").fill('"WAREHOUSE" LLC');
+    await page.getByTestId("party-consignee").getByRole("button", { name: "＋ У довідник" }).click();
+    await expect.poll(() => fb.parties.at(-1)?.role).toBe("consignee");
+
+    // In the directory, every role has its own «＋» button.
+    await page.getByTestId("docb-open-directory").click();
+    await page.getByTestId("dir-add-consignee").click();
+    await expect(page.getByTestId("dir-party-form")).toBeVisible();
+    await expect(page.getByTestId("dir-group-consignee")).toContainText('"WAREHOUSE" LLC');
+  });
+
   test("delete asks for a second click", async ({ page }) => {
     const fb = await setup(page);
     await page.getByTestId("docb-new-contract").click();

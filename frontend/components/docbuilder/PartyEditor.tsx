@@ -5,7 +5,7 @@
 // particular document needs it. «＋ У довідник» saves a new company for reuse.
 import { useState } from "react";
 import type { DirectoryParty, Party, PartyRole } from "@/lib/docbuilder/model";
-import { snapshot } from "@/lib/docbuilder/model";
+import { emptyParty, snapshot } from "@/lib/docbuilder/model";
 import { Area, Field, Pair, smallBtn } from "./fields";
 
 interface Props {
@@ -24,12 +24,15 @@ interface Props {
 export function PartyEditor({ title, party, onChange, directory, roles, onSaveToDirectory, show = { signatory: true, requisites: true }, testId }: Props) {
   const [open, setOpen] = useState(!party.nameEn);
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [savedKey, setSavedKey] = useState<string | null>(null);
   const set = (k: keyof Party) => (v: string) => onChange({ ...party, [k]: v });
 
   const preferred = directory.filter((d) => roles.includes(d.role));
   const others = directory.filter((d) => !roles.includes(d.role));
-  const inDirectory = directory.some((d) => d.nameEn.trim() && d.nameEn.trim() === party.nameEn.trim());
+  const key = (p: Party) => (p.nameEn || p.nameUk).trim().toLowerCase();
+  const inDirectory = directory.some((d) => key(d) && key(d) === key(party));
+  const named = Boolean(key(party));
+  const saved = savedKey !== null && savedKey === key(party);
 
   return (
     <div data-testid={testId} style={{ display: "grid", gap: 8 }}>
@@ -40,6 +43,11 @@ export function PartyEditor({ title, party, onChange, directory, roles, onSaveTo
           style={{ flex: 1, height: 34, fontSize: 13.5, padding: "0 8px", minWidth: 0 }}
           value=""
           onChange={(e) => {
+            if (e.target.value === "__new") {
+              onChange(emptyParty());
+              setOpen(true);
+              return;
+            }
             const hit = directory.find((d) => d.id === e.target.value);
             if (hit) {
               onChange(snapshot(hit));
@@ -49,6 +57,7 @@ export function PartyEditor({ title, party, onChange, directory, roles, onSaveTo
           data-testid={testId ? `${testId}-pick` : undefined}
         >
           <option value="">{party.nameEn || party.nameUk ? `✓ ${party.nameEn || party.nameUk}` : "Обрати з довідника…"}</option>
+          <option value="__new">＋ Нова компанія — ввести вручну</option>
           {preferred.length ? (
             <optgroup label="Найчастіше">
               {preferred.map((d) => (
@@ -72,16 +81,16 @@ export function PartyEditor({ title, party, onChange, directory, roles, onSaveTo
         <button type="button" style={smallBtn} onClick={() => setOpen((o) => !o)} data-testid={testId ? `${testId}-toggle` : undefined}>
           {open ? "Згорнути" : "Реквізити"}
         </button>
-        {onSaveToDirectory && party.nameEn.trim() && !inDirectory ? (
+        {onSaveToDirectory && named && (!inDirectory || saved) ? (
           <button
             type="button"
             style={{ ...smallBtn, color: "var(--accent)" }}
-            disabled={saving}
+            disabled={saving || saved}
             onClick={async () => {
               setSaving(true);
               try {
                 await onSaveToDirectory(party);
-                setSaved(true);
+                setSavedKey(key(party));
               } finally {
                 setSaving(false);
               }
@@ -93,6 +102,11 @@ export function PartyEditor({ title, party, onChange, directory, roles, onSaveTo
       </div>
       {open ? (
         <div style={{ display: "grid", gap: 8, padding: 12, borderRadius: 10, background: "var(--panel)" }}>
+          {named && !inDirectory && onSaveToDirectory && !saved ? (
+            <div style={{ fontSize: 12, color: "var(--muted)" }}>
+              Цієї компанії ще немає в довіднику — після заповнення натисніть «＋ У довідник», щоб наступного разу обрати її одним кліком.
+            </div>
+          ) : null}
           <Pair>
             <Field label="Назва (EN)" value={party.nameEn} onChange={set("nameEn")} placeholder='"COMPANY" LLC' />
             <Field label="Назва (UA)" value={party.nameUk} onChange={set("nameUk")} placeholder="ТОВ «КОМПАНІЯ»" />

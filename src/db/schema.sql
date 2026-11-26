@@ -1258,13 +1258,17 @@ CREATE TABLE IF NOT EXISTS finding_triage (
 -- document that was already sent. Team-shared, like org_directory.
 CREATE TABLE IF NOT EXISTS doc_parties (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  role        TEXT NOT NULL CHECK (role IN ('seller', 'buyer', 'consignor', 'other')),
+  role        TEXT NOT NULL CHECK (role IN ('seller', 'buyer', 'consignee', 'consignor', 'other')),
   name        TEXT NOT NULL,
   data        JSONB NOT NULL,
   created_by  UUID REFERENCES users(id) ON DELETE SET NULL,
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_doc_parties_role ON doc_parties(role, lower(name));
+-- 2026-11-26: + 'consignee' (вантажоодержувач) for databases created with the first role list.
+ALTER TABLE doc_parties DROP CONSTRAINT IF EXISTS doc_parties_role_check;
+ALTER TABLE doc_parties ADD CONSTRAINT doc_parties_role_check
+  CHECK (role IN ('seller', 'buyer', 'consignee', 'consignor', 'other'));
 
 CREATE TABLE IF NOT EXISTS doc_products (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),

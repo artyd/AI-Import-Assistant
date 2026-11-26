@@ -3,7 +3,7 @@
 
 export type DocKind = "contract" | "invoice";
 export type Currency = "USD" | "EUR";
-export type PartyRole = "seller" | "buyer" | "consignor" | "other";
+export type PartyRole = "seller" | "buyer" | "consignee" | "consignor" | "other";
 
 export interface Party {
   nameEn: string;

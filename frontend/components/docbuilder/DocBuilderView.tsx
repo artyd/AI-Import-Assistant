@@ -303,7 +303,7 @@ export function DocBuilderView() {
         ) : null}
         {mode === "directory" ? (
           <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 16 }}>
-            <div style={{ maxWidth: 980 }}>
+            <div>
             <h2 style={{ fontSize: 18, fontWeight: 800, margin: "0 0 4px" }}>Довідник</h2>
             <p style={{ fontSize: 13, color: "var(--muted)", margin: "0 0 14px" }}>Компанії та товари, з яких збираються контракти й інвойси. Спільний для всієї команди.</p>
             <DirectoryPanel
@@ -371,7 +371,7 @@ export function DocBuilderView() {
                   onSaveProduct={saveProduct}
                 />
               ) : (
-                <InvoiceForm data={data as InvoiceData} onChange={edit} parties={parties} products={products} onSaveProduct={saveProduct} />
+                <InvoiceForm data={data as InvoiceData} onChange={edit} parties={parties} products={products} onSaveProduct={saveProduct} onSaveParty={savePartyFromDoc} />
               )}
               <CheckNotice />
             </div>

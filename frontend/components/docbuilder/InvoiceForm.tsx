@@ -2,8 +2,9 @@
 
 // Інвойс + Пакувальний лист: one document, two pages (INVOICE / PACKING LIST)
 // on the seller's letterhead.
-import type { Batch, DirectoryParty, DirectoryProduct, InvoiceData, InvoiceItem, Product } from "@/lib/docbuilder/model";
-import { INCOTERMS, batchTotals, fmtMoney, fmtNum, itemsTotal, lineTotal } from "@/lib/docbuilder/model";
+import type { Batch, DirectoryParty, DirectoryProduct, InvoiceData, InvoiceItem, Party, PartyRole, Product } from "@/lib/docbuilder/model";
+import { INCOTERMS, batchTotals, emptyParty, fmtMoney, fmtNum, itemsTotal, lineTotal } from "@/lib/docbuilder/model";
+import { useState } from "react";
 import { Area, Check, Field, Grid, NumField, Pair, Section, Select, smallBtn } from "./fields";
 import { ItemPicker } from "./ItemPicker";
 
@@ -13,6 +14,7 @@ interface Props {
   parties: DirectoryParty[];
   products: DirectoryProduct[];
   onSaveProduct: (p: Product) => Promise<void>;
+  onSaveParty: (p: Party, role: PartyRole) => Promise<void>;
 }
 
 const emptyBatch = (it?: InvoiceItem): Batch => ({
@@ -25,19 +27,21 @@ const emptyBatch = (it?: InvoiceItem): Batch => ({
   packagesCount: 0,
 });
 
-function PartyPick({ label, parties, onPick, testId }: { label: string; parties: DirectoryParty[]; onPick: (p: DirectoryParty) => void; testId?: string }) {
+function PartyPick({ label, parties, onPick, onNew, testId }: { label: string; parties: DirectoryParty[]; onPick: (p: DirectoryParty) => void; onNew: () => void; testId?: string }) {
   return (
     <select
       className="input"
       style={{ height: 30, fontSize: 12.5, padding: "0 8px", maxWidth: 260 }}
       value=""
       onChange={(e) => {
+        if (e.target.value === "__new") return onNew();
         const hit = parties.find((p) => p.id === e.target.value);
         if (hit) onPick(hit);
       }}
       data-testid={testId}
     >
       <option value="">{label}</option>
+      <option value="__new">＋ Нова компанія — ввести вручну</option>
       {parties.map((p) => (
         <option key={p.id} value={p.id}>
           {p.nameEn || p.nameUk}
@@ -47,7 +51,30 @@ function PartyPick({ label, parties, onPick, testId }: { label: string; parties:
   );
 }
 
-export function InvoiceForm({ data, onChange, parties, products, onSaveProduct }: Props) {
+/** «＋ У довідник» for a company typed by hand in the invoice. */
+function SaveToDirectory({ name, address, role, parties, onSave, testId }: { name: string; address: string; role: PartyRole; parties: DirectoryParty[]; onSave: (p: Party, role: PartyRole) => Promise<void>; testId?: string }) {
+  const [savedName, setSavedName] = useState<string | null>(null);
+  const key = name.trim().toLowerCase();
+  if (!key) return null;
+  const known = parties.some((p) => (p.nameEn || p.nameUk).trim().toLowerCase() === key);
+  if (known && savedName !== key) return null;
+  return (
+    <button
+      type="button"
+      style={{ ...smallBtn, color: "var(--accent)" }}
+      disabled={savedName === key}
+      data-testid={testId}
+      onClick={async () => {
+        await onSave({ ...emptyParty(), nameEn: name.trim(), addressEn: address.trim() }, role);
+        setSavedName(key);
+      }}
+    >
+      {savedName === key ? "✓ У довіднику" : "＋ У довідник"}
+    </button>
+  );
+}
+
+export function InvoiceForm({ data, onChange, parties, products, onSaveProduct, onSaveParty }: Props) {
   const set = <K extends keyof InvoiceData>(k: K, v: InvoiceData[K]) => onChange({ ...data, [k]: v });
   const setItem = (i: number, patch: Partial<InvoiceItem>) => set("items", data.items.map((it, j) => (j === i ? { ...it, ...patch } : it)));
   const setBatch = (i: number, patch: Partial<Batch>) => set("batches", data.batches.map((b, j) => (j === i ? { ...b, ...patch } : b)));
@@ -89,10 +116,12 @@ export function InvoiceForm({ data, onChange, parties, products, onSaveProduct }
           <span style={{ fontSize: 12.5, fontWeight: 700 }}>To:</span>
           <PartyPick
             label="Обрати покупця…"
-            parties={parties.filter((p) => p.role === "buyer")}
-            onPick={(p) => onChange({ ...data, toName: p.nameEn, toAddress: p.addressEn })}
+            parties={parties.filter((p) => p.role === "buyer" || p.role === "consignee")}
+            onPick={(p) => onChange({ ...data, toName: p.nameEn || p.nameUk, toAddress: p.addressEn })}
+            onNew={() => onChange({ ...data, toName: "", toAddress: "" })}
             testId="invoice-to-pick"
           />
+          <SaveToDirectory name={data.toName} address={data.toAddress} role="buyer" parties={parties} onSave={onSaveParty} testId="invoice-to-save" />
         </div>
         <Pair>
           <Field label="Назва" value={data.toName} onChange={(v) => set("toName", v)} />
@@ -103,8 +132,10 @@ export function InvoiceForm({ data, onChange, parties, products, onSaveProduct }
           <PartyPick
             label="Обрати відправника…"
             parties={parties.filter((p) => p.role === "consignor" || p.role === "seller")}
-            onPick={(p) => onChange({ ...data, consignorName: p.nameEn, consignorAddress: p.addressEn })}
+            onPick={(p) => onChange({ ...data, consignorName: p.nameEn || p.nameUk, consignorAddress: p.addressEn })}
+            onNew={() => onChange({ ...data, consignorName: "", consignorAddress: "" })}
           />
+          <SaveToDirectory name={data.consignorName} address={data.consignorAddress} role="consignor" parties={parties} onSave={onSaveParty} />
         </div>
         <Pair>
           <Field label="Назва" value={data.consignorName} onChange={(v) => set("consignorName", v)} />

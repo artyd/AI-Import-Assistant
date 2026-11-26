@@ -31,7 +31,7 @@ export const partySchema = z.object({
 });
 export type Party = z.infer<typeof partySchema>;
 
-export const PARTY_ROLES = ['seller', 'buyer', 'consignor', 'other'] as const;
+export const PARTY_ROLES = ['seller', 'buyer', 'consignee', 'consignor', 'other'] as const;
 export const directoryPartySchema = partySchema.extend({
   role: z.enum(PARTY_ROLES).default('buyer'),
   note: s(500),

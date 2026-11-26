@@ -114,8 +114,10 @@ export function ContractForm({ data, onChange, parties, products, onSaveParty, o
               party={data.consignee}
               onChange={(p) => set("consignee", p)}
               directory={parties}
-              roles={["buyer", "other"]}
+              roles={["consignee", "buyer"]}
+              onSaveToDirectory={(p) => onSaveParty(p, "consignee")}
               show={{}}
+              testId="party-consignee"
             />
           ) : null}
           <Check
