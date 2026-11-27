@@ -1,7 +1,6 @@
 "use client";
 import { type CalRow, fmtDay, type SyncInfo } from "@/lib/calendar";
 import { type Load } from "./load";
-import { Select } from "@/components/ui/Select";
 
 export function LoadBadge({ load, small }: { load: Load; small?: boolean }) {
   return (
@@ -98,48 +97,6 @@ export function SyncBadge({ sync }: { sync: SyncInfo | null }) {
   );
 }
 
-export function FilterSelect({
-  label,
-  value,
-  options,
-  onChange,
-  format = (v: string) => v,
-}: {
-  label: string;
-  value: string;
-  options: string[];
-  onChange: (v: string) => void;
-  format?: (v: string) => string;
-}) {
-  return (
-    <label style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, color: "var(--muted)" }}>
-      {label}
-      <Select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        aria-label={label}
-        style={{
-          height: 28,
-          maxWidth: 160,
-          borderRadius: 8,
-          border: `1px solid ${value ? "var(--accent)" : "var(--border)"}`,
-          background: "var(--surface)",
-          color: "var(--text)",
-          font: "inherit",
-          fontSize: 12.5,
-          padding: "0 6px",
-        }}
-      >
-        <option value="">усі</option>
-        {options.map((o) => (
-          <option key={o} value={o}>
-            {format(o)}
-          </option>
-        ))}
-      </Select>
-    </label>
-  );
-}
 export const closeBtn: React.CSSProperties = {
   width: 30,
   height: 30,

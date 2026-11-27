@@ -14,6 +14,8 @@ import type {
   Party,
   PartyRole,
   Product,
+  StampInfo,
+  StampPlace,
   TemplateInfo,
 } from "./model";
 
@@ -80,6 +82,37 @@ export function uploadTemplate(kind: DocKind, name: string, file: File) {
   return api<{ template: TemplateInfo }>("/api/docbuilder/templates", { form }).then((r) => r.template);
 }
 
+// ---- stamps (seals / signatures) ----
+export const listStamps = () => api<{ stamps: StampInfo[]; places: Record<DocKind, StampPlace[]> }>("/api/docbuilder/stamps");
+export function uploadStamp(file: Blob, name: string, partyId: string | null) {
+  const form = new FormData();
+  form.append("name", name);
+  if (partyId) form.append("partyId", partyId);
+  form.append("file", file, `${name || "stamp"}.png`);
+  return api<{ stamp: StampInfo }>("/api/docbuilder/stamps", { form }).then((r) => r.stamp);
+}
+export const updateStamp = (id: string, patch: { name?: string; partyId?: string | null }) =>
+  api<{ stamp: StampInfo }>(`/api/docbuilder/stamps/${id}`, { method: "PATCH", body: patch }).then((r) => r.stamp);
+export const deleteStamp = (id: string) => api(`/api/docbuilder/stamps/${id}`, { method: "DELETE" });
+
+const stampUrls = new Map<string, Promise<string>>();
+/** An object URL of the stamp picture (the image route needs the auth header, so <img src> can't call it directly). */
+export function stampImageUrl(id: string): Promise<string> {
+  let hit = stampUrls.get(id);
+  if (!hit) {
+    const path = `/api/docbuilder/stamps/${id}/image`;
+    hit = fetch(path, { headers: auth() }).then(async (res) => {
+      if (!res.ok) {
+        stampUrls.delete(id);
+        throw new ApiError(res.status, "stamp_image", "Не вдалося завантажити печатку");
+      }
+      return URL.createObjectURL(await res.blob());
+    });
+    stampUrls.set(id, hit);
+  }
+  return hit;
+}
+
 export interface ExtractResult {
   companies: (Party & { role: PartyRole })[];
   products: Product[];
@@ -137,6 +170,17 @@ export async function downloadDoc(kind: DocKind, data: DocData, format: "docx" |
   const path = "/api/docbuilder/render";
   const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json", ...auth() }, body: JSON.stringify({ kind, data, format }) });
   await saveResponse(res, path, `${kind}.${format}`);
+}
+
+/** The document as PDF, for the exact preview (LibreOffice on the server — a few seconds). */
+export async function renderPdfBlob(kind: DocKind, data: DocData, signal?: AbortSignal): Promise<Blob> {
+  const path = "/api/docbuilder/render";
+  const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json", ...auth() }, body: JSON.stringify({ kind, data, format: "pdf" }), signal });
+  if (!res.ok) {
+    handleUnauthorized(path, res.status);
+    throw new ApiError(res.status, "render_failed", `PDF не сформувався (${res.status})`);
+  }
+  return res.blob();
 }
 
 /** Back-compat name used by older callers. */

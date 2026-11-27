@@ -10,44 +10,9 @@ import {
   relativeTimeUk,
 } from "@/lib/news";
 import { IconSpinner } from "@/components/ui/icons";
+import { Dropdown } from "@/components/ui/Dropdown";
 
 const FILTER_KEYS = ["all", ...NEWS_RUBRIC_ORDER] as const;
-
-function pillStyle(active: boolean): React.CSSProperties {
-  return {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 8,
-    height: 34,
-    padding: "0 7px 0 15px",
-    borderRadius: 20,
-    fontSize: 13,
-    fontWeight: active ? 600 : 500,
-    cursor: "pointer",
-    whiteSpace: "nowrap",
-    border: `1px solid ${active ? "var(--accent)" : "var(--border)"}`,
-    background: active ? "var(--accent)" : "var(--surface)",
-    color: active ? "var(--accentTx)" : "var(--text)",
-    transition: "background .12s",
-  };
-}
-
-function countStyle(active: boolean): React.CSSProperties {
-  return {
-    minWidth: 20,
-    height: 20,
-    padding: "0 6px",
-    borderRadius: 10,
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontSize: 11,
-    fontWeight: 700,
-    fontVariantNumeric: "tabular-nums",
-    background: active ? "rgba(255,255,255,.25)" : "var(--hover)",
-    color: active ? "var(--accentTx)" : "var(--muted)",
-  };
-}
 
 export function NewsView() {
   const [rubric, setRubric] = useState<string>("all");
@@ -110,16 +75,20 @@ export function NewsView() {
           Ключові оновлення по митниці, транзиту ЄС, портах, санкціях, фрахтових ставках та
           фарм/хім регулюванню.
         </p>
-        <div style={{ display: "flex", gap: 9, overflowX: "auto", paddingBottom: 2 }}>
-          {FILTER_KEYS.map((key) => {
-            const active = rubric === key;
-            return (
-              <button key={key} onClick={() => setRubric(key)} style={pillStyle(active)}>
-                {newsRubricLabel(key)}
-                <span style={countStyle(active)}>{countFor(key)}</span>
-              </button>
-            );
-          })}
+        <div style={{ display: "flex", gap: 9, alignItems: "center" }}>
+          <Dropdown
+            label="Рубрика"
+            value={rubric}
+            onChange={setRubric}
+            testId="news-rubric"
+            menuWidth={280}
+            options={FILTER_KEYS.map((key) => ({
+              value: key,
+              label: newsRubricLabel(key),
+              count: countFor(key),
+              color: key === "all" ? undefined : newsRubricColor(key),
+            }))}
+          />
         </div>
       </div>
 

@@ -291,7 +291,8 @@ test.describe("Logistics hub", () => {
     test.skip(info.project.name === "mobile", "list-driven check");
     await mockHub(page);
     await openHub(page);
-    await page.getByRole("tab", { name: /Увага/ }).click();
+    await page.getByTestId("hub-track-mode").click();
+    await page.getByTestId("hub-track-mode-opt-problems").click();
     const row = page.getByTestId("hub-track-row").filter({ hasText: "HLCU1234567" });
     await expect(row).toContainText("Немає даних від перевізника");
     await row.click();
@@ -303,7 +304,8 @@ test.describe("Logistics hub", () => {
     const state: HubMockState = { added: [], manual: { patches: [], events: [] } };
     await mockHub(page, state);
     await openHub(page);
-    await page.getByRole("tab", { name: /Увага/ }).click();
+    await page.getByTestId("hub-track-mode").click();
+    await page.getByTestId("hub-track-mode-opt-problems").click();
     await page.getByTestId("hub-track-row").filter({ hasText: "HLCU1234567" }).click();
     const card = page.getByTestId("hub-track-detail");
     await expect(card.getByTestId("hub-manual-hint")).toBeVisible();
@@ -370,21 +372,26 @@ test.describe("Logistics hub", () => {
     await expect(row.getByTestId("hub-row-delay")).toContainText("запізнюється на 3 дн");
     await expect(row).toContainText("Мультикс");
     // Filter by forwarder → list and map narrow.
-    const filters = page.getByTestId("hub-track-filters");
-    await filters.getByLabel("Хто везе").selectOption("DSV");
+    await page.getByTestId("hub-track-forwarder").click();
+    await page.getByTestId("hub-track-forwarder-opt-DSV").click();
     await expect(page.getByTestId("hub-track-row")).toHaveCount(1);
     await expect(page.getByTestId("hub-track-row")).toContainText("MEDU7654325");
     await expect(page.locator(".hub-mk")).toHaveCount(1);
-    await filters.getByLabel("Хто везе").selectOption("");
-    await filters.getByLabel("Тип вантажу").selectOption("fcl");
+    await page.getByTestId("hub-track-forwarder").click();
+    await page.getByTestId("hub-track-forwarder-opt-").click();
+    await page.getByTestId("hub-track-type").click();
+    await page.getByTestId("hub-track-type-opt-fcl").click();
     await expect(page.getByTestId("hub-track-row")).toHaveCount(1);
-    await filters.getByLabel("Тип вантажу").selectOption("");
+    await page.getByTestId("hub-track-type").click();
+    await page.getByTestId("hub-track-type-opt-").click();
     // Items the map can't place.
-    await page.getByRole("tab", { name: /Без координат/ }).click();
+    await page.getByTestId("hub-track-mode").click();
+    await page.getByTestId("hub-track-mode-opt-nogeo").click();
     await expect(page.getByTestId("hub-track-row")).toHaveCount(1);
     await expect(page.getByTestId("hub-track-row")).toContainText("HLCU1234567");
     // Card: delay line.
-    await page.getByRole("tab", { name: /Всі/ }).click();
+    await page.getByTestId("hub-track-mode").click();
+    await page.getByTestId("hub-track-mode-opt-all").click();
     await row.click();
     await expect(page.getByTestId("hub-plan-delay")).toContainText("Запізнюється на 3 дн");
     await page.screenshot({ path: `test-results/hub-sheetmeta-${info.project.name}.png` });
@@ -452,21 +459,22 @@ test.describe("Logistics hub", () => {
     await openHub(page);
     await page.getByRole("tab", { name: /Порти/ }).click();
     const kinds = new Map<string, string>(PORTS.ports.map((p: { name: string; kind: string }) => [p.name, p.kind]));
-    const filters = page.getByRole("tablist", { name: "Фільтр портів" });
     const mapKinds = async () => {
       await page.waitForTimeout(1200); // fly-to animation
       const titles = await page.locator(".leaflet-marker-icon:has(.hub-port)").evaluateAll((els) => els.map((e) => e.getAttribute("title") ?? ""));
       return titles.map((t) => kinds.get(t));
     };
 
-    await filters.getByRole("tab", { name: /Кордон/ }).click();
+    await page.getByTestId("hub-port-filter").click();
+    await page.getByTestId("hub-port-filter-opt-customs").click();
     const rows = page.getByTestId("hub-port-row");
     await expect(rows).toHaveCount(PORTS.ports.filter((p: { kind: string }) => p.kind === "customs").length);
     let onMap = await mapKinds();
     expect(onMap.length).toBeGreaterThan(0);
     expect(new Set(onMap)).toEqual(new Set(["customs"]));
 
-    await filters.getByRole("tab", { name: /Аеропорти/ }).click();
+    await page.getByTestId("hub-port-filter").click();
+    await page.getByTestId("hub-port-filter-opt-air").click();
     onMap = await mapKinds();
     expect(onMap.length).toBeGreaterThan(0);
     expect(new Set(onMap)).toEqual(new Set(["air"]));

@@ -17,7 +17,7 @@ import {
   LnPlug,
   LnTrash,
 } from "../ui/LineIcons";
-import { Select } from "@/components/ui/Select";
+import { Dropdown, type DropdownOption } from "@/components/ui/Dropdown";
 
 interface Props {
   workspaces: Workspace[];
@@ -45,16 +45,12 @@ interface Props {
   onDeleteConversation?: (id: string) => Promise<void>;
 }
 
-const KINDS: [ChatKind, string][] = [
-  ["normal", "Звичайний"],
-  ["supply", "Постачання"],
-  ["consolidated", "Збірний"],
+/** The chat kinds as dropdown cards: what each one is for. */
+export const KIND_OPTIONS: DropdownOption<ChatKind>[] = [
+  { value: "normal", label: "Звичайний", icon: "💬", hint: "Питання без привʼязки до постачання" },
+  { value: "supply", label: "Постачання", icon: "📦", hint: "Чат по одному постачанню: документи, звірка, комплектність" },
+  { value: "consolidated", label: "Збірний", icon: "🗂", hint: "Збірник (FCL) з кількох партій і постачальників" },
 ];
-
-function shipmentLabel(w: Workspace): string {
-  const base = `№${w.number ?? "—"}`;
-  return w.supplier ? `${base} · ${w.supplier}` : base;
-}
 
 function collectionLabel(c: Collection): string {
   const base = c.number ?? "Збірник";
@@ -297,42 +293,20 @@ export function SidebarNav(props: Props) {
 
       {/* Chat type switcher (Звичайний / Постачання / Збірний) — dubs the composer one */}
       <div style={{ flex: "none", padding: "2px 12px 8px" }}>
-        <div
-          style={{
-            display: "flex",
-            gap: 4,
-            background: "var(--surface)",
-            border: "1px solid var(--border)",
-            borderRadius: 10,
-            padding: 3,
+        <Dropdown
+          block
+          label="Чат"
+          value={chatKind}
+          options={KIND_OPTIONS}
+          onChange={(k) => {
+            onSetView("chat");
+            onChangeKind(k);
           }}
-        >
-          {KINDS.map(([k, label]) => {
-            const active = chatKind === k;
-            return (
-              <button
-                key={k}
-                onClick={() => {
-                  onSetView("chat");
-                  onChangeKind(k);
-                }}
-                style={{
-                  flex: 1,
-                  height: 30,
-                  borderRadius: 8,
-                  border: "none",
-                  cursor: "pointer",
-                  fontSize: 12.5,
-                  fontWeight: 600,
-                  background: active ? "var(--accent)" : "transparent",
-                  color: active ? "var(--accentTx)" : "var(--muted)",
-                }}
-              >
-                {label}
-              </button>
-            );
-          })}
-        </div>
+          testId="sidebar-chat-kind"
+          activeTint={false}
+          menuWidth={290}
+          style={{ height: 38 }}
+        />
       </div>
 
       {/* Entity selector — shipments (supply) or collections (consolidated); hidden for normal */}
@@ -353,10 +327,11 @@ export function SidebarNav(props: Props) {
           </label>
           <div style={{ display: "flex", gap: 6 }}>
             <div style={{ position: "relative", flex: 1, minWidth: 0 }}>
-              <Select
+              <Dropdown
+                block
                 value={chatKind === "supply" ? current.id : activeCollectionId ?? ""}
-                onChange={(e) => {
-                  const v = e.target.value;
+                placeholder={chatKind === "supply" ? "Оберіть постачання" : collections.length ? "Оберіть збірник" : "Немає збірників"}
+                onChange={(v) => {
                   // Picking an entity from News/Map must return to the chat view.
                   onSetView("chat");
                   if (chatKind === "supply") {
@@ -365,42 +340,17 @@ export function SidebarNav(props: Props) {
                     onSelectCollection(v);
                   }
                 }}
-                style={{
-                  width: "100%",
-                  height: 40,
-                  padding: "0 10px 0 12px",
-                  background: "var(--surface)",
-                  border: "1px solid var(--border2)",
-                  borderRadius: 10,
-                  fontSize: 13,
-                  fontWeight: 600,
-                  color: "var(--text)",
-                  outline: "none",
-                  cursor: "pointer",
-                  appearance: "none",
-                  WebkitAppearance: "none",
-                  fontVariantNumeric: "tabular-nums",
-                  textOverflow: "ellipsis",
-                }}
-              >
-                {chatKind === "supply" ? (
-                  workspaces.map((w) => (
-                    <option key={w.id} value={w.id}>
-                      {shipmentLabel(w)}
-                    </option>
-                  ))
-                ) : collections.length === 0 ? (
-                  <option value="" disabled>
-                    Немає збірників
-                  </option>
-                ) : (
-                  collections.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {collectionLabel(c)}
-                    </option>
-                  ))
-                )}
-              </Select>
+                options={
+                  chatKind === "supply"
+                    ? workspaces.map((w) => ({ value: w.id, label: `№${w.number ?? "—"}`, hint: w.supplier || undefined }))
+                    : collections.map((c) => ({ value: c.id, label: collectionLabel(c) }))
+                }
+                testId="sidebar-entity"
+                activeTint={false}
+                menuWidth={300}
+                ariaLabel={chatKind === "supply" ? "Постачання" : "Збірник"}
+                style={{ height: 40, fontVariantNumeric: "tabular-nums" }}
+              />
             </div>
             {(chatKind === "consolidated" || chatKind === "supply") && (
               <button

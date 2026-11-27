@@ -22,6 +22,8 @@ import type {
   InvoiceData,
   Party,
   Product,
+  StampInfo,
+  StampPlace,
   TemplateInfo,
   UaInvoiceData,
 } from "@/lib/docbuilder/model";
@@ -45,9 +47,10 @@ import { ContractForm } from "./ContractForm";
 import { AppendixForm } from "./AppendixForm";
 import { InvoiceForm } from "./InvoiceForm";
 import { UaInvoiceForm } from "./UaInvoiceForm";
-import { DirectoryPanel } from "./DirectoryPanel";
+import { DirectoryPanel, type DirTab } from "./DirectoryPanel";
+import { StampsSection } from "./Stamps";
 import { smallBtn } from "./fields";
-import { KIND_COLOR, KindFilterMenu, NewDocMenu, type KindFilter } from "./TypeMenus";
+import { KIND_COLOR, KindBadge, KindFilterMenu, NewDocMenu, type KindFilter } from "./TypeMenus";
 import { Select } from "@/components/ui/Select";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -222,6 +225,13 @@ export function DocBuilderView() {
   const [events, setEvents] = useState<DocEvent[] | null>(null);
   const [picker, setPicker] = useState<"from" | "to" | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [stamps, setStamps] = useState<StampInfo[]>([]);
+  const [stampPlaces, setStampPlaces] = useState<Partial<Record<DocKind, StampPlace[]>>>({});
+  const [dirTab, setDirTab] = useState<DirTab | undefined>(undefined);
+  const [previewMode, setPreviewMode] = useState<"html" | "pdf">("html");
+  const [pdf, setPdf] = useState<{ url: string | null; loading: boolean; error: string | null }>({ url: null, loading: false, error: null });
+  const formRef = useRef<HTMLDivElement>(null);
+  const paperRef = useRef<HTMLDivElement>(null);
   const dirty = useRef(false);
 
   const refreshDocs = useCallback(() => api.listDocuments().then(setDocs).catch(() => undefined), []);
@@ -236,6 +246,13 @@ export function DocBuilderView() {
         if (p.length === 0) setMode("directory");
       })
       .catch((e: Error) => setError(e.message || "Не вдалося завантажити конструктор"));
+    api
+      .listStamps()
+      .then((r) => {
+        setStamps(r.stamps);
+        setStampPlaces(r.places);
+      })
+      .catch(() => undefined);
   }, []);
 
   const open = useCallback(async (id: string) => {
@@ -312,6 +329,39 @@ export function DocBuilderView() {
       ctrl.abort();
     };
   }, [data, current]);
+
+  // ---- exact preview: the PDF the server makes (slower, so only while that tab is open) ----
+  useEffect(() => {
+    if (previewMode !== "pdf" || !current || !data) return;
+    const ctrl = new AbortController();
+    setPdf((p) => ({ ...p, loading: true, error: null }));
+    const t = setTimeout(() => {
+      api
+        .renderPdfBlob(current.kind, data, ctrl.signal)
+        .then((b) =>
+          setPdf((p) => {
+            if (p.url) URL.revokeObjectURL(p.url);
+            return { url: URL.createObjectURL(b), loading: false, error: null };
+          }),
+        )
+        .catch((e: Error) => {
+          if (e.name !== "AbortError") setPdf((p) => ({ ...p, loading: false, error: e.message || "PDF недоступний" }));
+        });
+    }, 900);
+    return () => {
+      clearTimeout(t);
+      ctrl.abort();
+    };
+  }, [previewMode, data, current]);
+
+  // The preview sheet is narrower than A4: stamps are placed in «mm» of this sheet.
+  useEffect(() => {
+    const el = paperRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => el.style.setProperty("--mm", `${Math.max(1.2, (el.clientWidth - 60) / 170).toFixed(3)}px`));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [current?.id, previewMode]);
 
   const edit = (d: DocData) => {
     if (locked) return;
@@ -443,38 +493,59 @@ export function DocBuilderView() {
   };
 
   const parentDoc = current?.contractId ? byId.get(current.contractId) : undefined;
+  const openStampLibrary = () => {
+    setDirTab("stamps");
+    setMode("directory");
+  };
 
   return (
     <div data-testid="docb-view" style={{ height: "100%", display: "flex", minHeight: 0, background: "var(--bg)" }}>
       {/* ---------- list ---------- */}
-      <aside style={{ width: 272, flex: "none", borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column", minHeight: 0, background: "var(--panel)" }}>
-        <div style={{ padding: "14px 12px 8px", display: "grid", gap: 8 }}>
+      <aside style={{ width: "clamp(220px, 18vw, 280px)", flex: "none", borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column", minHeight: 0, background: "var(--panel)" }}>
+        <div style={{ padding: "14px 12px 10px", display: "grid", gap: 8 }}>
           <NewDocMenu
             onCreate={(k) => void create(k)}
             onFromShipment={() => setPicker("from")}
             onAppendix={current?.kind === "contract" ? () => void run("appendix", () => openNew(api.appendixFrom(current.id))) : null}
           />
-          <input className="input" style={{ height: 32, fontSize: 13, padding: "0 10px" }} placeholder="Пошук за номером чи компанією" value={q} onChange={(e) => setQ(e.target.value)} />
+          <div style={{ position: "relative" }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden style={{ position: "absolute", left: 10, top: 9, color: "var(--muted)" }}>
+              <circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" strokeWidth="2.2" />
+              <path d="M20 20l-3.5-3.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+            </svg>
+            <input className="input" style={{ width: "100%", height: 32, fontSize: 13, padding: "0 10px 0 30px" }} placeholder="Пошук за номером чи компанією" value={q} onChange={(e) => setQ(e.target.value)} />
+          </div>
           <KindFilterMenu value={filter} onChange={setFilter} counts={counts} />
         </div>
-        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "0 6px 8px" }}>
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "0 8px 8px", display: "grid", alignContent: "start", gap: 3 }}>
           {filtered.length === 0 ? <p style={{ fontSize: 12.5, color: "var(--muted)", padding: "8px 8px" }}>{docs.length ? "Нічого не знайдено." : "Ще немає документів. Створіть перший контракт."}</p> : filtered.map(listRow)}
         </div>
         <div style={{ borderTop: "1px solid var(--border)", padding: 8 }}>
           <button
             type="button"
             className="nav-row"
-            onClick={() => setMode("directory")}
+            onClick={() => {
+              setDirTab(undefined);
+              setMode("directory");
+            }}
             data-testid="docb-open-directory"
-            style={{ width: "100%", textAlign: "left", border: "none", borderRadius: 10, padding: "9px 10px", cursor: "pointer", background: mode === "directory" ? "var(--active)" : "transparent", color: "var(--text)", font: "inherit", fontSize: 13.5, fontWeight: 600 }}
+            style={{ width: "100%", textAlign: "left", border: "none", borderRadius: 10, padding: "9px 10px", cursor: "pointer", background: mode === "directory" ? "var(--active)" : "transparent", color: "var(--text)", font: "inherit", fontSize: 13.5, fontWeight: 600, display: "flex", alignItems: "center", gap: 10 }}
           >
-            Довідник · {parties.length} компаній · {products.length} товарів
+            <span aria-hidden style={{ width: 28, height: 28, borderRadius: 8, display: "grid", placeItems: "center", background: "color-mix(in srgb, var(--accent) 12%, transparent)", color: "var(--accent)", fontSize: 14 }}>
+              ☰
+            </span>
+            <span style={{ minWidth: 0 }}>
+              <span style={{ display: "block" }}>Довідник</span>
+              <span style={{ display: "block", fontSize: 11.5, color: "var(--muted)", fontWeight: 500 }}>
+                {parties.length} компаній · {products.length} товарів · {stamps.length} печаток
+              </span>
+            </span>
           </button>
         </div>
       </aside>
 
       {/* ---------- editor ---------- */}
-      <main style={{ flex: "1.2 1 0", minWidth: 480, display: "flex", flexDirection: "column", minHeight: 0 }}>
+      <main style={{ flex: "1.2 1 0", minWidth: 440, display: "flex", flexDirection: "column", minHeight: 0 }}>
         {error ? (
           <div role="alert" style={{ margin: "10px 16px 0", padding: "8px 12px", borderRadius: 10, background: "color-mix(in srgb, var(--err) 12%, transparent)", color: "var(--err)", fontSize: 13 }}>
             {error}
@@ -510,9 +581,9 @@ export function DocBuilderView() {
         ) : null}
 
         {mode === "directory" ? (
-          <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 16 }}>
-            <h2 style={{ fontSize: 18, fontWeight: 800, margin: "0 0 4px" }}>Довідник</h2>
-            <p style={{ fontSize: 13, color: "var(--muted)", margin: "0 0 14px" }}>Компанії, товари та шаблони Word, з яких збираються документи. Спільні для всієї команди.</p>
+          <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "18px 20px" }}>
+            <h2 style={{ fontSize: 19, fontWeight: 800, margin: "0 0 4px" }}>Довідник</h2>
+            <p style={{ fontSize: 13, color: "var(--muted)", margin: "0 0 14px" }}>Компанії, товари, печатки та шаблони Word, з яких збираються документи. Спільні для всієї команди.</p>
             <DirectoryPanel
               parties={parties}
               products={products}
@@ -528,116 +599,139 @@ export function DocBuilderView() {
               }}
               templates={templates}
               onTemplates={setTemplates}
+              stamps={stamps}
+              onStamps={setStamps}
+              initialTab={dirTab}
             />
           </div>
         ) : current && data ? (
           <>
-            <div style={{ flex: "none", padding: "12px 16px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-              <div style={{ minWidth: 0, flex: "1 1 220px" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontSize: 16, fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} data-testid="docb-title">
-                    {current.kind === "ua_invoice" ? ((data as UaInvoiceData).docType === "rahunok" ? "Рахунок" : "Накладна") : KIND_LABEL[current.kind]} {current.kind === "appendix" ? current.title.split(" · ")[0] : data.number ? `№ ${data.number}` : "без номера"}
-                  </span>
-                  <StatusPill status={current.status} />
-                  {current.version > 1 ? <span style={{ fontSize: 11.5, color: "var(--muted)" }}>версія {current.version}</span> : null}
-                </div>
-                <div style={{ fontSize: 12, color: saveState === "error" ? "var(--err)" : "var(--muted)" }} data-testid="docb-save-state">
-                  {locked ? "Редагування закрите" : saveState === "saving" ? "Зберігаю…" : saveState === "error" ? "Не збережено — перевірте зʼєднання" : "Збережено"} · {KIND_SUBTITLE[current.kind]}
-                  {parentDoc ? ` · до ${shortTitle(parentDoc)}` : ""}
-                </div>
-              </div>
-              <button type="button" style={{ ...smallBtn, height: 34 }} onClick={check} disabled={busy === "check"} data-testid="docb-check">
-                {busy === "check" ? "Перевіряю…" : "Перевірити"}
-              </button>
-              {current.kind === "contract" ? (
-                <>
-                  <button type="button" style={{ ...smallBtn, height: 34 }} onClick={() => run("appendix", () => openNew(api.appendixFrom(current.id)))} data-testid="docb-make-appendix">
-                    ＋ Додаток
-                  </button>
-                  <button type="button" style={{ ...smallBtn, height: 34 }} onClick={() => run("invoice", () => openNew(api.invoiceFrom(current.id)))} data-testid="docb-make-invoice">
-                    Інвойс до контракту
-                  </button>
-                </>
-              ) : null}
-              {current.kind === "appendix" ? (
-                <button type="button" style={{ ...smallBtn, height: 34 }} onClick={() => run("invoice", () => openNew(api.invoiceFrom(current.id)))} data-testid="docb-make-invoice">
-                  Інвойс до додатку
-                </button>
-              ) : null}
-              {current.status === "draft" ? (
-                <button type="button" style={{ ...smallBtn, height: 34, color: "var(--info)" }} onClick={() => changeStatus("checked")} data-testid="docb-mark-checked">
-                  ✓ Перевірено
-                </button>
-              ) : null}
-              {current.status === "checked" ? (
-                <>
-                  <button type="button" style={{ ...smallBtn, height: 34 }} onClick={() => changeStatus("draft")} data-testid="docb-mark-draft">
-                    В чернетку
-                  </button>
-                  <button type="button" style={{ ...smallBtn, height: 34, color: "var(--ok)" }} onClick={() => changeStatus("sent")} data-testid="docb-mark-sent">
-                    Відправлено
-                  </button>
-                </>
-              ) : null}
-              {current.status === "sent" ? (
-                <button type="button" style={{ ...smallBtn, height: 34 }} onClick={() => run("version", () => openNew(api.newVersion(current.id)))} data-testid="docb-new-version">
-                  Нова версія
-                </button>
-              ) : null}
-              <Menu label="Ще ▾" testId="docb-more">
-                {(close) => (
-                  <>
-                    <button type="button" className="nav-row" style={menuItem} onClick={() => { close(); duplicate(); }} data-testid="docb-duplicate">
-                      Дублювати
-                    </button>
-                    <button type="button" className="nav-row" style={menuItem} onClick={() => { close(); setPicker("to"); }} data-testid="docb-to-shipment">
-                      Зберегти в постачання…
-                    </button>
-                    <button
-                      type="button"
-                      className="nav-row"
-                      style={menuItem}
-                      onClick={async () => {
-                        close();
-                        setEvents(events ? null : await api.listEvents(current.id).catch(() => []));
-                      }}
-                      data-testid="docb-history"
+            {/* header: what this is, where it is in its life, what to do next */}
+            <div style={{ flex: "none", padding: "14px 18px 12px", borderBottom: "1px solid var(--border)", display: "grid", gap: 12, background: "var(--panel)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px 12px", minWidth: 0, flexWrap: "wrap" }}>
+                <KindBadge kind={current.kind} size={38} />
+                <div style={{ minWidth: 180, flex: "1 1 220px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                    <span style={{ fontSize: 17, fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} data-testid="docb-title">
+                      {current.kind === "ua_invoice" ? ((data as UaInvoiceData).docType === "rahunok" ? "Рахунок" : "Накладна") : KIND_LABEL[current.kind]}{" "}
+                      {current.kind === "appendix" ? current.title.split(" · ")[0] : data.number ? `№ ${data.number}` : "без номера"}
+                    </span>
+                    <StatusPill status={current.status} />
+                    {current.version > 1 ? <span style={{ fontSize: 11.5, color: "var(--muted)" }}>версія {current.version}</span> : null}
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--muted)", display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                    <span
+                      data-testid="docb-save-state"
+                      style={{ display: "inline-flex", alignItems: "center", gap: 5, color: saveState === "error" ? "var(--err)" : locked ? "var(--muted)" : saveState === "saving" ? "var(--warn)" : "var(--ok)", fontWeight: 600, flex: "none" }}
                     >
-                      Історія змін
-                    </button>
-                    <button type="button" className="nav-row" style={{ ...menuItem, color: "var(--err)" }} onClick={() => { close(); setConfirmDelete(true); }} data-testid="docb-delete">
-                      Видалити…
-                    </button>
-                  </>
-                )}
-              </Menu>
-              <div style={{ display: "flex" }}>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  style={{ height: 34, fontSize: 13, borderTopRightRadius: 0, borderBottomRightRadius: 0 }}
-                  onClick={() => run("download", () => api.downloadDoc(current.kind, data, "docx"))}
-                  disabled={busy === "download"}
-                  data-testid="docb-download"
-                  title="Перед завантаженням обовʼязково перевірте всі поля"
-                >
-                  {busy === "download" ? "Формую…" : "Завантажити Word"}
+                      <span aria-hidden style={{ width: 6, height: 6, borderRadius: 9, background: "currentColor" }} />
+                      {locked ? "Редагування закрите" : saveState === "saving" ? "Зберігаю…" : saveState === "error" ? "Не збережено — перевірте зʼєднання" : "Збережено"}
+                    </span>
+                    <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      · {KIND_SUBTITLE[current.kind]}
+                      {parentDoc ? ` · до ${shortTitle(parentDoc)}` : ""}
+                    </span>
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", marginLeft: "auto", flex: "none" }}>
+                <button type="button" style={{ ...smallBtn, height: 34 }} onClick={check} disabled={busy === "check"} data-testid="docb-check">
+                  {busy === "check" ? "Перевіряю…" : "🔍 Перевірити"}
                 </button>
-                <Menu label="▾" testId="docb-download-more" primary>
+                <Menu label="Ще ▾" testId="docb-more">
                   {(close) => (
                     <>
-                      <button type="button" className="nav-row" style={menuItem} onClick={() => { close(); void run("download", () => api.downloadDoc(current.kind, data, "pdf")); }} data-testid="docb-download-pdf">
-                        PDF
+                      <button type="button" className="nav-row" style={menuItem} onClick={() => { close(); duplicate(); }} data-testid="docb-duplicate">
+                        Дублювати
                       </button>
-                      <button type="button" className="nav-row" style={menuItem} onClick={() => { close(); void run("download", async () => { await flush(); await api.downloadBundle(current.id, false); }); }} data-testid="docb-download-zip">
-                        Пакет ZIP з повʼязаними документами (Word)
+                      <button type="button" className="nav-row" style={menuItem} onClick={() => { close(); setPicker("to"); }} data-testid="docb-to-shipment">
+                        Зберегти в постачання…
                       </button>
-                      <button type="button" className="nav-row" style={menuItem} onClick={() => { close(); void run("download", async () => { await flush(); await api.downloadBundle(current.id, true); }); }}>
-                        Пакет ZIP (Word + PDF)
+                      <button
+                        type="button"
+                        className="nav-row"
+                        style={menuItem}
+                        onClick={async () => {
+                          close();
+                          setEvents(events ? null : await api.listEvents(current.id).catch(() => []));
+                        }}
+                        data-testid="docb-history"
+                      >
+                        Історія змін
+                      </button>
+                      <button type="button" className="nav-row" style={{ ...menuItem, color: "var(--err)" }} onClick={() => { close(); setConfirmDelete(true); }} data-testid="docb-delete">
+                        Видалити…
                       </button>
                     </>
                   )}
                 </Menu>
+                <div style={{ display: "flex", flex: "none" }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    style={{ height: 34, fontSize: 13, borderTopRightRadius: 0, borderBottomRightRadius: 0 }}
+                    onClick={() => run("download", () => api.downloadDoc(current.kind, data, "docx"))}
+                    disabled={busy === "download"}
+                    data-testid="docb-download"
+                    title="Перед завантаженням обовʼязково перевірте всі поля"
+                  >
+                    {busy === "download" ? "Формую…" : "⬇ Завантажити Word"}
+                  </button>
+                  <Menu label="▾" testId="docb-download-more" primary>
+                    {(close) => (
+                      <>
+                        <button type="button" className="nav-row" style={menuItem} onClick={() => { close(); void run("download", () => api.downloadDoc(current.kind, data, "pdf")); }} data-testid="docb-download-pdf">
+                          PDF
+                        </button>
+                        <button type="button" className="nav-row" style={menuItem} onClick={() => { close(); void run("download", async () => { await flush(); await api.downloadBundle(current.id, false); }); }} data-testid="docb-download-zip">
+                          Пакет ZIP з повʼязаними документами (Word)
+                        </button>
+                        <button type="button" className="nav-row" style={menuItem} onClick={() => { close(); void run("download", async () => { await flush(); await api.downloadBundle(current.id, true); }); }}>
+                          Пакет ZIP (Word + PDF)
+                        </button>
+                      </>
+                    )}
+                  </Menu>
+                </div>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <Stepper status={current.status} />
+                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  {current.status === "draft" ? (
+                    <button type="button" style={{ ...smallBtn, height: 30, color: "var(--info)", borderColor: "color-mix(in srgb, var(--info) 45%, var(--border))" }} onClick={() => changeStatus("checked")} data-testid="docb-mark-checked">
+                      ✓ Перевірено
+                    </button>
+                  ) : null}
+                  {current.status === "checked" ? (
+                    <>
+                      <button type="button" style={{ ...smallBtn, height: 30 }} onClick={() => changeStatus("draft")} data-testid="docb-mark-draft">
+                        В чернетку
+                      </button>
+                      <button type="button" style={{ ...smallBtn, height: 30, color: "var(--ok)", borderColor: "color-mix(in srgb, var(--ok) 45%, var(--border))" }} onClick={() => changeStatus("sent")} data-testid="docb-mark-sent">
+                        ✈ Відправлено
+                      </button>
+                    </>
+                  ) : null}
+                  {current.status === "sent" ? (
+                    <button type="button" style={{ ...smallBtn, height: 30 }} onClick={() => run("version", () => openNew(api.newVersion(current.id)))} data-testid="docb-new-version">
+                      Нова версія
+                    </button>
+                  ) : null}
+                </div>
+                {current.kind === "contract" || current.kind === "appendix" ? (
+                  <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
+                    <span style={{ fontSize: 12, color: "var(--muted)" }}>Створити з нього:</span>
+                    {current.kind === "contract" ? (
+                      <button type="button" style={{ ...smallBtn, height: 30 }} onClick={() => run("appendix", () => openNew(api.appendixFrom(current.id)))} data-testid="docb-make-appendix">
+                        ＋ Додаток
+                      </button>
+                    ) : null}
+                    <button type="button" style={{ ...smallBtn, height: 30 }} onClick={() => run("invoice", () => openNew(api.invoiceFrom(current.id)))} data-testid="docb-make-invoice">
+                      {current.kind === "contract" ? "Інвойс до контракту" : "Інвойс до додатку"}
+                    </button>
+                  </div>
+                ) : null}
               </div>
             </div>
 
@@ -678,7 +772,7 @@ export function DocBuilderView() {
             ) : null}
 
             {findings ? (
-              <div data-testid="docb-findings" style={{ flex: "none", margin: "10px 16px 0", padding: "10px 12px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface)", fontSize: 12.5, maxHeight: 220, overflowY: "auto" }}>
+              <div data-testid="docb-findings" style={{ flex: "none", margin: "10px 16px 0", padding: "10px 12px", borderRadius: 12, border: "1px solid var(--border)", background: "var(--surface)", fontSize: 12.5, maxHeight: 220, overflowY: "auto" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
                   <b>Перевірка</b>
                   <span style={{ color: "var(--muted)" }}>
@@ -701,7 +795,7 @@ export function DocBuilderView() {
             ) : null}
 
             {events ? (
-              <div data-testid="docb-events" style={{ flex: "none", margin: "10px 16px 0", padding: "10px 12px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface)", fontSize: 12.5, maxHeight: 180, overflowY: "auto" }}>
+              <div data-testid="docb-events" style={{ flex: "none", margin: "10px 16px 0", padding: "10px 12px", borderRadius: 12, border: "1px solid var(--border)", background: "var(--surface)", fontSize: 12.5, maxHeight: 180, overflowY: "auto" }}>
                 <div style={{ display: "flex", alignItems: "center", marginBottom: 6 }}>
                   <b>Історія змін</b>
                   <button type="button" style={{ ...smallBtn, marginLeft: "auto", height: 24 }} onClick={() => setEvents(null)}>
@@ -719,13 +813,18 @@ export function DocBuilderView() {
               </div>
             ) : null}
 
-            {gaps.length && !locked ? (
-              <div data-testid="docb-gaps" style={{ flex: "none", margin: "10px 16px 0", padding: "8px 12px", borderRadius: 10, background: "color-mix(in srgb, var(--warn) 12%, transparent)", fontSize: 12.5, lineHeight: 1.5 }}>
-                <b>Ще не заповнено:</b> {gaps.join(" · ")}
-              </div>
-            ) : null}
-
-            <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 16 }}>
+            <div ref={formRef} className="docb-form" style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "0 18px 18px" }}>
+              <SectionNav container={formRef} watch={`${current.id}:${current.kind}:${stamps.length > 0}`} gaps={locked ? 0 : gaps.length} />
+              {gaps.length && !locked ? (
+                <div data-testid="docb-gaps" style={{ margin: "0 0 12px", padding: "9px 12px", borderRadius: 12, background: "color-mix(in srgb, var(--warn) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--warn) 30%, transparent)", fontSize: 12.5, lineHeight: 1.5, display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+                  <b style={{ marginRight: 2 }}>Ще не заповнено:</b>
+                  {gaps.map((g) => (
+                    <span key={g} style={{ padding: "1px 8px", borderRadius: 99, background: "color-mix(in srgb, var(--warn) 16%, var(--surface))", whiteSpace: "nowrap" }}>
+                      {g}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
               <fieldset disabled={locked} style={{ border: 0, padding: 0, margin: 0, minWidth: 0, opacity: locked ? 0.75 : 1 }}>
                 {current.kind === "contract" ? (
                   <ContractForm data={data as ContractData} onChange={edit} parties={parties} products={products} templates={templates} onSaveParty={savePartyFromDoc} onSaveProduct={saveProduct} />
@@ -761,51 +860,212 @@ export function DocBuilderView() {
                     onSuggestNumber={() => void api.nextNumber("ua_invoice").then((n) => n && edit({ ...(data as UaInvoiceData), number: n }))}
                   />
                 )}
+                <StampsSection kind={current.kind} data={data} onChange={edit} stamps={stamps} places={stampPlaces[current.kind] ?? []} parties={parties} onOpenLibrary={openStampLibrary} />
               </fieldset>
               <CheckNotice />
             </div>
           </>
         ) : (
-          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
-            <div style={{ maxWidth: 460, textAlign: "center" }}>
-              <h2 style={{ fontSize: 20, fontWeight: 800, margin: "0 0 8px" }}>Конструктор документів</h2>
-              <p style={{ fontSize: 13.5, color: "var(--muted)", lineHeight: 1.55, margin: "0 0 16px" }}>
-                Контракт зі специфікацією, додаток до контракту, інвойс з пакувальним листом або видаткова накладна — із довідника компаній і товарів. Праворуч видно готовий документ;
-                «Перевірити» звіряє реквізити, коди й ліміти контракту; Word, PDF чи ZIP — одним кліком.
-              </p>
-              <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
-                <button type="button" className="btn btn-primary" style={{ height: 36 }} onClick={() => create("contract")}>
-                  ＋ Новий контракт
-                </button>
-                <button type="button" className="btn" style={{ height: 36 }} onClick={() => create("invoice")}>
-                  ＋ Новий інвойс
-                </button>
-                <button type="button" className="btn" style={{ height: 36 }} onClick={() => create("ua_invoice")}>
-                  ＋ Накладна / рахунок
-                </button>
-              </div>
-            </div>
-          </div>
+          <EmptyState onCreate={(k) => void create(k)} onFromShipment={() => setPicker("from")} hasDirectory={parties.length > 0} onDirectory={() => setMode("directory")} />
         )}
       </main>
 
       {/* ---------- preview ---------- */}
       {mode === "doc" && current && data ? (
-        <section data-testid="docb-preview" style={{ flex: "1 1 0", minWidth: 380, maxWidth: 760, borderLeft: "1px solid var(--border)", display: "flex", flexDirection: "column", minHeight: 0, background: "var(--panel)" }}>
-          <div style={{ flex: "none", padding: "10px 14px", fontSize: 12, color: "var(--muted)", display: "flex", gap: 8, alignItems: "center", borderBottom: "1px solid var(--border)" }}>
-            <b style={{ color: "var(--text)", fontSize: 12.5 }}>Перегляд документа</b>
-            <span>{preview.loading ? "оновлюю…" : "без колонтитулів — у Word вони є"}</span>
-            <span style={{ marginLeft: "auto", fontWeight: 700, color: "var(--text)" }}>
+        <section data-testid="docb-preview" style={{ flex: "1 1 0", minWidth: 320, maxWidth: 780, borderLeft: "1px solid var(--border)", display: "flex", flexDirection: "column", minHeight: 0, background: "color-mix(in srgb, var(--panel) 70%, var(--bg))" }}>
+          <div style={{ flex: "none", padding: "10px 14px", fontSize: 12, color: "var(--muted)", display: "flex", gap: 10, alignItems: "center", borderBottom: "1px solid var(--border)", background: "var(--panel)" }}>
+            <div role="tablist" aria-label="Режим перегляду" style={{ display: "inline-flex", padding: 2, borderRadius: 9, background: "var(--bg)", border: "1px solid var(--border)" }}>
+              {(
+                [
+                  ["html", "Перегляд"],
+                  ["pdf", "Точно (PDF)"],
+                ] as const
+              ).map(([m, label]) => (
+                <button
+                  key={m}
+                  type="button"
+                  role="tab"
+                  aria-selected={previewMode === m}
+                  onClick={() => setPreviewMode(m)}
+                  data-testid={`docb-preview-${m}`}
+                  style={{ border: "none", borderRadius: 7, padding: "4px 10px", font: "inherit", fontSize: 12, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap", background: previewMode === m ? "var(--surface)" : "transparent", color: previewMode === m ? "var(--text)" : "var(--muted)", boxShadow: previewMode === m ? "0 1px 2px rgba(0,0,0,.08)" : "none" }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>{previewMode === "html" ? (preview.loading ? "оновлюю…" : "без колонтитулів — у Word вони є") : pdf.loading ? "формую PDF…" : "так, як надрукується"}</span>
+            <span style={{ marginLeft: "auto", fontWeight: 800, color: "var(--text)", fontSize: 13, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
               {fmtMoney(docTotal(current.kind, data))} {docCurrency(current.kind, data)}
             </span>
           </div>
-          <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 16 }}>
-            {preview.error ? <p style={{ color: "var(--err)", fontSize: 13 }}>{preview.error}</p> : null}
-            <div className="docb-paper" style={{ opacity: preview.loading ? 0.6 : 1 }} dangerouslySetInnerHTML={{ __html: preview.html }} />
-          </div>
+          {previewMode === "html" ? (
+            <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 18 }}>
+              {preview.error ? <p style={{ color: "var(--err)", fontSize: 13 }}>{preview.error}</p> : null}
+              <div ref={paperRef} className="docb-paper" style={{ opacity: preview.loading ? 0.6 : 1 }} dangerouslySetInnerHTML={{ __html: preview.html }} />
+            </div>
+          ) : (
+            <div style={{ flex: 1, minHeight: 0, position: "relative", display: "flex" }}>
+              {pdf.error ? <p style={{ color: "var(--err)", fontSize: 13, padding: 16 }}>{pdf.error}</p> : null}
+              {pdf.url ? <iframe title="PDF документа" src={`${pdf.url}#toolbar=0&view=FitH`} data-testid="docb-preview-frame" style={{ flex: 1, border: 0, opacity: pdf.loading ? 0.6 : 1, transition: "opacity .15s" }} /> : null}
+              {!pdf.url && !pdf.error ? <p style={{ color: "var(--muted)", fontSize: 13, padding: 16 }}>Формую PDF — кілька секунд…</p> : null}
+            </div>
+          )}
         </section>
       ) : null}
       <style>{PAPER_CSS}</style>
+    </div>
+  );
+}
+
+/** Draft → checked → sent, as three steps with the current one lit. */
+function Stepper({ status }: { status: DocStatus }) {
+  const steps: { s: DocStatus; label: string }[] = [
+    { s: "draft", label: "Чернетка" },
+    { s: "checked", label: "Перевірено" },
+    { s: "sent", label: "Відправлено" },
+  ];
+  const at = steps.findIndex((x) => x.s === status);
+  return (
+    <ol aria-label="Етап документа" style={{ display: "flex", alignItems: "center", gap: 6, listStyle: "none", margin: 0, padding: 0 }}>
+      {steps.map((x, i) => {
+        const done = i < at;
+        const now = i === at;
+        const color = now ? STATUS_COLOR[x.s] === "var(--muted)" ? "var(--accent)" : STATUS_COLOR[x.s] : done ? "var(--ok)" : "var(--faint)";
+        return (
+          <li key={x.s} style={{ display: "flex", alignItems: "center", gap: 6 }} aria-current={now ? "step" : undefined}>
+            <span
+              style={{
+                width: 20,
+                height: 20,
+                borderRadius: 99,
+                display: "grid",
+                placeItems: "center",
+                fontSize: 11,
+                fontWeight: 800,
+                color: now || done ? "#fff" : "var(--muted)",
+                background: now || done ? color : "transparent",
+                border: `1.5px solid ${now || done ? color : "var(--border)"}`,
+              }}
+            >
+              {done ? "✓" : i + 1}
+            </span>
+            <span style={{ fontSize: 12.5, fontWeight: now ? 800 : 600, color: now ? "var(--text)" : "var(--muted)" }}>{x.label}</span>
+            {i < steps.length - 1 ? <span aria-hidden style={{ width: 22, height: 2, borderRadius: 2, background: done ? "var(--ok)" : "var(--border)" }} /> : null}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+/**
+ * The form's table of contents: a sticky row of its sections (read from the
+ * DOM, so every form gets it for free) that jumps to one and lights the one in
+ * view.
+ */
+function SectionNav({ container, watch, gaps }: { container: React.RefObject<HTMLDivElement | null>; watch: string; gaps: number }) {
+  const [items, setItems] = useState<{ id: string; title: string }[]>([]);
+  const [active, setActive] = useState<string | null>(null);
+  useEffect(() => {
+    const root = container.current;
+    if (!root) return;
+    const read = () => {
+      const secs = [...root.querySelectorAll<HTMLElement>("section[data-testid]")].filter((el) => !el.parentElement?.closest("section"));
+      setItems(secs.map((el) => ({ id: el.dataset.testid!, title: el.querySelector("header button")?.textContent?.trim() || el.dataset.testid! })));
+      return secs;
+    };
+    const secs = read();
+    const onScroll = () => {
+      const top = root.getBoundingClientRect().top + 70;
+      let cur: string | null = secs[0]?.dataset.testid ?? null;
+      for (const el of secs) if (el.getBoundingClientRect().top <= top) cur = el.dataset.testid ?? cur;
+      setActive(cur);
+    };
+    onScroll();
+    root.addEventListener("scroll", onScroll, { passive: true });
+    return () => root.removeEventListener("scroll", onScroll);
+  }, [container, watch]);
+  if (items.length < 2) return <div style={{ height: 14 }} />;
+  return (
+    <nav
+      aria-label="Розділи документа"
+      data-testid="docb-section-nav"
+      style={{ position: "sticky", top: 0, zIndex: 5, display: "flex", gap: 4, overflowX: "auto", padding: "10px 0", margin: "0 0 4px", background: "linear-gradient(var(--bg) 78%, transparent)", scrollbarWidth: "none" }}
+    >
+      {items.map((it) => (
+        <button
+          key={it.id}
+          type="button"
+          onClick={() => container.current?.querySelector(`[data-testid="${it.id}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+          style={{
+            flex: "none",
+            border: `1px solid ${active === it.id ? "color-mix(in srgb, var(--accent) 50%, var(--border))" : "var(--border)"}`,
+            background: active === it.id ? "color-mix(in srgb, var(--accent) 10%, var(--surface))" : "var(--surface)",
+            color: active === it.id ? "var(--accent)" : "var(--text)",
+            borderRadius: 99,
+            padding: "4px 11px",
+            font: "inherit",
+            fontSize: 12.5,
+            fontWeight: 650,
+            cursor: "pointer",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {it.title}
+        </button>
+      ))}
+      {gaps ? (
+        <span style={{ marginLeft: "auto", flex: "none", alignSelf: "center", fontSize: 12, fontWeight: 700, color: "var(--warn)", whiteSpace: "nowrap" }} title="Поля, які ще треба заповнити">
+          ⚠ не заповнено: {gaps}
+        </span>
+      ) : (
+        <span style={{ marginLeft: "auto", flex: "none", alignSelf: "center", fontSize: 12, fontWeight: 700, color: "var(--ok)", whiteSpace: "nowrap" }}>✓ усе заповнено</span>
+      )}
+    </nav>
+  );
+}
+
+/** No document open: one card per kind, the way in for a new logist. */
+function EmptyState({ onCreate, onFromShipment, hasDirectory, onDirectory }: { onCreate: (k: "contract" | "invoice" | "ua_invoice") => void; onFromShipment: () => void; hasDirectory: boolean; onDirectory: () => void }) {
+  const cards: { kind: "contract" | "invoice" | "ua_invoice"; title: string; hint: string }[] = [
+    { kind: "contract", title: "Контракт", hint: "Двомовний контракт зі специфікацією (Додаток №1). Додатки й інвойси потім — з нього в один клік." },
+    { kind: "invoice", title: "Інвойс + пакувальний лист", hint: "На бланку продавця: товари, партії, ваги, упаковка — суми пакувального листа звіряються з інвойсом." },
+    { kind: "ua_invoice", title: "Накладна / рахунок", hint: "Продаж в Україні: гривні, ПДВ, сума прописом." },
+  ];
+  return (
+    <div style={{ flex: 1, overflowY: "auto", display: "flex", alignItems: "center", justifyContent: "center", padding: 28 }}>
+      <div style={{ maxWidth: 720, width: "100%" }}>
+        <h2 style={{ fontSize: 22, fontWeight: 800, margin: "0 0 6px" }}>Конструктор документів</h2>
+        <p style={{ fontSize: 13.5, color: "var(--muted)", lineHeight: 1.55, margin: "0 0 18px" }}>
+          Оберіть, що зібрати. Сторони, товари й печатки беруться з довідника, праворуч одразу видно готовий документ, а «Перевірити» звіряє реквізити, коди й ліміти контракту.
+        </p>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
+          {cards.map((c) => (
+            <button
+              key={c.kind}
+              type="button"
+              className="docb-card"
+              onClick={() => onCreate(c.kind)}
+              data-testid={`docb-empty-${c.kind}`}
+              style={{ textAlign: "left", display: "grid", gap: 8, alignContent: "start", padding: 16, borderRadius: 14, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", font: "inherit", cursor: "pointer" }}
+            >
+              <KindBadge kind={c.kind} size={36} />
+              <span style={{ fontSize: 14.5, fontWeight: 800 }}>{c.title}</span>
+              <span style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.45 }}>{c.hint}</span>
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: KIND_COLOR[c.kind] }}>Створити →</span>
+            </button>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
+          <button type="button" style={{ ...smallBtn, height: 34 }} onClick={onFromShipment}>
+            ⇩ З документів постачання…
+          </button>
+          <button type="button" style={{ ...smallBtn, height: 34 }} onClick={onDirectory}>
+            {hasDirectory ? "Відкрити довідник" : "Заповнити довідник"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -840,10 +1100,14 @@ function CheckNotice() {
 
 // The preview is mammoth's HTML of the filled .docx — styled as a sheet of paper.
 const PAPER_CSS = `
-.docb-paper{background:#fff;color:#111;font-family:"Times New Roman",Times,serif;font-size:12.5px;line-height:1.35;padding:28px 30px;border-radius:6px;box-shadow:0 1px 2px rgba(0,0,0,.06),0 6px 24px rgba(0,0,0,.08);transition:opacity .15s}
+.docb-paper{position:relative;background:#fff;color:#111;font-family:"Times New Roman",Times,serif;font-size:12.5px;line-height:1.35;padding:30px;border-radius:4px;box-shadow:0 1px 2px rgba(0,0,0,.06),0 10px 30px rgba(15,23,42,.10);transition:opacity .15s;overflow:hidden}
 .docb-paper p{margin:0 0 4px}
 .docb-paper table{width:100%;border-collapse:collapse;margin:8px 0 12px;table-layout:fixed}
 .docb-paper td,.docb-paper th{border:1px solid #444;padding:4px 6px;vertical-align:top;word-wrap:break-word}
 .docb-paper h1,.docb-paper h2,.docb-paper h3{font-size:14px;margin:10px 0 6px;text-align:center}
 .docb-paper img{display:none}
+.docb-paper img.docb-stamp{display:block}
+.docb-form section[data-testid]{scroll-margin-top:56px}
+.docb-card{transition:border-color .12s, box-shadow .12s, transform .12s}
+.docb-card:hover{border-color:color-mix(in srgb, var(--accent) 45%, var(--border));box-shadow:var(--shadow);transform:translateY(-1px)}
 `;

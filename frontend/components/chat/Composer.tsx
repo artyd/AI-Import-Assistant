@@ -4,7 +4,7 @@ import type { ChatKind } from "@/lib/types";
 import { IconFile, IconAttach, IconSend } from "../ui/icons";
 import { LnChevronDown } from "../ui/LineIcons";
 import { fileKey } from "@/lib/files/policy";
-import { Select } from "@/components/ui/Select";
+import { Dropdown } from "@/components/ui/Dropdown";
 
 // The composer's kind switcher + entity selector (see prototype `typeTabs` /
 // `selectorLabel`/`selectorOptions`). The selector is hidden for the `normal`
@@ -21,6 +21,13 @@ export const CHAT_TYPES: { id: ChatKind; label: string }[] = [
   { id: "supply", label: "Постачання" },
   { id: "consolidated", label: "Збірний" },
 ];
+
+const CHAT_TYPE_ICON: Record<ChatKind, string> = { normal: "💬", supply: "📦", consolidated: "🗂" };
+const CHAT_TYPE_HINT: Record<ChatKind, string> = {
+  normal: "Питання без привʼязки до постачання",
+  supply: "Чат по одному постачанню",
+  consolidated: "Збірник (FCL) з кількох партій",
+};
 
 // Memoised and owns its own text state: typing re-renders only the composer,
 // and streaming tokens (which re-render <Chat>) skip it while its props hold.
@@ -83,67 +90,33 @@ export const Composer = memo(function Composer({
           borderBottom: "1px solid var(--border)",
         }}
       >
-        <div style={{ display: "flex", gap: 2, padding: 2, background: "var(--hover)", borderRadius: 9 }}>
-          {CHAT_TYPES.map((t) => {
-            const on = chatKind === t.id;
-            return (
-              <button
-                key={t.id}
-                onClick={() => onChangeKind(t.id)}
-                data-testid={`composer-kind-${t.id}`}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  height: 27,
-                  padding: "0 12px",
-                  border: "none",
-                  borderRadius: 8,
-                  cursor: "pointer",
-                  fontSize: 12,
-                  fontWeight: on ? 600 : 500,
-                  background: on ? "var(--accent)" : "transparent",
-                  color: on ? "var(--accentTx)" : "var(--muted)",
-                  transition: "background .12s",
-                }}
-              >
-                {t.label}
-              </button>
-            );
-          })}
-        </div>
+        <Dropdown
+          size="sm"
+          label="Чат"
+          value={chatKind}
+          onChange={onChangeKind}
+          testId="composer-kind"
+          activeTint={false}
+          menuWidth={290}
+          options={CHAT_TYPES.map((t) => ({ value: t.id, label: t.label, icon: CHAT_TYPE_ICON[t.id], hint: CHAT_TYPE_HINT[t.id] }))}
+        />
         {selector && (
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto", minWidth: 0 }}>
             <span style={{ fontSize: 11.5, color: "var(--faint)", whiteSpace: "nowrap" }}>
               {selector.label}:
             </span>
             <div style={{ position: "relative", minWidth: 0 }}>
-              <Select
+              <Dropdown
+                size="sm"
                 value={selector.value}
-                onChange={(e) => selector.onChange(e.target.value)}
-                data-testid="composer-entity-select"
-                style={{
-                  maxWidth: 230,
-                  height: 28,
-                  padding: "0 8px 0 10px",
-                  background: "var(--card)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 8,
-                  fontSize: 12,
-                  fontWeight: 500,
-                  color: "var(--text)",
-                  outline: "none",
-                  cursor: "pointer",
-                  appearance: "none",
-                  WebkitAppearance: "none",
-                  textOverflow: "ellipsis",
-                }}
-              >
-                {selector.options.map((o) => (
-                  <option key={o.id} value={o.id}>
-                    {o.label}
-                  </option>
-                ))}
-              </Select>
+                onChange={selector.onChange}
+                testId="composer-entity-select"
+                activeTint={false}
+                menuWidth={300}
+                ariaLabel={selector.label}
+                style={{ maxWidth: 260 }}
+                options={selector.options.map((o) => ({ value: o.id, label: o.label }))}
+              />
             </div>
           </div>
         )}

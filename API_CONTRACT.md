@@ -1255,6 +1255,13 @@ contract), `invoice` (invoice with its packing list) and `ua_invoice` (вида�
 - `POST /api/docbuilder/templates` (multipart `kind`, `name`, `file` .docx) → `201 { template }`. The template is test-filled with sample data before it is stored; a template that fails returns `422 template_error` with the reasons.
 - `GET /api/docbuilder/templates/:id/file` → .docx · `DELETE /api/docbuilder/templates/:id` → `204`
 
+**Stamps (seals / signatures).** A team-shared library of stamp pictures; a document's `data.stamps` places them.
+- `GET /api/docbuilder/stamps` → `{ stamps: [{ id, name, partyId, width, height, createdAt }], places: { contract|appendix|invoice|ua_invoice: [{ place, label, dx, dy }] } }`: the places each bundled template offers, with the default shift in mm
+- `GET /api/docbuilder/stamps/:id/image` → the PNG / JPEG (needs the auth header; the UI loads it as a blob)
+- `POST /api/docbuilder/stamps` (multipart `file` PNG/JPG ≤ 3 MB, `name`, optional `partyId`) → `201 { stamp }`. The browser makes white transparent and trims the picture before upload.
+- `PATCH /api/docbuilder/stamps/:id` `{ name?, partyId? }` → `{ stamp }` · `DELETE /api/docbuilder/stamps/:id` → `204`
+- `data.stamps: [{ stampId, place, size, dx, dy }]` on every document kind (≤ 12): `size` is the width on paper in mm (10–120), `dx`/`dy` the shift in mm (right / down positive). A template marks a place with `{stamp_<place>}`; the render turns it into a floating picture over the text (a place in the footer, `page_*`, repeats on every page). A stamp whose picture was deleted is skipped. An own stamp on an invoice (`invoice` / `packing`) switches off the letterhead's built-in seal.
+
 ## Health
 
 ### `GET /health`  (no auth) → `{ "status": "ok" }`

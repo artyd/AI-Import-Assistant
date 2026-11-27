@@ -329,7 +329,7 @@ function FancySelect(props: Props) {
                 bottom: pos.up ? window.innerHeight - pos.top : undefined,
                 width: pos.width,
                 maxHeight: pos.maxH,
-                zIndex: 1000,
+                zIndex: 4000,
                 display: "flex",
                 flexDirection: "column",
                 background: "var(--menu)",

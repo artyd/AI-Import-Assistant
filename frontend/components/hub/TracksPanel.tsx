@@ -26,6 +26,7 @@ import {
 } from "@/lib/hub";
 import { CARGO_META, forwarderColor, type CargoType } from "@/lib/calendar";
 import { Select } from "@/components/ui/Select";
+import { Dropdown, type DropdownOption } from "@/components/ui/Dropdown";
 
 export interface WorkspaceRef {
   id: string;
@@ -44,6 +45,8 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: "problems", label: "Увага" },
   { key: "nogeo", label: "Без координат" },
 ];
+
+const FILTER_ICON: Record<Filter, string> = { all: "▦", sea: "🚢", air: "✈️", courier: "📮", domestic: "🚚", problems: "⚠️", nogeo: "📍" };
 
 /** Needs attention: a problem, no data, a slipped ETA, or a hand-kept sea item still empty. */
 const needsAttention = (t: Track) =>
@@ -316,59 +319,42 @@ export function TracksPanel({
         </div>
       )}
 
-      <div style={{ display: "flex", gap: 4, padding: "10px 12px 6px", flexWrap: "wrap" }} role="tablist" aria-label="Фільтр">
-        {FILTERS.map((f) => {
-          const count =
-            f.key === "all"
-              ? items.length
-              : f.key === "problems"
-                ? items.filter(needsAttention).length
-                : f.key === "nogeo"
-                  ? items.filter(lacksCoords).length
-                  : items.filter((t) => t.mode === f.key).length;
-          if (f.key !== "all" && count === 0) return null;
-          return (
-            <button key={f.key} type="button" role="tab" aria-selected={filter === f.key} onClick={() => setFilter(f.key)} style={filterBtn(filter === f.key, f.key === "problems")}>
-              {f.label} <span style={{ opacity: 0.6 }}>{count}</span>
-            </button>
-          );
-        })}
-      </div>
-
-      {trackFilter && onTrackFilter && facets && (facets.forwarders.length > 0 || facets.types.length > 0) && (
-        <div style={{ display: "flex", gap: 6, padding: "0 12px 6px", flexWrap: "wrap" }} data-testid="hub-track-filters">
-          {facets.forwarders.length > 0 && (
-            <Select
-              aria-label="Хто везе"
-              value={trackFilter.forwarder}
-              onChange={(e) => onTrackFilter({ ...trackFilter, forwarder: e.target.value })}
-              style={selectStyle(!!trackFilter.forwarder)}
-            >
-              <option value="">Хто везе: усі</option>
-              {facets.forwarders.map((f) => (
-                <option key={f} value={f}>
-                  {f}
-                </option>
-              ))}
-            </Select>
-          )}
-          {facets.types.length > 0 && (
-            <Select
-              aria-label="Тип вантажу"
-              value={trackFilter.type}
-              onChange={(e) => onTrackFilter({ ...trackFilter, type: e.target.value })}
-              style={selectStyle(!!trackFilter.type)}
-            >
-              <option value="">Тип: усі</option>
-              {facets.types.map((t) => (
-                <option key={t} value={t}>
-                  {CARGO_META[t as CargoType]?.icon ?? ""} {CARGO_META[t as CargoType]?.label ?? t}
-                </option>
-              ))}
-            </Select>
-          )}
-        </div>
-      )}
+      {(() => {
+        const countOf = (k: Filter) =>
+          k === "all" ? items.length : k === "problems" ? items.filter(needsAttention).length : k === "nogeo" ? items.filter(lacksCoords).length : items.filter((t) => t.mode === k).length;
+        const modeOptions: DropdownOption<Filter>[] = FILTERS.filter((f) => f.key === "all" || f.key === filter || countOf(f.key) > 0).map((f) => ({
+          value: f.key,
+          label: f.label,
+          count: countOf(f.key),
+          icon: FILTER_ICON[f.key],
+        }));
+        const showFacets = !!(trackFilter && onTrackFilter && facets && (facets.forwarders.length > 0 || facets.types.length > 0));
+        return (
+          <div style={{ display: "flex", gap: 6, padding: "10px 12px 6px", flexWrap: "wrap" }} data-testid="hub-track-filters">
+            <Dropdown size="sm" label="Показати" value={filter} onChange={setFilter} options={modeOptions} testId="hub-track-mode" />
+            {showFacets && facets!.forwarders.length > 0 ? (
+              <Dropdown
+                size="sm"
+                label="Хто везе"
+                value={trackFilter!.forwarder}
+                onChange={(v) => onTrackFilter!({ ...trackFilter!, forwarder: v })}
+                testId="hub-track-forwarder"
+                options={[{ value: "", label: "усі" }, ...facets!.forwarders.map((f) => ({ value: f, label: f, color: forwarderColor(f) }))]}
+              />
+            ) : null}
+            {showFacets && facets!.types.length > 0 ? (
+              <Dropdown
+                size="sm"
+                label="Тип"
+                value={trackFilter!.type}
+                onChange={(v) => onTrackFilter!({ ...trackFilter!, type: v })}
+                testId="hub-track-type"
+                options={[{ value: "", label: "усі" }, ...facets!.types.map((t) => ({ value: t, label: CARGO_META[t as CargoType]?.label ?? t, icon: CARGO_META[t as CargoType]?.icon }))]}
+              />
+            ) : null}
+          </div>
+        );
+      })()}
       {filter === "nogeo" && visible.length > 0 && (
         <p style={{ margin: "0 12px 6px", fontSize: 12, color: "var(--muted)", lineHeight: 1.45 }}>
           Ці вантажі не вдалося покласти на карту: місце не розпізнано. Уточніть місто або порт у таблиці / картці.
@@ -388,19 +374,6 @@ export function TracksPanel({
   );
 }
 
-function selectStyle(active: boolean): React.CSSProperties {
-  return {
-    height: 28,
-    maxWidth: 170,
-    borderRadius: 8,
-    border: `1px solid ${active ? "var(--accent)" : "var(--border)"}`,
-    background: "var(--surface)",
-    color: "var(--text)",
-    font: "inherit",
-    fontSize: 12,
-    padding: "0 6px",
-  };
-}
 
 function TrackRow({ t, selected, onClick }: { t: Track; selected: boolean; onClick: () => void }) {
   const color = statusColor(t.status);
@@ -560,17 +533,3 @@ export function pill(color: string): React.CSSProperties {
   };
 }
 
-function filterBtn(active: boolean, warn: boolean): React.CSSProperties {
-  return {
-    height: 26,
-    padding: "0 9px",
-    borderRadius: 999,
-    border: `1px solid ${active ? (warn ? "var(--err)" : "var(--accent)") : "var(--border)"}`,
-    background: active ? (warn ? "color-mix(in srgb, var(--err) 12%, transparent)" : "var(--active)") : "transparent",
-    color: "var(--text)",
-    font: "inherit",
-    fontSize: 12,
-    fontWeight: 600,
-    cursor: "pointer",
-  };
-}

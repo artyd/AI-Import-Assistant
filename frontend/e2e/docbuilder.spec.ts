@@ -37,8 +37,12 @@ function fakeBackend() {
   const checks: any[] = [];
   const total = (d: any) => (d.items ?? []).reduce((s: number, i: any) => s + i.qty * i.price, 0);
   const title = (kind: string, d: any) => [d.number || "без номера", kind === "contract" ? d.buyer?.nameEn : kind === "ua_invoice" ? d.buyer?.nameUk : d.toName].filter(Boolean).join(" · ");
-  return { parties, products, docs, puts, renders, checks, id, now, total, title };
+  const stamps: Record<string, any>[] = [{ id: "st-1", name: "ACME seal", partyId: "p-seller", width: 300, height: 300, createdAt: now }];
+  return { parties, products, docs, puts, renders, checks, stamps, id, now, total, title };
 }
+
+// A 2×1 PNG stands in for a stamp picture.
+const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+KAAAAC0lEQVR4nGNgQAcAAAkAAX6+xNEAAAAASUVORK5CYII=", "base64");
 
 /** «＋ Новий документ ▾» → a kind. */
 async function newDoc(page: Page, id: string) {
@@ -72,6 +76,34 @@ async function setup(page: Page) {
       }
     }
     if (coll === "templates") return (await json({ templates: [] }), true);
+    if (coll === "stamps") {
+      if (sub === "image") {
+        await route.fulfill({ status: 200, contentType: "image/png", body: PNG });
+        return true;
+      }
+      if (!docId && method === "GET")
+        return (
+          await json({
+            stamps: fb.stamps,
+            places: {
+              contract: [
+                { place: "seller", label: "Реквізити — Продавець", dx: 40, dy: 0 },
+                { place: "buyer", label: "Реквізити — Покупець", dx: 40, dy: 0 },
+                { place: "page_seller", label: "Кожна сторінка — підпис Продавця", dx: 22, dy: -16 },
+              ],
+              appendix: [],
+              invoice: [{ place: "invoice", label: "Інвойс — внизу", dx: 25, dy: 0 }],
+              ua_invoice: [],
+            },
+          }),
+          true
+        );
+      if (!docId && method === "POST") {
+        const st = { id: fb.id("st"), name: "Новий підпис", partyId: null, width: 2, height: 1, createdAt: fb.now };
+        fb.stamps.push(st);
+        return (await json({ stamp: st }, 201), true);
+      }
+    }
     if (coll === "next-number") return (await json({ number: "TB-0001" }), true);
     if (coll === "check") {
       const b = body();
@@ -362,5 +394,44 @@ test.describe("Конструктор документів", () => {
     await page.getByTestId("docb-delete-confirm").click();
     await expect(page.getByTestId("docb-doc-row")).toHaveCount(0);
     expect(fb.docs).toHaveLength(0);
+  });
+
+  test("stamps: upload into the library, place one on a contract, size and shift reach the Word file", async ({ page }) => {
+    const fb = await setup(page);
+    // Library: one stamp already there, upload another (the picture is prepared in the browser).
+    await page.getByTestId("docb-open-directory").click();
+    await page.getByTestId("dir-tab-stamps").click();
+    await expect(page.getByTestId("stamp-card")).toHaveCount(1);
+    await page.getByTestId("stamps-file").setInputFiles({ name: "sign.png", mimeType: "image/png", buffer: PNG });
+    await expect(page.getByTestId("stamp-card")).toHaveCount(2);
+    await page.screenshot({ path: "test-results/docb-stamp-library.png" });
+
+    // A contract: the seller's stamp is suggested for the seller's place.
+    await newDoc(page, "docb-new-contract");
+    const block = page.getByTestId("docb-stamps");
+    await block.getByTestId("stamp-add-seller").click();
+    await expect(block.getByTestId("stamp-placement")).toHaveCount(1);
+    await expect(block.getByTestId("stamp-pick-0")).toContainText("ACME seal");
+    await block.getByTestId("stamp-size-0").fill("45");
+    await block.getByTestId("stamp-nudge-0-→").click();
+    await block.getByTestId("stamp-nudge-0-→").click();
+    await block.getByTestId("stamp-nudge-0-↑").click();
+    await expect(block).toContainText("x 44 · y -2 мм");
+    await block.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: "test-results/docb-stamps.png" });
+    // Move it to every page.
+    await block.getByTestId("stamp-place-0").click();
+    await page.getByTestId("stamp-place-0-opt-page_seller").click();
+    await expect(block).toContainText("x 22 · y -16 мм");
+
+    await page.getByTestId("docb-download").click();
+    await expect.poll(() => fb.renders.filter((r) => r.format === "docx").length).toBe(1);
+    const sent = fb.renders.find((r) => r.format === "docx")!.data;
+    expect(sent.stamps).toEqual([{ stampId: "st-1", place: "page_seller", size: 45, dx: 22, dy: -16 }]);
+
+    // Exact preview = the server's PDF.
+    await page.getByTestId("docb-preview-pdf").click();
+    await expect(page.getByTestId("docb-preview-frame")).toBeVisible();
+    expect(fb.renders.some((r) => r.format === "pdf")).toBe(true);
   });
 });

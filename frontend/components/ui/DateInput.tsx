@@ -245,7 +245,7 @@ function FancyDate(props: Props) {
                 top: pos.up ? undefined : pos.top,
                 bottom: pos.up ? window.innerHeight - pos.top : undefined,
                 width: 288,
-                zIndex: 1000,
+                zIndex: 4000,
                 background: "var(--menu)",
                 border: "1px solid var(--border)",
                 borderRadius: 14,

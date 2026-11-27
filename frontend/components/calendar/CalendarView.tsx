@@ -14,7 +14,8 @@ import { PunctualityPanel } from "./PunctualityPanel";
 import { calendarApi, CARGO_META, CARGO_ORDER, EVENT_SHAPE, forwarderColor, isoWeek, sameLogist, EVENT_META, EVENT_ORDER, fmtDay, MODE_LABEL_CAL, shiftAnchor, todayKyiv, viewRange, viewTitle, type CalendarResponse, type CalEvent, type CalEventType, type CalRow, type CalView, type CargoType } from "@/lib/calendar";
 import { matchesQuery } from "./load";
 import { printPlan } from "./printPlan";
-import { quickBtn, AttentionList, SyncBadge, FilterSelect } from "./controls";
+import { quickBtn, AttentionList, SyncBadge } from "./controls";
+import { Dropdown, type DropdownOption } from "@/components/ui/Dropdown";
 import { WeekGrid, MonthGrid, YearGrid } from "./grids";
 import { RowDetail, toolBtn } from "./RowDetail";
 
@@ -102,6 +103,7 @@ export function CalendarView() {
       place: uniq(rows.map((r) => r.destination)),
       status: uniq(rows.map((r) => r.statusLabel)),
       type: CARGO_ORDER.filter((t) => rows.some((r) => r.cargoType === t)),
+      count: (key: "logist" | "mode" | "forwarder" | "destination" | "statusLabel" | "cargoType", v: string) => rows.filter((r) => (r[key] ?? "") === v).length,
     };
   }, [data]);
 
@@ -354,106 +356,62 @@ export function CalendarView() {
           </div>
         </div>
 
-        {/* Filters + legend */}
-        <div style={{ padding: "8px 16px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", borderBottom: "1px solid var(--border)" }}>
-          <FilterSelect
-            label="Тип"
-            value={filters.type}
-            options={facets.type}
-            format={(v) => `${CARGO_META[v as CargoType]?.icon ?? ""} ${CARGO_META[v as CargoType]?.label ?? v}`}
-            onChange={(v) => setFilters((f) => ({ ...f, type: v }))}
-          />
-          <FilterSelect label="Хто везе" value={filters.forwarder} options={facets.forwarder} onChange={(v) => setFilters((f) => ({ ...f, forwarder: v }))} />
-          <FilterSelect label="Логіст" value={filters.logist} options={facets.logist} onChange={(v) => setFilters((f) => ({ ...f, logist: v }))} />
-          <FilterSelect
-            label="Вид"
-            value={filters.mode}
-            options={facets.mode}
-            format={(v) => MODE_LABEL_CAL[v] ?? v}
-            onChange={(v) => setFilters((f) => ({ ...f, mode: v }))}
-          />
-          <FilterSelect label="Куди" value={filters.place} options={facets.place} onChange={(v) => setFilters((f) => ({ ...f, place: v }))} />
-          <FilterSelect label="Статус" value={filters.status} options={facets.status} onChange={(v) => setFilters((f) => ({ ...f, status: v }))} />
-          {filtered && (
-            <button type="button" className="btn" style={{ ...toolBtn, height: 28 }} onClick={resetAll}>
-              Скинути
-            </button>
-          )}
-        </div>
-
-        {/* Legend: colour = who carries (click = filter), icon = cargo type, shape = event */}
+        {/* Filters: one line of dropdowns — colour = who carries, icon = cargo type, shape = event */}
         <div
-          style={{ padding: "6px 16px 8px", display: "flex", alignItems: "center", gap: "4px 14px", flexWrap: "wrap", borderBottom: "1px solid var(--border)", fontSize: 12 }}
-          data-testid="calendar-legend"
+          style={{ padding: "8px 16px", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", borderBottom: "1px solid var(--border)" }}
+          data-testid="calendar-filters"
         >
-          {facets.forwarder.length > 0 && (
-            <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }} aria-label="Хто везе">
-              <span style={legendLabel} title="Колір смужки зліва на мітці">Хто везе (смужка):</span>
-              {facets.forwarder.map((fw) => (
-                <button
-                  key={fw}
-                  type="button"
-                  aria-pressed={filters.forwarder === fw}
-                  onClick={() => setFilters((f) => ({ ...f, forwarder: f.forwarder === fw ? "" : fw }))}
-                  style={{ ...legendChip, borderColor: filters.forwarder === fw ? forwarderColor(fw) : "var(--border)" }}
-                >
-                  <span style={{ width: 10, height: 10, borderRadius: 3, background: forwarderColor(fw) }} />
-                  {fw}
-                </button>
-              ))}
-            </div>
-          )}
-          {facets.type.length > 0 && (
-            <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }} aria-label="Типи вантажу">
-              <span style={legendLabel}>Тип:</span>
-              {facets.type.map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  aria-pressed={filters.type === t}
-                  onClick={() => setFilters((f) => ({ ...f, type: f.type === t ? "" : t }))}
-                  style={{ ...legendChip, borderColor: filters.type === t ? "var(--accent)" : "var(--border)" }}
-                >
-                  <span aria-hidden>{CARGO_META[t].icon}</span>
-                  {CARGO_META[t].label}
-                </button>
-              ))}
-            </div>
-          )}
-          <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }} aria-label="Типи подій">
-            <span style={legendLabel}>Події:</span>
-            {EVENT_ORDER.map((t) => {
-              const off = hidden.has(t);
-              return (
-                <button
-                  key={t}
-                  type="button"
-                  aria-pressed={!off}
-                  onClick={() =>
-                    setHidden((h) => {
-                      const n = new Set(h);
-                      if (n.has(t)) n.delete(t);
-                      else n.add(t);
-                      return n;
-                    })
-                  }
-                  style={{ ...legendChip, opacity: off ? 0.4 : 1 }}
-                >
-                  <span
-                    aria-hidden
-                    style={{
-                      width: 14,
-                      height: 10,
-                      borderRadius: 3,
-                      border: `2px ${EVENT_SHAPE[t].border} ${EVENT_META[t].color}`,
-                      background: `color-mix(in srgb, ${EVENT_META[t].color} 25%, transparent)`,
+          {(() => {
+            const all = (label = "усі"): DropdownOption => ({ value: "", label });
+            const opts = (vals: string[], key: Parameters<typeof facets.count>[0], extra?: (v: string) => Partial<DropdownOption>): DropdownOption[] => [
+              all(),
+              ...vals.map((v) => ({ value: v, label: v, count: facets.count(key, v), ...extra?.(v) })),
+            ];
+            const set = (k: keyof Filters) => (v: string) => setFilters((f) => ({ ...f, [k]: v }));
+            const shownEvents = EVENT_ORDER.filter((t) => !hidden.has(t));
+            return (
+              <>
+                <Dropdown size="sm" label="Тип" value={filters.type} onChange={set("type")} testId="cal-f-type" options={opts(facets.type, "cargoType", (v) => ({ label: CARGO_META[v as CargoType]?.label ?? v, icon: CARGO_META[v as CargoType]?.icon }))} />
+                <Dropdown
+                  size="sm"
+                  label="Хто везе"
+                  value={filters.forwarder}
+                  onChange={set("forwarder")}
+                  testId="cal-f-forwarder"
+                  title="Колір смужки зліва на мітці = хто везе"
+                  options={opts(facets.forwarder, "forwarder", (v) => ({ color: forwarderColor(v) }))}
+                />
+                <Dropdown size="sm" label="Логіст" value={filters.logist} onChange={set("logist")} testId="cal-f-logist" options={opts(facets.logist, "logist")} />
+                <Dropdown size="sm" label="Вид" value={filters.mode} onChange={set("mode")} testId="cal-f-mode" options={opts(facets.mode, "mode", (v) => ({ label: MODE_LABEL_CAL[v] ?? v }))} />
+                <Dropdown size="sm" label="Куди" value={filters.place} onChange={set("place")} testId="cal-f-place" options={opts(facets.place, "destination")} />
+                <Dropdown size="sm" label="Статус" value={filters.status} onChange={set("status")} testId="cal-f-status" options={opts(facets.status, "statusLabel")} />
+                <Dropdown
+                  size="sm"
+                  multiple
+                  label="Події"
+                  allLabel="усі події"
+                  values={shownEvents.length === EVENT_ORDER.length ? [] : shownEvents}
+                  onChange={(v) => setHidden(new Set(v.length ? EVENT_ORDER.filter((t) => !v.includes(t)) : []))}
+                  testId="cal-f-events"
+                  menuWidth={240}
+                  options={EVENT_ORDER.map((t) => ({ value: t, label: EVENT_META[t].label, icon: <EventSwatch t={t} /> }))}
+                />
+                {(filtered || hidden.size > 0) && (
+                  <button
+                    type="button"
+                    className="btn"
+                    style={{ ...toolBtn, height: 30 }}
+                    onClick={() => {
+                      resetAll();
+                      setHidden(new Set());
                     }}
-                  />
-                  {EVENT_SHAPE[t].mark} {EVENT_META[t].label}
-                </button>
-              );
-            })}
-          </div>
+                  >
+                    Скинути
+                  </button>
+                )}
+              </>
+            );
+          })()}
         </div>
 
         {note && <div style={{ padding: "6px 16px", fontSize: 12.5, color: "var(--muted)" }}>{note}</div>}
@@ -520,20 +478,21 @@ export function CalendarView() {
 
 // ── Styles ───────────────────────────────────────────────────────────────────
 
-const legendLabel: React.CSSProperties = { color: "var(--muted)", fontWeight: 600, marginRight: 2 };
-const legendChip: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  gap: 5,
-  height: 24,
-  padding: "0 8px",
-  borderRadius: 999,
-  border: "1px solid var(--border)",
-  background: "var(--surface)",
-  color: "var(--text)",
-  font: "inherit",
-  fontSize: 12,
-  cursor: "pointer",
-};
+/** The event's mark as it looks on the calendar: its colour and border shape. */
+function EventSwatch({ t }: { t: CalEventType }) {
+  return (
+    <span
+      aria-hidden
+      style={{
+        width: 14,
+        height: 10,
+        borderRadius: 3,
+        display: "inline-block",
+        border: `2px ${EVENT_SHAPE[t].border} ${EVENT_META[t].color}`,
+        background: `color-mix(in srgb, ${EVENT_META[t].color} 25%, transparent)`,
+      }}
+    />
+  );
+}
 const iconBtn: React.CSSProperties = { width: 32, height: 32, padding: 0, fontSize: 16, display: "inline-flex", alignItems: "center", justifyContent: "center" };
 

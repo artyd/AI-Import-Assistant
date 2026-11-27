@@ -50,7 +50,7 @@ const panel: React.CSSProperties = {
   gap: 2,
 };
 
-function Badge({ kind, size = 30, children }: { kind?: DocKind; size?: number; children?: ReactNode }) {
+export function KindBadge({ kind, size = 30, children }: { kind?: DocKind; size?: number; children?: ReactNode }) {
   const color = kind ? KIND_COLOR[kind] : "var(--muted)";
   return (
     <span
@@ -114,7 +114,7 @@ function OptionRow({ o, close }: { o: Option; close: () => void }) {
         font: "inherit",
       }}
     >
-      <Badge kind={o.kind}>{o.badge}</Badge>
+      <KindBadge kind={o.kind}>{o.badge}</KindBadge>
       <span style={{ minWidth: 0 }}>
         <span style={{ display: "block", fontSize: 13.5, fontWeight: 700 }}>{o.title}</span>
         <span style={{ display: "block", fontSize: 11.5, color: "var(--muted)", lineHeight: 1.35 }}>{o.hint}</span>
@@ -219,7 +219,7 @@ export function KindFilterMenu({ value, onChange, counts }: { value: KindFilter;
           cursor: "pointer",
         }}
       >
-        {current.kind ? <Badge kind={current.kind} size={18} /> : null}
+        {current.kind ? <KindBadge kind={current.kind} size={18} /> : null}
         <span style={{ fontWeight: 600 }}>{current.label}</span>
         <span style={{ color: "var(--muted)", fontSize: 12 }}>{counts[current.value]}</span>
         <span style={{ marginLeft: "auto", fontSize: 9, color: "var(--muted)", transform: open ? "rotate(180deg)" : "none", transition: "transform .15s" }}>▼</span>
@@ -253,7 +253,7 @@ export function KindFilterMenu({ value, onChange, counts }: { value: KindFilter;
                 textAlign: "left",
               }}
             >
-              {i.kind ? <Badge kind={i.kind} size={18} /> : <span style={{ width: 18 }} />}
+              {i.kind ? <KindBadge kind={i.kind} size={18} /> : <span style={{ width: 18 }} />}
               <span style={{ flex: 1, fontWeight: i.value === value ? 700 : 500 }}>{i.label}</span>
               <span style={{ color: "var(--muted)", fontSize: 12 }}>{counts[i.value]}</span>
               {i.value === value ? <span style={{ color: "var(--accent)", fontSize: 12 }}>✓</span> : null}

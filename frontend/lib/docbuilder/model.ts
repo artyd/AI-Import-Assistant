@@ -43,6 +43,33 @@ export const PAYMENT_OPTIONS: { value: PaymentType; label: string }[] = [
   { value: "lc", label: "Акредитив" },
 ];
 
+/** A stamp / signature picture from the team library (doc_stamps). */
+export interface StampInfo {
+  id: string;
+  name: string;
+  partyId: string | null;
+  width: number;
+  height: number;
+  createdAt: string;
+}
+
+/** A place a template offers for a stamp, with its default shift (mm). */
+export interface StampPlace {
+  place: string;
+  label: string;
+  dx: number;
+  dy: number;
+}
+
+/** Where one stamp goes on a document: place, width on paper (mm) and a fine shift (mm, right / down). */
+export interface StampPlacement {
+  stampId: string;
+  place: string;
+  size: number;
+  dx: number;
+  dy: number;
+}
+
 export interface Finding {
   level: "error" | "warning" | "ok";
   area: string;
@@ -133,6 +160,7 @@ export interface ContractData extends PaymentFields {
   showReg: boolean;
   items: ContractItem[];
   templateId: string | null;
+  stamps?: StampPlacement[];
 }
 
 export interface AppendixData extends PaymentFields {
@@ -154,6 +182,7 @@ export interface AppendixData extends PaymentFields {
   showReg: boolean;
   items: ContractItem[];
   templateId: string | null;
+  stamps?: StampPlacement[];
 }
 
 export interface InvoiceItem {
@@ -194,6 +223,7 @@ export interface InvoiceData {
   items: InvoiceItem[];
   batches: Batch[];
   templateId: string | null;
+  stamps?: StampPlacement[];
 }
 
 export interface UaItem {
@@ -216,6 +246,7 @@ export interface UaInvoiceData {
   buyerSigner: string;
   items: UaItem[];
   templateId: string | null;
+  stamps?: StampPlacement[];
 }
 
 export type DocData = ContractData | AppendixData | InvoiceData | UaInvoiceData;

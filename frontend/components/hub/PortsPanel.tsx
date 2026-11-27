@@ -15,6 +15,7 @@ import {
   type PlaceKind,
 } from "@/lib/hub";
 import { pill } from "./TracksPanel";
+import { Dropdown } from "@/components/ui/Dropdown";
 
 export type PortFilter = "fav" | "issues" | "all" | PlaceKind;
 type Filter = PortFilter;
@@ -113,33 +114,19 @@ export function PortsPanel({
           data-testid="hub-port-search"
           style={{ height: 36, padding: "0 11px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", font: "inherit", fontSize: 13 }}
         />
-        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }} role="tablist" aria-label="Фільтр портів">
-          {FILTERS.map((f) => (
-            <button
-              key={f.key}
-              type="button"
-              role="tab"
-              aria-selected={filter === f.key && !q}
-              onClick={() => {
-                onFilter(f.key);
-                setQ("");
-              }}
-              style={{
-                height: 26,
-                padding: "0 9px",
-                borderRadius: 999,
-                border: `1px solid ${filter === f.key && !q ? "var(--accent)" : "var(--border)"}`,
-                background: filter === f.key && !q ? "var(--active)" : "transparent",
-                color: "var(--text)",
-                font: "inherit",
-                fontSize: 12,
-                fontWeight: 600,
-                cursor: "pointer",
-              }}
-            >
-              {f.label} <span style={{ opacity: 0.6 }}>{counts[f.key as keyof typeof counts]}</span>
-            </button>
-          ))}
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <Dropdown
+            size="sm"
+            label="Показати"
+            value={q ? ("" as Filter) : filter}
+            placeholder="результати пошуку"
+            onChange={(v) => {
+              onFilter(v);
+              setQ("");
+            }}
+            testId="hub-port-filter"
+            options={FILTERS.map((f) => ({ value: f.key, label: f.label.replace(/^★ /, ""), icon: f.key === "fav" ? "★" : f.key === "issues" ? "⚠️" : f.key === "all" ? "▦" : KIND_ICON[f.key as PlaceKind], count: counts[f.key as keyof typeof counts] }))}
+          />
         </div>
       </div>
 

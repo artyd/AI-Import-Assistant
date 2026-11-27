@@ -238,13 +238,21 @@ test.describe("Logist calendar (team sheet)", () => {
     await expect(events.first()).toBeVisible();
     const all = await events.count();
     expect(all).toBeGreaterThan(2);
-    await page.getByLabel("Логіст").selectOption("Яна");
+    await page.getByTestId("cal-f-logist").click();
+    await page.getByTestId("cal-f-logist-opt-Яна").click();
     await expect(events.filter({ hasText: "Холіна" })).toHaveCount(0);
     await expect(events.filter({ hasText: "Спиносад" })).not.toHaveCount(0);
     await page.getByRole("button", { name: "Скинути" }).click();
     await expect(events).toHaveCount(all);
-    await page.getByLabel("Типи подій").getByRole("button", { name: /Склад БЦ/ }).click();
-    await expect(events.filter({ hasText: "сорбитол" })).toHaveCount(0);
+    // «Події» is a multi-select: ticking one type shows only that type.
+    await page.getByTestId("cal-f-events").click();
+    await page.getByTestId("cal-f-events-opt-warehouse").click();
+    await page.screenshot({ path: "test-results/calendar-filters.png" });
+    await page.keyboard.press("Escape");
+    await expect(events.filter({ hasText: "сорбитол" })).not.toHaveCount(0);
+    expect(await events.count()).toBeLessThan(all);
+    await page.getByRole("button", { name: "Скинути" }).click();
+    await expect(events).toHaveCount(all);
   });
 
   test("colour = forwarder, icon = cargo type; legend filters; tracking links", async ({ page }, info) => {
@@ -252,21 +260,27 @@ test.describe("Logist calendar (team sheet)", () => {
     await mockCalendar(page, state);
     await page.addInitScript(() => localStorage.setItem("aia_calendar_view", "week"));
     await openCalendar(page);
-    const legend = page.getByTestId("calendar-legend");
-    await expect(legend.getByLabel("Хто везе")).toContainText("Мультикс");
-    await expect(legend.getByLabel("Типи вантажу")).toContainText("Контейнер");
+    // The forwarder / cargo-type dropdowns list what is in the data, with colours and icons.
+    await page.getByTestId("cal-f-forwarder").click();
+    await expect(page.getByTestId("cal-f-forwarder-list")).toContainText("Мультикс");
+    await page.keyboard.press("Escape");
+    await page.getByTestId("cal-f-type").click();
+    await expect(page.getByTestId("cal-f-type-list")).toContainText("Контейнер");
+    await page.keyboard.press("Escape");
     const chip = page.getByTestId("calendar-event").filter({ hasText: "Холіна" }).first();
     await expect(chip).toHaveAttribute("data-cargo", "fcl");
     await expect(chip).toContainText("🚢");
     await expect(chip.getByTestId("calendar-track-link")).toHaveAttribute("href", /MSBU1491088/);
     await expect(chip).toHaveAttribute("title", /Хто везе: Мультикс/);
-    // Click a forwarder in the legend → only its shipments.
-    await legend.getByLabel("Хто везе").getByRole("button", { name: /DHL/ }).click();
+    // Pick a forwarder → only its shipments.
+    await page.getByTestId("cal-f-forwarder").click();
+    await page.getByTestId("cal-f-forwarder-opt-DHL").click();
     await expect(page.getByTestId("calendar-event").filter({ hasText: "Холіна" })).toHaveCount(0);
-    await legend.getByLabel("Хто везе").getByRole("button", { name: /DHL/ }).click();
-    await legend.getByLabel("Типи вантажу").getByRole("button", { name: /Зразки/ }).click();
+    await page.getByRole("button", { name: "Скинути" }).click();
+    await page.getByTestId("cal-f-type").click();
+    await page.getByTestId("cal-f-type-opt-samples").click();
     await expect(page.getByTestId("calendar-event").filter({ hasText: "Холіна" })).toHaveCount(0);
-    await legend.getByLabel("Типи вантажу").getByRole("button", { name: /Зразки/ }).click();
+    await page.getByRole("button", { name: "Скинути" }).click();
     // Card: the number with a link to the carrier's site.
     await chip.click();
     const track = page.getByTestId("calendar-detail").getByTestId("calendar-track");
@@ -349,7 +363,7 @@ test.describe("Logist calendar (team sheet)", () => {
     await expect(pun.getByTestId("calendar-punctuality-row")).toHaveCount(2);
     await expect(pun).toContainText("вчасно 8 з 10");
     await pun.getByTestId("calendar-punctuality-row").filter({ hasText: "DHL" }).click();
-    await expect(page.getByRole("combobox", { name: "Хто везе" })).toHaveValue("DHL");
+    await expect(page.getByTestId("cal-f-forwarder")).toContainText("DHL");
   });
 
   test("event → row card with countdown, sheet link; «Увага» list; sync + Excel", async ({ page }, info) => {

@@ -343,6 +343,10 @@ builder picks from. A document keeps a snapshot of what it took, so a later edit
 of the directory never changes a sent document.
 _Avoid_: Catalogue (for companies), contacts
 
+**Stamp** (Печатка):
+A picture of a company's seal (often with the signature) from the directory's stamp library, pressed onto a trade document at a place the template offers (requisites, specification, every page…), with a width in mm and a shift.
+_Avoid_: Seal image, logo
+
 **Annex** (Додаток до контракту):
 A numbered specification under an existing contract for one delivery ("ANNEX No. 21 dated ... TO THE CONTRACT No. ..."). Built in the document builder from its contract; an invoice may refer to an annex instead of the contract.
 _Avoid_: Appendix (in UI text), supplement

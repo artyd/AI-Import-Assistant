@@ -1315,6 +1315,21 @@ CREATE TABLE IF NOT EXISTS doc_document_events (
 );
 CREATE INDEX IF NOT EXISTS idx_doc_document_events_doc ON doc_document_events(document_id, at DESC);
 
+-- 2026-11-27: the team's stamp / signature pictures (PNG with transparency),
+-- optionally tied to a directory company. Documents reference them by id.
+CREATE TABLE IF NOT EXISTS doc_stamps (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name        TEXT NOT NULL,
+  party_id    UUID REFERENCES doc_parties(id) ON DELETE SET NULL,
+  mime        TEXT NOT NULL CHECK (mime IN ('image/png', 'image/jpeg')),
+  image       BYTEA NOT NULL,
+  width       INT NOT NULL,
+  height      INT NOT NULL,
+  created_by  UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_doc_stamps_party ON doc_stamps(party_id, lower(name));
+
 -- A team template: the user's own .docx with the same {tags} as the bundled one.
 CREATE TABLE IF NOT EXISTS doc_templates (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
