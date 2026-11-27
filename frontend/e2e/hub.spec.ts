@@ -299,6 +299,34 @@ test.describe("Logistics hub", () => {
     await expect(page.getByTestId("hub-track-detail")).toContainText("Штурман не вгадує статус");
   });
 
+  test("bottom-bar figures filter the list; sort by arrival with groups; dense rows", async ({ page }, info) => {
+    test.skip(info.project.name === "mobile", "desktop list check");
+    await mockHub(page);
+    await openHub(page);
+    const rows = page.getByTestId("hub-track-row");
+    await expect(rows.first()).toBeVisible();
+    const all = await rows.count();
+    // «потребують уваги» in the bottom bar → the list shows exactly those.
+    const stat = page.getByTestId("hub-stat-problems");
+    const n = Number((await stat.getAttribute("aria-label"))!.split(" ")[0]);
+    await stat.click();
+    await expect(page.getByTestId("hub-track-mode")).toContainText("Увага");
+    await expect(stat).toHaveAttribute("aria-pressed", "true");
+    expect(await rows.count()).toBeGreaterThanOrEqual(n);
+    await stat.click(); // again → everything
+    await expect(rows).toHaveCount(all);
+    // Sort by the nearest arrival → bucket headers.
+    await page.getByTestId("hub-track-sort").click();
+    await page.getByTestId("hub-track-sort-opt-eta").click();
+    await expect(page.getByTestId("hub-track-group").first()).toBeVisible();
+    // Dense rows: one line each, same items.
+    await page.getByTestId("hub-track-dense").click();
+    await expect(rows).toHaveCount(all);
+    const box = await rows.first().boundingBox();
+    expect(box!.height).toBeLessThan(44);
+    await page.screenshot({ path: `test-results/hub-dense-${info.project.name}.png` });
+  });
+
   test("sea line kept by hand: logist enters status, ETA, vessel and a milestone", async ({ page }, info) => {
     test.skip(info.project.name === "mobile", "desktop-only feature");
     const state: HubMockState = { added: [], manual: { patches: [], events: [] } };

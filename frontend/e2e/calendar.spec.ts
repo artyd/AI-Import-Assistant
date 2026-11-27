@@ -323,16 +323,19 @@ test.describe("Logist calendar (team sheet)", () => {
     // Quick filters: «Мої» (Людмила ↔ Люда), «Запізнюються».
     await page.getByRole("tab", { name: "Місяць" }).click();
     const events = page.getByTestId("calendar-event");
-    await page.getByRole("button", { name: /Мої/ }).click();
+    const quick = async (v: string) => {
+      await page.getByTestId("cal-f-quick").click();
+      await page.getByTestId(`cal-f-quick-opt-${v}`).click();
+    };
+    await quick("mine");
     await expect(events.filter({ hasText: "Спиносад" })).toHaveCount(0);
     await expect(events.filter({ hasText: "Холіна" }).first()).toBeVisible();
-    await page.getByRole("button", { name: /Мої/ }).click();
-    await page.getByRole("button", { name: /Запізнюються/ }).click();
+    await quick("late");
     await expect(events.filter({ hasText: "Холіна" })).toHaveCount(0);
     await expect(events.filter({ hasText: "Спиносад" }).first()).toBeVisible();
-    await page.getByRole("button", { name: /Запізнюються/ }).click();
+    await quick("");
     // «Без дат» → the attention list filtered to undated rows.
-    await page.getByRole("button", { name: /Без дат/ }).click();
+    await quick("nodates");
     await expect(page.getByTestId("calendar-attention")).toContainText("Зразок без дат");
     await expect(page.getByTestId("calendar-attention")).not.toContainText("Спиносад");
   });
@@ -389,7 +392,8 @@ test.describe("Logist calendar (team sheet)", () => {
 
     await page.getByRole("button", { name: "↻ Оновити" }).click();
     await expect.poll(() => state.syncs).toBe(1);
-    await page.getByRole("button", { name: "Excel" }).click();
+    await page.getByTestId("cal-export").click();
+    await page.getByTestId("cal-export-opt-excel").click();
     await expect.poll(() => state.exports.length).toBe(1);
     expect(state.exports[0]).toMatch(/from=\d{4}-\d{2}-\d{2}&to=\d{4}-\d{2}-\d{2}/);
   });

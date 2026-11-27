@@ -26,7 +26,7 @@ import { MapSearch } from "./MapSearch";
 import { PlaybackBar } from "./PlaybackBar";
 import { actualProgress, buildReplay, planProgress, positionAt, type Replay } from "./playback";
 import { smoothPath, splitAt } from "./geo";
-import { TracksPanel, type WorkspaceRef } from "./TracksPanel";
+import { TracksPanel, type TrackListFilter, type WorkspaceRef } from "./TracksPanel";
 import { TrackDetail } from "./TrackDetail";
 import { defaultPortFilter, isIssue, portMatches, PortsPanel, type PortFilter } from "./PortsPanel";
 import { PortDetail } from "./PortDetail";
@@ -71,6 +71,7 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
   const [snap, setSnap] = useState<LiveSnapshot | null>(null);
   const [ports, setPorts] = useState<HubPort[]>([]);
   const [tab, setTab] = useState<Tab>("tracks");
+  const [listFilter, setListFilter] = useState<TrackListFilter>("all");
   // Ports-tab quick filter; null = not chosen yet (list shows the default, map shows everything).
   const [portFilter, setPortFilter] = useState<PortFilter | null>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceRef[]>([]);
@@ -1159,6 +1160,8 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
           <div style={{ flex: 1, minHeight: 0 }}>
             {tab === "tracks" ? (
               <TracksPanel
+                filter={listFilter}
+                onFilter={setListFilter}
                 items={items}
                 trackFilter={trackFilter}
                 onTrackFilter={setTrackFilter}
@@ -1387,11 +1390,46 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
             data-testid="hub-hud"
             data-tick={now}
           >
-            <Stat icon="🚢" n={stats.moving} label="в дорозі" color="var(--accent)" compact={compactHud} />
-            <Stat icon="⚓" n={stats.port} label="у порту / митниці" color="var(--warn)" compact={compactHud} />
-            <Stat icon="⚠" n={stats.alert} label="потребують уваги" color="var(--err)" compact={compactHud} />
-            <Stat icon="✓" n={stats.done} label="доставлено" color="var(--ok)" compact={compactHud} />
-            <Stat icon="⛔" n={portIssues} label="портів і кордонів зі збоями" color="var(--err)" compact={compactHud} />
+            {(
+              [
+                ["🚢", stats.moving, "в дорозі", "var(--accent)", "moving"],
+                ["⚓", stats.port, "у порту / митниці", "var(--warn)", "port"],
+                ["⚠", stats.alert, "потребують уваги", "var(--err)", "problems"],
+                ["✓", stats.done, "доставлено", "var(--ok)", "done"],
+              ] as const
+            ).map(([icon, n, label, color, f]) => (
+              <Stat
+                key={f}
+                icon={icon}
+                n={n}
+                label={label}
+                color={color}
+                compact={compactHud}
+                testId={`hub-stat-${f}`}
+                active={tab === "tracks" && listFilter === f}
+                onClick={() => {
+                  // A second click on the lit figure shows everything again.
+                  const next = tab === "tracks" && listFilter === f ? "all" : f;
+                  setTab("tracks");
+                  setPanelOpen(true);
+                  setListFilter(next);
+                }}
+              />
+            ))}
+            <Stat
+              icon="⛔"
+              n={portIssues}
+              label="портів і кордонів зі збоями"
+              color="var(--err)"
+              compact={compactHud}
+              testId="hub-stat-ports"
+              active={tab === "ports" && portFilter === "issues"}
+              onClick={() => {
+                setTab("ports");
+                setPanelOpen(true);
+                pickPortFilter("issues");
+              }}
+            />
             <span style={{ width: 1, alignSelf: "stretch", background: "var(--border)" }} />
             <button
               type="button"

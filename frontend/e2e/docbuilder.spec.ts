@@ -371,4 +371,24 @@ test.describe("Конструктор документів", () => {
     await expect(page.getByTestId("docb-preview-frame")).toBeVisible();
     expect(fb.renders.some((r) => r.format === "pdf")).toBe(true);
   });
+  test("a field's label opens the styled list, never the browser's own one", async ({ page }) => {
+    await setup(page);
+    await newDoc(page, "docb-new-contract");
+    // Track whether the hidden native <select> receives an un-cancelled click (that is what pops the OS list).
+    await page.evaluate(() => {
+      (window as any).__nativeClicks = 0;
+      document.addEventListener("click", (e) => {
+        if ((e.target as HTMLElement).tagName === "SELECT" && !e.defaultPrevented) (window as any).__nativeClicks++;
+      });
+    });
+    const field = page.locator("label", { hasText: "Валюта" }).first();
+    await field.locator("span").first().click(); // the field name
+    await expect(page.getByRole("listbox")).toContainText("EUR");
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("listbox")).toHaveCount(0);
+    await field.locator(".ui-select > div").first().click(); // the styled trigger
+    await expect(page.getByRole("listbox")).toContainText("EUR");
+    await page.getByRole("listbox").getByRole("option", { name: "EUR" }).click();
+    expect(await page.evaluate(() => (window as any).__nativeClicks)).toBe(0);
+  });
 });

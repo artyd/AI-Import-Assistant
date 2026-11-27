@@ -253,6 +253,9 @@ function FancySelect(props: Props) {
         aria-hidden
         title={title}
         className={className ?? "input"}
+        // A click inside a <label> is forwarded to the hidden native control, which then
+        // opens the OS list / date picker over ours — cancel that activation.
+        onClick={(e) => e.preventDefault()}
         onMouseDown={(e) => {
           e.preventDefault();
           if (disabled) return;
@@ -300,8 +303,22 @@ function FancySelect(props: Props) {
           onChange?.(e);
         }}
         onKeyDown={(e) => {
+          // F4 / Alt+↓ would open the OS list on Windows — open ours instead.
+          if (e.key === "F4") {
+            e.preventDefault();
+            if (open) close();
+            else openList();
+            return;
+          }
           // Open / drive the styled list; letters keep the native type-to-select.
           if (open || ["ArrowDown", "ArrowUp", "Enter", " "].includes(e.key)) onKey(e);
+        }}
+        // A click inside a <label> is forwarded to the hidden native control, which then
+        // opens the OS list / date picker over ours — cancel that activation.
+        onClick={(e) => {
+          // Reached through its <label> (a click on the field name): open ours, never the OS one.
+          e.preventDefault();
+          if (!disabled) (open ? close() : openList());
         }}
         onMouseDown={(e) => {
           // A click that reaches the native control (e.g. via its <label>) opens the styled list instead.

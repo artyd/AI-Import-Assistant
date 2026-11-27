@@ -41,6 +41,8 @@ interface Common<V extends string> {
   menuWidth?: number;
   style?: CSSProperties;
   title?: string;
+  /** Unset filter shows just its label («Тип ▾»), set one shows «Тип: Море ▾» — saves room in a filter bar. */
+  compact?: boolean;
   /** Extra row(s) at the end of the list (e.g. «＋ Додати»). */
   footer?: (close: () => void) => ReactNode;
 }
@@ -70,7 +72,7 @@ function Swatch({ o, size = 10 }: { o: Pick<DropdownOption, "color" | "icon">; s
 }
 
 export function Dropdown<V extends string>(props: DropdownProps<V>) {
-  const { options, label, placeholder, testId, ariaLabel, disabled, block, size = "md", activeTint = true, menuWidth, style, title, footer } = props;
+  const { options, label, placeholder, testId, ariaLabel, disabled, block, size = "md", activeTint = true, menuWidth, style, title, footer, compact } = props;
   const listId = useId();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -266,10 +268,16 @@ export function Dropdown<V extends string>(props: DropdownProps<V>) {
           ...style,
         }}
       >
-        {label ? <span style={{ color: "var(--muted)", flex: "none" }}>{label}:</span> : null}
-        {current ? <Swatch o={current} size={9} /> : null}
-        <span style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", minWidth: 0, flex: block ? 1 : undefined, textAlign: "left" }}>{text}</span>
-        {count !== undefined ? <span style={{ color: "var(--muted)", fontSize: 11.5, flex: "none" }}>{count}</span> : null}
+        {compact && label && !applied ? (
+          <span style={{ fontWeight: 600, flex: block ? 1 : undefined, textAlign: "left" }}>{label}</span>
+        ) : (
+          <>
+            {label ? <span style={{ color: "var(--muted)", flex: "none" }}>{label}:</span> : null}
+            {current ? <Swatch o={current} size={9} /> : null}
+            <span style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", minWidth: 0, flex: block ? 1 : undefined, textAlign: "left" }}>{text}</span>
+            {count !== undefined && !compact ? <span style={{ color: "var(--muted)", fontSize: 11.5, flex: "none" }}>{count}</span> : null}
+          </>
+        )}
         <svg width="11" height="11" viewBox="0 0 24 24" aria-hidden style={{ flex: "none", marginLeft: block ? 0 : 1, color: "var(--muted)", transition: "transform .15s", transform: open ? "rotate(180deg)" : "none" }}>
           <path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
         </svg>

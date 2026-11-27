@@ -1006,33 +1006,74 @@ function EmptyState({ onCreate, onFromShipment, hasDirectory, onDirectory }: { o
         <p style={{ fontSize: 13.5, color: "var(--muted)", lineHeight: 1.55, margin: "0 0 18px" }}>
           Оберіть, що зібрати. Сторони й товари беруться з довідника, праворуч одразу видно готовий документ, а «Перевірити» звіряє реквізити, коди й ліміти контракту.
         </p>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
+        {/* 6 columns: the three kinds take two each, the two helpers three each — every tile the same height */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gridAutoRows: "1fr", gap: 10 }}>
           {cards.map((c) => (
-            <button
-              key={c.kind}
-              type="button"
-              className="docb-card"
-              onClick={() => onCreate(c.kind)}
-              data-testid={`docb-empty-${c.kind}`}
-              style={{ textAlign: "left", display: "grid", gap: 8, alignContent: "start", padding: 16, borderRadius: 14, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", font: "inherit", cursor: "pointer" }}
-            >
-              <KindBadge kind={c.kind} size={36} />
-              <span style={{ fontSize: 14.5, fontWeight: 800 }}>{c.title}</span>
-              <span style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.45 }}>{c.hint}</span>
-              <span style={{ fontSize: 12.5, fontWeight: 700, color: KIND_COLOR[c.kind] }}>Створити →</span>
-            </button>
+            <Tile key={c.kind} span={2} testId={`docb-empty-${c.kind}`} onClick={() => onCreate(c.kind)} badge={<KindBadge kind={c.kind} size={36} />} title={c.title} hint={c.hint} cta="Створити →" color={KIND_COLOR[c.kind]} />
           ))}
-        </div>
-        <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
-          <button type="button" style={{ ...smallBtn, height: 34 }} onClick={onFromShipment}>
-            ⇩ З документів постачання…
-          </button>
-          <button type="button" style={{ ...smallBtn, height: 34 }} onClick={onDirectory}>
-            {hasDirectory ? "Відкрити довідник" : "Заповнити довідник"}
-          </button>
+          <Tile
+            span={3}
+            testId="docb-empty-from-shipment"
+            onClick={onFromShipment}
+            badge={<TileBadge color="var(--info)">⇩</TileBadge>}
+            title="З документів постачання"
+            hint="Контракт чи інвойс із прочитаних документів постачання Штурмана — сторони й товари підставляться самі, решту перевірте."
+            cta="Обрати постачання →"
+            color="var(--info)"
+          />
+          <Tile
+            span={3}
+            testId="docb-empty-directory"
+            onClick={onDirectory}
+            badge={<TileBadge color="#0d9488">☰</TileBadge>}
+            title={hasDirectory ? "Довідник" : "Заповнити довідник"}
+            hint="Компанії, товари й шаблони Word, з яких збираються всі документи. Спільний для всієї команди."
+            cta={hasDirectory ? "Відкрити довідник →" : "Заповнити →"}
+            color="#0d9488"
+          />
         </div>
       </div>
     </div>
+  );
+}
+
+function TileBadge({ color, children }: { color: string; children: React.ReactNode }) {
+  return (
+    <span
+      aria-hidden
+      style={{
+        width: 36,
+        height: 36,
+        borderRadius: 9,
+        display: "grid",
+        placeItems: "center",
+        fontSize: 16,
+        fontWeight: 800,
+        color,
+        background: `color-mix(in srgb, ${color} 14%, transparent)`,
+        border: `1px solid color-mix(in srgb, ${color} 30%, transparent)`,
+      }}
+    >
+      {children}
+    </span>
+  );
+}
+
+/** One tile of the empty state: badge, title, a line of what it does, a call to action. */
+function Tile({ span, testId, onClick, badge, title, hint, cta, color }: { span: number; testId: string; onClick: () => void; badge: React.ReactNode; title: string; hint: string; cta: string; color: string }) {
+  return (
+    <button
+      type="button"
+      className="docb-card"
+      onClick={onClick}
+      data-testid={testId}
+      style={{ gridColumn: `span ${span}`, textAlign: "left", display: "flex", flexDirection: "column", gap: 8, padding: 16, borderRadius: 14, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", font: "inherit", cursor: "pointer", minWidth: 0 }}
+    >
+      {badge}
+      <span style={{ fontSize: 14.5, fontWeight: 800 }}>{title}</span>
+      <span style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.45 }}>{hint}</span>
+      <span style={{ marginTop: "auto", fontSize: 12.5, fontWeight: 700, color }}>{cta}</span>
+    </button>
   );
 }
 

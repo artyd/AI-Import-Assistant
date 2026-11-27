@@ -179,6 +179,9 @@ function FancyDate(props: Props) {
         aria-hidden
         title={title}
         className={className ?? "input"}
+        // A click inside a <label> is forwarded to the hidden native control, which then
+        // opens the OS list / date picker over ours — cancel that activation.
+        onClick={(e) => e.preventDefault()}
         onMouseDown={(e) => {
           e.preventDefault();
           if (disabled) return;
@@ -224,6 +227,13 @@ function FancyDate(props: Props) {
             e.preventDefault();
             close();
           }
+        }}
+        // A click inside a <label> is forwarded to the hidden native control, which then
+        // opens the OS list / date picker over ours — cancel that activation.
+        onClick={(e) => {
+          // Reached through its <label> (a click on the field name): open ours, never the OS one.
+          e.preventDefault();
+          if (!disabled) (open ? close() : openPop());
         }}
         onMouseDown={(e) => {
           e.preventDefault();

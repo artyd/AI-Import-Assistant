@@ -6,7 +6,7 @@
 // an «Увага» list of rows with data problems; Excel export and a printable plan.
 // The sheet is the source of truth — every row links back to it.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { ListView } from "./ListView";
@@ -14,7 +14,7 @@ import { PunctualityPanel } from "./PunctualityPanel";
 import { calendarApi, CARGO_META, CARGO_ORDER, EVENT_SHAPE, forwarderColor, isoWeek, sameLogist, EVENT_META, EVENT_ORDER, fmtDay, MODE_LABEL_CAL, shiftAnchor, todayKyiv, viewRange, viewTitle, type CalendarResponse, type CalEvent, type CalEventType, type CalRow, type CalView, type CargoType } from "@/lib/calendar";
 import { matchesQuery } from "./load";
 import { printPlan } from "./printPlan";
-import { quickBtn, AttentionList, SyncBadge } from "./controls";
+import { AttentionList, SyncBadge } from "./controls";
 import { Dropdown, type DropdownOption } from "@/components/ui/Dropdown";
 import { WeekGrid, MonthGrid, YearGrid } from "./grids";
 import { RowDetail, toolBtn } from "./RowDetail";
@@ -249,17 +249,24 @@ export function CalendarView() {
           <button type="button" className="btn" style={toolBtn} onClick={() => void syncNow()} disabled={syncing} title="Прочитати таблицю зараз">
             {syncing ? "Оновлюю…" : "↻ Оновити"}
           </button>
-          {data?.sync.sheetUrl && (
-            <a className="btn" style={{ ...toolBtn, textDecoration: "none" }} href={data.sync.sheetUrl} target="_blank" rel="noreferrer noopener">
-              Таблиця ↗
-            </a>
-          )}
-          <button type="button" className="btn" style={toolBtn} onClick={() => void calendarApi.exportXlsx(from, to)} title="Події періоду в Excel">
-            Excel
-          </button>
-          <button type="button" className="btn" style={toolBtn} onClick={() => printPlan(viewTitle(view, anchor), events, rowsById)} title="Друк або збереження в PDF">
-            Друк / PDF
-          </button>
+          <Dropdown
+            value=""
+            placeholder="Експорт"
+            activeTint={false}
+            testId="cal-export"
+            menuWidth={250}
+            style={{ height: 32 }}
+            onChange={(v) => {
+              if (v === "sheet" && data?.sync.sheetUrl) window.open(data.sync.sheetUrl, "_blank", "noopener,noreferrer");
+              else if (v === "excel") void calendarApi.exportXlsx(from, to);
+              else if (v === "print") printPlan(viewTitle(view, anchor), events, rowsById);
+            }}
+            options={[
+              ...(data?.sync.sheetUrl ? [{ value: "sheet", label: "Відкрити таблицю", icon: "↗", hint: "Робоча Google-таблиця команди" }] : []),
+              { value: "excel", label: "Excel", icon: "📊", hint: "Події показаного періоду" },
+              { value: "print", label: "Друк / PDF", icon: "🖨", hint: "План на період для друку" },
+            ]}
+          />
           <button
             type="button"
             className="btn"
@@ -287,9 +294,12 @@ export function CalendarView() {
           </button>
         </div>
 
-        {/* Search + quick filters */}
-        <div style={{ padding: "8px 16px 0", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <div style={{ position: "relative", flex: "0 1 320px", minWidth: 200 }}>
+        {/* One row: search, quick views, the main filters, the rest under «Ще» */}
+        <div
+          style={{ padding: "8px 16px", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", borderBottom: "1px solid var(--border)" }}
+          data-testid="calendar-filters"
+        >
+          <div style={{ position: "relative", flex: "1 1 200px", minWidth: 160, maxWidth: 360 }}>
             <input
               value={query}
               onChange={(e) => {
@@ -298,7 +308,7 @@ export function CalendarView() {
               }}
               onFocus={() => setHitsOpen(true)}
               onKeyDown={(e) => e.key === "Escape" && setHitsOpen(false)}
-              placeholder="🔍 Пошук: товар, номер, хто везе, місце…"
+              placeholder="🔍 Пошук: товар, номер, місце…"
               aria-label="Пошук у календарі"
               data-testid="calendar-search"
               style={{ width: "100%", boxSizing: "border-box", height: 32, borderRadius: 9, border: `1px solid ${query ? "var(--accent)" : "var(--border)"}`, background: "var(--surface)", color: "var(--text)", font: "inherit", fontSize: 13, padding: "0 10px" }}
@@ -333,34 +343,6 @@ export function CalendarView() {
               </div>
             )}
           </div>
-          <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }} aria-label="Швидкі фільтри">
-            <button type="button" aria-pressed={quick === "mine"} onClick={() => setQuick((q) => (q === "mine" ? null : "mine"))} style={quickBtn(quick === "mine")} title={user?.name ? `Логіст у таблиці = ${user.name}` : "Вкажіть імʼя у профілі"}>
-              👤 Мої
-            </button>
-            <button type="button" onClick={arrivalsThisWeek} style={quickBtn(false)}>
-              ⚓ Прибуває цього тижня
-            </button>
-            <button type="button" aria-pressed={quick === "late"} onClick={() => setQuick((q) => (q === "late" ? null : "late"))} style={quickBtn(quick === "late")}>
-              ⚠ Запізнюються
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setAttentionCode("no_dates");
-                setPanel("attention");
-              }}
-              style={quickBtn(false)}
-            >
-              📭 Без дат
-            </button>
-          </div>
-        </div>
-
-        {/* Filters: one line of dropdowns — colour = who carries, icon = cargo type, shape = event */}
-        <div
-          style={{ padding: "8px 16px", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", borderBottom: "1px solid var(--border)" }}
-          data-testid="calendar-filters"
-        >
           {(() => {
             const all = (label = "усі"): DropdownOption => ({ value: "", label });
             const opts = (vals: string[], key: Parameters<typeof facets.count>[0], extra?: (v: string) => Partial<DropdownOption>): DropdownOption[] => [
@@ -369,11 +351,34 @@ export function CalendarView() {
             ];
             const set = (k: keyof Filters) => (v: string) => setFilters((f) => ({ ...f, [k]: v }));
             const shownEvents = EVENT_ORDER.filter((t) => !hidden.has(t));
+            const more = [filters.mode, filters.place, filters.status].filter(Boolean).length;
             return (
               <>
-                <Dropdown size="sm" label="Тип" value={filters.type} onChange={set("type")} testId="cal-f-type" options={opts(facets.type, "cargoType", (v) => ({ label: CARGO_META[v as CargoType]?.label ?? v, icon: CARGO_META[v as CargoType]?.icon }))} />
                 <Dropdown
                   size="sm"
+                  compact
+                  label="Швидко"
+                  value={quick ?? ""}
+                  testId="cal-f-quick"
+                  menuWidth={270}
+                  onChange={(v) => {
+                    if (v === "week") arrivalsThisWeek();
+                    else if (v === "nodates") {
+                      setAttentionCode("no_dates");
+                      setPanel("attention");
+                    } else setQuick(v ? (v as "mine" | "late") : null);
+                  }}
+                  options={[
+                    { value: "", label: "Усе", icon: "▦" },
+                    { value: "mine", label: "Мої", icon: "👤", hint: user?.name ? `Логіст у таблиці = ${user.name}` : "Вкажіть імʼя у профілі" },
+                    { value: "late", label: "Запізнюються", icon: "⚠️", hint: "План минув або трекінг показує пізніше" },
+                    { value: "week", label: "Прибуває цього тижня", icon: "⚓", hint: "Тиждень, лише прибуття" },
+                    { value: "nodates", label: "Без дат", icon: "📭", hint: "Рядки таблиці без жодної дати" },
+                  ]}
+                />
+                <Dropdown
+                  size="sm"
+                  compact
                   label="Хто везе"
                   value={filters.forwarder}
                   onChange={set("forwarder")}
@@ -381,12 +386,11 @@ export function CalendarView() {
                   title="Колір смужки зліва на мітці = хто везе"
                   options={opts(facets.forwarder, "forwarder", (v) => ({ color: forwarderColor(v) }))}
                 />
-                <Dropdown size="sm" label="Логіст" value={filters.logist} onChange={set("logist")} testId="cal-f-logist" options={opts(facets.logist, "logist")} />
-                <Dropdown size="sm" label="Вид" value={filters.mode} onChange={set("mode")} testId="cal-f-mode" options={opts(facets.mode, "mode", (v) => ({ label: MODE_LABEL_CAL[v] ?? v }))} />
-                <Dropdown size="sm" label="Куди" value={filters.place} onChange={set("place")} testId="cal-f-place" options={opts(facets.place, "destination")} />
-                <Dropdown size="sm" label="Статус" value={filters.status} onChange={set("status")} testId="cal-f-status" options={opts(facets.status, "statusLabel")} />
+                <Dropdown size="sm" compact label="Логіст" value={filters.logist} onChange={set("logist")} testId="cal-f-logist" options={opts(facets.logist, "logist")} />
+                <Dropdown size="sm" compact label="Тип" value={filters.type} onChange={set("type")} testId="cal-f-type" options={opts(facets.type, "cargoType", (v) => ({ label: CARGO_META[v as CargoType]?.label ?? v, icon: CARGO_META[v as CargoType]?.icon }))} />
                 <Dropdown
                   size="sm"
+                  compact
                   multiple
                   label="Події"
                   allLabel="усі події"
@@ -396,6 +400,11 @@ export function CalendarView() {
                   menuWidth={240}
                   options={EVENT_ORDER.map((t) => ({ value: t, label: EVENT_META[t].label, icon: <EventSwatch t={t} /> }))}
                 />
+                <MoreFilters count={more}>
+                  <Dropdown block size="sm" label="Вид" value={filters.mode} onChange={set("mode")} testId="cal-f-mode" options={opts(facets.mode, "mode", (v) => ({ label: MODE_LABEL_CAL[v] ?? v }))} />
+                  <Dropdown block size="sm" label="Куди" value={filters.place} onChange={set("place")} testId="cal-f-place" options={opts(facets.place, "destination")} />
+                  <Dropdown block size="sm" label="Статус" value={filters.status} onChange={set("status")} testId="cal-f-status" options={opts(facets.status, "statusLabel")} />
+                </MoreFilters>
                 {(filtered || hidden.size > 0) && (
                   <button
                     type="button"
@@ -477,6 +486,71 @@ export function CalendarView() {
 }
 
 // ── Styles ───────────────────────────────────────────────────────────────────
+
+/** «Ще ▾»: the filters used less often, in a small panel under the bar. */
+function MoreFilters({ count, children }: { count: number; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const down = (e: MouseEvent) => {
+      const t = e.target as HTMLElement;
+      // A list opened from inside the panel lives in a portal — it is still «inside».
+      if (ref.current?.contains(t) || t.closest('[role="listbox"]')) return;
+      setOpen(false);
+    };
+    const key = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !document.querySelector('[role="listbox"]')) setOpen(false);
+    };
+    document.addEventListener("mousedown", down);
+    document.addEventListener("keydown", key);
+    return () => {
+      document.removeEventListener("mousedown", down);
+      document.removeEventListener("keydown", key);
+    };
+  }, [open]);
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button
+        type="button"
+        className="ui-dd"
+        aria-expanded={open}
+        data-open={open || undefined}
+        data-testid="cal-f-more"
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 6,
+          height: 30,
+          padding: "0 9px",
+          borderRadius: 10,
+          border: `1px solid ${count ? "color-mix(in srgb, var(--accent) 55%, var(--border))" : "var(--border)"}`,
+          background: count ? "color-mix(in srgb, var(--accent) 9%, var(--surface))" : "var(--surface)",
+          color: "var(--text)",
+          font: "inherit",
+          fontSize: 12.5,
+          fontWeight: 600,
+          cursor: "pointer",
+          whiteSpace: "nowrap",
+        }}
+      >
+        Ще{count ? ` · ${count}` : ""}
+        <svg width="11" height="11" viewBox="0 0 24 24" aria-hidden style={{ color: "var(--muted)", transform: open ? "rotate(180deg)" : "none", transition: "transform .15s" }}>
+          <path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open ? (
+        <div
+          data-testid="cal-f-more-panel"
+          style={{ position: "absolute", top: 36, left: 0, zIndex: 30, width: 260, display: "grid", gap: 6, padding: 8, background: "var(--menu)", border: "1px solid var(--border)", borderRadius: 14, boxShadow: "var(--shadow)", animation: "ui-pop .12s ease-out" }}
+        >
+          {children}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 /** The event's mark as it looks on the calendar: its colour and border shape. */
 function EventSwatch({ t }: { t: CalEventType }) {

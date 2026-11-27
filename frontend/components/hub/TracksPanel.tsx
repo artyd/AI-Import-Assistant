@@ -34,19 +34,83 @@ export interface WorkspaceRef {
   supplier: string;
 }
 
-type Filter = "all" | HubMode | "problems" | "nogeo";
+export type TrackListFilter = "all" | HubMode | "problems" | "nogeo" | "moving" | "port" | "done";
+type Filter = TrackListFilter;
 
 const FILTERS: { key: Filter; label: string }[] = [
   { key: "all", label: "Всі" },
+  { key: "moving", label: "В дорозі" },
+  { key: "port", label: "У порту / митниці" },
+  { key: "done", label: "Доставлено" },
+  { key: "problems", label: "Увага" },
   { key: "sea", label: "Море" },
   { key: "air", label: "Авіа" },
   { key: "courier", label: "Курʼєр" },
   { key: "domestic", label: "Україна" },
-  { key: "problems", label: "Увага" },
   { key: "nogeo", label: "Без координат" },
 ];
 
-const FILTER_ICON: Record<Filter, string> = { all: "▦", sea: "🚢", air: "✈️", courier: "📮", domestic: "🚚", problems: "⚠️", nogeo: "📍" };
+const FILTER_ICON: Record<Filter, string> = { all: "▦", moving: "➜", port: "⚓", done: "✓", sea: "🚢", air: "✈️", courier: "📮", domestic: "🚚", problems: "⚠️", nogeo: "📍" };
+
+/** Status groups — the same split as the map's bottom bar. */
+const isMoving = (t: Track) => t.status === "in_transit" || t.status === "out_for_delivery";
+const isAtPort = (t: Track) => t.status === "at_port" || t.status === "customs";
+
+type Sort = "server" | "eta" | "late" | "updated" | "name";
+const SORTS: { value: Sort; label: string; hint: string }[] = [
+  { value: "server", label: "Спочатку важливі", hint: "Як є: проблемні й активні вгорі" },
+  { value: "eta", label: "Найближче прибуття", hint: "Групи: прострочено · 3 дні · тиждень · пізніше" },
+  { value: "late", label: "Найбільше запізнення", hint: "Проти плану з таблиці або зсуву ETA" },
+  { value: "updated", label: "Нещодавно оновлені", hint: "Останні зміни від перевізника чи вручну" },
+  { value: "name", label: "За назвою", hint: "А → Я" },
+];
+
+const DAY = 86_400_000;
+/** ETA bucket of a track, for the «Найближче прибуття» headers. */
+function etaBucket(t: Track, now: number): string {
+  if (t.status === "delivered") return "Доставлено";
+  const eta = effEta(t);
+  if (!eta) return "Без ETA";
+  const d = (Date.parse(eta) - now) / DAY;
+  if (d < 0) return "Прострочено";
+  if (d <= 3) return "Найближчі 3 дні";
+  if (d <= 7) return "Цього тижня";
+  return "Пізніше";
+}
+
+function sortTracks(list: Track[], sort: Sort, now: number): Track[] {
+  if (sort === "server") return list;
+  const out = [...list];
+  const etaMs = (t: Track) => {
+    if (t.status === "delivered") return Number.POSITIVE_INFINITY;
+    const e = effEta(t);
+    return e ? Date.parse(e) : Number.MAX_SAFE_INTEGER;
+  };
+  const late = (t: Track) => Math.max(delayDays(t) ?? 0, etaShiftDays(t));
+  const changed = (t: Track) => Date.parse(t.lastChangedAt ?? t.lastCheckedAt ?? "") || 0;
+  if (sort === "eta") out.sort((a, b) => etaMs(a) - etaMs(b));
+  else if (sort === "late") out.sort((a, b) => late(b) - late(a) || etaMs(a) - etaMs(b));
+  else if (sort === "updated") out.sort((a, b) => changed(b) - changed(a));
+  else out.sort((a, b) => (a.label || a.number).localeCompare(b.label || b.number, "uk"));
+  void now;
+  return out;
+}
+
+function readPref<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
+  try {
+    const v = localStorage.getItem(key) as T | null;
+    return v && allowed.includes(v) ? v : fallback;
+  } catch {
+    return fallback;
+  }
+}
+function writePref(key: string, v: string) {
+  try {
+    localStorage.setItem(key, v);
+  } catch {
+    /* private mode */
+  }
+}
 
 /** Needs attention: a problem, no data, a slipped ETA, or a hand-kept sea item still empty. */
 const needsAttention = (t: Track) =>
@@ -68,8 +132,13 @@ export function TracksPanel({
   onChanged,
   workspaceId,
   workspaces,
+  filter: filterProp,
+  onFilter,
 }: {
   items: Track[];
+  /** The list filter; lifted so the map's bottom bar can set it. */
+  filter?: TrackListFilter;
+  onFilter?: (f: TrackListFilter) => void;
   /** Who carries it / cargo type — shared with the map (same as the calendar). */
   trackFilter?: { forwarder: string; type: string };
   onTrackFilter?: (f: { forwarder: string; type: string }) => void;
@@ -89,7 +158,23 @@ export function TracksPanel({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [more, setMore] = useState(false);
-  const [filter, setFilter] = useState<Filter>("all");
+  const [ownFilter, setOwnFilter] = useState<Filter>("all");
+  const filter = filterProp ?? ownFilter;
+  const setFilter = (f: Filter) => (onFilter ? onFilter(f) : setOwnFilter(f));
+  const [sort, setSortState] = useState<Sort>("server");
+  const [dense, setDenseState] = useState(false);
+  useEffect(() => {
+    setSortState(readPref("hub-track-sort", SORTS.map((x) => x.value), "server"));
+    setDenseState(readPref("hub-track-dense", ["1", "0"] as const, "0") === "1");
+  }, []);
+  const setSort = (v: Sort) => {
+    setSortState(v);
+    writePref("hub-track-sort", v);
+  };
+  const setDense = (v: boolean) => {
+    setDenseState(v);
+    writePref("hub-track-dense", v ? "1" : "0");
+  };
   const [sugg, setSugg] = useState<TrackingSuggestion[]>([]);
   const [suggBusy, setSuggBusy] = useState<string | null>(null);
   // Numbers found in the shipment's documents — a collapsed dropdown so it doesn't push the list down.
@@ -166,19 +251,21 @@ export function TracksPanel({
     }
   }
 
-  const visible = useMemo(
-    () =>
-      items.filter((t) =>
-        filter === "all"
-          ? true
-          : filter === "problems"
-            ? needsAttention(t)
-            : filter === "nogeo"
-              ? lacksCoords(t)
-              : t.mode === filter
-      ),
-    [items, filter]
-  );
+  const passes = (t: Track, f: Filter) =>
+    f === "all"
+      ? true
+      : f === "problems"
+        ? needsAttention(t)
+        : f === "nogeo"
+          ? lacksCoords(t)
+          : f === "moving"
+            ? isMoving(t)
+            : f === "port"
+              ? isAtPort(t)
+              : f === "done"
+                ? t.status === "delivered"
+                : t.mode === f;
+  const visible = useMemo(() => sortTracks(items.filter((t) => passes(t, filter)), sort, Date.now()), [items, filter, sort]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div style={{ display: "flex", flexDirection: "column", minHeight: 0, height: "100%" }}>
@@ -320,18 +407,30 @@ export function TracksPanel({
       )}
 
       {(() => {
-        const countOf = (k: Filter) =>
-          k === "all" ? items.length : k === "problems" ? items.filter(needsAttention).length : k === "nogeo" ? items.filter(lacksCoords).length : items.filter((t) => t.mode === k).length;
+        const countOf = (k: Filter) => items.filter((t) => passes(t, k)).length;
         const modeOptions: DropdownOption<Filter>[] = FILTERS.filter((f) => f.key === "all" || f.key === filter || countOf(f.key) > 0).map((f) => ({
           value: f.key,
           label: f.label,
           count: countOf(f.key),
           icon: FILTER_ICON[f.key],
+          group: f.key === "all" ? undefined : ["moving", "port", "done", "problems"].includes(f.key) ? "Стан" : f.key === "nogeo" ? "Інше" : "Вид перевезення",
         }));
         const showFacets = !!(trackFilter && onTrackFilter && facets && (facets.forwarders.length > 0 || facets.types.length > 0));
         return (
           <div style={{ display: "flex", gap: 6, padding: "10px 12px 6px", flexWrap: "wrap" }} data-testid="hub-track-filters">
             <Dropdown size="sm" label="Показати" value={filter} onChange={setFilter} options={modeOptions} testId="hub-track-mode" />
+            <Dropdown size="sm" compact label="Сортування" value={sort} onChange={setSort} testId="hub-track-sort" menuWidth={270} activeTint={false} options={SORTS} />
+            <button
+              type="button"
+              className="ui-dd"
+              onClick={() => setDense(!dense)}
+              aria-pressed={dense}
+              title={dense ? "Показати картками" : "Показати рядками — більше вантажів на екрані"}
+              data-testid="hub-track-dense"
+              style={{ height: 30, width: 30, borderRadius: 10, border: "1px solid var(--border)", background: dense ? "color-mix(in srgb, var(--accent) 10%, var(--surface))" : "var(--surface)", color: dense ? "var(--accent)" : "var(--muted)", cursor: "pointer", display: "grid", placeItems: "center", fontSize: 14 }}
+            >
+              {dense ? "▤" : "☰"}
+            </button>
             {showFacets && facets!.forwarders.length > 0 ? (
               <Dropdown
                 size="sm"
@@ -367,13 +466,80 @@ export function TracksPanel({
         ) : visible.length === 0 ? (
           <p style={{ fontSize: 13, color: "var(--muted)", padding: 12 }}>Немає вантажів у цьому фільтрі.</p>
         ) : (
-          visible.map((t) => <TrackRow key={t.id} t={t} selected={t.id === selectedId} onClick={() => onSelect(t.id)} />)
+          (() => {
+            const now = Date.now();
+            let last = "";
+            return visible.map((t) => {
+              const b = sort === "eta" ? etaBucket(t, now) : "";
+              const head = b && b !== last ? ((last = b), b) : null;
+              const row = dense ? (
+                <TrackLine key={t.id} t={t} selected={t.id === selectedId} onClick={() => onSelect(t.id)} />
+              ) : (
+                <TrackRow key={t.id} t={t} selected={t.id === selectedId} onClick={() => onSelect(t.id)} />
+              );
+              return head ? (
+                <div key={`h-${t.id}`}>
+                  <div data-testid="hub-track-group" style={{ position: "sticky", top: -4, zIndex: 1, padding: "8px 4px 5px", fontSize: 10.5, fontWeight: 800, letterSpacing: 0.4, textTransform: "uppercase", color: head === "Прострочено" ? "var(--err)" : "var(--faint)", background: "var(--panel, var(--bg))" }}>
+                    {head} · {visible.filter((x) => etaBucket(x, now) === head).length}
+                  </div>
+                  {row}
+                </div>
+              ) : (
+                row
+              );
+            });
+          })()
         )}
       </div>
     </div>
   );
 }
 
+
+/** One line per item: the dense list for a logist scanning many shipments. */
+function TrackLine({ t, selected, onClick }: { t: Track; selected: boolean; onClick: () => void }) {
+  const color = statusColor(t.status);
+  const eta = effEta(t);
+  const left = eta && t.status !== "delivered" ? countdown(eta) : null;
+  const delay = delayDays(t);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      data-testid="hub-track-row"
+      title={`${t.label || t.number} · ${t.carrierName} · ${t.origin || "—"} → ${t.destination || "—"}`}
+      style={{
+        width: "100%",
+        textAlign: "left",
+        display: "flex",
+        alignItems: "center",
+        gap: 7,
+        padding: "6px 8px",
+        marginBottom: 2,
+        borderRadius: 8,
+        border: `1px solid ${selected ? color : "transparent"}`,
+        borderLeft: `3px solid ${t.forwarder ? forwarderColor(t.forwarder) : color}`,
+        background: selected ? "color-mix(in srgb, var(--surface) 88%, var(--accent) 12%)" : "var(--surface)",
+        color: "var(--text)",
+        cursor: "pointer",
+        font: "inherit",
+        fontSize: 12.5,
+      }}
+    >
+      <span aria-hidden style={{ flex: "none" }}>{MODE_ICON[t.mode]}</span>
+      <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <b style={{ fontWeight: 650 }}>{t.label || t.number}</b>
+        <span style={{ color: "var(--muted)" }}> · {t.destination || t.carrierName}</span>
+      </span>
+      {left ? (
+        <span style={{ flex: "none", fontSize: 11.5, color: left.late || (delay ?? 0) >= 2 ? "var(--err)" : "var(--muted)", fontVariantNumeric: "tabular-nums" }} data-testid="hub-row-eta">
+          {left.late ? `−${left.text}` : left.text}
+        </span>
+      ) : null}
+      <span aria-label={t.statusLabel} title={t.statusLabel} style={{ width: 8, height: 8, borderRadius: 99, background: color, flex: "none" }} />
+    </button>
+  );
+}
 
 function TrackRow({ t, selected, onClick }: { t: Track; selected: boolean; onClick: () => void }) {
   const color = statusColor(t.status);
