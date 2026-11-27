@@ -272,17 +272,17 @@ test.describe("Logistics hub", () => {
     await expect(card.getByRole("link", { name: "Сайт ↗" })).toHaveAttribute("href", /maersk\.com/);
     await page.waitForTimeout(1200);
     await page.screenshot({ path: `test-results/hub-detail-${info.project.name}.png` });
-    // Actions: three equal buttons on one row, «Видалити» spans the full row below.
-    const boxes = await Promise.all(
-      [card.getByRole("button", { name: /Оновити/ }), card.getByRole("link", { name: "Сайт ↗" }), card.getByRole("button", { name: "В архів" }), card.getByRole("button", { name: "Видалити" })].map((l) => l.boundingBox())
-    );
-    const [r1, r2, r3, del] = boxes.map((b) => b!);
+    // Actions under the header: «Оновити» and «Сайт» side by side, equal; archive / delete behind «⋯».
+    const [r1, r2] = (await Promise.all([card.getByRole("button", { name: /Оновити/ }), card.getByRole("link", { name: "Сайт ↗" })].map((l) => l.boundingBox()))).map((b) => b!);
     expect(Math.abs(r1!.width - r2!.width)).toBeLessThan(2);
-    expect(Math.abs(r2!.width - r3!.width)).toBeLessThan(2);
-    expect(Math.abs(r1!.y - r3!.y)).toBeLessThan(2);
-    expect(del!.y).toBeGreaterThan(r1!.y + r1!.height - 1);
-    expect(Math.abs(del!.x - r1!.x)).toBeLessThan(2);
-    expect(Math.abs(del!.x + del!.width - (r3!.x + r3!.width))).toBeLessThan(2);
+    expect(Math.abs(r1!.y - r2!.y)).toBeLessThan(2);
+    await expect(card.getByRole("button", { name: "В архів" })).toHaveCount(0);
+    await card.getByTestId("hub-track-more").click();
+    await expect(card.getByRole("menuitem", { name: /В архів/ })).toBeVisible();
+    const del = card.getByRole("menuitem", { name: /Видалити/ });
+    await del.click();
+    await expect(card.getByRole("menuitem", { name: "Точно видалити?" })).toBeVisible(); // a second click is needed
+    await card.getByTestId("hub-track-more").click();
     await card.getByRole("button", { name: "Закрити" }).click();
     await expect(card).toBeHidden();
   });
@@ -722,10 +722,12 @@ test.describe("Logistics hub", () => {
       await expect.poll(() => page.locator(".hub-eta").count()).toBeGreaterThan(1);
       await expect.poll(() => page.locator(".hub-eta.is-late").count()).toBeGreaterThan(0);
       await expect(page.getByTestId("hub-track-row")).toHaveCount(6);
-      await page.getByTestId("hub-only-shipment").click();
+      await page.getByTestId("hub-scope").click();
+      await page.getByTestId("hub-scope-opt-only").click();
       await expect(page.getByTestId("hub-track-row")).toHaveCount(1);
       await expect(page.locator(".hub-mk")).toHaveCount(1);
-      await page.getByTestId("hub-all-shipments").click();
+      await page.getByTestId("hub-scope").click();
+      await page.getByTestId("hub-scope-opt-all").click();
       await expect(page.getByTestId("hub-track-row")).toHaveCount(6);
     });
 

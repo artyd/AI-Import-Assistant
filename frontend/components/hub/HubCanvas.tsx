@@ -36,6 +36,7 @@ import { RoutesPanel } from "./RoutesPanel";
 import { RouteDetail, type PickedPoint } from "./RouteDetail";
 import { haversineKm } from "./geo";
 import { type BasemapKey, BASEMAPS, BASEMAP_STORE, TILE_LIGHT, TILE_DARK, ATTRIB, FIT_BOUNDS, POLL_MS, PORTS_POLL_MS, GLIDE_MS, MAX_DR_MS, AIS_MIN_ZOOM, CLUSTER_MAX_ZOOM, LABEL_MIN_ZOOM, statusRank, etaBadge, positionOn, type LayerKey, type Tab, TABS, LAYERS, resolveCssColor } from "./canvasConfig";
+import { Dropdown } from "@/components/ui/Dropdown";
 import { Stat, segBtn } from "./Stat";
 import { usePolling } from "@/lib/usePolling";
 import { deadReckon, estimatePosition, glidePosition } from "./motion";
@@ -1057,15 +1058,27 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
             background: "color-mix(in srgb, var(--surface) 94%, transparent)",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 12px 0" }}>
-            <span style={{ fontSize: 18 }} aria-hidden>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 12px 0", minWidth: 0 }}>
+            <span aria-hidden style={{ width: 30, height: 30, flex: "none", borderRadius: 9, display: "grid", placeItems: "center", fontSize: 16, background: "color-mix(in srgb, var(--accent) 12%, var(--surface))" }}>
               🧭
             </span>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 750, fontSize: 15, lineHeight: 1.1 }}>Логістичний хаб</div>
-              <div style={{ fontSize: 11.5, color: "var(--muted)" }}>Море · Авіа · Курʼєри · Україна</div>
-            </div>
-            <button type="button" onClick={() => setPanelOpen(false)} aria-label="Сховати панель" style={{ ...iconBtn, width: 30, height: 30, fontSize: 14 }}>
+            <div style={{ fontWeight: 750, fontSize: 15, lineHeight: 1.1, flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>Логістичний хаб</div>
+            {!narrow && workspaceId && shipmentNumber && (
+              <Dropdown
+                size="sm"
+                value={onlyShipment ? "only" : "all"}
+                onChange={(v) => setOnlyShipment(v === "only")}
+                testId="hub-scope"
+                ariaLabel="Що показувати на карті"
+                menuWidth={240}
+                options={[
+                  { value: "all", label: "Усі вантажі", icon: "🌍", hint: "Уся команда" },
+                  { value: "only", label: `Лише №${shipmentNumber}`, icon: "📦", hint: "Тільки це постачання" },
+                ]}
+                style={{ maxWidth: 150 }}
+              />
+            )}
+            <button type="button" onClick={() => setPanelOpen(false)} aria-label="Сховати панель" title="Сховати панель" style={{ ...iconBtn, width: 30, height: 30, fontSize: 14, flex: "none" }}>
               ‹
             </button>
           </div>
@@ -1092,40 +1105,6 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
                 onShipment={showShipment}
                 onPlace={flyToPlace}
               />
-              {workspaceId && shipmentNumber && (
-                <div role="radiogroup" aria-label="Що показувати на карті" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, padding: 3, borderRadius: 10, background: "var(--hover)" }}>
-                  {[
-                    { v: false, label: "Усі вантажі" },
-                    { v: true, label: `Лише №${shipmentNumber}` },
-                  ].map((o) => (
-                    <button
-                      key={String(o.v)}
-                      type="button"
-                      role="radio"
-                      aria-checked={onlyShipment === o.v}
-                      data-testid={o.v ? "hub-only-shipment" : "hub-all-shipments"}
-                      onClick={() => setOnlyShipment(o.v)}
-                      style={{
-                        height: 28,
-                        borderRadius: 8,
-                        border: 0,
-                        background: onlyShipment === o.v ? "var(--surface)" : "transparent",
-                        boxShadow: onlyShipment === o.v ? "0 1px 3px rgba(0,0,0,.1)" : "none",
-                        color: onlyShipment === o.v ? "var(--text)" : "var(--muted)",
-                        font: "inherit",
-                        fontSize: 12.5,
-                        fontWeight: 650,
-                        cursor: "pointer",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {o.label}
-                    </button>
-                  ))}
-                </div>
-              )}
             </div>
           )}
           <div role="tablist" aria-label="Розділи хабу" style={{ display: "flex", gap: 4, padding: "10px 12px 0" }}>
@@ -1145,14 +1124,21 @@ export function HubCanvas({ workspaceId }: { workspaceId?: string }) {
                   boxShadow: tab === t.key ? "0 1px 4px rgba(0,0,0,.06)" : "none",
                   color: tab === t.key ? "var(--text)" : "var(--muted)",
                   font: "inherit",
-                  fontSize: 12.5,
+                  fontSize: 12,
                   fontWeight: 650,
                   cursor: "pointer",
-                  padding: "0 4px",
+                  padding: "0 3px",
                   whiteSpace: "nowrap",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 4,
+                  minWidth: 0,
+                  overflow: "hidden",
                 }}
               >
                 {t.label}
+                {t.key === "tracks" && items.length > 0 && <span aria-hidden style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600 }}>{items.length}</span>}
                 {t.key === "ports" && portIssues > 0 && <span style={{ marginLeft: 4, color: "var(--err)" }}>●{portIssues}</span>}
               </button>
             ))}
