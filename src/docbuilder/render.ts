@@ -10,7 +10,6 @@ import { config } from '../lib/config.js';
 import { query } from '../db/pool.js';
 import type { DocData, DocKind } from './schema.js';
 import { tagsFor } from './templateData.js';
-import { applyStamps, loadStampImages, positionPreviewStamps, stampTags } from './stamps.js';
 
 /**
  * Fills the team's own Word templates (made from real contracts / invoices, so
@@ -72,23 +71,13 @@ export function fillTemplate(tpl: Buffer, tags: Record<string, unknown>): Buffer
 export async function renderDocx(kind: DocKind, data: DocData): Promise<Buffer> {
   const tid = (data as { templateId?: string | null }).templateId;
   const tpl = (tid ? await customTemplate(tid, kind) : null) ?? (await bundledTemplate(kind));
-  const stamps = data.stamps ?? [];
-  const filled = fillTemplate(tpl, { ...tagsFor(kind, data), ...stampTags(kind, stamps) });
-  return stamps.length ? applyStamps(filled, stamps, await loadStampImages(stamps)) : filled;
+  return fillTemplate(tpl, tagsFor(kind, data));
 }
 
 /** The body of the filled document as HTML, for the live preview (no header/footer). */
 export async function renderPreviewHtml(kind: DocKind, data: DocData): Promise<string> {
-  const { value } = await mammoth.convertToHtml(
-    { buffer: await renderDocx(kind, data) },
-    {
-      convertImage: mammoth.images.imgElement(async (image) => ({
-        src: `data:${image.contentType};base64,${await image.read('base64')}`,
-        alt: (image as { altText?: string }).altText ?? '',
-      })),
-    },
-  );
-  return positionPreviewStamps(value);
+  const { value } = await mammoth.convertToHtml({ buffer: await renderDocx(kind, data) });
+  return value;
 }
 
 /** .docx → .pdf with headless LibreOffice (the same binary that converts legacy .doc at ingest). */

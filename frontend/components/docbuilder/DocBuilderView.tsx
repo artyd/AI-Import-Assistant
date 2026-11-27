@@ -22,8 +22,6 @@ import type {
   InvoiceData,
   Party,
   Product,
-  StampInfo,
-  StampPlace,
   TemplateInfo,
   UaInvoiceData,
 } from "@/lib/docbuilder/model";
@@ -47,8 +45,7 @@ import { ContractForm } from "./ContractForm";
 import { AppendixForm } from "./AppendixForm";
 import { InvoiceForm } from "./InvoiceForm";
 import { UaInvoiceForm } from "./UaInvoiceForm";
-import { DirectoryPanel, type DirTab } from "./DirectoryPanel";
-import { StampsSection } from "./Stamps";
+import { DirectoryPanel } from "./DirectoryPanel";
 import { smallBtn } from "./fields";
 import { KIND_COLOR, KindBadge, KindFilterMenu, NewDocMenu, type KindFilter } from "./TypeMenus";
 import { Select } from "@/components/ui/Select";
@@ -225,13 +222,9 @@ export function DocBuilderView() {
   const [events, setEvents] = useState<DocEvent[] | null>(null);
   const [picker, setPicker] = useState<"from" | "to" | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [stamps, setStamps] = useState<StampInfo[]>([]);
-  const [stampPlaces, setStampPlaces] = useState<Partial<Record<DocKind, StampPlace[]>>>({});
-  const [dirTab, setDirTab] = useState<DirTab | undefined>(undefined);
   const [previewMode, setPreviewMode] = useState<"html" | "pdf">("html");
   const [pdf, setPdf] = useState<{ url: string | null; loading: boolean; error: string | null }>({ url: null, loading: false, error: null });
   const formRef = useRef<HTMLDivElement>(null);
-  const paperRef = useRef<HTMLDivElement>(null);
   const dirty = useRef(false);
 
   const refreshDocs = useCallback(() => api.listDocuments().then(setDocs).catch(() => undefined), []);
@@ -246,13 +239,6 @@ export function DocBuilderView() {
         if (p.length === 0) setMode("directory");
       })
       .catch((e: Error) => setError(e.message || "Не вдалося завантажити конструктор"));
-    api
-      .listStamps()
-      .then((r) => {
-        setStamps(r.stamps);
-        setStampPlaces(r.places);
-      })
-      .catch(() => undefined);
   }, []);
 
   const open = useCallback(async (id: string) => {
@@ -353,15 +339,6 @@ export function DocBuilderView() {
       ctrl.abort();
     };
   }, [previewMode, data, current]);
-
-  // The preview sheet is narrower than A4: stamps are placed in «mm» of this sheet.
-  useEffect(() => {
-    const el = paperRef.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => el.style.setProperty("--mm", `${Math.max(1.2, (el.clientWidth - 60) / 170).toFixed(3)}px`));
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [current?.id, previewMode]);
 
   const edit = (d: DocData) => {
     if (locked) return;
@@ -493,10 +470,6 @@ export function DocBuilderView() {
   };
 
   const parentDoc = current?.contractId ? byId.get(current.contractId) : undefined;
-  const openStampLibrary = () => {
-    setDirTab("stamps");
-    setMode("directory");
-  };
 
   return (
     <div data-testid="docb-view" style={{ height: "100%", display: "flex", minHeight: 0, background: "var(--bg)" }}>
@@ -524,10 +497,7 @@ export function DocBuilderView() {
           <button
             type="button"
             className="nav-row"
-            onClick={() => {
-              setDirTab(undefined);
-              setMode("directory");
-            }}
+            onClick={() => setMode("directory")}
             data-testid="docb-open-directory"
             style={{ width: "100%", textAlign: "left", border: "none", borderRadius: 10, padding: "9px 10px", cursor: "pointer", background: mode === "directory" ? "var(--active)" : "transparent", color: "var(--text)", font: "inherit", fontSize: 13.5, fontWeight: 600, display: "flex", alignItems: "center", gap: 10 }}
           >
@@ -537,7 +507,7 @@ export function DocBuilderView() {
             <span style={{ minWidth: 0 }}>
               <span style={{ display: "block" }}>Довідник</span>
               <span style={{ display: "block", fontSize: 11.5, color: "var(--muted)", fontWeight: 500 }}>
-                {parties.length} компаній · {products.length} товарів · {stamps.length} печаток
+                {parties.length} компаній · {products.length} товарів
               </span>
             </span>
           </button>
@@ -583,7 +553,7 @@ export function DocBuilderView() {
         {mode === "directory" ? (
           <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "18px 20px" }}>
             <h2 style={{ fontSize: 19, fontWeight: 800, margin: "0 0 4px" }}>Довідник</h2>
-            <p style={{ fontSize: 13, color: "var(--muted)", margin: "0 0 14px" }}>Компанії, товари, печатки та шаблони Word, з яких збираються документи. Спільні для всієї команди.</p>
+            <p style={{ fontSize: 13, color: "var(--muted)", margin: "0 0 14px" }}>Компанії, товари та шаблони Word, з яких збираються документи. Спільні для всієї команди.</p>
             <DirectoryPanel
               parties={parties}
               products={products}
@@ -599,9 +569,6 @@ export function DocBuilderView() {
               }}
               templates={templates}
               onTemplates={setTemplates}
-              stamps={stamps}
-              onStamps={setStamps}
-              initialTab={dirTab}
             />
           </div>
         ) : current && data ? (
@@ -814,7 +781,7 @@ export function DocBuilderView() {
             ) : null}
 
             <div ref={formRef} className="docb-form" style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "0 18px 18px" }}>
-              <SectionNav container={formRef} watch={`${current.id}:${current.kind}:${stamps.length > 0}`} gaps={locked ? 0 : gaps.length} />
+              <SectionNav container={formRef} watch={`${current.id}:${current.kind}`} gaps={locked ? 0 : gaps.length} />
               {gaps.length && !locked ? (
                 <div data-testid="docb-gaps" style={{ margin: "0 0 12px", padding: "9px 12px", borderRadius: 12, background: "color-mix(in srgb, var(--warn) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--warn) 30%, transparent)", fontSize: 12.5, lineHeight: 1.5, display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
                   <b style={{ marginRight: 2 }}>Ще не заповнено:</b>
@@ -860,7 +827,6 @@ export function DocBuilderView() {
                     onSuggestNumber={() => void api.nextNumber("ua_invoice").then((n) => n && edit({ ...(data as UaInvoiceData), number: n }))}
                   />
                 )}
-                <StampsSection kind={current.kind} data={data} onChange={edit} stamps={stamps} places={stampPlaces[current.kind] ?? []} parties={parties} onOpenLibrary={openStampLibrary} />
               </fieldset>
               <CheckNotice />
             </div>
@@ -902,7 +868,7 @@ export function DocBuilderView() {
           {previewMode === "html" ? (
             <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 18 }}>
               {preview.error ? <p style={{ color: "var(--err)", fontSize: 13 }}>{preview.error}</p> : null}
-              <div ref={paperRef} className="docb-paper" style={{ opacity: preview.loading ? 0.6 : 1 }} dangerouslySetInnerHTML={{ __html: preview.html }} />
+              <div className="docb-paper" style={{ opacity: preview.loading ? 0.6 : 1 }} dangerouslySetInnerHTML={{ __html: preview.html }} />
             </div>
           ) : (
             <div style={{ flex: 1, minHeight: 0, position: "relative", display: "flex" }}>
@@ -1038,7 +1004,7 @@ function EmptyState({ onCreate, onFromShipment, hasDirectory, onDirectory }: { o
       <div style={{ maxWidth: 720, width: "100%" }}>
         <h2 style={{ fontSize: 22, fontWeight: 800, margin: "0 0 6px" }}>Конструктор документів</h2>
         <p style={{ fontSize: 13.5, color: "var(--muted)", lineHeight: 1.55, margin: "0 0 18px" }}>
-          Оберіть, що зібрати. Сторони, товари й печатки беруться з довідника, праворуч одразу видно готовий документ, а «Перевірити» звіряє реквізити, коди й ліміти контракту.
+          Оберіть, що зібрати. Сторони й товари беруться з довідника, праворуч одразу видно готовий документ, а «Перевірити» звіряє реквізити, коди й ліміти контракту.
         </p>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
           {cards.map((c) => (
@@ -1106,7 +1072,6 @@ const PAPER_CSS = `
 .docb-paper td,.docb-paper th{border:1px solid #444;padding:4px 6px;vertical-align:top;word-wrap:break-word}
 .docb-paper h1,.docb-paper h2,.docb-paper h3{font-size:14px;margin:10px 0 6px;text-align:center}
 .docb-paper img{display:none}
-.docb-paper img.docb-stamp{display:block}
 .docb-form section[data-testid]{scroll-margin-top:56px}
 .docb-card{transition:border-color .12s, box-shadow .12s, transform .12s}
 .docb-card:hover{border-color:color-mix(in srgb, var(--accent) 45%, var(--border));box-shadow:var(--shadow);transform:translateY(-1px)}

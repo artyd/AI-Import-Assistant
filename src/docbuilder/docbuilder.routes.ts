@@ -26,7 +26,6 @@ import { checkDocument, suggestNumber } from './checks.js';
 import { extractCompanies } from './extractParties.js';
 import { draftFromShipment, saveToShipment } from './shipment.js';
 import { sampleData } from './sample.js';
-import { STAMP_PLACES, imageInfo } from './stamps.js';
 
 const require = createRequire(import.meta.url);
 const { ZipArchive } = require('archiver') as { ZipArchive: new (options?: { zlib?: { level?: number } }) => Archiver };
@@ -436,64 +435,6 @@ export async function docBuilderRoutes(app: FastifyInstance): Promise<void> {
     } catch (err) {
       return templateFail(reply, err) ?? reply.code(500).send({ error: 'render_failed' });
     }
-  });
-
-  // ---------- stamps (seals / signatures) ----------
-  type StampRow = { id: string; name: string; party_id: string | null; width: number; height: number; created_at: string };
-  const stampOut = (r: StampRow) => ({ id: r.id, name: r.name, partyId: r.party_id, width: r.width, height: r.height, createdAt: r.created_at });
-  const MAX_STAMP_BYTES = 3 * 1024 * 1024;
-
-  app.get('/api/docbuilder/stamps', async (_req, reply) => {
-    const { rows } = await query<StampRow>('SELECT id, name, party_id, width, height, created_at FROM doc_stamps ORDER BY lower(name), created_at');
-    return reply.send({ stamps: rows.map(stampOut), places: STAMP_PLACES });
-  });
-
-  app.get<{ Params: { id: string } }>('/api/docbuilder/stamps/:id/image', async (req, reply) => {
-    const id = uuid.safeParse(req.params.id);
-    if (!id.success) return reply.code(400).send({ error: 'invalid_request' });
-    const { rows } = await query<{ mime: string; image: Buffer }>('SELECT mime, image FROM doc_stamps WHERE id = $1', [id.data]);
-    if (!rows[0]) return reply.code(404).send({ error: 'not_found' });
-    return reply.header('content-type', rows[0].mime).header('cache-control', 'private, max-age=86400').send(rows[0].image);
-  });
-
-  app.post('/api/docbuilder/stamps', async (req, reply) => {
-    if (!req.isMultipart()) return reply.code(400).send({ error: 'no_file' });
-    const part = await req.file();
-    if (!part) return reply.code(400).send({ error: 'no_file' });
-    const fields = part.fields as Record<string, { value?: unknown } | undefined>;
-    const fallbackName = part.filename.replace(/\.[^.]+$/, '');
-    const name = z.string().trim().min(1).max(200).safeParse(fields.name?.value || fallbackName);
-    const partyRaw = fields.partyId?.value;
-    const partyId = partyRaw ? uuid.safeParse(partyRaw) : null;
-    const buf = await part.toBuffer();
-    const info = imageInfo(buf);
-    if (!name.success || (partyId && !partyId.success) || !info || buf.length > MAX_STAMP_BYTES) {
-      return reply.code(400).send({ error: 'invalid_request', message: 'Потрібне зображення PNG або JPG до 3 МБ (краще PNG з прозорим тлом)' });
-    }
-    const { rows } = await query<StampRow>(
-      'INSERT INTO doc_stamps (name, party_id, mime, image, width, height, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, name, party_id, width, height, created_at',
-      [name.data, partyId?.success ? partyId.data : null, info.mime, buf, info.width, info.height, req.user!.sub],
-    );
-    return reply.code(201).send({ stamp: stampOut(rows[0]!) });
-  });
-
-  app.patch<{ Params: { id: string } }>('/api/docbuilder/stamps/:id', async (req, reply) => {
-    const id = uuid.safeParse(req.params.id);
-    const body = z.object({ name: z.string().trim().min(1).max(200).optional(), partyId: uuid.nullable().optional() }).safeParse(req.body ?? {});
-    if (!id.success || !body.success) return reply.code(400).send({ error: 'invalid_request' });
-    const { rows } = await query<StampRow>(
-      `UPDATE doc_stamps SET name = COALESCE($2, name), party_id = CASE WHEN $3::boolean THEN $4::uuid ELSE party_id END
-        WHERE id = $1 RETURNING id, name, party_id, width, height, created_at`,
-      [id.data, body.data.name ?? null, body.data.partyId !== undefined, body.data.partyId ?? null],
-    );
-    return rows[0] ? reply.send({ stamp: stampOut(rows[0]) }) : reply.code(404).send({ error: 'not_found' });
-  });
-
-  app.delete<{ Params: { id: string } }>('/api/docbuilder/stamps/:id', async (req, reply) => {
-    const id = uuid.safeParse(req.params.id);
-    if (!id.success) return reply.code(400).send({ error: 'invalid_request' });
-    const { rowCount } = await query('DELETE FROM doc_stamps WHERE id = $1', [id.data]);
-    return rowCount ? reply.code(204).send() : reply.code(404).send({ error: 'not_found' });
   });
 
   // ---------- templates ----------

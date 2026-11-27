@@ -75,19 +75,6 @@ export type ContractItem = z.infer<typeof contractItemSchema>;
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).or(z.literal('')).default('');
 const templateId = z.string().uuid().nullable().catch(null).default(null);
 
-/** A stamp / signature picture placed on a document (see stamps.ts). */
-export const stampPlacementSchema = z.object({
-  stampId: z.string().uuid(),
-  place: z.string().trim().min(1).max(40),
-  /** Width on paper, mm (the height follows the picture). */
-  size: z.coerce.number().min(10).max(120).catch(38).default(38),
-  /** Shift from the place's anchor, mm: right / down are positive. */
-  dx: z.coerce.number().min(-150).max(250).catch(0).default(0),
-  dy: z.coerce.number().min(-150).max(250).catch(0).default(0),
-});
-export type StampPlacement = z.infer<typeof stampPlacementSchema>;
-export const stampsField = z.array(stampPlacementSchema).max(12).catch([]).default([]);
-
 /** How the buyer pays — each variant is its own wording of clause 4.1. */
 export const PAYMENT_TYPES = ['deferred', 'prepay_full', 'prepay_part', 'lc'] as const;
 const paymentFields = {
@@ -126,7 +113,6 @@ export const contractDataSchema = z.object({
   showReg: z.boolean().default(false),
   items: z.array(contractItemSchema).max(100).default([]),
   templateId,
-  stamps: stampsField,
 });
 export type ContractData = z.infer<typeof contractDataSchema>;
 
@@ -146,7 +132,6 @@ export const appendixDataSchema = z.object({
   showReg: z.boolean().default(false),
   items: z.array(contractItemSchema).max(100).default([]),
   templateId,
-  stamps: stampsField,
 });
 export type AppendixData = z.infer<typeof appendixDataSchema>;
 
@@ -189,7 +174,6 @@ export const invoiceDataSchema = z.object({
   items: z.array(invoiceItemSchema).max(100).default([]),
   batches: z.array(batchSchema).max(200).default([]),
   templateId,
-  stamps: stampsField,
 });
 export type InvoiceData = z.infer<typeof invoiceDataSchema>;
 
@@ -216,7 +200,6 @@ export const uaInvoiceDataSchema = z.object({
   buyerSigner: s(200),
   items: z.array(uaItemSchema).max(200).default([]),
   templateId,
-  stamps: stampsField,
 });
 export type UaInvoiceData = z.infer<typeof uaInvoiceDataSchema>;
 

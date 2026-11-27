@@ -110,12 +110,10 @@ real ones, not redrawn.
 13. **Штурман tools**: `trade_documents_list` and `trade_document_draft` (an invoice or annex draft from a
     saved contract, only on a direct request). They are available in all three chat kinds.
 
-## Phase 3 (2026-11-27): stamps, design pass
+## Phase 3 (2026-11-27): design pass, dropdowns
 
-- **Stamps library** (Довідник → «Печатки»): PNG / JPG of the team's seals and signatures, several variants per company, each tied to a directory company. The browser removes the white background («colour to alpha», so text under a stamp stays visible) and trims empty margins before upload. Stored in `doc_stamps` (bytea).
-- **Placing a stamp** (every document, block «Печатки й підписи»): which stamp, which place, width in mm, a shift in 2 mm steps. Places per template: contract — requisites of each party, the specification, every page (the footer signature line); annex — each signature, every page; invoice — invoice and packing list; накладна — supplier / receiver. «＋ <place>» suggests the stamp of the company on that side.
-- **Render**: `{stamp_<place>}` tags in the templates (body and footer); the token becomes a floating `wp:anchor` picture positioned from the column / paragraph (`src/docbuilder/stamps.ts`). Preview: mammoth shows it lifted out of the flow, scaled by the sheet's px-per-mm; «Точно (PDF)» shows the server's PDF.
-- **Design pass**: header with the document's stage (Чернетка → Перевірено → Відправлено) and next actions; a sticky table of contents of the form's sections with «не заповнено: N»; missing fields as chips; empty state with a card per kind.
+- **No stamps by the builder.** A stamp library with placement was built and withdrawn the same day: documents are stamped by a separate person, not by the logist's tool. (`doc_stamps` is dropped by `schema.sql`.) The invoice letterhead's own seal (`stamp`) predates this and is unchanged.
+- **Design pass**: header with the document's stage (Чернетка → Перевірено → Відправлено) and next actions; a sticky table of contents of the form's sections with «не заповнено: N»; missing fields as chips; empty state with a card per kind; «Точно (PDF)» preview from the server.
 - **Dropdowns everywhere**: `components/ui/Dropdown.tsx` (colour dot / icon / hint / count, single or multi) replaces chip rows and plain selects in the calendar, news, map and chat.
 
 ## Not in scope (next)

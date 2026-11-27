@@ -231,8 +231,7 @@ export function invoiceTags(d: InvoiceData): Tags {
     inco_year: d.incoYear,
     origin_en: d.originEn || uniq(d.items.map((i) => i.countryEn)).join(', '),
     pallets: d.pallets,
-    // The letterhead's own seal steps aside once the team places its own stamp on the invoice.
-    stamp: d.stamp && !d.stamps.some((x) => x.place === 'invoice' || x.place === 'packing'),
+    stamp: d.stamp,
     qty_hdr_en: h.qtyInv,
     price_hdr_en: h.priceInv,
     amount_uk: moneyUk(itemsTotal(d.items)),

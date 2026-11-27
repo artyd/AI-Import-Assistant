@@ -3,11 +3,10 @@
 // Довідник: the team's companies (seller / buyers / consignors) and goods. Filled
 // once, then every contract and invoice picks from it.
 import { useEffect, useState } from "react";
-import type { DirectoryParty, DirectoryProduct, PartyRole, Product, StampInfo, TemplateInfo, Unit } from "@/lib/docbuilder/model";
+import type { DirectoryParty, DirectoryProduct, PartyRole, Product, TemplateInfo, Unit } from "@/lib/docbuilder/model";
 import { UNIT_OPTIONS } from "@/lib/docbuilder/model";
 import { ImportFromDoc } from "./ImportFromDoc";
 import { TemplatesPanel } from "./TemplatesPanel";
-import { StampsPanel } from "./Stamps";
 import { emptyParty, emptyProduct } from "@/lib/docbuilder/model";
 import { Area, Field, Grid, Pair, Section, Select, smallBtn } from "./fields";
 
@@ -37,22 +36,13 @@ interface Props {
   onDeleteProduct: (id: string) => Promise<void>;
   templates: TemplateInfo[];
   onTemplates: (list: TemplateInfo[]) => void;
-  stamps: StampInfo[];
-  onStamps: (list: StampInfo[]) => void;
-  /** Open on this tab (e.g. «Печатки» from a document). */
-  initialTab?: DirTab;
 }
-
-export type DirTab = "parties" | "products" | "stamps" | "templates";
 
 type PartyDraft = DirectoryParty | Omit<DirectoryParty, "id">;
 type ProductDraft = DirectoryProduct | Product;
 
-export function DirectoryPanel({ parties, products, onSaveParty, onDeleteParty, onSaveProduct, onDeleteProduct, templates, onTemplates, stamps, onStamps, initialTab }: Props) {
-  const [tab, setTab] = useState<DirTab>(initialTab ?? "parties");
-  useEffect(() => {
-    if (initialTab) setTab(initialTab);
-  }, [initialTab]);
+export function DirectoryPanel({ parties, products, onSaveParty, onDeleteParty, onSaveProduct, onDeleteProduct, templates, onTemplates }: Props) {
+  const [tab, setTab] = useState<"parties" | "products" | "templates">("parties");
   const [importing, setImporting] = useState(false);
   const [party, setParty] = useState<PartyDraft | null>(null);
   const [product, setProduct] = useState<ProductDraft | null>(null);
@@ -102,13 +92,10 @@ export function DirectoryPanel({ parties, products, onSaveParty, onDeleteParty, 
         <button type="button" style={tabBtn(tab === "products")} onClick={() => setTab("products")} data-testid="dir-tab-products">
           Товари · {products.length}
         </button>
-        <button type="button" style={tabBtn(tab === "stamps")} onClick={() => setTab("stamps")} data-testid="dir-tab-stamps">
-          Печатки · {stamps.length}
-        </button>
         <button type="button" style={tabBtn(tab === "templates")} onClick={() => setTab("templates")} data-testid="dir-tab-templates">
           Шаблони Word · {templates.length}
         </button>
-        {tab === "parties" || tab === "products" ? (
+        {tab !== "templates" ? (
           <>
             <button type="button" style={{ ...smallBtn, height: 32, marginLeft: "auto" }} onClick={() => setImporting((v) => !v)} data-testid="dir-import-open">
               Додати з документа
@@ -126,7 +113,7 @@ export function DirectoryPanel({ parties, products, onSaveParty, onDeleteParty, 
         ) : null}
       </div>
 
-      {importing && (tab === "parties" || tab === "products") ? (
+      {importing && tab !== "templates" ? (
         <ImportFromDoc
           parties={parties}
           products={products}
@@ -137,7 +124,6 @@ export function DirectoryPanel({ parties, products, onSaveParty, onDeleteParty, 
       ) : null}
 
       {tab === "templates" ? <TemplatesPanel templates={templates} onChange={onTemplates} /> : null}
-      {tab === "stamps" ? <StampsPanel stamps={stamps} parties={parties} onChange={onStamps} /> : null}
 
       {tab === "parties" && party ? (
         <Section title={"id" in party ? "Редагування компанії" : "Нова компанія"} testId="dir-party-form">
